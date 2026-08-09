@@ -1,0 +1,95 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+/dist
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# query history debug logs
+query-history-debug.json
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+Rexa DB
+# Local Netlify folder
+.netlify
+/netlify-deploy
+
+sqlite.db
+/sqlite.db
+.sqlite.db
+search-index.db
+/search-index.db*
+*.db-shm
+*.db-wal
+port.json
+
+
+.opencode
+/.opencode
+auth-storage.json
+.auth-storage.json
+
+# packaging-time main.js backup (created by dist scripts)
+main.js.clean
+
+# Tauri
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/binaries/
+/src-tauri/icons/icon.png
+/src-tauri/resources
+
+# Release artifacts (build output, never commit)
+/release-*/
+
+# Server
+/server/node_modules/
+server/index
+
+# AI assistant skill config (local tooling, not part of the app)
+.agents/
+.claude/
+.trae/
+skills-lock.json
+
+# User-imported icon packs (user data, not source)
+/custom-icon-packs/
+
+# Local release staging
+/v1.3/

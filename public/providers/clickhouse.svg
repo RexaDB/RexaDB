@@ -1,0 +1,10 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="24" fill="#111827"/>
+  <rect x="18" y="24" width="8" height="72" fill="#F59E0B"/>
+  <rect x="32" y="24" width="8" height="72" fill="#F59E0B"/>
+  <rect x="46" y="24" width="8" height="72" fill="#F59E0B"/>
+  <rect x="60" y="24" width="8" height="72" fill="#F59E0B"/>
+  <rect x="74" y="24" width="8" height="72" fill="#F59E0B"/>
+  <rect x="88" y="24" width="8" height="72" fill="#F59E0B"/>
+  <text x="60" y="102" font-family="Arial, Helvetica, sans-serif" font-size="16" fill="#F9FAFB" text-anchor="middle">CH</text>
+</svg>

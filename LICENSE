@@ -1,0 +1,45 @@
+REXADB VIEW-ONLY LICENSE
+Version 1.0, August 2026
+
+Copyright (c) 2026 Rexa DB
+
+This repository is provided solely for transparency and inspection purposes.
+
+1. What you may do
+   You are allowed to view, read, and study the source code contained in this
+   repository for informational and educational purposes.
+
+2. What you may NOT do
+   a. You may not use, run, deploy, or distribute this software, in whole or
+      in part, for any commercial purpose, either directly or indirectly.
+   b. You may not sell, license, sublicense, lease, or otherwise monetize this
+      software or any derivative of it.
+   c. You may not copy, modify, merge, publish, or redistribute this software,
+      or any portion of it, without prior written permission from the
+      copyright holder. Private, non-commercial reproduction for personal
+      study is permitted only for the purpose described in Section 1.
+   d. You may not incorporate any part of this code into commercial products,
+      services, or tools, including as a dependency or embedded component.
+
+3. Commercial usage includes, but is not limited to
+   using the software in a business environment, offering it as part of a
+   paid or freemium product, providing it as a hosted/managed service,
+   or using its code or algorithms in any revenue-generating activity.
+
+4. No warranty
+   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+   CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+5. Termination
+   Any violation of this license automatically terminates your rights to view
+   and study the code. Rexa DB reserves the right to pursue all available
+   legal remedies for any unauthorized commercial use.
+
+6. Contact
+   For permission requests beyond what is granted here, please contact the
+   copyright holder.

@@ -1,0 +1,27 @@
+/*
+ * Supabase theme variable values — computed from
+ * packages/ui/build/css/source/semantic.css + themes/light.css + themes/dark.css
+ * Scoped under .supabase-theme so they only affect the database UI section.
+ */
+.supabase-theme {
+  --background-200: var(--card);
+  --background-surface-100: var(--card);
+  --background-surface-200: var(--muted);
+  --foreground-light: oklch(0.395 0 159);
+  --foreground-lighter: oklch(0.521 0 159);
+  --foreground-muted: oklch(0.521 0 159);
+  --border-strong: oklch(0.864 0 159);
+  --border-default: var(--border);
+}
+
+.dark .supabase-theme,
+.supabase-theme.dark {
+  --background-200: var(--card);
+  --background-surface-100: var(--card);
+  --background-surface-200: var(--muted);
+  --foreground-light: oklch(0.798 0.0028 159);
+  --foreground-lighter: oklch(0.684 0.0028 159);
+  --foreground-muted: oklch(0.684 0.0028 159);
+  --border-strong: oklch(0.292 0 159);
+  --border-default: var(--border);
+}

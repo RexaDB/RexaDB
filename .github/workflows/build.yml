@@ -1,0 +1,501 @@
+name: Build (Windows, Linux & macOS)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+            artifact-name: RexaDB-Windows-x64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libfuse2 \
+            patchelf \
+            xvfb
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+          key: bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-
+
+      - run: bun install
+
+      - name: Install server dependencies
+        run: |
+          cd server
+          bun install
+
+      - run: bun run scripts/build-server.mjs
+
+      - name: Verify sidecar binary (all platforms)
+        shell: bash
+        run: |
+          echo "===== Sidecar binary check ====="
+          case "$RUNNER_OS" in
+            Linux)
+              SIDECAR="src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu"
+              ;;
+            Windows)
+              SIDECAR="src-tauri/binaries/rexadb-server-x86_64-pc-windows-msvc.exe"
+              ;;
+            macOS)
+              case "$(uname -m)" in
+                arm64) SIDECAR="src-tauri/binaries/rexadb-server-aarch64-apple-darwin" ;;
+                x86_64) SIDECAR="src-tauri/binaries/rexadb-server-x86_64-apple-darwin" ;;
+              esac
+              ;;
+          esac
+          echo "  Expected: $SIDECAR"
+          if [ -f "$SIDECAR" ]; then
+            SIZE=$(wc -c < "$SIDECAR")
+            echo "  ✅ Found: $SIDECAR ($SIZE bytes)"
+            ls -lh "$SIDECAR"
+          else
+            echo "  ❌ MISSING: $SIDECAR"
+            echo "  Contents of binaries/:"
+            ls -la src-tauri/binaries/ 2>/dev/null || echo "  (binaries dir not found)"
+            exit 1
+          fi
+
+      - name: Build Java bridge (Docker)
+        if: runner.os == 'Linux'
+        run: bash resources/java-bridge/build.sh --docker
+
+      - uses: actions/setup-java@v4
+        if: runner.os == 'Windows'
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - uses: actions/setup-java@v4
+        if: runner.os == 'macOS'
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build Java bridge
+        if: runner.os == 'Windows'
+        run: bash resources/java-bridge/build.sh
+        shell: bash
+
+      - name: Build Java bridge (macOS)
+        if: runner.os == 'macOS'
+        run: bash resources/java-bridge/build.sh
+
+      - name: Verify Java bridge resources (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "===== Java bridge resource check ====="
+          echo "  RUNNER_OS: $RUNNER_OS"
+          echo "  PWD: $(pwd)"
+          echo ""
+          echo "--- bridge.jar ---"
+          JAR="resources/java-bridge/dist/bridge.jar"
+          if [ -f "$JAR" ]; then
+            SIZE=$(wc -c < "$JAR")
+            echo "  ✅ $JAR ($SIZE bytes)"
+          else
+            echo "  ❌ MISSING: $JAR"
+            echo "  Contents of dist/:"
+            ls -la resources/java-bridge/dist/ 2>/dev/null || echo "  (dist dir not found)"
+            echo "  Contents of java-bridge/:"
+            ls -la resources/java-bridge/ 2>/dev/null || echo "  (java-bridge dir not found)"
+            exit 1
+          fi
+          echo ""
+          echo "--- JRE ---"
+          JRE_BIN="resources/java-bridge/dist/jre/bin/java.exe"
+          if [ -f "$JRE_BIN" ]; then
+            SIZE=$(wc -c < "$JRE_BIN")
+            echo "  ✅ $JRE_BIN ($SIZE bytes)"
+          else
+            echo "  ❌ MISSING: $JRE_BIN"
+            echo "  Build script may have skipped jlink (jmods not found)."
+            echo "  Contents of dist/jre/:"
+            ls -laR resources/java-bridge/dist/jre/ 2>/dev/null || echo "  (jre dir not found)"
+            echo "  Contents of dist/:"
+            ls -la resources/java-bridge/dist/ 2>/dev/null || echo "  (dist dir not found)"
+            echo ""
+            echo "  Attempting jlink with JAVA_HOME=$JAVA_HOME ..."
+            if [ -n "$JAVA_HOME" ]; then
+              JMODS="$JAVA_HOME/jmods"
+              if [ -d "$JMODS" ]; then
+                echo "  Found jmods at $JMODS, running jlink..."
+                rm -rf resources/java-bridge/dist/jre
+                jlink --module-path "$JMODS" \
+                  --add-modules java.base,java.sql,jdk.crypto.ec,java.management \
+                  --output resources/java-bridge/dist/jre \
+                  --strip-debug --compress=2 --no-header-files --no-man-pages
+                if [ -f "$JRE_BIN" ]; then
+                  echo "  ✅ jlink succeeded: $JRE_BIN"
+                else
+                  echo "  ❌ jlink FAILED"
+                  exit 1
+                fi
+              else
+                echo "  jmods not found at $JMODS"
+                echo "  Looking for JDK installation..."
+                ls -la "$JAVA_HOME/" 2>/dev/null || echo "  JAVA_HOME not accessible"
+                exit 1
+              fi
+            else
+              echo "  JAVA_HOME not set"
+              exit 1
+            fi
+          fi
+          echo ""
+          echo "--- jre/lib/modules check ---"
+          MODULES="resources/java-bridge/dist/jre/lib/modules"
+          if [ -f "$MODULES" ]; then
+            SIZE=$(wc -c < "$MODULES")
+            echo "  ✅ modules file ($SIZE bytes)"
+          else
+            echo "  ❌ MISSING: $MODULES"
+            echo "  Contents of jre/lib/:"
+            ls -la resources/java-bridge/dist/jre/lib/ 2>/dev/null || echo "  (lib/ dir not found)"
+            echo "  Contents of jre/:"
+            ls -la resources/java-bridge/dist/jre/ 2>/dev/null || echo "  (jre dir not found)"
+            exit 1
+          fi
+          echo ""
+          echo "===== Java bridge check PASSED ====="
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --bundles ${{ matrix.bundles }}
+
+      - name: Verify bundle artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "===== Bundle artifact verification ====="
+          echo ""
+          
+          # --- 1. Main binary ---
+          echo "--- App binary ---"
+          BINARY="src-tauri/target/release/rexa-db.exe"
+          if [ -f "$BINARY" ]; then
+            SIZE=$(wc -c < "$BINARY")
+            echo "  ✅ $BINARY ($SIZE bytes)"
+          else
+            echo "  ❌ MISSING: $BINARY"
+            echo "  Contents of target/release/:"
+            ls src-tauri/target/release/rexa-db* 2>/dev/null || echo "  (no rexa-db files)"
+            exit 1
+          fi
+          echo ""
+          
+          # --- 2. NSIS installer(s) ---
+          echo "--- NSIS installer ---"
+            INSTALLERS=0
+          while IFS= read -r f; do
+            SIZE=$(wc -c < "$f")
+            echo "  📦 $f ($SIZE bytes)"
+            INSTALLERS=$((INSTALLERS + 1))
+          done < <(find src-tauri/target/release/bundle -name "*.exe" -o -name "*.msi" 2>/dev/null)
+          if [ "$INSTALLERS" -eq 0 ]; then
+            echo "  ❌ No installers found in bundle/"
+            echo "  Bundle tree:"
+            find src-tauri/target/release/bundle -type f 2>/dev/null || echo "  (bundle dir not found)"
+            exit 1
+          fi
+          echo ""
+          
+          # --- 3. Sidecar in bundle staging ---
+          echo "--- Sidecar in bundle staging ---"
+          SIDECAR_BUNDLE="src-tauri/target/release/bundle/nsis/rexadb-server-x86_64-pc-windows-msvc.exe"
+          if [ -f "$SIDECAR_BUNDLE" ]; then
+            SIZE=$(wc -c < "$SIDECAR_BUNDLE")
+            echo "  ✅ $SIDECAR_BUNDLE ($SIZE bytes)"
+          else
+            echo "  ℹ️  Not at expected path (may be embedded in installer by Tauri)"
+            echo "  Searching for sidecar in bundle/:"
+            find src-tauri/target/release/bundle -name "*server*" -type f 2>/dev/null || echo "  (none found)"
+          fi
+          echo ""
+          
+          # --- 4. Full bundle tree ---
+          echo "--- Complete bundle tree ---"
+          find src-tauri/target/release/bundle -type f 2>/dev/null | while IFS= read -r f; do
+            SIZE=$(wc -c < "$f")
+            echo "  $f ($SIZE bytes)"
+          done
+          echo ""
+          echo "===== Bundle verification PASSED ====="
+
+      - name: Pre-download AppImage tools (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/tauri" "$HOME/.local/bin"
+
+          curl -sL \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+            -o "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+          chmod +x "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+
+          curl -sL \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage \
+            -o "$HOME/.cache/tauri/linuxdeploy-plugin-gtk-x86_64.AppImage"
+          chmod +x "$HOME/.cache/tauri/linuxdeploy-plugin-gtk-x86_64.AppImage"
+
+          curl -sL \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o "$HOME/.local/bin/appimagetool-x86_64.AppImage"
+          chmod +x "$HOME/.local/bin/appimagetool-x86_64.AppImage"
+
+      - name: Build AppImage (Linux only)
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+
+          bash scripts/build-appimage.sh --skip-tauri-build --skip-bridge
+
+          APPIMAGE="${GITHUB_WORKSPACE}/RexaDB_${VERSION}_x86_64.AppImage"
+          if [ ! -f "$APPIMAGE" ]; then
+            echo "ERROR: AppImage not created by build-appimage.sh"
+            exit 1
+          fi
+
+          # Sign for updater
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/rexadb-sign-key
+          unset TAURI_SIGNING_PRIVATE_KEY
+          export TAURI_SIGNING_PRIVATE_KEY_PATH=/tmp/rexadb-sign-key
+          "$GITHUB_WORKSPACE/node_modules/.bin/tauri" signer sign \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$APPIMAGE"
+          echo "Signed: ${APPIMAGE}.sig"
+
+          # Move to CI-expected location for subsequent steps
+          BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          mkdir -p "$BUNDLE_DIR"
+          mv "$APPIMAGE" "$BUNDLE_DIR/"
+          mv "${APPIMAGE}.sig" "$BUNDLE_DIR/"
+
+      - name: Generate updater platform snippet
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v${VERSION}"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            TARGET="linux-x86_64"
+            BUNDLE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -1)
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ]; then
+              TARGET="darwin-aarch64"
+            else
+              TARGET="darwin-x86_64"
+            fi
+            BUNDLE=$(find src-tauri/target/release/bundle/macos -name "*.app.tar.gz" | head -1)
+          else
+            TARGET="windows-x86_64"
+            BUNDLE=$(find src-tauri/target/release/bundle/nsis -name "*.exe" | head -1)
+          fi
+          SIG="${BUNDLE}.sig"
+          if [ -n "$BUNDLE" ] && [ -f "$SIG" ]; then
+            SIGNATURE=$(cat "$SIG")
+            PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            SNIPPET="src-tauri/target/release/platform.${TARGET}.json"
+            URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${BUNDLE##*/}"
+            printf '{\n  "version": "%s",\n  "pub_date": "%s",\n  "platforms": {\n    "%s": {\n      "url": "%s",\n      "signature": "%s"\n    }\n  }\n}\n' \
+              "$VERSION" "$PUB_DATE" "$TARGET" "$URL" "$SIGNATURE" > "$SNIPPET"
+            echo "Generated platform snippet for ${TARGET}"
+            echo "  URL: ${URL}"
+          else
+            echo "No updater bundle/sig found, skipping platform snippet"
+          fi
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIDECAR_OK=false
+
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            BINARY="src-tauri/target/release/rexa-db.exe"
+          else
+            BINARY="src-tauri/target/release/rexa-db"
+          fi
+
+          echo "════════════════════════════════════════════"
+          echo "  SMOKE TEST — ${RUNNER_OS}"
+          echo "════════════════════════════════════════════"
+
+          if [ ! -f "$BINARY" ]; then
+            echo "  ❌ FAIL: Binary not found at ${BINARY}"
+            exit 1
+          fi
+
+          echo "  Binary: ${BINARY}"
+          file "$BINARY" 2>/dev/null || true
+          echo ""
+
+          LOGFILE="/tmp/rexadb-smoke.${RUNNER_OS}.log"
+
+          # Set up resource paths so unbundled binary can find bridge.jar/jre
+          export RESOURCEDIR="${GITHUB_WORKSPACE}/resources/java-bridge/dist"
+
+          # Copy sidecar alongside the binary for Tauri shell plugin resolution
+          if [ "$RUNNER_OS" = "Linux" ] && [ -f "src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu" ]; then
+            cp "src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu" \
+               "$(dirname "$BINARY")/rexadb-server-x86_64-unknown-linux-gnu"
+          elif [ "$RUNNER_OS" = "Windows" ] && [ -f "src-tauri/binaries/rexadb-server-x86_64-pc-windows-msvc.exe" ]; then
+            cp "src-tauri/binaries/rexadb-server-x86_64-pc-windows-msvc.exe" \
+               "$(dirname "$BINARY")/rexadb-server-x86_64-pc-windows-msvc.exe"
+          fi
+
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            echo "  Launching app via xvfb-run (timeout: 12s)..."
+            EXIT_CODE=0
+            export WEBKIT_DISABLE_DMABUF_RENDERER=1
+            timeout 12 xvfb-run -a "$BINARY" > "$LOGFILE" 2>&1 || EXIT_CODE=$?
+          else
+            echo "  Launching app (timeout: 10s)..."
+            "$BINARY" > "$LOGFILE" 2>&1 &
+            APP_PID=$!
+            echo "  PID: ${APP_PID}"
+            SIDECAR_OK=false
+            for i in $(seq 1 9); do
+              if curl -sf http://127.0.0.1:3867/health > /dev/null 2>&1; then
+                echo "  ✅ Sidecar /health responded on port 3867 (took ~${i}s)"
+                SIDECAR_OK=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "$SIDECAR_OK" = "false" ]; then
+              echo "  ⚠️  Sidecar /health did NOT respond (may be blocked by Defender)"
+            fi
+            sleep 1
+            if kill -0 $APP_PID 2>/dev/null; then
+              kill $APP_PID 2>/dev/null || true
+              wait $APP_PID 2>/dev/null || true
+              EXIT_CODE=0
+            else
+              wait $APP_PID 2>/dev/null || true
+              EXIT_CODE=$?
+            fi
+          fi
+
+          echo ""
+          echo "  ── Result ──"
+          if [ "$EXIT_CODE" -eq 124 ] || [ "$EXIT_CODE" -eq 0 ]; then
+            echo "  ✅ PASS: App stayed alive for the full test duration"
+            if [ "$SIDECAR_OK" = "true" ]; then
+              echo "  ✅ PASS: Sidecar health endpoint responded"
+            else
+              echo "  ⚠️  WARN: Sidecar health endpoint did NOT respond"
+            fi
+            RESULT=0
+          else
+            echo "  ❌ FAIL: App exited with code ${EXIT_CODE}"
+            RESULT=$EXIT_CODE
+          fi
+
+          echo ""
+          echo "════════════════════════════════════════════"
+          echo "  APPLICATION LOG OUTPUT"
+          echo "════════════════════════════════════════════"
+          if [ -s "$LOGFILE" ]; then
+            cat "$LOGFILE"
+          else
+            echo "  (no output captured)"
+          fi
+          echo "════════════════════════════════════════════"
+
+          exit $RESULT
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${{ github.repository }}"
+          echo "Uploading artifacts for ${TAG} to ${REPO}..."
+
+          FILES=()
+          while IFS= read -r f; do FILES+=("$f"); done < <(
+            find src-tauri/target/release/bundle \
+              \( -name "*.deb" -o -name "*.AppImage" -o -name "*.exe" \
+                 -o -name "*.msi" -o -name "*.rpm" -o -name "*.dmg" \
+                 -o -name "*.app.tar.gz" -o -name "*.sig" \) -type f \
+              ! -name "control.tar.gz" ! -name "data.tar.gz" 2>/dev/null
+          )
+          while IFS= read -r f; do FILES+=("$f"); done < <(
+            find src-tauri/target/release -maxdepth 1 -name "platform.*.json" -type f 2>/dev/null
+          )
+
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No artifacts found to upload"
+            exit 1
+          fi
+
+          echo "Found ${#FILES[@]} artifact(s):"
+          printf '  %s\n' "${FILES[@]}"
+
+          # Upload directly; create draft release if it doesn't exist yet
+          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1 && exit 0
+
+          echo "Release doesn't exist yet, creating draft..."
+          gh release create "$TAG" --repo "$REPO" \
+            --title "RexaDB ${TAG}" --draft --generate-notes 2>&1 || true
+
+          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1

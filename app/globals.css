@@ -1,0 +1,2480 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./supabase-theme.css";
+
+/*
+ * ── Type Scale ──────────────────────────────────────
+ * Only two sizes: text-xs (12px) and text-sm (14px)
+ * Hierarchy is communicated via font-weight + color,
+ * not font-size. No text-base, text-lg, text-xl, etc.
+ * ──────────────────────────────────────────────────
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--app-font-sans, var(--font-outfit), var(--font-arabic), var(--font-inter), var(--font-geist-sans), -apple-system, "SF Arabic", "Geeza Pro", sans-serif);
+  --font-mono: var(--font-geist-mono), monospace;
+  --font-space: var(--font-space-grotesk), var(--font-inter), sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Supabase-compat theme entries (used by database-table.tsx) */
+  --color-surface-100: var(--background-surface-100);
+  --color-surface-200: var(--background-surface-200);
+  --color-foreground-lighter: var(--foreground-lighter);
+  --color-foreground-light: var(--foreground-light);
+  --color-foreground-muted: var(--foreground-muted);
+
+  --color-studio-bg: var(--studio-bg);
+  --color-studio-border: var(--studio-border);
+  --color-studio-header-bg: var(--studio-header-bg);
+  --color-table-header-bg: var(--table-header-bg);
+  --color-studio-cell-text: var(--studio-cell-text);
+  --color-studio-cell-muted: var(--studio-cell-muted);
+  --color-studio-tab-active: var(--studio-tab-active);
+  --color-studio-tab-inactive: var(--studio-tab-inactive);
+  --color-studio-row-hover: var(--studio-row-hover);
+  --color-studio-selection: var(--studio-selection);
+  --color-studio-accent-purple: var(--studio-accent-purple);
+
+  --color-shell-chip: var(--shell-chip);
+  --color-shell-chip-hover: var(--shell-chip-hover);
+  --color-shell-chip-active: var(--shell-chip-active);
+  --color-shell-sidebar: var(--shell-sidebar);
+  --color-shell-panel: var(--shell-panel);
+  --color-shell-border: var(--shell-border);
+  --color-shell-bg: var(--shell-bg);
+  --color-shell-fg: var(--shell-fg);
+  --color-shell-fg-muted: var(--shell-fg-muted);
+
+  --color-title-bar-bg: var(--title-bar-bg);
+  --color-title-bar-fg: var(--title-bar-fg);
+  --color-activity-bar-bg: var(--activity-bar-bg);
+  --color-activity-bar-fg: var(--activity-bar-fg);
+  --color-activity-bar-inactive: var(--activity-bar-inactive);
+  --color-activity-bar-active-border: var(--activity-bar-active-border);
+  --color-side-bar-bg: var(--side-bar-bg);
+  --color-side-bar-fg: var(--side-bar-fg);
+  --color-side-bar-header-bg: var(--side-bar-header-bg);
+  --color-side-bar-border: var(--side-bar-border);
+  --color-panel-bg: var(--panel-bg);
+  --color-panel-fg: var(--panel-fg);
+  --color-panel-border: var(--panel-border);
+  --color-panel-header-bg: var(--panel-header-bg);
+  --color-status-bar-bg: var(--status-bar-bg);
+  --color-status-bar-fg: var(--status-bar-fg);
+
+  --color-tab-active-bg: var(--tab-active-bg);
+  --color-tab-active-fg: var(--tab-active-fg);
+  --color-tab-inactive-bg: var(--tab-inactive-bg);
+  --color-tab-inactive-fg: var(--tab-inactive-fg);
+  --color-tab-hover-bg: var(--tab-hover-bg);
+  --color-tab-border: var(--tab-border);
+  --color-tab-active-border-top: var(--tab-active-border-top);
+
+  --color-editor-widget-bg: var(--editor-widget-bg);
+  --color-editor-widget-fg: var(--editor-widget-fg);
+  --color-editor-widget-border: var(--editor-widget-border);
+
+  --color-menu-bg: var(--menu-bg);
+  --color-menu-fg: var(--menu-fg);
+  --color-menu-separator: var(--menu-separator);
+
+  --color-notification-bg: var(--notification-bg);
+  --color-notification-fg: var(--notification-fg);
+  --color-notification-border: var(--notification-border);
+
+  --color-button-bg: var(--button-bg);
+  --color-button-fg: var(--button-fg);
+  --color-button-hover-bg: var(--button-hover-bg);
+
+  --color-badge-bg: var(--badge-bg);
+  --color-badge-fg: var(--badge-fg);
+
+  --color-input-bg: var(--input-bg);
+  --color-input-fg: var(--input-fg);
+  --color-input-border: var(--input-border);
+  --color-input-placeholder: var(--input-placeholder);
+
+  --color-progress-bar-bg: var(--progress-bar-bg);
+
+  --color-scrollbar-bg: var(--scrollbar-bg);
+  --color-scrollbar-hover-bg: var(--scrollbar-hover-bg);
+  --color-scrollbar-active-bg: var(--scrollbar-active-bg);
+
+  --color-list-hover-bg: var(--list-hover-bg);
+  --color-list-hover-fg: var(--list-hover-fg);
+  --color-list-active-bg: var(--list-active-bg);
+  --color-list-active-fg: var(--list-active-fg);
+
+  --color-editor-group-bg: var(--editor-group-bg);
+  --color-editor-group-border: var(--editor-group-border);
+  --color-editor-group-tabs-bg: var(--editor-group-tabs-bg);
+  --color-editor-group-tabs-border: var(--editor-group-tabs-border);
+
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  @keyframes bounce-gentle {
+
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes shine {
+    0% {
+      transform: translateX(-100%) rotate(45deg);
+    }
+
+    100% {
+      transform: translateX(200%) rotate(45deg);
+    }
+  }
+
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes cmd-enter {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -10%) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+  }
+
+  @keyframes cmd-exit {
+    from {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translate(-50%, -10%) scale(0.95);
+    }
+  }
+
+  @keyframes cmd-item-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes progress-beam {
+    0% {
+      transform: translateX(-100%);
+    }
+
+    50% {
+      transform: translateX(0%);
+    }
+
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  @keyframes loading-dot-pulse {
+    0%,
+    100% {
+      transform: scale(0);
+      opacity: 0.5;
+    }
+
+    50% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  --animate-cmd-enter: cmd-enter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-cmd-exit: cmd-exit 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-cmd-item-enter: cmd-item-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-bounce-gentle: bounce-gentle 3s ease-in-out infinite;
+  --animate-shine: shine 2s infinite;
+  --animate-fade-in-up: fade-in-up 0.5s ease-out forwards;
+  --animate-progress-beam: progress-beam 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  --color-invert-foreground: var(--invert-foreground);
+  --color-invert: var(--invert);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-destructive-foreground: var(--destructive-foreground);
+}
+
+/* Override browser default ::selection (color-scheme: dark causes red on Safari/macOS) */
+::selection {
+  background-color: var(--studio-selection, rgba(59, 130, 246, 0.3));
+}
+
+:root {
+  --font-inter: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-space-grotesk: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-geist-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+   --font-geist-mono: "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --background: oklch(1 0 0);
+  --shell-content-bg: var(--card);
+  --shell-tab-active-bg: var(--accent);
+  --shell-tab-inactive-bg: transparent;
+  --shell-history-bg: var(--card);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.809 0.105 251.813);
+  --chart-2: oklch(0.623 0.214 259.815);
+  --chart-3: oklch(0.546 0.245 262.881);
+  --chart-4: oklch(0.488 0.243 264.376);
+  --chart-5: oklch(0.424 0.199 265.638);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.96 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.87 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  --studio-bg: #ffffff;
+  --studio-border: #e2e8f0;
+  --studio-header-bg: #f8fafc;
+  --table-header-bg: #f8fafc;
+  --studio-cell-text: #1e293b;
+  --studio-cell-muted: #94a3b8;
+  --studio-tab-active: #ffffff;
+  --studio-tab-inactive: #f1f5f9;
+  --studio-row-hover: #f8fafc;
+  --studio-selection: #f3f0ff;
+  --studio-accent-purple: #7c3aed;
+  --shell-gutter: 6px;
+  --shell-gutter-top: 8px;
+  --shell-chip-h: 32px;
+  --shell-radius-chip: 8px;
+  --shell-radius-panel: 10px;
+  --shell-sidebar-w: 200px;
+  --shell-tab-w: 160px;
+  --shell-bg: #F5F5F5;
+  --shell-fg: #111111;
+  --shell-fg-muted: #888888;
+  --shell-border: #D4D4D4;
+  --shell-chip: #E8E8E8;
+  --shell-chip-hover: #DEDEDE;
+  --shell-chip-active: #D0D0D0;
+  --shell-sidebar: #E0E0E0;
+  --shell-panel: #FFFFFF;
+
+  /* VS Code-style shell tokens (light) */
+  --title-bar-bg: #DDDDDD;
+  --title-bar-fg: #333333;
+  --activity-bar-bg: #2C2C2C;
+  --activity-bar-fg: #FFFFFF;
+  --activity-bar-inactive: #858585;
+  --activity-bar-active-border: #FFFFFF;
+  --side-bar-bg: #F3F3F3;
+  --side-bar-fg: #333333;
+  --side-bar-header-bg: #ECECEC;
+  --side-bar-border: #E0E0E0;
+  --panel-bg: #F3F3F3;
+  --panel-fg: #333333;
+  --panel-border: #E0E0E0;
+  --panel-header-bg: #ECECEC;
+  --status-bar-bg: #007ACC;
+  --status-bar-fg: #FFFFFF;
+
+  /* Enhanced UI tokens (light) */
+  --tab-active-bg: #FFFFFF;
+  --tab-active-fg: #333333;
+  --tab-inactive-bg: #ECECEC;
+  --tab-inactive-fg: #666666;
+  --tab-hover-bg: #E8E8E8;
+  --tab-border: #F3F3F3;
+  --tab-active-border-top: #007ACC;
+
+  --editor-widget-bg: #F3F3F3;
+  --editor-widget-fg: #333333;
+  --editor-widget-border: #C8C8C8;
+
+  --menu-bg: #F3F3F3;
+  --menu-fg: #333333;
+  --menu-separator: #C8C8C8;
+
+  --notification-bg: #F3F3F3;
+  --notification-fg: #333333;
+  --notification-border: #C8C8C8;
+
+  --button-bg: #007ACC;
+  --button-fg: #FFFFFF;
+  --button-hover-bg: #0062A3;
+  --badge-bg: #007ACC;
+  --badge-fg: #FFFFFF;
+  --input-bg: #FFFFFF;
+  --input-fg: #333333;
+  --input-border: #CCCCCC;
+  --input-placeholder: #999999;
+  --progress-bar-bg: #007ACC;
+
+  --scrollbar-bg: rgba(0,0,0,0.10);
+  --scrollbar-hover-bg: rgba(0,0,0,0.15);
+  --scrollbar-active-bg: rgba(0,0,0,0.20);
+
+  --list-hover-bg: #E8E8E8;
+  --list-hover-fg: #333333;
+  --list-active-bg: #007ACC;
+  --list-active-fg: #FFFFFF;
+  --list-focus-bg: #007ACC;
+  --list-focus-fg: #FFFFFF;
+
+  --editor-group-bg: #FFFFFF;
+  --editor-group-border: #E0E0E0;
+  --editor-group-tabs-bg: #ECECEC;
+  --editor-group-tabs-border: #E0E0E0;
+
+  --syntax-keyword: #0000FF;
+  --syntax-string: #A31515;
+  --syntax-number: #098658;
+  --syntax-function: #795E26;
+  --syntax-variable: #001080;
+  --syntax-comment: #008000;
+  --syntax-type: #267F99;
+
+  /* VS Code color token aliases (light) */
+  --vscode-shadow-md: 0 2px 8px rgba(0,0,0,0.36);
+  --vscode-editor-background: #FFFFFF;
+  --vscode-editor-foreground: #333333;
+  --vscode-titleBar-activeBackground: var(--title-bar-bg);
+  --vscode-titleBar-activeForeground: var(--title-bar-fg);
+  --vscode-titleBar-inactiveBackground: #E8E8E8;
+  --vscode-titleBar-inactiveForeground: #999999;
+  --vscode-activityBar-background: var(--activity-bar-bg);
+  --vscode-activityBar-foreground: var(--activity-bar-fg);
+  --vscode-activityBar-inactiveForeground: var(--activity-bar-inactive);
+  --vscode-activityBar-activeBorder: var(--activity-bar-active-border);
+  --vscode-activityBar-activeBackground: rgba(255,255,255,0.08);
+  --vscode-activityBar-border: transparent;
+  --vscode-sideBar-background: var(--side-bar-bg);
+  --vscode-sideBar-foreground: var(--side-bar-fg);
+  --vscode-sideBarTitle-background: var(--side-bar-header-bg);
+  --vscode-sideBar-border: var(--side-bar-border);
+  --vscode-panel-background: var(--panel-bg);
+  --vscode-panel-border: var(--panel-border);
+  --vscode-panelTitle-activeForeground: #333333;
+  --vscode-panelTitle-inactiveForeground: #999999;
+  --vscode-panelTitle-activeBorder: #007ACC;
+  --vscode-panel-dropBorder: #424242;
+  --vscode-statusBar-background: var(--status-bar-bg);
+  --vscode-statusBar-foreground: var(--status-bar-fg);
+  --vscode-statusBar-border: transparent;
+  --vscode-statusBarItem-hoverBackground: rgba(0,0,0,0.12);
+  --vscode-statusBarItem-activeBackground: rgba(0,0,0,0.18);
+  --vscode-statusBarItem-hoverForeground: var(--status-bar-fg);
+  --vscode-tab-activeBackground: #FFFFFF;
+  --vscode-tab-activeForeground: #333333;
+  --vscode-tab-activeBorderTop: #007ACC;
+  --vscode-tab-inactiveBackground: #ECECEC;
+  --vscode-tab-inactiveForeground: #666666;
+  --vscode-tab-hoverBackground: #E8E8E8;
+  --vscode-tab-border: #F3F3F3;
+
+  --destructive-foreground: var(--color-red-800);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-900);
+  --info: var(--color-violet-500);
+  --info-foreground: var(--color-violet-900);
+  --warning: var(--color-yellow-500);
+  --warning-foreground: var(--color-yellow-900);
+  --invert: var(--color-zinc-900);
+  --invert-foreground: var(--color-zinc-50);
+}
+
+/* Sidebar buttons — base muted, hover/active white */
+[data-sidebar="menu-button"],
+[data-sidebar="menu-sub-button"] {
+  color: var(--muted-foreground);
+}
+[data-sidebar="menu-button"]:hover,
+[data-sidebar="menu-sub-button"]:hover {
+  color: var(--sidebar-accent-foreground);
+}
+[data-sidebar="menu-button"][data-active="true"],
+[data-sidebar="menu-sub-button"][data-active="true"] {
+  color: var(--foreground);
+}
+
+/* Sidebar nav item hover/active — explicit rules so they work regardless of Tailwind class generation */
+[data-sidebar="menu-button"]:hover,
+[data-sidebar="menu-sub-button"]:hover {
+  background-color: oklch(0.87 0 0);
+}
+.dark [data-sidebar="menu-button"]:hover,
+.dark [data-sidebar="menu-sub-button"]:hover {
+  background-color: #303030;
+}
+[data-sidebar="menu-button"][data-active="true"],
+[data-sidebar="menu-sub-button"][data-active="true"] {
+  background-color: oklch(0.87 0 0);
+}
+.dark [data-sidebar="menu-button"][data-active="true"],
+.dark [data-sidebar="menu-sub-button"][data-active="true"] {
+  background-color: #303030;
+}
+
+.map-host {
+  background: #0f141b;
+  position: relative;
+  z-index: 0;
+}
+
+.map-host .leaflet-pane {
+  z-index: 1 !important;
+}
+
+.map-host .leaflet-control-container,
+.map-host .leaflet-top,
+.map-host .leaflet-bottom {
+  z-index: 2 !important;
+}
+
+.map-host .leaflet-tooltip-pane,
+.map-host .leaflet-popup-pane {
+  z-index: 3 !important;
+}
+
+.map-marker-icon {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.map-marker-core {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.map-marker-pulse {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  opacity: 0.45;
+  animation: map-pulse 1.8s ease-out infinite;
+}
+
+body[data-review-sheet-open="true"] .studio-grid-header,
+body[data-review-sheet-open="true"] .studio-grid-header th {
+  filter: blur(2px);
+  transition: filter 160ms ease;
+}
+
+@keyframes map-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.45;
+  }
+
+  70% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes pending-edge-run {
+  0% {
+    top: 1px;
+    left: 12px;
+  }
+  25% {
+    top: 1px;
+    left: calc(100% - 14px);
+  }
+  50% {
+    top: calc(100% - 14px);
+    left: calc(100% - 14px);
+  }
+  75% {
+    top: calc(100% - 14px);
+    left: 1px;
+  }
+  100% {
+    top: 1px;
+    left: 12px;
+  }
+}
+
+@keyframes pending-border-trace {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.dark {
+  --background: #151515;
+  --shell-content-bg: #232323;
+  --shell-tab-active-bg: #1C1D1F;
+  --shell-tab-inactive-bg: #131416;
+  --shell-history-bg: #1B1B1C;
+  --foreground: #E5E7EB;
+  --card: #1C1C1C;
+  --card-foreground: #E5E7EB;
+  --popover: #1A1A1A;
+  --popover-foreground: #E5E7EB;
+  --primary: #3B82F6;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1F1F1F;
+  --secondary-foreground: #E5E7EB;
+  --muted: #1F1F1F;
+  --muted-foreground: #9CA3AF;
+  --accent: #1F1F1F;
+  --accent-foreground: #E5E7EB;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #262626;
+  --input: #262626;
+  --ring: #3B82F6;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: #070707;
+  --sidebar-foreground: #E5E7EB;
+  --sidebar-primary: #3B82F6;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #303030;
+  --sidebar-accent-foreground: #E5E7EB;
+  --sidebar-border: #1A1A1A;
+  --sidebar-ring: #3B82F6;
+
+  --studio-bg: #171717;
+  --studio-border: #262626;
+  --studio-header-bg: #1C1C1C;
+  --table-header-bg: #1F1F1F;
+  --studio-cell-text: #E5E7EB;
+  --studio-cell-muted: #9CA3AF;
+  --studio-tab-active: #1C1C1C;
+  --studio-tab-inactive: #171717;
+  --studio-row-hover: #1F1F1F;
+  --studio-selection: rgba(59, 130, 246, 0.18);
+  --studio-accent-purple: #7c3aed;
+
+  /* Solo Mode - Theme Aware Tokens */
+  --shell-gutter: 6px;
+  --shell-gutter-top: 8px;
+  --shell-chip-h: 32px;
+  --shell-radius-chip: 8px;
+  --shell-radius-panel: 10px;
+  --shell-sidebar-w: 200px;
+  --shell-tab-w: 160px;
+  --shell-bg: #070707;
+  --shell-fg: #FFFFFF;
+  --shell-fg-muted: #666666;
+  --shell-border: #434343ab;
+  --shell-chip: #232323;
+  --shell-chip-hover: #2A2A2A;
+  --shell-chip-active: #151515;
+  --shell-sidebar: #232323;
+  --shell-panel: #151515;
+
+  /* VS Code-style shell tokens (dark) */
+  --title-bar-bg: #3C3C3C;
+  --title-bar-fg: #CCCCCC;
+  --activity-bar-bg: #333333;
+  --activity-bar-fg: #FFFFFF;
+  --activity-bar-inactive: #858585;
+  --activity-bar-active-border: #FFFFFF;
+  --side-bar-bg: #252526;
+  --side-bar-fg: #CCCCCC;
+  --side-bar-header-bg: #2D2D2D;
+  --side-bar-border: #333333;
+  --panel-bg: #1E1E1E;
+  --panel-fg: #CCCCCC;
+  --panel-border: #333333;
+  --panel-header-bg: #2D2D2D;
+  --status-bar-bg: #007ACC;
+  --status-bar-fg: #FFFFFF;
+
+  /* Enhanced UI tokens (dark) */
+  --tab-active-bg: #1E1E1E;
+  --tab-active-fg: #CCCCCC;
+  --tab-inactive-bg: #2D2D2D;
+  --tab-inactive-fg: #969696;
+  --tab-hover-bg: #2A2A2A;
+  --tab-border: #252526;
+  --tab-active-border-top: #007ACC;
+
+  --editor-widget-bg: #252526;
+  --editor-widget-fg: #CCCCCC;
+  --editor-widget-border: #454545;
+
+  --menu-bg: #252526;
+  --menu-fg: #CCCCCC;
+  --menu-separator: #454545;
+
+  --notification-bg: #252526;
+  --notification-fg: #CCCCCC;
+  --notification-border: #454545;
+
+  --button-bg: #0E639C;
+  --button-fg: #FFFFFF;
+  --button-hover-bg: #1177BB;
+  --badge-bg: #4D4D4D;
+  --badge-fg: #FFFFFF;
+  --input-bg: #3C3C3C;
+  --input-fg: #CCCCCC;
+  --input-border: #3C3C3C;
+  --input-placeholder: #7A7A7A;
+  --progress-bar-bg: #0E639C;
+
+  --scrollbar-bg: rgba(255,255,255,0.10);
+  --scrollbar-hover-bg: rgba(255,255,255,0.15);
+  --scrollbar-active-bg: rgba(255,255,255,0.20);
+
+  --list-hover-bg: #2A2D2E;
+  --list-hover-fg: #CCCCCC;
+  --list-active-bg: #04395E;
+  --list-active-fg: #FFFFFF;
+  --list-focus-bg: #04395E;
+  --list-focus-fg: #FFFFFF;
+
+  --editor-group-bg: #1E1E1E;
+  --editor-group-border: #333333;
+  --editor-group-tabs-bg: #2D2D2D;
+  --editor-group-tabs-border: #252526;
+
+  --syntax-keyword: #569CD6;
+  --syntax-string: #CE9178;
+  --syntax-number: #B5CEA8;
+  --syntax-function: #DCDCAA;
+  --syntax-variable: #9CDCFE;
+  --syntax-comment: #6A9955;
+  --syntax-type: #4EC9B0;
+
+  /* VS Code color token aliases (dark) */
+  --vscode-shadow-md: 0 2px 8px rgba(0,0,0,0.36);
+  --vscode-editor-background: #1E1E1E;
+  --vscode-editor-foreground: #CCCCCC;
+  --vscode-titleBar-activeBackground: var(--title-bar-bg);
+  --vscode-titleBar-activeForeground: var(--title-bar-fg);
+  --vscode-titleBar-inactiveBackground: #2A2A2A;
+  --vscode-titleBar-inactiveForeground: #7A7A7A;
+  --vscode-activityBar-background: var(--activity-bar-bg);
+  --vscode-activityBar-foreground: var(--activity-bar-fg);
+  --vscode-activityBar-inactiveForeground: var(--activity-bar-inactive);
+  --vscode-activityBar-activeBorder: var(--activity-bar-active-border);
+  --vscode-activityBar-activeBackground: rgba(255,255,255,0.08);
+  --vscode-activityBar-border: transparent;
+  --vscode-sideBar-background: var(--side-bar-bg);
+  --vscode-sideBar-foreground: var(--side-bar-fg);
+  --vscode-sideBarTitle-background: var(--side-bar-header-bg);
+  --vscode-sideBar-border: var(--side-bar-border);
+  --vscode-panel-background: var(--panel-bg);
+  --vscode-panel-border: var(--panel-border);
+  --vscode-panelTitle-activeForeground: #E7E7E7;
+  --vscode-panelTitle-inactiveForeground: rgba(231,231,231,0.6);
+  --vscode-panelTitle-activeBorder: #007ACC;
+  --vscode-panel-dropBorder: #E7E7E7;
+  --vscode-statusBar-background: var(--status-bar-bg);
+  --vscode-statusBar-foreground: var(--status-bar-fg);
+  --vscode-statusBar-border: transparent;
+  --vscode-statusBarItem-hoverBackground: rgba(255,255,255,0.12);
+  --vscode-statusBarItem-activeBackground: rgba(255,255,255,0.18);
+  --vscode-statusBarItem-hoverForeground: var(--status-bar-fg);
+  --vscode-tab-activeBackground: #1E1E1E;
+  --vscode-tab-activeForeground: #CCCCCC;
+  --vscode-tab-activeBorderTop: #007ACC;
+  --vscode-tab-inactiveBackground: #2D2D2D;
+  --vscode-tab-inactiveForeground: #969696;
+  --vscode-tab-hoverBackground: #2A2A2A;
+  --vscode-tab-border: #252526;
+
+  --destructive-foreground: var(--color-red-600);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-600);
+  --info: var(--color-violet-500);
+  --info-foreground: var(--color-violet-600);
+  --warning: var(--color-yellow-500);
+  --warning-foreground: var(--color-yellow-600);
+  --invert: var(--color-zinc-700);
+  --invert-foreground: var(--color-zinc-50);
+}
+
+.tui-mode {
+  --radius: 0rem;
+  --font-sans: var(--font-mono);
+  --card: var(--background);
+  --card-foreground: var(--foreground);
+  --popover: var(--background);
+  --popover-foreground: var(--foreground);
+  --secondary: color-mix(in srgb, var(--foreground) 6%, var(--background));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 4%, var(--background));
+  --muted-foreground: color-mix(in srgb, var(--foreground) 65%, transparent);
+  --accent: color-mix(in srgb, var(--foreground) 6%, var(--background));
+  --accent-foreground: var(--foreground);
+  --border: color-mix(in srgb, var(--foreground) 18%, var(--background));
+  --input: var(--border);
+  --ring: var(--foreground);
+  --studio-bg: var(--background);
+  --studio-border: var(--border);
+  --studio-header-bg: var(--background);
+  --table-header-bg: var(--background);
+  --studio-row-hover: color-mix(in srgb, var(--foreground) 8%, var(--background));
+  --studio-selection: color-mix(in srgb, var(--foreground) 18%, var(--background));
+}
+
+/* ── Sonner Toast — theme-aware overrides ── */
+.rexa-toast {
+  --normal-bg: var(--card) !important;
+  --normal-text: var(--foreground) !important;
+  --normal-border: var(--border) !important;
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border-color: var(--border) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.rexa-toast [data-close-button] {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+  border-color: var(--border) !important;
+}
+
+.rexa-toast-success {
+  --success-bg: color-mix(in srgb, var(--success) 12%, var(--card)) !important;
+  --success-border: color-mix(in srgb, var(--success) 25%, var(--border)) !important;
+  --success-text: var(--foreground) !important;
+  background: color-mix(in srgb, var(--success) 12%, var(--card)) !important;
+  border-color: color-mix(in srgb, var(--success) 25%, var(--border)) !important;
+  color: var(--foreground) !important;
+}
+
+.rexa-toast-success [data-icon] svg {
+  color: var(--success) !important;
+}
+
+.rexa-toast-error {
+  --error-bg: color-mix(in srgb, var(--destructive) 12%, var(--card)) !important;
+  --error-border: color-mix(in srgb, var(--destructive) 25%, var(--border)) !important;
+  --error-text: var(--foreground) !important;
+  background: color-mix(in srgb, var(--destructive) 12%, var(--card)) !important;
+  border-color: color-mix(in srgb, var(--destructive) 25%, var(--border)) !important;
+  color: var(--foreground) !important;
+}
+
+.rexa-toast-error [data-icon] svg {
+  color: var(--destructive) !important;
+}
+
+.rexa-toast-warning {
+  --warning-bg: color-mix(in srgb, var(--warning) 12%, var(--card)) !important;
+  --warning-border: color-mix(in srgb, var(--warning) 25%, var(--border)) !important;
+  --warning-text: var(--foreground) !important;
+  background: color-mix(in srgb, var(--warning) 12%, var(--card)) !important;
+  border-color: color-mix(in srgb, var(--warning) 25%, var(--border)) !important;
+  color: var(--foreground) !important;
+}
+
+.rexa-toast-warning [data-icon] svg {
+  color: var(--warning) !important;
+}
+
+.rexa-toast-info {
+  --info-bg: color-mix(in srgb, var(--info) 12%, var(--card)) !important;
+  --info-border: color-mix(in srgb, var(--info) 25%, var(--border)) !important;
+  --info-text: var(--foreground) !important;
+  background: color-mix(in srgb, var(--info) 12%, var(--card)) !important;
+  border-color: color-mix(in srgb, var(--info) 25%, var(--border)) !important;
+  color: var(--foreground) !important;
+}
+
+.rexa-toast-info [data-icon] svg {
+  color: var(--info) !important;
+}
+
+.rexa-toast [data-description] {
+  color: var(--muted-foreground) !important;
+}
+
+/* Action buttons inside toasts */
+.rexa-toast [data-button] {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-radius: var(--radius) !important;
+}
+
+.rexa-toast [data-cancel] {
+  background: var(--muted) !important;
+  color: var(--muted-foreground) !important;
+  border-radius: var(--radius) !important;
+}
+
+.tui-mode[data-tui-theme="light"] {
+  color-scheme: light;
+}
+
+.tui-mode[data-tui-theme="dark"] {
+  color-scheme: dark;
+}
+
+.tui-mode body {
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.tui-mode * {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.tui-mode [data-slot="select-trigger"] {
+  border-color: var(--border);
+  background-color: var(--background);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tui-mode [data-slot="select-content"] {
+  border: 1px solid var(--border);
+  background-color: var(--background);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tui-mode [data-slot="select-content"] [data-slot="select-item"][data-state="checked"] {
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tui-mode [role="listbox"] {
+  border: 1px solid var(--border);
+  background-color: var(--background);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tui-mode [aria-haspopup="listbox"] {
+  border: 1px solid var(--border);
+  background-color: var(--background);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tui-mode [role="combobox"] {
+  border: 1px solid var(--border);
+  background-color: var(--background);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: #333 transparent;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [role="menuitem"]:not(:disabled),
+  [role="option"]:not(:disabled),
+  [role="tab"]:not(:disabled),
+  [role="switch"]:not(:disabled),
+  [role="checkbox"]:not(:disabled):not([aria-disabled]),
+  [data-slot="button"]:not(:disabled),
+  [data-slot="dropdown-menu-trigger"]:not(:disabled),
+  [data-slot="dropdown-menu-item"]:not(:disabled),
+  [data-sidebar="menu-button"]:not(:disabled),
+  [data-sidebar="menu-sub-button"]:not(:disabled),
+  [data-slot="sidebar-menu-button"]:not(:disabled),
+  [data-slot="sidebar-menu-sub-button"]:not(:disabled),
+  a:not([tabindex="-1"]):not([disabled]),
+  summary {
+    cursor: pointer;
+  }
+
+  *:not(.scrollbar-hide)::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  *:not(.scrollbar-hide)::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *:not(.scrollbar-hide)::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    background-clip: content-box;
+  }
+
+  .dark *:not(.scrollbar-hide)::-webkit-scrollbar-thumb {
+    background: #27272a;
+    background-clip: content-box;
+  }
+
+  .table-sidebar-scrollbar {
+    scrollbar-width: thin;
+  }
+
+  .table-sidebar-scrollbar::-webkit-scrollbar {
+    width: 1px;
+    height: 1px;
+  }
+
+  .table-sidebar-scrollbar::-webkit-scrollbar-thumb {
+    border: 0;
+    background-clip: padding-box;
+  }
+
+  /* Hide native scrollbar for tabs */
+  .tabs-scrollbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    /* Firefox */
+    -ms-overflow-style: none;
+    /* IE/Edge */
+  }
+
+  .tabs-scrollbar::-webkit-scrollbar {
+    display: none;
+    /* Chrome/Safari/Webkit */
+  }
+
+  .scrollbar-hide {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  .mask-fade-x {
+    mask-image: linear-gradient(to right, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+
+  :where(:lang(ar), [lang|="ar"]) {
+    font-family: var(--font-arabic), "SF Arabic", "Geeza Pro", sans-serif;
+  }
+
+}
+
+@layer utilities {
+  /* Supabase-compat utility classes (used by database-table.tsx) */
+  .bg-200 {
+    background-color: var(--background-200);
+  }
+  .border-strong {
+    border-color: var(--border-strong);
+  }
+  .border-default {
+    border-color: var(--border-default);
+  }
+  .heading-meta {
+    font-size: 0.625rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .studio-ag-grid {
+    --ag-font-family: var(--font-sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif);
+    --ag-font-size: 13px;
+    --ag-background-color: var(--studio-bg);
+    --ag-foreground-color: var(--studio-cell-text);
+    --ag-header-background-color: var(--table-header-bg);
+    --ag-header-foreground-color: var(--studio-cell-text);
+    --ag-border-color: color-mix(in srgb, var(--studio-border) 90%, transparent);
+    --ag-row-border-color: color-mix(in srgb, var(--studio-border) 90%, transparent);
+    --ag-row-hover-color: transparent;
+    --ag-selected-row-background-color: transparent;
+    --ag-range-selection-border-color: rgb(78, 129, 238);
+    --ag-cell-horizontal-border: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent);
+    --ag-column-border: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent);
+    --ag-header-column-border: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent);
+    --ag-wrapper-border-radius: 0;
+    --ag-border-radius: 0;
+    --ag-checkbox-unchecked-color: var(--studio-border);
+    --ag-checkbox-checked-color: var(--studio-accent-purple);
+    --ag-checkbox-background-color: var(--studio-bg);
+    --ag-checkbox-border-color: var(--studio-border);
+    --ag-checkbox-checked-background-color: var(--studio-accent-purple);
+    --ag-checkbox-checked-border-color: var(--studio-accent-purple);
+    --ag-checkbox-indeterminate-background-color: var(--studio-accent-purple);
+    --ag-checkbox-indeterminate-border-color: var(--studio-accent-purple);
+    --ag-scrollbar-thumb-color: color-mix(in srgb, var(--studio-border) 80%, transparent);
+    --ag-scrollbar-track-color: var(--studio-bg);
+    border-top: 1px solid color-mix(in srgb, var(--studio-border) 80%, transparent);
+  }
+
+  .studio-ag-grid .ag-header-cell,
+  .studio-ag-grid .ag-header-group-cell {
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--table-header-bg) !important;
+    color: var(--studio-cell-text) !important;
+    border-right: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent) !important;
+    border-style: solid !important;
+  }
+
+  .studio-ag-grid .ag-header-cell:last-child,
+  .studio-ag-grid .ag-cell:last-child {
+    border-right: none !important;
+  }
+
+  .studio-ag-grid .ag-cell {
+    color: var(--studio-cell-text);
+    user-select: none;
+    -webkit-user-select: none;
+    border-right: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent) !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent) !important;
+    border-style: solid !important;
+  }
+
+  .studio-ag-grid [data-cell-editor] textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .studio-ag-grid .ag-row {
+    background-color: var(--studio-bg) !important;
+  }
+
+  .studio-ag-grid .ag-row:hover .ag-cell {
+    background-color: transparent !important;
+  }
+
+  .studio-ag-grid .ag-row-hover .ag-cell {
+    background-color: transparent !important;
+  }
+
+  .studio-ag-grid .ag-studio-cell:hover {
+    background-color: var(--studio-row-hover) !important;
+  }
+
+  .studio-ag-grid .ag-pinned-left-header,
+  .studio-ag-grid .ag-pinned-left-cols-container .ag-cell,
+  .studio-ag-grid .ag-center-cols-container .ag-cell {
+    border-right: 1px solid color-mix(in srgb, var(--studio-border) 90%, transparent) !important;
+    border-style: solid !important;
+  }
+
+  .studio-ag-grid .ag-row,
+  .studio-ag-grid .ag-row .ag-cell,
+  .studio-ag-grid .ag-header-cell,
+  .studio-ag-grid .ag-header-cell::before,
+  .studio-ag-grid .ag-header-cell::after,
+  .studio-ag-grid .ag-cell::before,
+  .studio-ag-grid .ag-cell::after {
+    border-style: solid !important;
+    border-image: none !important;
+    outline-style: solid;
+  }
+
+  .studio-ag-grid .ag-studio-col-hovered {
+    background-color: var(--studio-row-hover) !important;
+  }
+
+  .studio-ag-grid .ag-cell-focus,
+  .studio-ag-grid .ag-cell-range-selected:not(.ag-cell-inline-editing),
+  .studio-ag-grid .ag-cell-range-single-cell {
+    border-color: rgb(78, 129, 238) !important;
+  }
+
+  .studio-ag-grid .ag-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .studio-ag-grid .ag-studio-col-selected {
+    background-color: color-mix(in srgb, rgb(78, 129, 238) 10%, var(--studio-bg)) !important;
+  }
+
+  .studio-ag-grid .ag-studio-cell-selected {
+    outline: 2px solid rgb(78, 129, 238) !important;
+    outline-offset: -2px;
+  }
+
+  .studio-ag-grid .ag-studio-range-selected {
+    background-color: color-mix(in srgb, rgb(78, 129, 238) 12%, var(--studio-bg)) !important;
+    box-shadow: inset 0 0 0 1px rgb(78, 129, 238) !important;
+  }
+
+  .studio-ag-grid .ag-root-wrapper,
+  .studio-ag-grid .ag-root,
+  .studio-ag-grid .ag-body-viewport,
+  .studio-ag-grid .ag-center-cols-viewport,
+  .studio-ag-grid .ag-center-cols-container,
+  .studio-ag-grid .ag-pinned-left-cols-container,
+  .studio-ag-grid .ag-header,
+  .studio-ag-grid .ag-header-viewport,
+  .studio-ag-grid .ag-header-container,
+  .studio-ag-grid .ag-floating-top,
+  .studio-ag-grid .ag-floating-bottom,
+  .studio-ag-grid .ag-overlay,
+  .studio-ag-grid .ag-popup,
+  .studio-ag-grid .ag-menu {
+    background-color: var(--studio-bg) !important;
+    color: var(--studio-cell-text) !important;
+  }
+
+  .studio-ag-grid .ag-body-horizontal-scroll,
+  .studio-ag-grid .ag-body-vertical-scroll,
+  .studio-ag-grid .ag-body-horizontal-scroll-viewport,
+  .studio-ag-grid .ag-body-vertical-scroll-viewport,
+  .studio-ag-grid .ag-horizontal-left-spacer,
+  .studio-ag-grid .ag-horizontal-right-spacer {
+    background-color: var(--studio-bg) !important;
+  }
+
+  .studio-ag-grid .ag-checkbox-input-wrapper {
+    background: var(--studio-bg) !important;
+    border: 1px solid var(--studio-border) !important;
+    border-radius: 8px !important;
+    color: transparent !important;
+  }
+
+  .studio-ag-grid .ag-checkbox-input-wrapper:not(.ag-checked):not(.ag-indeterminate)::before,
+  .studio-ag-grid .ag-checkbox-input-wrapper:not(.ag-checked):not(.ag-indeterminate)::after,
+  .studio-ag-grid .ag-checkbox-input-wrapper:not(.ag-checked):not(.ag-indeterminate) .ag-icon {
+    opacity: 0 !important;
+    display: none !important;
+    content: none !important;
+  }
+
+  .studio-ag-grid .ag-checkbox-input-wrapper.ag-checked,
+  .studio-ag-grid .ag-checkbox-input-wrapper.ag-indeterminate {
+    background: var(--studio-accent-purple) !important;
+    border-color: var(--studio-accent-purple) !important;
+    color: #fff !important;
+  }
+
+  .studio-ag-grid .ag-studio-pending-delete {
+    background-color: rgba(239, 68, 68, 0.12) !important;
+  }
+
+  .custom-scrollbar {
+    /* Utility class kept for explicit usage, but logic moved to base * selector */
+  }
+
+  .app-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .app-drag-region button,
+  .app-drag-region a,
+  .app-drag-region input,
+  .app-drag-region textarea,
+  .app-drag-region select,
+  .app-drag-region [role="button"],
+  .app-drag-region [role="menuitem"],
+  .app-drag-region .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* React Flow Handle Refinements */
+  .react-flow__handle {
+    width: 8px !important;
+    height: 8px !important;
+    border: 2px solid #3b82f6 !important;
+    background-color: var(--background) !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    z-index: 10;
+  }
+
+  .react-flow__handle-connecting {
+    opacity: 1 !important;
+    background-color: rgba(59, 130, 246, 0.05) !important;
+    border-radius: 4px !important;
+  }
+
+  .react-flow__handle-valid {
+    opacity: 1 !important;
+    background-color: rgba(16, 185, 129, 0.1) !important;
+    box-shadow: inset 0 0 0 1px #10b981;
+    border-radius: 4px !important;
+    transform: none !important;
+  }
+
+  .react-flow__edge-path {
+    stroke-width: 2;
+    transition: stroke 0.2s ease;
+  }
+
+  .react-flow__edge.selected .react-flow__edge-path {
+    stroke: #3b82f6;
+  }
+
+  .row-handle {
+    width: 4px !important;
+    height: 100% !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    transform: none !important;
+    top: 0 !important;
+    z-index: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Source handle on top by default for starting drags */
+  .row-handle.react-flow__handle-source {
+    z-index: 2 !important;
+  }
+
+  /* Target handle on top during active connection for dropping */
+  .react-flow--connecting .row-handle.react-flow__handle-target {
+    z-index: 3 !important;
+  }
+
+  /* Disable source handles during connection so they don't block the target drop */
+  .react-flow--connecting .row-handle.react-flow__handle-source {
+    pointer-events: none !important;
+  }
+
+  .row-handle.react-flow__handle-right {
+    right: 0 !important;
+    left: auto !important;
+  }
+
+  .row-handle.react-flow__handle-right::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 600px;
+    height: 100%;
+  }
+
+  .row-handle.react-flow__handle-left {
+    left: 0 !important;
+    right: auto !important;
+  }
+
+  .row-handle.react-flow__handle-left::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 600px;
+    height: 100%;
+  }
+}
+
+.workspace-scroll-stack-card {
+  will-change: transform, opacity;
+}
+
+.hero-pixel-section {
+  isolation: isolate;
+}
+
+.hero-pixel-drift {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 56% 26%, rgba(16, 185, 129, 0.12), transparent 42%),
+    radial-gradient(circle at 24% 70%, rgba(148, 163, 184, 0.06), transparent 46%),
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.02) 0 1px,
+      transparent 1px 3px
+    );
+  opacity: 0.34;
+}
+
+.hero-pixel-cloud {
+  position: absolute;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.66) 1.3px, transparent 1.4px),
+    radial-gradient(circle at 1px 1px, rgba(16, 185, 129, 0.42) 1.1px, transparent 1.2px);
+  background-size: 9px 9px, 15px 15px;
+  filter: none;
+  mix-blend-mode: normal;
+}
+
+.hero-pixel-cloud-top {
+  inset: -4% -8% auto -8%;
+  height: 64%;
+  clip-path: polygon(0 20%, 10% 15%, 22% 20%, 34% 11%, 44% 17%, 54% 10%, 66% 18%, 78% 13%, 90% 22%, 100% 18%, 100% 0, 0 0);
+  mask-image:
+    linear-gradient(to bottom, black 0 56%, transparent 86%),
+    radial-gradient(80% 95% at 50% 28%, black 44%, transparent 72%),
+    radial-gradient(84% 90% at 50% 30%, transparent 30%, black 58%, transparent 88%);
+  mask-composite: intersect;
+  opacity: 0.9;
+}
+
+.hero-pixel-cloud-left {
+  left: -8%;
+  top: 30%;
+  width: 36%;
+  height: 34%;
+  clip-path: polygon(0 24%, 18% 12%, 36% 18%, 52% 32%, 64% 48%, 70% 70%, 58% 84%, 36% 84%, 16% 72%, 4% 50%);
+  mask-image: linear-gradient(to right, black 0 70%, transparent 96%);
+  opacity: 0.36;
+}
+
+.hero-pixel-cloud-right {
+  right: -7%;
+  top: 22%;
+  width: 35%;
+  height: 36%;
+  clip-path: polygon(8% 16%, 28% 8%, 46% 16%, 62% 30%, 78% 44%, 90% 62%, 88% 80%, 70% 88%, 48% 84%, 30% 74%, 12% 54%);
+  mask-image: linear-gradient(to left, black 0 72%, transparent 96%);
+  opacity: 0.4;
+}
+
+.hero-pixel-cloud-bottom {
+  left: 6%;
+  bottom: 8%;
+  width: 32%;
+  height: 14%;
+  clip-path: polygon(0 44%, 18% 30%, 36% 38%, 54% 28%, 72% 38%, 88% 32%, 100% 44%, 86% 66%, 66% 74%, 42% 68%, 20% 72%, 4% 60%);
+  opacity: 0.22;
+}
+
+@keyframes pixel-walk {
+  0% {
+    background-position:
+      0 0,
+      0 100%,
+      0 0,
+      100% 0;
+  }
+  100% {
+    background-position:
+      40px 0,
+      -40px 100%,
+      0 40px,
+      100% -40px;
+  }
+}
+
+@keyframes pixel-blink {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  20% {
+    opacity: 0.75;
+  }
+  55% {
+    opacity: 0.35;
+  }
+  75% {
+    opacity: 0.9;
+  }
+}
+
+.beam-card {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+}
+
+.beam-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.16);
+}
+
+.beam-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 8px,
+      rgba(16, 185, 129, 0.95) 8px 10px,
+      transparent 10px 18px
+    ) 0 0 / 220% 1px no-repeat,
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 8px,
+      rgba(16, 185, 129, 0.9) 8px 10px,
+      transparent 10px 18px
+    ) 0 100% / 220% 1px no-repeat,
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 8px,
+      rgba(52, 211, 153, 0.95) 8px 10px,
+      transparent 10px 18px
+    ) 0 0 / 1px 220% no-repeat,
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 8px,
+      rgba(52, 211, 153, 0.85) 8px 10px,
+      transparent 10px 18px
+    ) 100% 0 / 1px 220% no-repeat;
+  animation:
+    pixel-walk 1.2s steps(10, end) infinite,
+    pixel-blink 1.8s steps(4, end) infinite;
+  animation-delay: var(--beam-delay, 0ms);
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.35));
+}
+
+.beam-card:hover::after {
+  filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.52));
+}
+
+.beam-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.supabase-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: linear-gradient(180deg, rgba(20, 22, 26, 0.98), rgba(16, 17, 20, 0.98));
+  color: rgb(235 235 235);
+}
+
+.supabase-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.supabase-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.supabase-card-visual {
+  pointer-events: none;
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 34%;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+}
+
+.supabase-card-visual-interactive {
+  pointer-events: auto;
+}
+
+.supabase-card-visual-database {
+  height: 62%;
+  transition: height 240ms ease;
+}
+
+.supabase-card:hover .supabase-card-visual-database {
+  height: 68%;
+}
+
+.supabase-card-visual-terminal {
+  height: 50%;
+}
+
+.supabase-card-visual-schema {
+  position: relative;
+  height: auto;
+  width: calc(100% - 2rem);
+  margin: 0 1rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+}
+
+.supabase-visual-shell {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.sql-editor-visual {
+  position: absolute;
+  inset: 8px 10px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 6px;
+}
+
+.sql-editor-window {
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(10, 15, 25, 0.95), rgba(7, 10, 19, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.sql-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.66);
+}
+
+.sql-editor-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.sql-editor-dot-red {
+  background: rgba(248, 113, 113, 0.9);
+}
+
+.sql-editor-dot-yellow {
+  background: rgba(250, 204, 21, 0.9);
+}
+
+.sql-editor-dot-green {
+  background: rgba(74, 222, 128, 0.9);
+}
+
+.sql-editor-tab {
+  margin-left: 8px;
+  color: rgba(226, 232, 240, 0.82);
+  font-size: 0.63rem;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.sql-editor-code {
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+.sql-editor-code-line {
+  margin: 0 0 3px;
+  color: rgba(203, 213, 225, 0.86);
+  font-size: 0.56rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.sql-editor-keyword {
+  color: rgba(74, 222, 128, 0.94);
+  font-weight: 700;
+}
+
+.sql-editor-results {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(21, 27, 38, 0.92), rgba(14, 18, 27, 0.97));
+  padding: 6px 8px;
+}
+
+.sql-editor-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 0.54rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sql-editor-status {
+  color: rgba(74, 222, 128, 0.88);
+  font-weight: 700;
+}
+
+.sql-editor-row {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 5px;
+  padding: 3px 5px;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.sql-editor-row + .sql-editor-row {
+  margin-top: 3px;
+}
+
+.sql-editor-cell {
+  color: rgba(226, 232, 240, 0.88);
+  font-size: 0.54rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sql-editor-cell-id {
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.db-connection-map {
+  position: absolute;
+  inset: 10px 24px 16px;
+  overflow: hidden;
+  --db-line: rgba(161, 161, 170, 0.48);
+  --db-line-hover: rgba(212, 212, 216, 0.68);
+  --db-border: rgba(113, 113, 122, 0.45);
+  --db-border-hover: rgba(161, 161, 170, 0.62);
+  --db-bg-top: rgba(39, 39, 42, 0.94);
+  --db-bg-bottom: rgba(24, 24, 27, 0.98);
+  --db-bg-hover-top: rgba(63, 63, 70, 0.92);
+  --db-bg-hover-bottom: rgba(24, 24, 27, 0.98);
+}
+
+.db-connection-source-wrap {
+  position: absolute;
+  left: 4%;
+  translate: 0 -50%;
+  z-index: 2;
+}
+
+.db-connection-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--db-border);
+  background: linear-gradient(180deg, var(--db-bg-top), var(--db-bg-bottom));
+  min-width: 212px;
+  padding: 14px 20px;
+  color: rgb(241 245 249);
+  box-shadow: 0 14px 30px rgba(3, 7, 18, 0.5);
+  transition: box-shadow 220ms ease;
+}
+
+.db-connection-source-logo {
+  height: 24px;
+  width: 24px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(161, 161, 170, 0.5);
+}
+
+.db-connection-source-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.db-connection-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.db-connection-path {
+  fill: none;
+  stroke: var(--db-line);
+  stroke-dasharray: 5 4;
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 220ms ease, stroke-width 220ms ease, filter 220ms ease;
+}
+
+.db-connection-path-beam {
+  display: none;
+}
+
+.db-connection-targets {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.db-connection-row {
+  position: relative;
+  position: absolute;
+  right: 2%;
+  translate: 0 -50%;
+}
+
+.db-connection-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 184px;
+  border-radius: 999px;
+  border: 1px solid var(--db-border);
+  background: linear-gradient(180deg, var(--db-bg-top), var(--db-bg-bottom));
+  padding: 9px 16px 9px 10px;
+  color: rgb(226 232 240);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.015em;
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.34);
+  transition:
+    transform 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 220ms ease;
+}
+
+.db-connection-target-logo {
+  height: 18px;
+  width: 18px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+@media (max-width: 860px) {
+  .supabase-card-visual-database {
+    height: 52%;
+  }
+
+  .db-connection-map {
+    inset: 8px 12px 10px;
+  }
+
+  .db-connection-source-wrap {
+    left: 2%;
+  }
+
+  .db-connection-target {
+    min-width: 152px;
+    font-size: 0.78rem;
+    padding-right: 10px;
+  }
+}
+
+.supabase-visual-grid {
+  position: absolute;
+  inset: 12% 8%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background:
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.supabase-visual-orbit {
+  position: absolute;
+  inset: 15% 20%;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.supabase-visual-orbit-2 {
+  inset: 24% 30%;
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.supabase-visual-core {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  height: 12px;
+  width: 12px;
+  translate: -50% -50%;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.8);
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.45);
+}
+
+.supabase-visual-terminal-line {
+  position: absolute;
+  left: 10%;
+  right: 36%;
+  height: 8px;
+  top: 28%;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.34);
+}
+
+.supabase-visual-terminal-line-2 {
+  top: 44%;
+  right: 18%;
+}
+
+.supabase-visual-terminal-line-3 {
+  top: 60%;
+  right: 46%;
+  background: rgba(16, 185, 129, 0.45);
+}
+
+.supabase-visual-cube {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  width: 74px;
+  height: 74px;
+  translate: -50% -50%;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  transform: rotate(45deg);
+}
+
+.supabase-visual-branch {
+  position: absolute;
+  inset: 20% 14%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.8) 0 3px, transparent 4px) 0 30% / 100% 100% no-repeat,
+    linear-gradient(rgba(148, 163, 184, 0.48), rgba(148, 163, 184, 0.48)) 18% 30% / 64% 1px no-repeat,
+    linear-gradient(rgba(148, 163, 184, 0.48), rgba(148, 163, 184, 0.48)) 48% 30% / 1px 56% no-repeat,
+    linear-gradient(rgba(148, 163, 184, 0.48), rgba(148, 163, 184, 0.48)) 48% 62% / 26% 1px no-repeat;
+}
+
+.supabase-visual-shield {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 86px;
+  height: 98px;
+  translate: -50% -50%;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  clip-path: polygon(50% 0%, 86% 12%, 86% 56%, 50% 100%, 14% 56%, 14% 12%);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.24), rgba(16, 185, 129, 0.04));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-pixel-cloud {
+    filter: none;
+  }
+}
+
+.dark img[src*="spacetimedb"] {
+  filter: invert(1) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   VS Code Shell — EXACT copy from vscode repo source
+   ══════════════════════════════════════════════════════════════ */
+
+/* Base */
+.monaco-workbench {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #1E1E1E;
+}
+
+/* Part (from part.css) */
+.monaco-workbench .part {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.monaco-workbench .part > .title,
+.monaco-workbench .part > .header-or-footer {
+  height: 35px;
+  display: flex;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.monaco-workbench .part > .title {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.monaco-workbench .part > .title > .title-label {
+  line-height: 35px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 12px;
+}
+.monaco-workbench .part > .title > .title-label h2 {
+  font-size: 11px;
+  cursor: default;
+  font-weight: normal;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.monaco-workbench .part > .title > .title-actions {
+  height: 35px;
+  flex: 1;
+  padding-left: 5px;
+}
+.monaco-workbench .part > .title > .title-actions .action-label {
+  display: block;
+  background-size: 16px;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+.monaco-workbench .part > .content {
+  font-size: 13px;
+}
+.monaco-workbench .part > .title > .title-actions .monaco-action-bar .actions-container {
+  display: flex;
+  justify-content: flex-end;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  align-items: center;
+  height: 35px;
+}
+.monaco-workbench .part > .title > .title-actions .monaco-action-bar .action-item {
+  height: 35px;
+  display: flex;
+  align-items: center;
+}
+.monaco-workbench .part > .title > .title-actions .monaco-action-bar .action-item .action-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  height: 100%;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* nosidebar / nopanel */
+.monaco-workbench.nosidebar > .part.sidebar { display: none !important; visibility: hidden !important; }
+.monaco-workbench.nopanel .part.panel { display: none !important; }
+
+/* ── Title bar (from titlebarpart.css) ─────────────── */
+.monaco-workbench .part.titlebar {
+  display: flex;
+  flex-direction: row;
+  box-shadow: 0 2px 8px rgba(0,0,0,.36);
+  z-index: 10;
+}
+.monaco-workbench .part.titlebar>.titlebar-container {
+  box-sizing: border-box;
+  overflow: hidden;
+  flex-shrink: 1;
+  flex-grow: 1;
+  align-items: center;
+  justify-content: left;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  height: 100%;
+  width: 100%;
+  line-height: 22px;
+}
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-drag-region {
+  top: 0;
+  left: 0;
+  display: block;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-left,
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-center,
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-right {
+  display: flex;
+  height: 100%;
+  align-items: center;
+}
+.monaco-workbench .part.titlebar>.titlebar-container.has-center>.titlebar-left {
+  order: 0;
+  width: 20%;
+  flex-grow: 2;
+  justify-content: flex-start;
+}
+.monaco-workbench .part.titlebar>.titlebar-container.has-center>.titlebar-center {
+  order: 1;
+  width: 60%;
+  max-width: fit-content;
+  min-width: 0;
+  margin: 0 10px;
+  justify-content: center;
+}
+.monaco-workbench .part.titlebar>.titlebar-container.has-center>.titlebar-right {
+  order: 2;
+  width: 20%;
+  min-width: min-content;
+  flex-grow: 2;
+  justify-content: flex-end;
+}
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-left>.window-appicon {
+  width: 35px;
+  height: 100%;
+  position: relative;
+  z-index: 2500;
+  flex-shrink: 0;
+  order: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.monaco-workbench .part.titlebar>.titlebar-container>.titlebar-center>.window-title {
+  flex: 0 1 auto;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin-left: auto;
+  margin-right: auto;
+  cursor: default;
+}
+
+
+/* ── Activity bar (from activitybarpart.css + activityaction.css) ── */
+.monaco-workbench .part.activitybar {
+  width: 48px;
+  height: 100%;
+  flex-shrink: 0;
+  background-color: #333333;
+}
+.monaco-workbench .activitybar > .content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.monaco-workbench .activitybar > .content > .composite-bar {
+  margin-bottom: auto;
+}
+.monaco-workbench .activitybar > .content .monaco-action-bar {
+  text-align: left;
+  background-color: inherit;
+}
+.monaco-workbench .activitybar .monaco-action-bar .actions-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.monaco-workbench .activitybar .action-item {
+  display: block;
+  position: relative;
+  width: 48px;
+  height: 48px;
+}
+.monaco-workbench .activitybar .action-item .action-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  overflow: hidden;
+  width: 48px;
+  height: 48px;
+  margin-right: 0;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #858585;
+}
+.monaco-workbench .activitybar .action-item .action-label:hover {
+  color: #FFFFFF !important;
+}
+.monaco-workbench .activitybar .action-item.checked .action-label {
+  color: #FFFFFF;
+}
+.monaco-workbench .activitybar .action-item .active-item-indicator {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin: auto;
+  left: 0;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+.monaco-workbench .activitybar .action-item.checked .active-item-indicator {
+  background-color: rgba(255,255,255,0.08);
+}
+.monaco-workbench .activitybar.left .action-item .active-item-indicator:before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  height: 100%;
+  left: 0;
+  border-left: 2px solid;
+}
+.monaco-workbench .activitybar .action-item.checked .active-item-indicator:before {
+  border-color: #FFFFFF;
+}
+
+/* ── Side bar (from sidebarpart.css) ──────────────────── */
+.monaco-workbench .part.sidebar {
+  background-color: #252526;
+  color: #CCCCCC;
+  border-right: 1px solid #333333;
+  display: flex;
+  flex-direction: column;
+}
+.monaco-workbench .part.sidebar > .title {
+  background-color: #2D2D2D;
+  border-bottom: 1px solid #333333;
+  height: 35px;
+  display: flex;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.monaco-workbench .part.sidebar > .title > .title-label {
+  line-height: 35px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.monaco-workbench .part.sidebar > .title > .title-label h2 {
+  font-size: 11px;
+  cursor: default;
+  font-weight: normal;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  color: #BBBBBB;
+}
+.monaco-workbench .part.sidebar > .title > .title-actions {
+  height: 35px;
+  padding-left: 5px;
+  display: flex;
+  align-items: center;
+}
+.monaco-workbench .part.sidebar > .title > .title-actions .action-item {
+  margin-right: 4px;
+}
+.monaco-workbench .part.sidebar > .content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  font-size: 13px;
+}
+.monaco-workbench .sidebar-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #CCCCCC;
+  opacity: 0;
+}
+.monaco-workbench .part.sidebar:hover .sidebar-close-btn { opacity: 0.5; }
+.monaco-workbench .sidebar-close-btn:hover { opacity: 1; background-color: rgba(204,204,204,0.1); }
+.monaco-workbench .sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -2px;
+  width: 4px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.monaco-workbench .sidebar-resize-handle:hover {
+  background-color: #007ACC;
+}
+
+/* ── Panel (bottom panel, custom, matches VS Code style) ── */
+.monaco-workbench .part.panel.bottom {
+  background-color: #1E1E1E;
+  border-top: 1px solid #333333;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.monaco-workbench .part.panel.bottom .composite.title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 35px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.monaco-workbench .part.panel.bottom .composite.title .title-actions {
+  height: 35px;
+  display: flex;
+  align-items: center;
+}
+.monaco-workbench .part.panel.bottom .composite.title .monaco-action-bar .actions-container {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  align-items: center;
+  height: 35px;
+}
+.monaco-workbench .part.panel.bottom .composite.title .action-item {
+  height: 35px;
+  display: flex;
+  align-items: center;
+}
+.monaco-workbench .part.panel.bottom .composite.title .action-item .action-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 35px;
+  padding: 0 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: rgba(231,231,231,0.6);
+  border-top: 2px solid transparent;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.monaco-workbench .part.panel.bottom .composite.title .action-item .action-label:hover {
+  color: #E7E7E7;
+}
+.monaco-workbench .part.panel.bottom .composite.title .action-item.checked .action-label {
+  color: #E7E7E7;
+  border-top-color: #007ACC;
+}
+.monaco-workbench .part.panel.bottom > .content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  font-size: 13px;
+  padding: 4px;
+}
+.monaco-workbench .part.panel.bottom > .content .placeholder-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  opacity: 0.4;
+}
+
+/* ── Panel resize handle ───────────────────────────── */
+.monaco-workbench .panel-resize-handle {
+  flex-shrink: 0;
+  height: 4px;
+  cursor: row-resize;
+  position: relative;
+}
+.monaco-workbench .panel-resize-handle:hover {
+  background-color: #007ACC;
+}
+
+/* ── Status bar (from statusbarpart.css) ────────────── */
+.monaco-workbench .part.statusbar {
+  box-sizing: border-box;
+  cursor: default;
+  width: 100%;
+  height: 22px;
+  font-size: 12px;
+  display: flex;
+  overflow: hidden;
+  background-color: #007ACC;
+  color: #FFFFFF;
+  flex-shrink: 0;
+}
+.monaco-workbench .part.statusbar > .left-items,
+.monaco-workbench .part.statusbar > .right-items {
+  display: flex;
+}
+.monaco-workbench .part.statusbar > .right-items {
+  flex-wrap: wrap;
+  flex-direction: row-reverse;
+}
+.monaco-workbench .part.statusbar > .left-items {
+  flex-grow: 1;
+}
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item {
+  display: inline-block;
+  line-height: 22px;
+  height: 100%;
+  vertical-align: top;
+  max-width: 40vw;
+}
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item > .statusbar-item-label {
+  cursor: pointer;
+  display: flex;
+  height: 100%;
+  margin-right: 3px;
+  margin-left: 3px;
+  padding: 0 5px;
+  white-space: pre;
+  align-items: center;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  outline-width: 0;
+}
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item > .statusbar-item-label:hover {
+  background-color: rgba(255,255,255,0.12);
+}
+
+/* ── Editor area ────────────────────────────────────── */
+.monaco-workbench .part.editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #1E1E1E;
+  color: #CCCCCC;
+}
+
+/* ── Editor tabs (matches VS Code tab colors) ──────── */
+.monaco-workbench .editor-tab-bar {
+  display: flex;
+  height: 35px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background-color: #252526;
+}
+.monaco-workbench .editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 35px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  min-width: 80px;
+  background-color: #2D2D2D;
+  color: #969696;
+  border-right: 1px solid #252526;
+  border-top: 2px solid transparent;
+  box-sizing: border-box;
+}
+.monaco-workbench .editor-tab:hover {
+  background-color: #2A2A2A;
+}
+.monaco-workbench .editor-tab.active {
+  background-color: #1E1E1E;
+  color: #CCCCCC;
+  border-top-color: #007ACC;
+}
+.monaco-workbench .editor-tab .tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+.monaco-workbench .editor-tab:hover .tab-close,
+.monaco-workbench .editor-tab.active .tab-close {
+  opacity: 0.5;
+}
+.monaco-workbench .editor-tab .tab-close:hover {
+  opacity: 1;
+  background-color: rgba(204,204,204,0.15);
+}
+
+/* Translucent frosted-glass effect — blur on root, tint on sidebar */
+[data-translucent] {
+  backdrop-filter: var(--sidebar-backdrop, none);
+  -webkit-backdrop-filter: var(--sidebar-backdrop, none);
+}
+
