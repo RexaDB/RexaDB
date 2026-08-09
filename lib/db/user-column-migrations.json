@@ -1,0 +1,11 @@
+[
+  { "column": "email", "statement": "ALTER TABLE users ADD COLUMN email TEXT" },
+  { "column": "name", "statement": "ALTER TABLE users ADD COLUMN name TEXT" },
+  { "column": "created_at", "statement": "ALTER TABLE users ADD COLUMN created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')*1000)" },
+  { "column": "is_local", "statement": "ALTER TABLE users ADD COLUMN is_local INTEGER NOT NULL DEFAULT 1" },
+  { "column": "supabase_id", "statement": "ALTER TABLE users ADD COLUMN supabase_id TEXT" },
+  { "column": "plan_type", "statement": "ALTER TABLE users ADD COLUMN plan_type TEXT NOT NULL DEFAULT 'free'" },
+  { "column": "plan_status", "statement": "ALTER TABLE users ADD COLUMN plan_status TEXT NOT NULL DEFAULT 'none'" },
+  { "column": "plan_synced_at", "statement": "ALTER TABLE users ADD COLUMN plan_synced_at INTEGER" },
+  { "column": "plan_period_end", "statement": "ALTER TABLE users ADD COLUMN plan_period_end INTEGER" }
+]

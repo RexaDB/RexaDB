@@ -1,0 +1,84 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "dynamicallyLoaded": [
+    "lib/db/federated/**",
+    "lib/db/postgres-compat/**",
+    "lib/db/sql-engine/**"
+  ],
+  "entry": [
+    "scripts/**",
+    "tests/**",
+    "tools/**"
+  ],
+  "ignorePatterns": ["main.js"],
+  "ignoreExports": [
+    {
+      "file": "components/studio/AuthIcon.tsx",
+      "exports": ["AuthIcon"]
+    },
+    {
+      "file": "lib/icon-theme/lucide-react.tsx",
+      "exports": ["AuthIcon", "TableEditorIcon"]
+    },
+    {
+      "file": "components/studio/TableEditorIcon.tsx",
+      "exports": ["TableEditorIcon"]
+    },
+    {
+      "file": "lib/db/actions-constants.ts",
+      "exports": ["SqlEditorRunQueryResult"]
+    },
+    {
+      "file": "lib/db/actions-core.ts",
+      "exports": ["SqlEditorRunQueryResult"]
+    },
+    {
+      "file": "lib/api/actions-client.ts",
+      "exports": ["fetchRedisKeys", "fetchTableForeignKeys", "fetchTableStructure", "getGlobalAppThemeSettings", "getGlobalEditorThemeSettings", "saveGlobalAppThemeSettings", "saveGlobalEditorThemeSettings"]
+    },
+    {
+      "file": "lib/db/schema-introspection-actions.ts",
+      "exports": ["fetchRedisKeys"]
+    },
+    {
+      "file": "lib/db/table-row-ops.ts",
+      "exports": ["fetchTableForeignKeys", "fetchTableStructure"]
+    },
+    {
+      "file": "lib/db/app-admin-actions.ts",
+      "exports": ["getGlobalAppThemeSettings", "getGlobalEditorThemeSettings", "saveGlobalAppThemeSettings", "saveGlobalEditorThemeSettings"]
+    }
+  ],
+  "ignoreDependencies": [
+    "@radix-ui/react-accordion",
+    "@radix-ui/react-alert-dialog",
+    "@radix-ui/react-aspect-ratio",
+    "@radix-ui/react-avatar",
+    "@radix-ui/react-checkbox",
+    "@radix-ui/react-collapsible",
+    "@radix-ui/react-context-menu",
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-hover-card",
+    "@radix-ui/react-label",
+    "@radix-ui/react-menubar",
+    "@radix-ui/react-navigation-menu",
+    "@radix-ui/react-popover",
+    "@radix-ui/react-progress",
+    "@radix-ui/react-radio-group",
+    "@radix-ui/react-scroll-area",
+    "@radix-ui/react-select",
+    "@radix-ui/react-separator",
+    "@radix-ui/react-slider",
+    "@radix-ui/react-switch",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-toast",
+    "@radix-ui/react-toggle",
+    "@radix-ui/react-toggle-group",
+    "@radix-ui/react-tooltip",
+    "@radix-ui/react-slot",
+
+    "pg",
+    "zod"
+  ]
+}

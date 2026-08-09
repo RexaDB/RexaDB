@@ -1,0 +1,20 @@
+{
+  "name": "rexadb-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run index.ts",
+    "build:binary": "bun run ../scripts/build-server.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "nearley": "^2.20.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^20"
+  }
+}
