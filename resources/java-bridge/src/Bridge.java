@@ -290,9 +290,19 @@ public class Bridge {
   }
 
   static String errorJson(Exception e) {
-    String msg = e.getMessage();
-    if (msg == null) msg = e.getClass().getName();
-    return "{\"error\":\"" + escape(msg) + "\"}";
+    StringBuilder sb = new StringBuilder();
+    Throwable cur = e;
+    boolean first = true;
+    while (cur != null) {
+      if (!first) sb.append(" (caused by: ");
+      String msg = cur.getMessage();
+      if (msg == null || msg.isEmpty()) msg = cur.getClass().getSimpleName();
+      sb.append(first ? msg : cur.getClass().getSimpleName() + ": " + msg);
+      if (!first) sb.append(")");
+      first = false;
+      cur = cur.getCause();
+    }
+    return "{\"error\":\"" + escape(sb.toString()) + "\"}";
   }
 
   static String escape(String s) {

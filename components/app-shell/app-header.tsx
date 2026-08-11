@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { NavUser } from "@/components/navigation/nav-user";
-import { ProviderLogo } from "@/components/shared/provider-logo";
+import { ProviderLogo, SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
 import type { AppTab, AppHeaderTabsProps } from "@/components/app-shell/app-shared";
 import { NavigationControls } from "@/components/navigation/navigation-controls";
 import { WindowControls } from "@/components/shared/window-controls";
@@ -46,6 +46,9 @@ function TabIcon({ tab }: { tab: AppTab }) {
 				className="size-4 rounded-[3px] object-contain"
 			/>
 		);
+	}
+	if (tab.kind === "spacetimedb") {
+		return <SpacetimeDbBrandImage className="size-4" />;
 	}
 	return <DatabaseIcon className="size-4" />;
 }

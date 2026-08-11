@@ -21,6 +21,7 @@ import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import { supabase } from "@/lib/supabase/client";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
+import { SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
 import { WindowControls } from "@/components/shared/window-controls";
 import { HeaderIconButton } from "@/components/shared/header-icon-button";
@@ -42,6 +43,8 @@ export function ConnectionsHeader({
   onSettingsClick,
   supabaseActive,
   onSupabaseClick,
+  spacetimedbActive,
+  onSpacetimedbClick,
   avatarDropdownChildren,
 }: {
   displayName?: string;
@@ -58,6 +61,8 @@ export function ConnectionsHeader({
   onSettingsClick?: () => void;
   supabaseActive?: boolean;
   onSupabaseClick?: () => void;
+  spacetimedbActive?: boolean;
+  onSpacetimedbClick?: () => void;
   avatarDropdownChildren?: ReactNode;
 }) {
   const { sleekLayout, hideWindowActions } = useGlobalStudioSettings();
@@ -210,6 +215,24 @@ export function ConnectionsHeader({
               "rounded-[3px] object-contain",
               sleekLayout ? "w-3.5 h-3.5" : "w-4 h-4",
               supabaseActive ? "" : "opacity-60",
+            )}
+          />
+        </button>
+        <button
+          onClick={onSpacetimedbClick ?? (() => {})}
+          title={spacetimedbActive ? "Close SpacetimeDB" : "SpacetimeDB accounts"}
+          className={cn(
+            "flex items-center justify-center transition-colors no-drag",
+            !isMac
+              ? "h-8 w-8 hover:bg-studio-border/50"
+              : "border border-studio-border rounded-lg bg-background/15 hover:bg-background/25",
+            !isMac ? "rounded" : sleekLayout ? "h-8 w-8" : "h-9 w-9",
+          )}
+        >
+          <SpacetimeDbBrandImage
+            className={cn(
+              sleekLayout ? "w-3.5 h-3.5" : "w-4 h-4",
+              spacetimedbActive ? "" : "opacity-60",
             )}
           />
         </button>

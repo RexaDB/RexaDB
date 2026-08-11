@@ -30,7 +30,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Connection } from "@/lib/db/schema";
-import { ProviderLogo } from "@/components/shared/provider-logo";
+import { ProviderLogo, SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { NavigationControls } from "@/components/navigation/navigation-controls";
@@ -201,6 +201,16 @@ export function AppSidebar({
                   className="size-4 rounded-[3px] object-contain"
                 />
                 <span>Supabase</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem className="mt-1">
+              <SidebarMenuButton
+                className={FLAT_ITEM}
+                isActive={activePath === "spacetimedb"}
+                onClick={() => onNavigate?.("spacetimedb")}
+              >
+                <SpacetimeDbBrandImage className="size-4" />
+                <span>SpacetimeDB</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

@@ -171,6 +171,20 @@ import {
   registerActiveSupabaseProjects,
 } from "@/lib/supabase-mgmt/register";
 import { listProjects } from "@/lib/supabase-mgmt/client";
+import { SpacetimeDbLoginDialog } from "@/components/spacetimedb/spacetimedb-login-dialog";
+import { SpacetimeDbAccountsScreen } from "@/components/spacetimedb/spacetimedb-account-screen";
+import {
+  getSpacetimeDbMgmtAccounts,
+  removeSpacetimeDbMgmtAccount,
+  type SpacetimeDbMgmtAccount,
+} from "@/lib/spacetimedb-mgmt/token-store";
+import {
+  canAddSpacetimeDbAccount,
+} from "@/lib/spacetimedb-mgmt/limits";
+import {
+  registerSpacetimeDbDatabases,
+} from "@/lib/spacetimedb-mgmt/register";
+import { listSpacetimeDbDatabases } from "@/lib/spacetimedb-mgmt/client";
 
 // Removed Pattern import
 
@@ -191,7 +205,9 @@ type ConnectionScreen =
   | "compare"
   | "settings"
   | "jdbc-picker"
-  | "supabase";
+  | "supabase"
+  | "spacetimedb"
+  | "spacetimedb-account";
 
 type PlanCode = "free" | "pro" | "team" | "enterprise" | "otl";
 type PlanEntitlements = {
@@ -217,6 +233,7 @@ export function ConnectionManager({
   newConnectionTrigger = 0,
   initialScreen = "list",
   onOpenSupabaseAccounts,
+  onOpenSpacetimedbAccounts,
 }: {
   hideHeader?: boolean;
   isAnalyticsEnabled?: boolean;
@@ -226,9 +243,11 @@ export function ConnectionManager({
   newConnectionTrigger?: number;
   initialScreen?: ConnectionScreen;
   onOpenSupabaseAccounts?: () => void;
+  onOpenSpacetimedbAccounts?: () => void;
 }) {
   useGlobalAppFontFamily();
   const isSupabaseMode = initialScreen === "supabase";
+  const isSpacetimeDbMode = initialScreen === "spacetimedb-account";
   const appTheme = useGlobalAppTheme(false);
   const {
     sleekLayout,
@@ -926,6 +945,21 @@ export function ConnectionManager({
       typeof window === "undefined"
         ? null
         : (getMgmtAccounts()[0]?.id ?? null),
+  );
+  const [spacetimedbLoginOpen, setSpacetimedbLoginOpen] = useState(false);
+  const [spacetimedbAccounts, setSpacetimedbAccounts] = useState<
+    SpacetimeDbMgmtAccount[]
+  >(
+    () =>
+      typeof window === "undefined" ? [] : getSpacetimeDbMgmtAccounts(),
+  );
+  const [activeSpacetimeDbAccountId, setActiveSpacetimeDbAccountId] = useState<
+    string | null
+  >(
+    () =>
+      typeof window === "undefined"
+        ? null
+        : (getSpacetimeDbMgmtAccounts()[0]?.id ?? null),
   );
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -2121,6 +2155,70 @@ export function ConnectionManager({
     return res;
   };
 
+  const handleAddSpacetimeDbAccount = useCallback(() => {
+    const check = canAddSpacetimeDbAccount(
+      entitlement.premiumActive,
+      spacetimedbAccounts.length,
+    );
+    if (!check.allowed) {
+      toast.error(
+        "Free plan allows 1 linked SpacetimeDB account. Upgrade to Pro to link more.",
+      );
+      openExternalUrl(REXADB_UPGRADE_URL);
+      return;
+    }
+    setSpacetimedbLoginOpen(true);
+  }, [entitlement.premiumActive, spacetimedbAccounts.length]);
+
+  const handleRemoveSpacetimeDbAccount = useCallback((id: string) => {
+    removeSpacetimeDbMgmtAccount(id);
+    const next = getSpacetimeDbMgmtAccounts();
+    setSpacetimedbAccounts(next);
+    setActiveSpacetimeDbAccountId((cur) => {
+      if (cur !== id) return cur;
+      return next[0]?.id ?? null;
+    });
+    if (next.length === 0) {
+      if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
+      else setConnectionScreen("spacetimedb-account");
+    }
+  }, [onOpenSpacetimedbAccounts]);
+
+  const handleSpacetimeDbConnectDatabase = async (
+    payload: {
+      name: string;
+      connectionString: string;
+      connectionType: string;
+    },
+    opts?: { silent?: boolean },
+  ) => {
+    const res = await createConnection({
+      name: payload.name,
+      connectionString: payload.connectionString,
+      connectionType: payload.connectionType,
+    });
+    if (res.success) {
+      if (opts?.silent) {
+        if (supabaseImportReloadTimerRef.current) {
+          window.clearTimeout(supabaseImportReloadTimerRef.current);
+        }
+        supabaseImportReloadTimerRef.current = window.setTimeout(() => {
+          supabaseImportReloadTimerRef.current = null;
+          void loadConnections();
+        }, 300);
+      } else {
+        await loadConnections();
+        if (!isSpacetimeDbMode) {
+          setConnectionScreen("list");
+        }
+        toast.success(`Connected to ${payload.name}`);
+      }
+    } else if (!opts?.silent) {
+      toast.error((res as any).error ?? "Failed to create connection.");
+    }
+    return res;
+  };
+
   function terminalLog(
     type: "log" | "group" | "groupEnd" | "warn" | "error",
     ...args: any[]
@@ -2553,6 +2651,24 @@ export function ConnectionManager({
       (conn as any).connectionType,
     );
     if (provider !== "federated") {
+      if (provider === "jdbc") {
+        try {
+          const parsed = new URL(conn.connectionString);
+          if (!parsed.searchParams.get("jarPaths")) {
+            const driverClass = parsed.searchParams.get("driverClass") || "";
+            if (driverClass) {
+              const installed = await loadInstalledDrivers();
+              const match = installed.find((i) => i.driverClass === driverClass);
+              if (match && match.jarPaths.length > 0) {
+                parsed.searchParams.set("jarPaths", match.jarPaths.join(","));
+                const healed = parsed.toString();
+                conn.connectionString = healed;
+                await updateConnection(conn.id, { connectionString: healed }).catch(() => {});
+              }
+            }
+          }
+        } catch {}
+      }
       try {
         const res = await testConnection({
           connectionString: conn.connectionString,
@@ -3308,6 +3424,12 @@ export function ConnectionManager({
             onSupabaseClick={() =>
               setConnectionScreen(
                 connectionScreen === "supabase" ? "list" : "supabase",
+              )
+            }
+            spacetimedbActive={connectionScreen === "spacetimedb-account"}
+            onSpacetimedbClick={() =>
+              setConnectionScreen(
+                connectionScreen === "spacetimedb-account" ? "list" : "spacetimedb-account",
               )
             }
             avatarDropdownChildren={
@@ -4617,6 +4739,27 @@ export function ConnectionManager({
                 />
               </div>
             </div>
+          ) : connectionScreen === "spacetimedb-account" ? (
+            <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
+              <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                <SpacetimeDbAccountsScreen
+                  accounts={spacetimedbAccounts}
+                  activeAccountId={activeSpacetimeDbAccountId}
+                  onSwitchAccount={setActiveSpacetimeDbAccountId}
+                  onRemoveAccount={handleRemoveSpacetimeDbAccount}
+                  onAddAccount={handleAddSpacetimeDbAccount}
+                  canAddAccount={canAddSpacetimeDbAccount(
+                    entitlement.premiumActive,
+                    spacetimedbAccounts.length,
+                  ).allowed}
+                  existingConnectionStrings={connections.map(
+                    (c) => c.connectionString,
+                  )}
+                  maxConnections={plan.maxConnections}
+                  onConnectDatabase={handleSpacetimeDbConnectDatabase}
+                />
+              </div>
+            </div>
           ) : connectionScreen === "new-select" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="flex min-h-full w-full flex-col items-center px-6 py-6">
@@ -4706,6 +4849,39 @@ export function ConnectionManager({
                                 "Supabase account"
                               }`
                             : `${supabaseAccounts.length} accounts linked`}
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (spacetimedbAccounts.length > 0) {
+                        if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
+                        else setConnectionScreen("spacetimedb-account");
+                      } else {
+                        handleAddSpacetimeDbAccount();
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                  >
+                    <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                      <SpacetimeDbLogo className="h-[26px] w-[26px] text-foreground/80" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">
+                        SpacetimeDB Account
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {spacetimedbAccounts.length === 0
+                          ? "Log in to browse and connect your databases"
+                          : spacetimedbAccounts.length === 1
+                            ? `Logged in as ${
+                                spacetimedbAccounts[0]?.identity
+                                  ? `${spacetimedbAccounts[0].identity.slice(0, 8)}…`
+                                  : "SpacetimeDB account"
+                              }`
+                            : `${spacetimedbAccounts.length} accounts linked`}
                       </div>
                     </div>
                   </button>
@@ -5712,6 +5888,54 @@ export function ConnectionManager({
               toast.error("Failed to import projects.");
             } else {
               toast.info("No active projects to import.");
+            }
+          });
+        }}
+      />
+
+      <SpacetimeDbLoginDialog
+        open={spacetimedbLoginOpen}
+        onOpenChange={setSpacetimedbLoginOpen}
+        onLoginComplete={(token, account) => {
+          setSpacetimedbAccounts((prev) => {
+            const exists = prev.some((a) => a.id === account.id);
+            return exists ? prev : [...prev, account];
+          });
+          setActiveSpacetimeDbAccountId(account.id);
+          if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
+          else setConnectionScreen("spacetimedb-account");
+          void registerSpacetimeDbDatabases(
+            token,
+            account.host || "",
+            connectionsRef.current.map((c) => c.connectionString),
+            plan.maxConnections,
+            { listDatabases: listSpacetimeDbDatabases, createConnection },
+          ).then((result) => {
+            const total =
+              result.imported +
+              result.alreadyRegistered +
+              result.skippedLimit +
+              result.skippedNameless;
+            if (result.imported > 0) {
+              void loadConnections();
+              queueCloudPush();
+              if (result.skippedLimit > 0) {
+                toast.warning(
+                  `Imported ${result.imported} of ${total} databases — upgrade for more connections`,
+                );
+              } else {
+                toast.success(
+                  `Imported ${result.imported} of ${total} databases`,
+                );
+              }
+            } else if (result.skippedLimit > 0) {
+              toast.warning("Upgrade to Pro for more connections");
+            } else if (result.alreadyRegistered > 0) {
+              toast.info("All databases are already connected.");
+            } else if (result.failed > 0) {
+              toast.error("Failed to import databases.");
+            } else {
+              toast.info("No databases to import.");
             }
           });
         }}

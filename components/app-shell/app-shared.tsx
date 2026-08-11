@@ -18,7 +18,7 @@ export type SidebarNavGroup = {
 	items: SidebarNavItem[];
 };
 
-export type AppTabKind = "connections" | "analytics" | "settings" | "supabase";
+export type AppTabKind = "connections" | "analytics" | "settings" | "supabase" | "spacetimedb";
 
 export type AppHeaderTabsProps = {
 	/** Signed-in user displayed in the account menu. */

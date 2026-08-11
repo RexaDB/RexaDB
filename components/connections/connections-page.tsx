@@ -26,6 +26,12 @@ const SUPABASE_TAB: AppTab = {
   title: "Supabase",
 };
 
+const SPACETIMEDB_TAB: AppTab = {
+  id: "spacetimedb",
+  kind: "spacetimedb",
+  title: "SpacetimeDB",
+};
+
 export function ConnectionsPage() {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
@@ -198,6 +204,7 @@ export function ConnectionsPage() {
     (path: string) => {
       if (path === "connections") openTab(CONNECTIONS_TAB);
       else if (path === "supabase") openTab(SUPABASE_TAB);
+      else if (path === "spacetimedb") openTab(SPACETIMEDB_TAB);
       else if (path === "settings")
         openTab({ id: "settings", kind: "settings", title: "Settings" });
     },
@@ -281,6 +288,7 @@ export function ConnectionsPage() {
             onAnalyticsToggle={() => {}}
             onViewAnalytics={(id) => handleSelectConnection(id)}
             onOpenSupabaseAccounts={() => openTab(SUPABASE_TAB)}
+            onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
           />
         </div>
       )}
@@ -288,6 +296,16 @@ export function ConnectionsPage() {
       {section === "supabase" && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ConnectionManager hideHeader initialScreen="supabase" />
+        </div>
+      )}
+
+      {section === "spacetimedb" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ConnectionManager
+            hideHeader
+            initialScreen="spacetimedb-account"
+            onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
+          />
         </div>
       )}
 

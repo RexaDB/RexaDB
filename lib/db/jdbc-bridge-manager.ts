@@ -395,7 +395,56 @@ function redactJdbcUrl(url: string): string {
   }
 }
 
+async function resolveDriverJars(config: JdbcConfig): Promise<JdbcConfig> {
+  if (config.jarPaths && config.jarPaths.length > 0) return config;
+  const driversDir =
+    typeof process !== "undefined" ? process.env.REXADB_JDBC_DRIVERS_DIR : undefined;
+  if (!driversDir || !fs.existsSync(driversDir)) {
+    log("resolveDriverJars: no drivers dir, leaving jarPaths empty");
+    return config;
+  }
+  try {
+    const candidates: string[] = [];
+    const entries = fs.readdirSync(driversDir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const subDir = path.join(driversDir, e.name);
+      const manifestPath = path.join(subDir, "manifest.json");
+      if (fs.existsSync(manifestPath)) {
+        try {
+          const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+          if (m.driver_class === config.driverClass) {
+            const paths = Array.isArray(m.jar_paths) ? m.jar_paths : [];
+            for (const p of paths) {
+              if (typeof p === "string" && fs.existsSync(p)) candidates.push(p);
+            }
+          }
+        } catch {}
+      }
+      if (candidates.length > 0) break;
+    }
+    if (candidates.length === 0) {
+      const walk = (dir: string) => {
+        for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, f.name);
+          if (f.isDirectory()) walk(p);
+          else if (f.name.endsWith(".jar")) candidates.push(p);
+        }
+      };
+      walk(driversDir);
+    }
+    if (candidates.length > 0) {
+      log("resolveDriverJars: auto-attached", candidates.length, "jar(s)");
+      return { ...config, jarPaths: candidates };
+    }
+  } catch (e: any) {
+    log("resolveDriverJars error:", e?.message || String(e));
+  }
+  return config;
+}
+
 export async function jdbcTestConnection(config: JdbcConfig): Promise<boolean> {
+  config = await resolveDriverJars(config);
   log("jdbcTestConnection:", {
     jdbcUrl: redactJdbcUrl(config.jdbcUrl),
     driverClass: config.driverClass,
@@ -413,6 +462,7 @@ export async function jdbcTestConnection(config: JdbcConfig): Promise<boolean> {
 }
 
 async function withJdbcSession<T>(config: JdbcConfig, fn: (session: number) => Promise<T>): Promise<T> {
+  config = await resolveDriverJars(config);
   const connectResp = await sendCommand({ action: "connect", config });
   if (!connectResp.ok || !connectResp.session) {
     throw new Error(connectResp.data?.error || "Failed to connect");

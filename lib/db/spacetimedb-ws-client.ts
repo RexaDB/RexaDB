@@ -78,6 +78,7 @@ export class SpacetimeDbWsClient {
     const rawConnId = `gen-${nextConnectionId++}-${Date.now().toString(36)}`;
     wsUrl.searchParams.set("connection_id", rawConnId);
     wsUrl.searchParams.set("compression", "none");
+    if (this.token) wsUrl.searchParams.set("token", this.token);
 
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
