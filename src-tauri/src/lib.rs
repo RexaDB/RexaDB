@@ -307,7 +307,10 @@ struct JdbcDriverEntry {
 }
 
 fn get_jdbc_drivers_dir(app: &tauri::AppHandle) -> PathBuf {
-    get_app_data_dir(app).join("jdbc-drivers")
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| get_app_data_dir(app))
+        .join("jdbc-drivers")
 }
 
 #[tauri::command]
@@ -367,10 +370,17 @@ fn load_jdbc_drivers(app: tauri::AppHandle) -> Result<Vec<JdbcDriverEntry>, Stri
             }
         };
         let mut jar_paths: Vec<String> = vec![];
-        if let Ok(sub_entries) = fs::read_dir(entry.path()) {
-            for sub in sub_entries.flatten() {
-                if sub.path().extension().map(|e| e == "jar").unwrap_or(false) {
-                    jar_paths.push(sub.path().to_string_lossy().to_string());
+        for p in &manifest.jar_paths {
+            if std::path::Path::new(p).is_file() {
+                jar_paths.push(p.clone());
+            }
+        }
+        if jar_paths.is_empty() {
+            if let Ok(sub_entries) = fs::read_dir(entry.path()) {
+                for sub in sub_entries.flatten() {
+                    if sub.path().extension().map(|e| e == "jar").unwrap_or(false) {
+                        jar_paths.push(sub.path().to_string_lossy().to_string());
+                    }
                 }
             }
         }
@@ -419,10 +429,12 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
 
     let data_dir = get_app_data_dir(app);
+    let jdbc_drivers_dir = get_jdbc_drivers_dir(app);
     let resource_dir = app.path().resource_dir().ok();
     let mut sidecar_command = app.shell().sidecar("rexadb-server")
         .expect("failed to create sidecar command")
-        .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref());
+        .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref())
+        .env("REXADB_JDBC_DRIVERS_DIR", jdbc_drivers_dir.to_string_lossy().as_ref());
     if let Some(rd) = &resource_dir {
         sidecar_command = sidecar_command.env("RESOURCEDIR", rd.to_string_lossy().as_ref());
     }

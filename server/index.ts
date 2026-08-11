@@ -155,6 +155,74 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
   }
 });
 
+// SpacetimeDB management/auth API proxy (avoids CORS in the browser).
+// The SpacetimeDB CLI talks to these endpoints directly with reqwest; the
+// webview can't because of CORS. The target host comes from ?host= — the
+// login flow targets spacetimedb.com, while database listing targets the
+// cloud host (customizable like `spacetime server add` in the CLI).
+app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
+  try {
+    const targetPath = (req.params as any)[0];
+    const host = String(req.query.host || "spacetimedb.com");
+    // Cloud/maincloud hosts speak TLS; loopback/self-hosted servers usually
+    // speak plain HTTP. Let an explicit http:// prefix win, then sniff.
+    const explicitProto = /^https?:\/\//i.test(host);
+    const cleanHost = host.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+    if (!cleanHost || /[/?#@]/.test(cleanHost)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid proxy host" });
+    }
+    const isLoopback =
+      /^localhost([:\/]|$)/i.test(cleanHost) ||
+      /^127\.0\.0\.1([:\/]|$)/.test(cleanHost) ||
+      /^\[?::1\]([:\/]|$)/.test(cleanHost);
+    const protocol = explicitProto
+      ? host.match(/^https:\/\//i)
+        ? "https"
+        : "http"
+      : isLoopback
+        ? "http"
+        : "https";
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(req.query)) {
+      if (k === "host") continue;
+      if (typeof v === "string") params.set(k, v);
+    }
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const targetUrl = `${protocol}://${cleanHost}/${targetPath}${qs}`;
+    const headers: Record<string, string> = {
+      "User-Agent": "spacetime-cli",
+    };
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    if (req.headers["user-agent"]) headers["User-Agent"] = req.headers["user-agent"];
+    const hasBody =
+      req.body &&
+      typeof req.body === "object" &&
+      Object.keys(req.body).length > 0;
+    if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
+      headers["Content-Type"] = req.headers["content-type"] || "application/json";
+    }
+    const fetchInit: RequestInit = {
+      method: req.method,
+      headers,
+    };
+    if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
+      fetchInit.body = JSON.stringify(req.body);
+    }
+    const upstream = await fetch(targetUrl, fetchInit);
+    const text = await upstream.text();
+    res.status(upstream.status);
+    try {
+      res.json(JSON.parse(text));
+    } catch {
+      res.send(text);
+    }
+  } catch (e: any) {
+    res.status(502).json({ success: false, error: e.message });
+  }
+});
+
 // Load actions-core at module init — forces Bun to bundle it and all static deps
 const actionsCore = require("../lib/db/actions-core");
 const mod = actionsCore;
