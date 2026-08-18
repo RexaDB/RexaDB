@@ -13,12 +13,13 @@ interface AuthProviderSheetProps {
 }
 
 export function AuthProviderSheet({ open, config, onSave, onOpenChange }: AuthProviderSheetProps) {
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
   const label = config?.name || "Custom Provider";
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" contained={appShellLayout} className="bg-studio-bg border-studio-border text-foreground w-[min(520px,92vw)] p-0 flex flex-col">
+      <SheetContent side="right" contained={shellLayout} className="bg-studio-bg border-studio-border text-foreground w-[min(520px,92vw)] p-0 flex flex-col">
         <SheetHeader className="px-6 py-5 border-b border-studio-border">
           <SheetTitle className="text-sm font-semibold">{label}</SheetTitle>
           <SheetDescription className="text-xs text-muted-foreground">Manage custom providers stored in auth.custom_oauth_providers.</SheetDescription>

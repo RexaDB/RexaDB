@@ -152,7 +152,8 @@ export function RlsPoliciesList({
   const [tableDefView, setTableDefView] = useState<"columns" | "sql">(
     "columns",
   );
-  const { appShellLayout, confirmSheetClose } = useGlobalStudioSettings();
+  const { appShellLayout, confirmSheetClose, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
 
   const editIsDirty = useMemo(() => {
     if (!editingPolicy) return false;
@@ -515,7 +516,7 @@ export function RlsPoliciesList({
       >
         <SheetContent
           side="right"
-          contained={appShellLayout}
+          contained={shellLayout}
           onInteractOutside={editHandleInteractOutside}
           style={{ maxWidth: "min(1020px, 100vw)" }}
           className="bg-background border-border text-foreground flex flex-col p-0 gap-0"

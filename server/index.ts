@@ -9,7 +9,7 @@ import "drizzle-orm";
 import "drizzle-orm/bun-sqlite";
 import "nearley";
 import { extractIndexColumns } from "../lib/db/pg-utils";
-import { createRexaDbAgent } from "../lib/ai/mastra-agent";
+import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 function log(...args: any[]) {
   let i = 0;
   const parts: string[] = [];
@@ -120,9 +120,9 @@ app.get("/health", (_req, res) => {
 });
 
 // Supabase Management API proxy (avoids CORS in the browser)
-app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
+app.all("/api/supabase-mgmt/proxy/*proxyPath", async (req, res) => {
   try {
-    const targetPath = (req.params as any)[0];
+    const targetPath = (req.params as any).proxyPath;
     const qs = Object.keys(req.query).length
       ? "?" + new URLSearchParams(req.query as Record<string, string>).toString()
       : "";
@@ -160,9 +160,9 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
 // webview can't because of CORS. The target host comes from ?host= — the
 // login flow targets spacetimedb.com, while database listing targets the
 // cloud host (customizable like `spacetime server add` in the CLI).
-app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
+app.all("/api/spacetimedb-mgmt/proxy/*proxyPath", async (req, res) => {
   try {
-    const targetPath = (req.params as any)[0];
+    const targetPath = (req.params as any).proxyPath;
     const host = String(req.query.host || "spacetimedb.com");
     // Cloud/maincloud hosts speak TLS; loopback/self-hosted servers usually
     // speak plain HTTP. Let an explicit http:// prefix win, then sniff.
@@ -886,28 +886,6 @@ async function queryAndReturn(wsId: string, sql: string, params?: any[]) {
   return { success: true, data: qr.rows || [] };
 }
 
-function writeStreamEvent(chunkType: string, payload: any, res: any, textDeltaType: string): string {
-  switch (chunkType) {
-    case "text-delta":
-      res.write(`data: ${JSON.stringify({ type: textDeltaType, message: payload.text })}\n\n`);
-      return payload.text;
-    case "tool-call":
-      res.write(`data: ${JSON.stringify({ type: "tool_start", tool: payload.toolName, command: JSON.stringify(payload.args) })}\n\n`);
-      return "";
-    case "tool-result":
-      res.write(`data: ${JSON.stringify({ type: "tool_output", output: JSON.stringify(payload.result) })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: "tool_end", exitCode: payload.isError ? 1 : 0 })}\n\n`);
-      return "";
-    case "error": {
-      const errMsg = payload.error instanceof Error ? payload.error.message : typeof payload.error === "string" ? payload.error : "Unknown error";
-      res.write(`data: ${JSON.stringify({ type: "error", message: errMsg })}\n\n`);
-      return "";
-    }
-    default:
-      return "";
-  }
-}
-
 async function proxyDbOp(apiPath: string, body: any): Promise<any> {
   if (!studioConfig) return { success: false, error: "Studio not configured" };
   const wsId = getWsConnId(body?.connectionString);
@@ -1618,16 +1596,20 @@ async function resolveAiReq(req: any, res: any) {
 }
 
 function handleSseError(error: any, label: string, res: any) {
-  console.error(`[${label}] error:`, error?.message || error);
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  console.error(`[${label}] error:`, message);
+  if (error?.stack && !(error instanceof Error && error.message === error.stack)) {
+    console.error(`[${label}] stack:`, error.stack);
+  }
   if (res.headersSent) {
-    res.write(`data: ${JSON.stringify({ type: "error", message: error?.message || "Internal server error" })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
     res.end();
   } else {
-    res.status(500).json({ error: error?.message || "Internal server error" });
+    res.status(500).json({ error: message });
   }
 }
 
-function setupSseAgent(req: any, res: any, agentConfig: Record<string, any>) {
+function setupSsePiAgent(req: any, res: any) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -1637,16 +1619,28 @@ function setupSseAgent(req: any, res: any, agentConfig: Record<string, any>) {
   let aborted = false;
   req.on("close", () => { aborted = true; });
 
-  const agent = createRexaDbAgent({
-    ...(agentConfig as Parameters<typeof createRexaDbAgent>[0]),
-    emitStep: (message: string) => {
-      if (!aborted) {
-        res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
-      }
-    },
-  });
+  const emitSse = (event: PiSseEvent) => {
+    if (aborted) return;
+    switch (event.type) {
+      case "step":
+        res.write(`data: ${JSON.stringify({ type: "step", message: event.message })}\n\n`);
+        break;
+      case "assistant_delta":
+        res.write(`data: ${JSON.stringify({ type: "assistant_delta", message: event.message })}\n\n`);
+        break;
+      case "tool_start":
+        res.write(`data: ${JSON.stringify({ type: "tool_start", tool: event.tool, command: event.command })}\n\n`);
+        break;
+      case "tool_output":
+        res.write(`data: ${JSON.stringify({ type: "tool_output", output: event.output })}\n\n`);
+        break;
+      case "tool_end":
+        res.write(`data: ${JSON.stringify({ type: "tool_end", exitCode: event.exitCode })}\n\n`);
+        break;
+    }
+  };
 
-  return { aborted, agent };
+  return { aborted, emitSse };
 }
 
 // Agent / SQL stream routes
@@ -1658,7 +1652,9 @@ app.post("/api/agent/chat/stream", async (req, res) => {
     const { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace } = resolved;
     const dashboardContext = lightDashboardContext || [];
 
-    const { aborted, agent } = setupSseAgent(req, res, {
+    const { aborted, emitSse } = setupSsePiAgent(req, res);
+
+    const piInput: PiAgentInput = {
       settings,
       provider,
       model,
@@ -1669,24 +1665,26 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       schemaContext,
       dashboardContext,
       workflowContext: lightWorkflowContext || { existing: [], current: null },
-    });
+      emitStep: (message: string) => {
+        if (!aborted) {
+          res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
+        }
+      },
+    };
 
-    const messages = [
-      ...(history || []).map((m: { role: string; content: string }) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      // fallow-ignore-next-line code-duplication
-      { role: "user" as const, content: prompt },
-    ];
+    const { session, dispose } = await createRexaDbPiSession(piInput);
 
-    const result = await agent.stream(messages);
     let fullText = "";
-
-    for await (const raw of result.fullStream) {
-      if (aborted) break;
-      const chunk = raw as any;
-      fullText += writeStreamEvent(chunk.type, chunk.payload, res, "assistant_delta");
+    try {
+      fullText = await streamPiResponse({
+        session,
+        history: history || [],
+        prompt,
+        emit: emitSse,
+        isAborted: () => aborted,
+      });
+    } finally {
+      dispose();
     }
 
     if (!aborted) {
@@ -1705,7 +1703,9 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
     if (!resolved) return;
     const { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace } = resolved;
 
-    const { aborted, agent } = setupSseAgent(req, res, {
+    const { aborted, emitSse } = setupSsePiAgent(req, res);
+
+    const piInput: PiAgentInput = {
       settings,
       provider,
       model,
@@ -1715,19 +1715,26 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
       selectedNamespace: namespace,
       schemaContext,
       dashboardContext: [],
-    });
+      emitStep: (message: string) => {
+        if (!aborted) {
+          res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
+        }
+      },
+    };
 
-    const messages = [
-      { role: "user" as const, content: prompt },
-    ];
+    const { session, dispose } = await createRexaDbPiSession(piInput);
 
-    const result = await agent.stream(messages);
     let fullText = "";
-
-    for await (const raw of result.fullStream) {
-      if (aborted) break;
-      const chunk = raw as any;
-      fullText += writeStreamEvent(chunk.type, chunk.payload, res, "assistant");
+    try {
+      fullText = await streamPiResponse({
+        session,
+        history: [],
+        prompt,
+        emit: emitSse,
+        isAborted: () => aborted,
+      });
+    } finally {
+      dispose();
     }
 
     if (!aborted) {

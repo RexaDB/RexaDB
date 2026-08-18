@@ -43,6 +43,7 @@ import {
   House,
 } from "@/lib/icon-theme/solar-icons";
 import { NavUser } from "@/components/navigation/nav-user";
+import { ResizeHandle } from "@/components/app-shell/resize-handle";
 
 const DRAG = { WebkitAppRegion: "drag" } as React.CSSProperties;
 const NO_DRAG = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
@@ -82,6 +83,16 @@ export type AppSidebarProps = {
   onSelectTab?: (id: string) => void;
   /** User data for the avatar. */
   user?: { name?: string; email?: string };
+  /** Extra classes merged onto the sidebar container. */
+  className?: string;
+  /** Extra inline styles applied to the sidebar container. */
+  style?: React.CSSProperties;
+  /** Current sidebar width in pixels (for resizable sidebar). */
+  sidebarWidth?: number;
+  /** Called when the sidebar is resized by dragging. */
+  onSidebarWidthChange?: (width: number) => void;
+  /** Hide the top Home/back/forward header controls (Modern UI). */
+  hideHeaderControls?: boolean;
 };
 
 export function AppSidebar({
@@ -101,6 +112,11 @@ export function AppSidebar({
   tabs = [],
   onSelectTab,
   user,
+  className,
+  style,
+  sidebarWidth,
+  onSidebarWidthChange,
+  hideHeaderControls = false,
 }: AppSidebarProps) {
   const router = useRouter();
   const { state: sidebarState } = useSidebar();
@@ -112,12 +128,41 @@ export function AppSidebar({
 
   const isExpanded = sidebarState === "expanded";
 
+  const handleResizeStart = (e: React.MouseEvent) => {
+    if (!onSidebarWidthChange) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth ?? 256;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.min(500, Math.max(150, startWidth + ev.clientX - startX));
+      onSidebarWidthChange(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   return (
-    <Sidebar
-      collapsible="offcanvas"
-      variant="inset"
-      className="pt-1 select-none"
-    >
+      <Sidebar
+        collapsible="offcanvas"
+        variant="inset"
+        className={cn("pt-1 select-none", className)}
+        // Modern UI: the floating title bar owns window drag / double-click
+        // maximize — don't treat the whole sidebar as a titlebar region.
+        data-tauri-drag-region={hideHeaderControls ? "false" : undefined}
+        style={style}
+      >
+      {!hideHeaderControls && (
       <SidebarHeader
         className={cn("-mr-2 h-8 flex-row items-center justify-between pl-0.5 pr-1 py-0")}
         style={DRAG}
@@ -155,6 +200,7 @@ export function AppSidebar({
           />
         </div>
       </SidebarHeader>
+      )}
       {content ? (
         <SidebarContent className="overflow-hidden p-0 select-none">
           {content}
@@ -291,6 +337,30 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarFooter>
         </>
+      )}
+      {onSidebarWidthChange && isExpanded && (
+        <ResizeHandle
+          orientation="vertical"
+          onMouseDown={handleResizeStart}
+          className={cn(
+            hideHeaderControls
+              ? // Modern UI: pin to the gutter between the reserved sidebar column
+                // and the content column (not relative to the inner card). The
+                // strip is exactly --shell-sash-gap wide ending at
+                // --sidebar-width, so the sash line is dead-center in the gap.
+                "fixed top-9 bottom-0 z-[60]"
+              : // Classic shell: leave room for header/footer chrome.
+                "absolute left-full top-10 bottom-8 w-[var(--shell-sash-gap,6px)]",
+          )}
+          style={
+            hideHeaderControls
+              ? {
+                  left: "calc(var(--sidebar-width) - var(--shell-sash-gap, 6px))",
+                  width: "var(--shell-sash-gap, 6px)",
+                }
+              : undefined
+          }
+        />
       )}
     </Sidebar>
   );

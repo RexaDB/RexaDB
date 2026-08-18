@@ -68,7 +68,8 @@ export function EditColumnSheet({
   onEditColumn,
   isEditing,
 }: EditColumnSheetProps) {
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
 
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
@@ -309,7 +310,7 @@ export function EditColumnSheet({
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        contained={appShellLayout}
+        contained={shellLayout}
         onInteractOutside={handleInteractOutside}
         className="bg-studio-bg border-studio-border text-foreground w-[min(540px,88vw)] data-[side=right]:sm:max-w-[540px] flex flex-col h-full p-0"
       >

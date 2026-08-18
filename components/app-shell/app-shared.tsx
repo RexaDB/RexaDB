@@ -46,6 +46,10 @@ export type AppTab = {
 	connectionType?: string | null;
 	/** Optional explicit icon (used when the tab isn't a connections/analytics kind). */
 	icon?: ReactNode;
+	/** Pane group id when the studio is split into multiple panes. Tabs with
+	 *  the same paneId belong to one pane; a divider is rendered between
+	 *  different pane groups in the tab strip. */
+	paneId?: string;
 };
 
 /**

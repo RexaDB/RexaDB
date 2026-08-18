@@ -43,6 +43,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   skeletonLoaders: boolean;
   sleekLayout: boolean;
   appShellLayout: boolean;
+  modernUiLayout: boolean;
   showTabIndicator: boolean;
   iconThemeId: string;
   customIconThemes: CustomIconTheme[];
@@ -106,6 +107,7 @@ export function useGlobalStudioSettings(persist = false) {
   const [sleekLayout, setSleekLayout] = useState<boolean>(false);
   const [activeSleekLayout, setActiveSleekLayout] = useState<boolean>(false);
   const [appShellLayout, setAppShellLayout] = useState<boolean>(true);
+  const [modernUiLayout, setModernUiLayout] = useState<boolean>(false);
   const [showTabIndicator, setShowTabIndicator] = useState<boolean>(true);
   const [iconThemeId, setIconThemeId] = useState<string>(DEFAULT_ICON_THEME_ID);
   const [customIconThemes, setCustomIconThemes] = useState<CustomIconTheme[]>(
@@ -205,6 +207,9 @@ export function useGlobalStudioSettings(persist = false) {
         }
         if (d.appShellLayout !== undefined) {
           setAppShellLayout(d.appShellLayout);
+        }
+        if (d.modernUiLayout !== undefined) {
+          setModernUiLayout(d.modernUiLayout);
         }
         if (d.restoreAppState !== undefined) {
           setRestoreAppState(d.restoreAppState);
@@ -337,6 +342,7 @@ export function useGlobalStudioSettings(persist = false) {
       skeletonLoaders,
       sleekLayout,
       appShellLayout,
+      modernUiLayout,
       showTabIndicator,
       iconThemeId,
       customIconThemes,
@@ -399,6 +405,7 @@ export function useGlobalStudioSettings(persist = false) {
     skeletonLoaders,
     sleekLayout,
     appShellLayout,
+    modernUiLayout,
     showTabIndicator,
     iconThemeId,
     customIconThemes,
@@ -507,6 +514,8 @@ export function useGlobalStudioSettings(persist = false) {
     activeSleekLayout,
     appShellLayout,
     setAppShellLayout,
+    modernUiLayout,
+    setModernUiLayout,
     showTabIndicator,
     setShowTabIndicator,
     iconThemeId,

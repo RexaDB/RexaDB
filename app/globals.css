@@ -273,10 +273,10 @@
   --font-geist-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
    --font-geist-mono: "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --background: oklch(1 0 0);
-  --shell-content-bg: var(--card);
-  --shell-tab-active-bg: var(--accent);
-  --shell-tab-inactive-bg: transparent;
-  --shell-history-bg: var(--card);
+  --shell-content-bg: var(--studio-bg);
+  --shell-tab-active-bg: var(--studio-tab-active);
+  --shell-tab-inactive-bg: var(--studio-tab-inactive);
+  --shell-history-bg: var(--studio-bg);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -327,7 +327,7 @@
   --shell-radius-panel: 10px;
   --shell-sidebar-w: 200px;
   --shell-tab-w: 160px;
-  --shell-bg: #F5F5F5;
+  --shell-bg: var(--background);
   --shell-fg: #111111;
   --shell-fg-muted: #888888;
   --shell-border: #D4D4D4;
@@ -597,10 +597,10 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
 
 .dark {
   --background: #151515;
-  --shell-content-bg: #232323;
-  --shell-tab-active-bg: #1C1D1F;
-  --shell-tab-inactive-bg: #131416;
-  --shell-history-bg: #1B1B1C;
+  --shell-content-bg: var(--studio-bg);
+  --shell-tab-active-bg: var(--studio-tab-active);
+  --shell-tab-inactive-bg: var(--studio-tab-inactive);
+  --shell-history-bg: var(--studio-bg);
   --foreground: #E5E7EB;
   --card: #1C1C1C;
   --card-foreground: #E5E7EB;
@@ -652,7 +652,7 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   --shell-radius-panel: 10px;
   --shell-sidebar-w: 200px;
   --shell-tab-w: 160px;
-  --shell-bg: #070707;
+  --shell-bg: var(--background);
   --shell-fg: #FFFFFF;
   --shell-fg-muted: #666666;
   --shell-border: #434343ab;
@@ -2472,9 +2472,34 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   background-color: rgba(204,204,204,0.15);
 }
 
-/* Translucent frosted-glass effect — blur on root, tint on sidebar */
+/* Translucent frosted-glass effect — blur on root, tint on sidebar.
+   Do NOT put transform / will-change / opacity animation on this node:
+   those create a compositing context and WebKit then samples nothing
+   behind the window, so frost becomes fully transparent. */
 [data-translucent] {
   backdrop-filter: var(--sidebar-backdrop, none);
   -webkit-backdrop-filter: var(--sidebar-backdrop, none);
+}
+
+/* Tiny dummy layer: keeps the compositor dirty without touching the frost node. */
+@keyframes translucent-frost-keepalive {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, 0.01px, 0);
+  }
+}
+
+#translucent-frost-keepalive {
+  position: fixed;
+  inset: auto 0 0 auto;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0.01;
+  z-index: 2147483647;
+  animation: translucent-frost-keepalive 1.2s linear infinite;
 }
 

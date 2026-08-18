@@ -66,6 +66,8 @@ export function useAppSettings(planCode = "free") {
     activeSleekLayout: settings.activeSleekLayout,
     appShellLayout: settings.appShellLayout,
     setAppShellLayout: settings.setAppShellLayout,
+    modernUiLayout: settings.modernUiLayout,
+    setModernUiLayout: settings.setModernUiLayout,
     showTabIndicator: settings.showTabIndicator,
     setShowTabIndicator: settings.setShowTabIndicator,
     restoreAppState: settings.restoreAppState,

@@ -1,2 +1,0 @@
-JAVA_VERSION="21.0.12"
-MODULES="java.base java.logging java.management java.security.sasl java.naming java.security.jgss java.transaction.xa java.xml java.sql jdk.crypto.ec"

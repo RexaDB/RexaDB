@@ -94,6 +94,12 @@ skills-lock.json
 # Local release staging
 /v1.3/
 /v1.3.1/
+/v1.3.2/
 
 # Session transcripts
 /session-ses_*.md
+
+# Java bridge build artifacts
+/resources/java-bridge/dist/
+/resources/java-bridge/out/
+/resources/java-bridge/*.jar

@@ -44,6 +44,16 @@ import {
   Workflow,
   Zap,
 } from "@/lib/icon-theme/lucide-react";
+import {
+  Table2 as SolarTable2,
+  Code2 as SolarCode2,
+  LayoutDashboard as SolarLayoutDashboard,
+  Settings as SolarSettings,
+  User as SolarUser,
+  BarChart3 as SolarBarChart3,
+  History as SolarHistory,
+  Workflow as SolarWorkflow,
+} from "@/lib/icon-theme/solar-icons";
 import type { LucideIcon } from "lucide-react";
 
 export interface RenderTabOptions {
@@ -746,3 +756,21 @@ export function getAllTabTypes(): string[] {
 export function getAllViewModes(): string[] {
   return Array.from(new Set(Object.values(TAB_REGISTRY).map((config) => config.viewMode)));
 }
+
+/** Canonical tab-type → icon component used by both the AppHeader and
+ *  ModernPaneTabs so icons stay consistent across single-pane and split views. */
+export const STUDIO_TAB_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  ...Object.fromEntries(
+    getAllTabTypes().map((type) => [type, getTabIcon(type) ?? SolarTable2]),
+  ),
+  table: SolarTable2,
+  sql: SolarCode2,
+  dashboard: SolarLayoutDashboard,
+  analytics: SolarBarChart3,
+  advisor: SolarBarChart3,
+  settings: SolarSettings,
+  "agent-settings": SolarSettings,
+  "profile-settings": SolarUser,
+  history: SolarHistory,
+  workflow: SolarWorkflow,
+};

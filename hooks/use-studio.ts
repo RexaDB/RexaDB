@@ -1013,7 +1013,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows">(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1024,22 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows">) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
+  const sidebarViewRef = useRef(sidebarView);
+  const lastSidebarViewRef = useRef<
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows"
+  >("tables");
+  useEffect(() => {
+    sidebarViewRef.current = sidebarView;
+    if (sidebarView) lastSidebarViewRef.current = sidebarView;
+  }, [sidebarView]);
 
   // Local persistence for immediate recovery on sidebar view change
   useEffect(() => {
+    if (!sidebarView) return;
     persistLocalState(connection.id, {
       [`rexa-db-sidebar-view-${connection.id}`]: sidebarView,
     });
@@ -1073,6 +1082,10 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     delayedUiRestoreBlockedRef.current = true;
     setIsSidebarVisibleState(nextVisible);
   }, []);
+  const isSidebarVisibleRef = useRef(isSidebarVisible);
+  useEffect(() => {
+    isSidebarVisibleRef.current = isSidebarVisible;
+  }, [isSidebarVisible]);
 
   // Local persistence for immediate recovery on sidebar change
   useEffect(() => {
@@ -1096,6 +1109,22 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const setSidebarHoverOpen = useCallback((hovered: boolean) => {
     setIsSidebarHovered(hovered);
   }, []);
+
+  /** Toggle primary sidebar for classic + Modern UI (used by hotkeys & chrome). */
+  const toggleSidebar = useCallback(() => {
+    const isOpen =
+      sidebarViewRef.current !== null || isSidebarVisibleRef.current;
+    if (isOpen) {
+      if (sidebarViewRef.current) {
+        lastSidebarViewRef.current = sidebarViewRef.current;
+      }
+      setSidebarView(null);
+      setIsSidebarVisible(false);
+    } else {
+      setIsSidebarVisible(true);
+      setSidebarView(lastSidebarViewRef.current ?? "tables");
+    }
+  }, [setSidebarView, setIsSidebarVisible]);
 
   // New settings based on image
   const studioSettings = useGlobalStudioSettings(true);
@@ -1310,7 +1339,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     openTabs,
     activeTabId,
     sidebarSortMode,
-    sidebarView,
+    sidebarView: sidebarView ?? "tables",
     sidebarBehavior: sidebarBehaviorState,
     keybindings,
     searchSettings,
@@ -8287,12 +8316,13 @@ END $$;`.trim();
         openCreateDatabaseTab();
         break;
       case "TOGGLE_SIDEBAR":
-        setIsSidebarVisible((prev) => !prev);
+        toggleSidebar();
         break;
       case "SET_SIDEBAR_VIEW":
         if (!binding.sidebar) return;
         if (["dashboard", "tables", "sql", "database", "import-export", "workflows"].includes(binding.sidebar)) {
-          setSidebarView(binding.sidebar);
+          setSidebarView(binding.sidebar as any);
+          setIsSidebarVisible(true);
         }
         break;
       case "TOGGLE_COMMAND_MENU":
@@ -8393,6 +8423,7 @@ END $$;`.trim();
     openCreateDatabaseTab,
     setSidebarView,
     setIsSidebarVisible,
+    toggleSidebar,
     setIsShortcutNavigatorOpen,
     setIsInsertSheetOpen,
     dbType,
@@ -8797,6 +8828,7 @@ END $$;`.trim();
     sidebarBehavior: sidebarBehaviorState,
     isNavigationRailExpanded,
     setIsSidebarVisible,
+    toggleSidebar,
     setSidebarBehavior,
     setSidebarHoverOpen,
     isSidebarVisible,

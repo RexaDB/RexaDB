@@ -38,7 +38,8 @@ export const KEYBINDING_ACTIONS: KeybindingActionDefinition[] = [
   { id: "SET_SIDEBAR_VIEW", name: "Set Sidebar View", fields: ["sidebar"] },
   { id: "TOGGLE_COMMAND_MENU", name: "Toggle Command Menu", fields: [] },
   { id: "OPEN_UNIVERSAL_SEARCH", name: "Search All Tables", fields: [] },
-  { id: "TOGGLE_GLOBAL_SQL_PANEL", name: "Toggle Global SQL Panel", fields: [] },
+  { id: "TOGGLE_GLOBAL_SQL_PANEL", name: "Toggle SQL Editor Sheet", fields: [] },
+  { id: "TOGGLE_BOTTOM_PANEL", name: "Toggle Bottom Panel", fields: [] },
   { id: "TOGGLE_AI_PANEL", name: "Toggle AI Panel", fields: [] },
   { id: "TOGGLE_PENDING_CHANGES_PANEL", name: "Toggle Pending Changes Panel", fields: [] },
   { id: "FORMAT_QUERY", name: "Format SQL Query", fields: [] },
@@ -46,6 +47,8 @@ export const KEYBINDING_ACTIONS: KeybindingActionDefinition[] = [
   { id: "OPEN_SHORTCUT_NAVIGATOR", name: "Open Shortcut Navigator", fields: [] },
   { id: "OPEN_INSERT_SHEET", name: "Insert Row", fields: [] },
   { id: "ACTIVATE_AI_MODE", name: "Activate AI Mode", fields: [] },
+  { id: "TOGGLE_ACTIVITY_BAR", name: "Toggle Activity Bar", fields: [] },
+  { id: "TOGGLE_STATUS_BAR", name: "Toggle Status Bar", fields: [] },
 ];
 
 export const DB_VIEWS = [
@@ -104,7 +107,9 @@ const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   "Cmd+Alt+R": { type: "OPEN_CREATE_TRIGGER" },
   "Cmd+Alt+S": { type: "OPEN_CREATE_SCHEMA" },
   "Cmd+Alt+B": { type: "OPEN_CREATE_DATABASE" },
-  "Cmd+J": { type: "TOGGLE_SIDEBAR" },
+  // VS Code–style: sidebar Cmd+B, bottom panel Cmd+J (sheet SQL is separate).
+  "Cmd+B": { type: "TOGGLE_SIDEBAR" },
+  "Cmd+J": { type: "TOGGLE_BOTTOM_PANEL" },
   "Cmd+Alt+1": { type: "SET_SIDEBAR_VIEW", sidebar: "tables" },
   "Cmd+K": { type: "TOGGLE_COMMAND_MENU" },
   "Cmd+Shift+F": { type: "OPEN_UNIVERSAL_SEARCH" },
@@ -156,17 +161,31 @@ export function withMissingDefaultKeybindings(
   source: Record<string, Keybinding>
 ): Record<string, Keybinding> {
   const result: Record<string, Keybinding> = { ...source };
+
+  // Migrate legacy defaults: Cmd+J used to toggle the sidebar; it now toggles
+  // the Modern UI bottom panel, and the sidebar is Cmd+B (when free).
+  const hasBottomPanel = Object.values(result).some(
+    (binding) => binding?.type === "TOGGLE_BOTTOM_PANEL",
+  );
+  if (result["Cmd+J"]?.type === "TOGGLE_SIDEBAR" && !hasBottomPanel) {
+    if (!result["Cmd+B"]) {
+      result["Cmd+B"] = { type: "TOGGLE_SIDEBAR" };
+    }
+    result["Cmd+J"] = { type: "TOGGLE_BOTTOM_PANEL" };
+  }
+
   const existingTypes = new Set(
-    Object.values(source)
+    Object.values(result)
       .map((binding) => binding?.type)
       .filter((type): type is string => typeof type === "string")
   );
 
   for (const [combo, binding] of Object.entries(DEFAULT_KEYBINDINGS)) {
-    if (!existingTypes.has(binding.type)) {
-      result[combo] = { ...binding };
-      existingTypes.add(binding.type);
-    }
+    if (existingTypes.has(binding.type)) continue;
+    // Never clobber a combo the user (or an older default) already owns.
+    if (result[combo]) continue;
+    result[combo] = { ...binding };
+    existingTypes.add(binding.type);
   }
 
   return result;

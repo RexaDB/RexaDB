@@ -59,7 +59,8 @@ export function FKSelectionSheet({
     null,
   );
 
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
 
   const requestGridFocus = React.useCallback(() => {
     window.dispatchEvent(new Event("studio:grid-focus-request"));
@@ -177,7 +178,7 @@ export function FKSelectionSheet({
     <Sheet open={isFKSelectionSheetOpen} onOpenChange={handleOpenChange}>
       <SheetContent
         side="right"
-        contained={appShellLayout}
+        contained={shellLayout}
         showCloseButton={false}
         data-fk-selection-sheet="true"
         onCloseAutoFocus={(e) => {
@@ -192,7 +193,7 @@ export function FKSelectionSheet({
         maxResizeWidth={1400}
         resizeHandleLabel="Resize select record sheet"
       >
-        {appShellLayout ? (
+        {shellLayout ? (
           <SheetHeader className="h-12 border-b shrink-0 flex flex-row items-center gap-2 px-4">
             <span className="text-xs text-muted-foreground shrink-0">
               Choose a record from{" "}

@@ -232,7 +232,8 @@ export function AddRlsPolicySheet({
   initialTable,
   onSave,
 }: AddRlsPolicySheetProps) {
-  const { appShellLayout, confirmSheetClose } = useGlobalStudioSettings();
+  const { appShellLayout, confirmSheetClose, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
   const [form, setForm] = useState<PolicyValues>({ ...DEFAULTS });
   const [templateSearch, setTemplateSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -323,7 +324,7 @@ export function AddRlsPolicySheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        contained={appShellLayout}
+        contained={shellLayout}
         onInteractOutside={handleInteractOutside}
         className="bg-background border-border text-foreground p-0 gap-0 flex flex-col data-[side=right]:sm:max-w-[1020px] w-full"
       >
