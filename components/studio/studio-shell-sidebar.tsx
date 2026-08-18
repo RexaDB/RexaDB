@@ -213,7 +213,14 @@ function RenameDialog({
  * reuse the normal-mode explorer components — it renders its own Linear-style
  * nav list that drills into each section (with a Back button).
  */
-export function StudioShellSidebar({ studio }: { studio: any }) {
+export function StudioShellSidebar({
+  studio,
+  hideBack = false,
+}: {
+  studio: any;
+  /** Hide the drill-in back row (Modern UI: the rail handles navigation). */
+  hideBack?: boolean;
+}) {
   const [section, setSection] = useState<Section | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]);
 
@@ -303,6 +310,7 @@ export function StudioShellSidebar({ studio }: { studio: any }) {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
+          {!hideBack && (
           <button
             type="button"
             onClick={() => setSection(null)}
@@ -311,6 +319,7 @@ export function StudioShellSidebar({ studio }: { studio: any }) {
             <ChevronLeft className="size-4" />
             <span className="font-medium">{title}</span>
           </button>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto px-0.5 pb-2 scrollbar-hide">
             {section === "tables" && <TablesPanel studio={studio} />}
             {section === "sql" && <SqlPanel studio={studio} />}
@@ -447,6 +456,11 @@ function ConnectionSwitcher({
 
 function TablesPanel({ studio }: { studio: any }) {
   const [q, setQ] = useState("");
+  const [schemaMenuOpen, setSchemaMenuOpen] = useState(false);
+  const schemas: string[] = (studio.schemas ?? []).filter(
+    (s: string) => !String(s).startsWith("pg_"),
+  );
+  const selectedSchema: string = studio.selectedSchema || "";
   const tables: string[] = (studio.tables ?? []).map((t: any) =>
     typeof t === "string" ? t : (t?.name ?? String(t)),
   );
@@ -464,14 +478,63 @@ function TablesPanel({ studio }: { studio: any }) {
           className="h-8 pl-7 text-sm"
         />
       </div>
-      <button
-        type="button"
-        onClick={() => studio.openCreateTableTab?.()}
-        className={ROW}
-      >
-        <Plus className="size-4 shrink-0" />
-        <span>New table</span>
-      </button>
+      {/* Schema picker + new-table action under the search bar. */}
+      <div className="mb-1 flex items-center gap-1">
+        <DropdownMenu open={schemaMenuOpen} onOpenChange={setSchemaMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-2 text-left text-xs text-muted-foreground transition-colors",
+                "hover:bg-white/[0.06] hover:text-foreground",
+                "outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "data-[state=open]:bg-white/[0.06] data-[state=open]:text-foreground",
+              )}
+            >
+              <span className="shrink-0 text-muted-foreground/70">schema</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                {selectedSchema || "Select…"}
+              </span>
+              <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto border-border bg-[var(--shell-content-bg)]"
+          >
+            {schemas.length === 0 ? (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                No schemas
+              </div>
+            ) : (
+              schemas.map((s) => (
+                <DropdownMenuItem
+                  key={s}
+                  className="gap-2 text-xs"
+                  onSelect={() => studio.setSelectedSchema?.(s)}
+                >
+                  <span className="min-w-0 flex-1 truncate">{s}</span>
+                  {selectedSchema === s ? (
+                    <Check className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : null}
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button
+          type="button"
+          aria-label="New table"
+          title="New table"
+          onClick={() => studio.openCreateTableTab?.()}
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-white/[0.04] text-muted-foreground transition-colors",
+            "hover:bg-white/[0.06] hover:text-foreground",
+          )}
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
       {filtered.length === 0 ? (
         <div className="px-2 py-2 text-xs text-muted-foreground">
           {q ? "No matches" : "No tables"}

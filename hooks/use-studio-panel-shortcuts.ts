@@ -6,13 +6,22 @@ interface UseStudioPanelShortcutsProps {
   onToggleAi: () => void;
   onToggleSql: () => void;
   onTogglePendingChanges: () => void;
+  /** Optional Modern UI chrome toggles — resolved via the keybindings map. */
+  onToggleActivityBar?: () => void;
+  onToggleStatusBar?: () => void;
   keybindings: Record<string, Keybinding>;
 }
 
+/**
+ * Dispatches panel/layout shortcuts from the user's keybinding map.
+ * Lookup is always pressed-combo → binding.type, so remapped shortcuts work.
+ */
 export function useStudioPanelShortcuts({
   onToggleAi,
   onToggleSql,
   onTogglePendingChanges,
+  onToggleActivityBar,
+  onToggleStatusBar,
   keybindings,
 }: UseStudioPanelShortcutsProps) {
   useEffect(() => {
@@ -36,10 +45,29 @@ export function useStudioPanelShortcuts({
           event.preventDefault();
           onTogglePendingChanges();
           break;
+        case "TOGGLE_ACTIVITY_BAR":
+          if (onToggleActivityBar) {
+            event.preventDefault();
+            onToggleActivityBar();
+          }
+          break;
+        case "TOGGLE_STATUS_BAR":
+          if (onToggleStatusBar) {
+            event.preventDefault();
+            onToggleStatusBar();
+          }
+          break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onToggleAi, onToggleSql, onTogglePendingChanges, keybindings]);
+  }, [
+    onToggleAi,
+    onToggleSql,
+    onTogglePendingChanges,
+    onToggleActivityBar,
+    onToggleStatusBar,
+    keybindings,
+  ]);
 }

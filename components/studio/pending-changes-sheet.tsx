@@ -145,7 +145,8 @@ export function PendingChangesSheet({
   customEditorThemes,
   appEditorTheme,
 }: PendingChangesSheetProps) {
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
 
   const [viewMode, setViewMode] = React.useState<"visual" | "sql">("visual");
   const pendingCount =
@@ -283,7 +284,7 @@ export function PendingChangesSheet({
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-full sm:max-w-[500px] flex flex-col p-0 border-l border-border bg-background" contained={appShellLayout}>
+      <SheetContent className="w-full sm:max-w-[500px] flex flex-col p-0 border-l border-border bg-background" contained={shellLayout}>
         <SheetHeader className="p-6 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-sm">
             Pending Changes

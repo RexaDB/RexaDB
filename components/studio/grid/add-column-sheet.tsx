@@ -59,7 +59,8 @@ export function AddColumnSheet({
   onAddColumn,
   isAdding,
 }: AddColumnSheetProps) {
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
     [connectionString],
@@ -225,12 +226,12 @@ export function AddColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!appShellLayout}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
-        contained={appShellLayout}
+        contained={shellLayout}
         onInteractOutside={handleInteractOutside}
-        className={cn("bg-background text-foreground flex flex-col p-0 gap-0", !appShellLayout && "h-full w-[min(540px,88vw)] border-border data-[side=right]:sm:max-w-[540px]")}
+        className={cn("bg-background text-foreground flex flex-col p-0 gap-0", !shellLayout && "h-full w-[min(540px,88vw)] border-border data-[side=right]:sm:max-w-[540px]")}
       >
         {ConfirmDialog}
         <div className="flex flex-col h-full">

@@ -343,6 +343,8 @@ interface StudioSettingsModel {
   activeSleekLayout: boolean;
   appShellLayout: boolean;
   setAppShellLayout: (value: boolean) => void;
+  modernUiLayout: boolean;
+  setModernUiLayout: (value: boolean) => void;
   showTabIndicator: boolean;
   setShowTabIndicator: (value: boolean) => void;
   restoreAppState: boolean;
@@ -688,6 +690,8 @@ export function SettingsView({
     activeSleekLayout,
     appShellLayout,
     setAppShellLayout,
+    modernUiLayout,
+    setModernUiLayout,
     showTabIndicator,
     setShowTabIndicator,
     restoreAppState,
@@ -1446,6 +1450,14 @@ export function SettingsView({
                   description="Use the new app-shell chrome: a bordered content panel on a darker surrounding surface."
                   value={appShellLayout}
                   onChange={setAppShellLayout}
+                />
+
+                {/* Modern UI (copy of the New Layout with a navigation rail) */}
+                <ToggleSetting
+                  title="Modern UI"
+                  description="A copy of the New Layout with an always-visible navigation rail. Separate from the New Layout setting."
+                  value={modernUiLayout}
+                  onChange={setModernUiLayout}
                 />
 
                 {/* Translucent Background */}

@@ -36,7 +36,11 @@ import {
 import { defaultFilter } from "cmdk";
 import { ConnectionDbType } from "@/lib/db/connection-type";
 import { getTableLabels } from "@/lib/studio/db-labels";
-import { formatShortcutForPlatform } from "@/lib/studio/keybindings";
+import {
+  formatShortcutForPlatform,
+  getKeybindingCombo,
+  type Keybinding,
+} from "@/lib/studio/keybindings";
 
 type SectionId =
   | "create"
@@ -75,6 +79,8 @@ interface CommandMenuProps {
   onOpenSpacetimeDbLogs?: () => void;
   onOpenSpacetimeDbSchema?: () => void;
   commandMenuSections: Array<{ id: string; name: string; isVisible: boolean }>;
+  /** User keybindings so listed shortcuts reflect remaps. */
+  keybindings?: Record<string, Keybinding>;
 }
 
 interface CommandItem {
@@ -121,6 +127,7 @@ export function CommandMenu({
   onOpenSpacetimeDbLogs,
   onOpenSpacetimeDbSchema,
   commandMenuSections = [],
+  keybindings,
 }: CommandMenuProps) {
   const labels = getTableLabels(dbType);
   const isMongo = dbType === "mongodb";
@@ -128,6 +135,14 @@ export function CommandMenu({
 
   const [search, setSearch] = useState("");
   const [selectedValue, setSelectedValue] = useState("");
+
+  const shortcutFor = useCallback(
+    (type: string, fallback: string) => {
+      const combo = keybindings ? getKeybindingCombo(keybindings, type) : null;
+      return formatShortcutForPlatform(combo || fallback);
+    },
+    [keybindings],
+  );
 
   const sectionVisibility = useMemo(() => {
     const visible = new Map<string, boolean>();
@@ -161,7 +176,7 @@ export function CommandMenu({
                 ? ["redis", "command", "editor"]
                 : ["sql", "editor", "query"],
             icon: Plus,
-            shortcut: formatShortcutForPlatform("Cmd+N"),
+            shortcut: shortcutFor("OPEN_SQL_EDITOR", "Cmd+N"),
             action: onNewQuery,
           },
           ...(isSpacetimedb
@@ -299,7 +314,7 @@ export function CommandMenu({
             label: "Schema Diagram",
             keywords: ["diagram", "er", "schema", "graph"],
             icon: GitFork,
-            shortcut: formatShortcutForPlatform("Cmd+Shift+D"),
+            shortcut: shortcutFor("OPEN_DATABASE_VIEW", "Cmd+Shift+D"),
             action: onOpenDiagram,
           },
           {
@@ -307,7 +322,7 @@ export function CommandMenu({
             label: "Toggle Navigator",
             keywords: ["sidebar", "navigator"],
             icon: Layout,
-            shortcut: formatShortcutForPlatform("Cmd+J"),
+            shortcut: shortcutFor("TOGGLE_SIDEBAR", "Cmd+B"),
             action: onToggleSidebar,
           },
           {
@@ -344,7 +359,7 @@ export function CommandMenu({
                     "cross-table",
                   ],
                   icon: Search,
-                  shortcut: formatShortcutForPlatform("Cmd+Shift+F"),
+                  shortcut: shortcutFor("OPEN_UNIVERSAL_SEARCH", "Cmd+Shift+F"),
                   action: () => onUniversalSearch(),
                 },
               ]
@@ -444,8 +459,10 @@ export function CommandMenu({
     onSelectTable,
     onToggleSidebar,
     onOpenSnapshots,
+    onUniversalSearch,
     schemas,
     sectionVisibility,
+    shortcutFor,
     tables,
   ]);
 

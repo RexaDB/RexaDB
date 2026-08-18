@@ -172,6 +172,9 @@ interface SqlEditorProps extends SqlEditorSettingsProps, SqlEditorCommonProps {
   layoutVersion?: number;
   keybindings?: Record<string, Keybinding>;
   userId?: string | null;
+  /** Hides the results grid so the editor is code-only (used in the bottom
+   *  SQL editor panel, where results are not useful). */
+  hideResults?: boolean;
   resultTabs?: Array<{
     id: string;
     label: string;
@@ -226,6 +229,7 @@ export function SqlEditor({
   appEditorTheme = null,
   layoutVersion = 0,
   vimMode = false,
+  hideResults = false,
   slashAiTrigger = true,
   keybindings = {},
   resultTabsEnabled = false,
@@ -1308,8 +1312,8 @@ export function SqlEditor({
         <div className="absolute inset-0 flex flex-col">
           {/* Editor Area - Absolute Positioning to force stability */}
           <div
-            className="flex flex-col border-b border-studio-border relative overflow-hidden bg-studio-bg shrink-0"
-            style={{ height: `${splitRatio * 100}%` }}
+            className={`flex flex-col relative overflow-hidden bg-studio-bg shrink-0 ${hideResults ? "" : "border-b border-studio-border"}`}
+            style={{ height: hideResults ? "100%" : `${splitRatio * 100}%` }}
           >
             <div className="flex-1 flex overflow-hidden relative">
               <div className="flex-1 relative">
@@ -1357,6 +1361,7 @@ export function SqlEditor({
             </div>
           </div>
 
+          {!hideResults && (
           <div
             className="h-[2px] bg-studio-border cursor-row-resize shrink-0 hover:bg-blue-500/40 transition-colors"
             onMouseDown={(e) => {
@@ -1366,8 +1371,9 @@ export function SqlEditor({
               preventTextSelection();
             }}
           />
+          )}
 
-          {/* Results Area - Forced Position */}
+          {!hideResults && (
           <div
             className="flex flex-col bg-studio-bg overflow-hidden relative"
             style={{
@@ -1685,6 +1691,7 @@ export function SqlEditor({
               )
             )}
           </div>
+        )}
         </div>
       </div>
 

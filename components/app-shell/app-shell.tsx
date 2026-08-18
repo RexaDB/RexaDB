@@ -159,7 +159,7 @@ export function AppShell({
 					onSelectTab={onActivateTab}
 				/>
 					<div
-						className="content-panel-surface mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border"
+						className="content-panel-surface mx-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
 						style={
 							{
 								"--background": "var(--shell-content-bg)",

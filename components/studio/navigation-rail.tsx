@@ -26,7 +26,7 @@ import { NavigationRailItem } from "./navigation-rail-item";
 import { SidebarBehaviorControl } from "./sidebar-behavior-control";
 
 interface NavigationRailProps {
-  sidebarView: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows";
+  sidebarView: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null;
   setSidebarView: (view: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows") => void;
   onDashboardClick: () => void;
   onTableClick: () => void;

@@ -43,7 +43,8 @@ export function ExtensionDetailsSheet({
   onToggleExtension,
   isLoading = false,
 }: ExtensionDetailsSheetProps) {
-  const { appShellLayout } = useGlobalStudioSettings();
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
 
   if (!extension) return null;
 
@@ -60,7 +61,7 @@ export function ExtensionDetailsSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        contained={appShellLayout}
+        contained={shellLayout}
         className="w-[min(520px,95vw)] bg-studio-bg border-studio-border text-foreground p-0"
       >
         <SheetHeader className="border-b border-studio-border/80 px-4 sm:px-5 py-3 sm:py-4">

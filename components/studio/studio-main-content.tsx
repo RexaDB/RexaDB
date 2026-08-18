@@ -1,4 +1,5 @@
 import { EditorHeader } from "./editor-header";
+import { ModernPaneTabs } from "./modern-pane-tabs";
 import { WelcomeScreen } from "./welcome-screen";
 import { SqlEditor } from "./sql-editor";
 import { TableEditorView } from "./table-editor-view";
@@ -153,6 +154,9 @@ interface StudioMainContentProps {
   } | null;
   /** Hide the per-pane tab bar (the AppShell "New Layout" renders tabs itself). */
   hideTabBar?: boolean;
+  /** Tab bar styling per pane: "classic" (EditorHeader) or "modern" pills
+   *  (used by shell layouts when split-view is active). */
+  paneTabsVariant?: "classic" | "modern";
 }
 
 export function StudioMainContent({
@@ -165,6 +169,7 @@ export function StudioMainContent({
   dashboardSplitDrag,
   tabSplitDrag,
   hideTabBar,
+  paneTabsVariant = "classic",
 }: StudioMainContentProps) {
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [globalSearchScope, setGlobalSearchScope] = useState<"page" | "table">(
@@ -1704,8 +1709,22 @@ export function StudioMainContent({
         className="flex-1 flex flex-col min-w-0 min-h-0 relative"
         onMouseDown={handleActivatePane}
       >
-        {!hideTabBar && paneTabs.length > 0 && (
-          <EditorHeader
+        {!hideTabBar && paneTabs.length > 0 &&
+          (paneTabsVariant === "modern" ? (
+            <ModernPaneTabs
+              tabs={paneTabs}
+              activeTabId={paneActiveTabId}
+              switchTab={handlePaneSwitchTab}
+              closeTab={handlePaneCloseTab}
+              openSqlEditor={openSqlEditorForPane}
+              isPaneActive={isPaneActive}
+              onActivatePane={handleActivatePane}
+              onSplitPane={createSplit}
+              onClosePane={isSplitViewEnabled ? closeActivePane : undefined}
+              paneId={paneId}
+            />
+          ) : (
+            <EditorHeader
             {...studio}
             connection={connection}
             openTabs={paneTabs}
@@ -1733,7 +1752,7 @@ export function StudioMainContent({
             onTabPaneDragCancel={() => studio.cancelTabSplitDrag()}
             isTabPaneDragging={!!tabSplitDrag}
           />
-        )}
+          ))}
         <div className="relative z-10 flex-1 flex flex-col min-h-0">
           {renderPaneBody(paneId)}
         </div>

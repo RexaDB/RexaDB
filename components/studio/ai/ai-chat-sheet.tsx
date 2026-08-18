@@ -31,7 +31,6 @@ import { AiModelPicker } from "@/components/studio/ai/ai-model-picker";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
 import { useAiUser } from "@/hooks/use-ai-user";
-import { useResizePanel } from "@/hooks/use-resize-panel";
 
 import { buildLightDashboardContext } from "@/lib/ai/dashboard-context";
 import { applyAppThemeVariables } from "@/lib/studio/app-themes";
@@ -49,6 +48,8 @@ interface AiChatSheetProps {
   onOpenChange: (isOpen: boolean) => void;
   dashboardApplyLabel?: string;
   initialPrompt?: string | null;
+  /** Chat (thread) to select when the panel opens. */
+  initialChatId?: string | null;
   startNewChatToken?: number;
   dashboards?: any[];
   connectionId: number;
@@ -69,6 +70,8 @@ interface AiChatSheetProps {
   onOpenSettings: () => void;
   sleek?: boolean;
   floating?: boolean;
+  /** Render the chat body without any outer container (the host lays it out). */
+  embedded?: boolean;
   customAppThemes: CustomAppTheme[];
   setCustomAppThemes: Dispatch<SetStateAction<CustomAppTheme[]>>;
   setAppThemeId: (value: string) => void;
@@ -82,6 +85,7 @@ export function AiChatSheet({
   onOpenChange,
   dashboardApplyLabel,
   initialPrompt,
+  initialChatId,
   startNewChatToken,
   dashboards = [],
   connectionId,
@@ -98,6 +102,7 @@ export function AiChatSheet({
   onOpenSettings: _onOpenSettings,
   sleek,
   floating,
+  embedded,
   customAppThemes,
   setCustomAppThemes,
   setAppThemeId,
@@ -115,9 +120,30 @@ export function AiChatSheet({
     "schema_only" | "schema_with_data"
   >("schema_with_data");
 
-  const { width, isResizeHovered, resizeHandleProps } = useResizePanel({
-    ariaLabel: "Resize AI chat",
-  });
+  const [width, setWidth] = useState(400);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.min(700, Math.max(320, startWidth + ev.clientX - startX));
+      setWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
 
   const handleApplyTheme = useCallback(
     (block: ThemeBlockData) => {
@@ -296,6 +322,11 @@ export function AiChatSheet({
     }
   }, [isOpen, loadChats, connectionId]);
 
+  useEffect(() => {
+    if (!isOpen || !initialChatId) return;
+    setActiveChatId(initialChatId);
+  }, [isOpen, initialChatId, setActiveChatId]);
+
   const handleSendMessage = async () => {
     if (!message.trim()) return;
     const nextMessage = message;
@@ -335,7 +366,14 @@ export function AiChatSheet({
   const chatInner = (
     <>
       <TooltipProvider delayDuration={120}>
-        <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+        <div
+          className={cn(
+            "flex h-full flex-col overflow-hidden text-foreground",
+            floating || embedded
+              ? "bg-[var(--shell-content-bg)]"
+              : "bg-background",
+          )}
+        >
           <div className="flex h-[44px] items-center justify-between border-b border-border px-4">
             <div className="flex items-center">
               <AiChatHistoryMenu
@@ -581,12 +619,33 @@ export function AiChatSheet({
     </>
   );
 
+  if (embedded) {
+    return <>{chatInner}</>;
+  }
+
   if (floating) {
     return createPortal(
       <div
-        className="fixed bottom-8 right-11 z-50 flex h-[calc(100vh-19rem)] w-[400px] flex-col overflow-hidden rounded-xl border border-border text-foreground shadow-2xl"
-        style={{ background: "var(--ai-chat-bg, var(--background))" }}
+        className="fixed left-12 top-10 bottom-8 z-50 flex flex-col overflow-hidden rounded-lg border border-border text-foreground"
+        style={{ width, background: "var(--shell-content-bg)" }}
       >
+        <div
+          className="group/resize absolute left-full top-0 bottom-0 z-[60] flex w-[6px] cursor-col-resize items-center justify-center bg-transparent touch-none select-none"
+          onMouseDown={handleResizeStart}
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 rounded-full bg-transparent transition-colors duration-100 group-hover/resize:bg-foreground/30 group-active/resize:bg-foreground/45"
+          />
+          <div
+            className="pointer-events-none relative z-[1] flex flex-col items-center gap-[3px] opacity-45 transition-opacity duration-100 group-hover/resize:opacity-0"
+            aria-hidden
+          >
+            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
+            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
+            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
+          </div>
+        </div>
         {chatInner}
       </div>,
       document.body,
@@ -597,13 +656,12 @@ export function AiChatSheet({
     <aside
       className={cn(
         "relative h-full shrink-0 border-l bg-background text-foreground shadow-xl transition-all",
-        isResizeHovered ? "border-blue-500/60" : "border-border/60",
+        "border-border/60",
         sleek &&
           "rounded-lg border border-studio-border/80 overflow-hidden shadow-sm",
       )}
       style={{ width }}
     >
-      <div {...resizeHandleProps} />
       {chatInner}
     </aside>
   );
