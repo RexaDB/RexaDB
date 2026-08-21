@@ -14,7 +14,7 @@
 All official release builds are available in the [GitHub Releases](https://github.com/rexadbapp/rexadb/releases) section.
 
 ## License
-View-only. No commercial use permitted. See [LICENSE](LICENSE).
+Rexa DB is licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later).
 
 ## Copyright
-© 2026 Rexa DB. All rights reserved.
+© 2026 Rexa DB
