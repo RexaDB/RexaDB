@@ -4,6 +4,7 @@
   "private": true,
   "description": "Rexa DB desktop application",
   "author": "Rexa DB",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
