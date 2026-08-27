@@ -27,12 +27,26 @@ jobs:
           - os: windows-latest
             bundles: nsis
             artifact-name: RexaDB-Windows-x64
+          - os: macos-14
+            bundles: dmg
+            artifact-name: RexaDB-macOS-arm64
+          - os: macos-13
+            bundles: dmg
+            artifact-name: RexaDB-macOS-Intel
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore .env
+        shell: bash
+        env:
+          APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+        run: |
+          printf '%s' "$APP_ENV_FILE" > .env
+          echo "Restored .env ($(grep -c '=' .env) entries)"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -459,6 +473,18 @@ jobs:
           echo "════════════════════════════════════════════"
 
           exit $RESULT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.sig
+            src-tauri/target/release/platform.*.json
+          if-no-files-found: error
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')

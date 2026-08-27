@@ -36,10 +36,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Apply stored light/dark preference before paint to avoid splash/flash. */}
+        {/* Apply stored light/dark + custom app theme colors before paint, to
+            avoid a splash/flash of the default theme. The theme vars cache is
+            kept warm by hooks/use-global-app-theme.ts. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("theme");var d=window.matchMedia("(prefers-color-scheme: dark)").matches;var r=t==="light"||t==="dark"?t:(d?"dark":"light");var e=document.documentElement;e.classList.remove("light","dark");e.classList.add(r);e.style.colorScheme=r;}catch(e){}})();`,
+            __html: `(function(){try{var el=document.documentElement;var t=localStorage.getItem("theme");var d=window.matchMedia("(prefers-color-scheme: dark)").matches;var r=t==="light"||t==="dark"?t:(d?"dark":"light");var av=null;try{var raw=localStorage.getItem("rexa-db-app-theme-vars");if(raw)av=JSON.parse(raw);}catch(e2){av=null;}if(av&&av.colors&&(av.base==="light"||av.base==="dark")){r=av.base;}el.classList.remove("light","dark");el.classList.add(r);el.style.colorScheme=r;if(av&&av.colors){for(var k in av.colors){if(Object.prototype.hasOwnProperty.call(av.colors,k)){el.style.setProperty(k,av.colors[k]);}}if(av.id)el.dataset.appTheme=av.id;}}catch(e){}})();`,
           }}
         />
       </head>

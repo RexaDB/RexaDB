@@ -21,6 +21,9 @@ import {
   LayoutSidebarRightIcon,
 } from "@/components/app-shell/vscode-layout-icons";
 import { CustomizeLayoutPopover } from "@/components/app-shell/customize-layout-popover";
+import { WindowControls } from "@/components/shared/window-controls";
+import { useDesktopWindow } from "@/hooks/use-desktop-window";
+import type { Connection } from "@/lib/db/schema";
 
 type KeybindingsMap = Record<string, Keybinding>;
 
@@ -60,6 +63,7 @@ export function ModernVscodeHeader({
   canForward,
   onForward,
   connection,
+  onSelectConnection,
 }: {
   /** Height of the strip between the window top and the content container. */
   height?: number;
@@ -91,6 +95,11 @@ export function ModernVscodeHeader({
     connectionType?: string | null;
     connectionString?: string;
   } | null;
+  /**
+   * Optional local-only connection switch handler. When provided, the header
+   * dropdown does not navigate the main studio (used by the Agents window).
+   */
+  onSelectConnection?: (conn: Connection) => void | Promise<void>;
 }) {
   // Compact title-bar controls so the cluster sits cleanly inside the ~36px
   // strip above the content cards (mt-9 / pt-9).
@@ -100,6 +109,7 @@ export function ModernVscodeHeader({
   const sidebarShortcut = shortcutLabel(keybindings, "TOGGLE_SIDEBAR");
   const panelShortcut = shortcutLabel(keybindings, "TOGGLE_BOTTOM_PANEL");
   const aiShortcut = shortcutLabel(keybindings, "TOGGLE_AI_PANEL");
+  const { isMaximized, sendWindowAction, canUseDesktop, isMac, isLinuxCloseOnly } = useDesktopWindow();
 
   return (
     <header
@@ -137,7 +147,10 @@ export function ModernVscodeHeader({
           >
             <AltArrowRight />
           </Button>
-          <ModernConnectionDropdown connection={connection} />
+          <ModernConnectionDropdown
+            connection={connection}
+            onSelectConnection={onSelectConnection}
+          />
           <ModernUISearchBar onOpen={onOpenSearch} keybindings={keybindings} />
         </div>
       </div>
@@ -232,6 +245,15 @@ export function ModernVscodeHeader({
             </TooltipTrigger>
             <TooltipContent side="bottom">Notifications</TooltipContent>
           </Tooltip>
+        )}
+        {canUseDesktop && !isMac && (
+          <WindowControls
+            isMaximized={isMaximized}
+            onMinimize={() => sendWindowAction("minimize")}
+            onMaximizeToggle={() => sendWindowAction("maximize-toggle")}
+            onClose={() => sendWindowAction("close")}
+            wayland={isLinuxCloseOnly}
+          />
         )}
       </div>
     </header>

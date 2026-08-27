@@ -29,11 +29,16 @@ type CurrentConnection = {
 /**
  * Compact connection switcher for the Modern UI title bar (left of search).
  * Keeps the menu open while testing/navigating so switching feels continuous.
+ *
+ * Pass `onSelectConnection` for surfaces that should switch locally only
+ * (e.g. the Agents window) without navigating the main studio.
  */
 export function ModernConnectionDropdown({
   connection,
+  onSelectConnection,
 }: {
   connection?: CurrentConnection | null;
+  onSelectConnection?: (conn: Connection) => void | Promise<void>;
 }) {
   const router = useRouter();
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -108,10 +113,27 @@ export function ModernConnectionDropdown({
         toast.success("Connection successful.");
       }
 
+      if (onSelectConnection) {
+        try {
+          await onSelectConnection(conn);
+        } finally {
+          setSwitchingToId(null);
+          setMenuOpen(false);
+        }
+        return;
+      }
+
       // Keep spinner until navigation unmounts this header.
       router.push(`/studio/${conn.id}`);
     },
-    [connection, router, shouldTestConnection, switchingToId, testConnection],
+    [
+      connection,
+      onSelectConnection,
+      router,
+      shouldTestConnection,
+      switchingToId,
+      testConnection,
+    ],
   );
 
   if (!connection) return null;

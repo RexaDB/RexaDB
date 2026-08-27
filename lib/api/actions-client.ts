@@ -10,11 +10,30 @@ import type { QueryExecutionContext } from "@/lib/studio/table-permissions";
 import type { HistoryEntry } from "@/lib/api/history-entry-types";
 import { emitGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 import { API_BASE } from "@/lib/api-base";
+import { isDesktopRuntime } from "@/lib/desktop";
 
 type ApiResult<T> = { success: boolean; data?: T; error?: string } & Record<
   string,
   unknown
 >;
+
+// Fast path for settings that also live directly in Rust (see src-tauri/src/lib.rs).
+// Returns undefined when not running under Tauri, or when the Rust side reports
+// it has nothing to serve yet (e.g. settings.json hasn't been migrated into
+// existence) — callers fall back to the HTTP request in that case.
+async function tauriInvoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T | undefined> {
+  if (!isDesktopRuntime()) return undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const result = await invoke<T | null>(cmd, args);
+    return result === null ? undefined : result;
+  } catch {
+    return undefined;
+  }
+}
 
 export type { GlobalAiSettings } from "@/lib/ai/types";
 export type { SqlEditorRunQueryResult } from "@/lib/db/actions-constants";
@@ -161,6 +180,35 @@ export function upsertUserEntitlement(
 
 export function getGlobalAiSettings() {
   return request(buildUrl("/api/ai/settings"));
+}
+
+export type AiProviderCatalogEntry = { id: string; name: string; baseUrl?: string };
+
+export function listAiProviderCatalog() {
+  return request<AiProviderCatalogEntry[]>(buildUrl("/api/ai/providers"));
+}
+
+export async function getKeybindingsFile() {
+  const fast = await tauriInvoke<{ data: Record<string, any>; filePath: string }>(
+    "settings_get_keybindings",
+  );
+  if (fast !== undefined) {
+    return { success: true, data: fast.data, filePath: fast.filePath } as ApiResult<
+      Record<string, any>
+    > & { filePath?: string };
+  }
+  const result = await request<Record<string, any>>(buildUrl("/api/keybindings"));
+  return result as typeof result & { filePath?: string };
+}
+
+export async function saveKeybindingsFile(keybindings: Record<string, any>) {
+  const applied = await tauriInvoke<boolean>("settings_save_keybindings", { keybindings });
+  if (applied) return { success: true };
+  return request(buildUrl("/api/keybindings"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keybindings }),
+  });
 }
 
 export async function saveGlobalAiSettings(settings: unknown) {
@@ -504,11 +552,15 @@ export function saveStudioDashboards(
   });
 }
 
-export function getAppFontFamily() {
+export async function getAppFontFamily(): Promise<ApiResult<string>> {
+  const fast = await tauriInvoke<string>("settings_get_app_font_family");
+  if (fast !== undefined) return { success: true, data: fast };
   return request(buildUrl("/api/app-font"));
 }
 
-export function saveAppFontFamily(fontFamily: string | null) {
+export async function saveAppFontFamily(fontFamily: string | null): Promise<ApiResult<never>> {
+  const applied = await tauriInvoke<boolean>("settings_save_app_font_family", { fontFamily });
+  if (applied) return { success: true };
   return request(buildUrl("/api/app-font"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -516,14 +568,25 @@ export function saveAppFontFamily(fontFamily: string | null) {
   });
 }
 
-export function getGlobalAppThemeSettings() {
+export async function getGlobalAppThemeSettings(): Promise<
+  ApiResult<{ appThemeId: string; customAppThemes: string }>
+> {
+  const fast = await tauriInvoke<{ appThemeId: string; customAppThemes: string }>(
+    "settings_get_app_theme",
+  );
+  if (fast !== undefined) return { success: true, data: fast };
   return request(buildUrl("/api/app-theme"));
 }
 
-export function saveGlobalAppThemeSettings(settings: {
+export async function saveGlobalAppThemeSettings(settings: {
   appThemeId: string;
   customAppThemes: string;
-}) {
+}): Promise<ApiResult<never>> {
+  const applied = await tauriInvoke<boolean>("settings_save_app_theme", {
+    appThemeId: settings.appThemeId,
+    customAppThemes: settings.customAppThemes,
+  });
+  if (applied) return { success: true };
   return request(buildUrl("/api/app-theme"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -531,14 +594,25 @@ export function saveGlobalAppThemeSettings(settings: {
   });
 }
 
-export function getGlobalEditorThemeSettings() {
+export async function getGlobalEditorThemeSettings(): Promise<
+  ApiResult<{ editorThemeId: string; customEditorThemes: string }>
+> {
+  const fast = await tauriInvoke<{ editorThemeId: string; customEditorThemes: string }>(
+    "settings_get_editor_theme",
+  );
+  if (fast !== undefined) return { success: true, data: fast };
   return request(buildUrl("/api/editor-theme"));
 }
 
-export function saveGlobalEditorThemeSettings(settings: {
+export async function saveGlobalEditorThemeSettings(settings: {
   editorThemeId: string;
   customEditorThemes: string;
-}) {
+}): Promise<ApiResult<never>> {
+  const applied = await tauriInvoke<boolean>("settings_save_editor_theme", {
+    editorThemeId: settings.editorThemeId,
+    customEditorThemes: settings.customEditorThemes,
+  });
+  if (applied) return { success: true };
   return request(buildUrl("/api/editor-theme"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -546,11 +620,17 @@ export function saveGlobalEditorThemeSettings(settings: {
   });
 }
 
-export function getGlobalStudioSettings() {
+export async function getGlobalStudioSettings(): Promise<ApiResult<Record<string, any>>> {
+  const fast = await tauriInvoke<Record<string, any>>("settings_get_studio_settings");
+  if (fast !== undefined) return { success: true, data: fast };
   return request(buildUrl("/api/studio-settings"));
 }
 
-export function saveGlobalStudioSettings(settings: Record<string, any>) {
+export async function saveGlobalStudioSettings(
+  settings: Record<string, any>,
+): Promise<ApiResult<never>> {
+  const applied = await tauriInvoke<boolean>("settings_save_studio_settings", { settings });
+  if (applied) return { success: true };
   return request(buildUrl("/api/studio-settings"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

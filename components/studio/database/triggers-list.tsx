@@ -1,7 +1,6 @@
 "use client";
 
 import { Zap, Search, Check, X, MoreVertical, Edit2, Copy, Trash2, Plus } from "@/lib/icon-theme/lucide-react";
-import { LogoIcon } from "@/components/logo";
 import { useState, useMemo } from "react";
 import {
   DropdownMenu,
@@ -57,6 +56,7 @@ interface TriggersListProps {
   onEditTrigger?: (trigger: Trigger) => void;
   onDuplicateTrigger?: (trigger: Trigger) => void;
   onDeleteTrigger?: (trigger: Trigger) => void;
+  onAskAI?: () => void;
 }
 
 export function TriggersList({
@@ -69,6 +69,7 @@ export function TriggersList({
   onEditTrigger,
   onDuplicateTrigger,
   onDeleteTrigger,
+  onAskAI,
 }: TriggersListProps) {
   const [search, setSearch] = useState("");
   const [viewingDefinition, setViewingDefinition] = useState<Trigger | null>(null);
@@ -195,8 +196,9 @@ export function TriggersList({
               <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <LogoIcon width={16} height={16} />
+                  <Button variant="outline" size="icon" onClick={onAskAI}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
@@ -227,8 +229,9 @@ export function TriggersList({
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button variant="outline" size="icon">
-                            <LogoIcon width={16} height={16} />
+                          <Button variant="outline" size="icon" onClick={onAskAI}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>

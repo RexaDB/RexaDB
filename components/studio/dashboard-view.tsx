@@ -1595,7 +1595,7 @@ function TableWidget({
     richJsonInspector,
     dataBars,
     skeletonLoaders,
-  } = useGlobalStudioSettings(true);
+  } = useGlobalStudioSettings();
   const [results, setResults] = useState<any>(null);
   const [structure, setStructure] = useState<any[]>([]);
   const [foreignKeys, setForeignKeys] = useState<any[]>([]);
@@ -3848,6 +3848,8 @@ export function DashboardView({
   appEditorTheme = null,
   vimMode = false,
 }: DashboardViewProps) {
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
   const { resolvedTheme } = useTheme();
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
@@ -5241,8 +5243,12 @@ export function DashboardView({
         </div>
       </div>
 
-      <Sheet open={configOpen} onOpenChange={setConfigOpen}>
-        <SheetContent side="right" className="sm:max-w-xl overflow-y-auto">
+      <Sheet open={configOpen} onOpenChange={setConfigOpen} modal={!shellLayout}>
+        <SheetContent
+          side="right"
+          contained={shellLayout}
+          className={cn("overflow-y-auto", !shellLayout && "sm:max-w-xl")}
+        >
           <SheetHeader>
             <SheetTitle>Set Widget</SheetTitle>
             <SheetDescription>

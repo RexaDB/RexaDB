@@ -18,6 +18,7 @@ interface AiMessageListProps {
   userName: string;
   emptyIdeas: string[];
   onSelectIdea: (idea: string) => void;
+  onApprovalSubmit?: (answers: { question: string; type: string; selected: string[]; custom?: string }[]) => void;
 }
 
 export function AiMessageList({
@@ -33,6 +34,7 @@ export function AiMessageList({
   userName,
   emptyIdeas,
   onSelectIdea,
+  onApprovalSubmit,
 }: AiMessageListProps) {
   return (
     <div className="px-4 pt-4">
@@ -44,13 +46,13 @@ export function AiMessageList({
           message.role === "user" ? (
             <div key={message.id} className="flex justify-end">
               <div className="max-w-[80%] rounded-2xl bg-white/8 px-4 py-2.5 text-sm leading-6 text-foreground whitespace-pre-wrap">
-                {message.content || "…"}
+                {message.content}
               </div>
             </div>
-          ) : (
+          ) : message.content ? (
             <div key={message.id} className="text-sm leading-7 text-foreground">
               <AiMessageContent
-                content={message.content || "…"}
+                content={message.content}
                 dashboardApplyLabel={dashboardApplyLabel}
                 onApplyAppTheme={onApplyAppTheme}
                 onApplyEditorTheme={onApplyEditorTheme}
@@ -59,9 +61,10 @@ export function AiMessageList({
                 onRunSql={onRunSql}
                 onSendToSql={onSendToSql}
                 workflowApplyBusy={workflowApplyBusy}
+                onApprovalSubmit={onApprovalSubmit}
               />
             </div>
-          ),
+          ) : null,
         )}
       </div>
     </div>

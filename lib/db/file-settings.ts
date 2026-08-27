@@ -108,6 +108,41 @@ export async function writeSettingsJson(data: Record<string, any>): Promise<bool
   }
 }
 
+// Every save function below (studio settings, app theme, editor theme, font
+// family) shares this ONE file — each reads the whole thing, mutates only
+// its own top-level key, and writes the whole thing back. Without
+// serialization, two saves firing close together (e.g. a layout toggle
+// alongside any other settings change) can interleave: B reads before A's
+// write lands, then B writes back A's now-stale key, silently reverting it.
+// Node/Bun is single-threaded, so chaining every read-modify-write through
+// one promise queue is enough to make each one atomic relative to the
+// others — no two can ever be "in flight" at once.
+let settingsWriteQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Serializes a read-modify-write cycle against settings.json. `mutator`
+ * receives the current file contents (or `{}` if it doesn't exist/parse)
+ * and returns the full object to persist. Use this instead of calling
+ * `readSettingsJson`/`writeSettingsJson` directly for any read-then-write
+ * sequence, so it can't race with any other queued update.
+ */
+export function queueSettingsUpdate(
+  mutator: (current: Record<string, any>) => Record<string, any> | Promise<Record<string, any>>,
+): Promise<boolean> {
+  const task = settingsWriteQueue.then(async () => {
+    const current = (await readSettingsJson()) || {};
+    const next = await mutator(current);
+    return writeSettingsJson(next);
+  });
+  // Keep the queue moving even if this update failed, so one bad write
+  // doesn't wedge every save after it.
+  settingsWriteQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
 export interface SettingsFile {
   /** All studio_settings fields in one blob (mirrors the old SQLite key) */
   studio_settings?: Record<string, any>;

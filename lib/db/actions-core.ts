@@ -699,6 +699,7 @@ export async function upsertUserEntitlement(payload: {
   return { success: true };
 }
 
+/** Providers pinned in the settings UI; any other Pi-SDK provider id may also be a key of `providers`. */
 export type AgentProvider =
   | "openai"
   | "google"
@@ -706,7 +707,8 @@ export type AgentProvider =
   | "openrouter"
   | "kilo"
   | "ollama"
-  | "external";
+  | "external"
+  | (string & {});
 
 export type GlobalAiProviderConfig = {
   apiKey: string;
@@ -716,7 +718,7 @@ export type GlobalAiProviderConfig = {
 
 export type GlobalAiSettings = {
   permissionMode: "schema_only" | "schema_with_data";
-  providers: Record<AgentProvider, GlobalAiProviderConfig>;
+  providers: Record<string, GlobalAiProviderConfig>;
 };
 
 type StoredAiChat = {
@@ -781,44 +783,39 @@ function normalizeGlobalAiSettings(input: unknown): GlobalAiSettings {
       .filter(Boolean);
   };
   const normalizeProviderConfig = (
-    provider: keyof GlobalAiSettings["providers"],
+    provider: string,
     config: Partial<GlobalAiProviderConfig> | undefined,
   ): GlobalAiProviderConfig => {
+    const defaults = DEFAULT_GLOBAL_AI_SETTINGS.providers[provider];
     return {
-      ...DEFAULT_GLOBAL_AI_SETTINGS.providers[provider],
+      ...defaults,
       ...config,
       apiKey: typeof config?.apiKey === "string" ? config.apiKey : "",
       models: normalizeModels(config?.models),
       baseUrl:
         typeof config?.baseUrl === "string"
           ? config.baseUrl
-          : DEFAULT_GLOBAL_AI_SETTINGS.providers[provider].baseUrl,
+          : defaults?.baseUrl,
     };
   };
+
+  // Pinned defaults always exist; any additional provider ids the user has
+  // configured (from the Pi SDK's full provider catalog) are preserved too.
+  const providerIds = new Set([
+    ...Object.keys(DEFAULT_GLOBAL_AI_SETTINGS.providers),
+    ...Object.keys(providers as Record<string, unknown>),
+  ]);
+  const normalizedProviders: Record<string, GlobalAiProviderConfig> = {};
+  for (const id of providerIds) {
+    normalizedProviders[id] = normalizeProviderConfig(id, (providers as any)[id]);
+  }
 
   return {
     permissionMode:
       source.permissionMode === "schema_only"
         ? "schema_only"
         : DEFAULT_GLOBAL_AI_SETTINGS.permissionMode,
-    providers: {
-      openai: normalizeProviderConfig("openai", (providers as any).openai),
-      google: normalizeProviderConfig("google", (providers as any).google),
-      anthropic: normalizeProviderConfig(
-        "anthropic",
-        (providers as any).anthropic,
-      ),
-      openrouter: normalizeProviderConfig(
-        "openrouter",
-        (providers as any).openrouter,
-      ),
-      kilo: normalizeProviderConfig("kilo", (providers as any).kilo),
-      ollama: normalizeProviderConfig("ollama", (providers as any).ollama),
-      external: normalizeProviderConfig(
-        "external",
-        (providers as any).external,
-      ),
-    },
+    providers: normalizedProviders,
   };
 }
 

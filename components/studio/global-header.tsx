@@ -155,6 +155,7 @@ interface GlobalHeaderProps {
   isSqlEditorOpen: boolean;
   onAiAssistantClick: () => void;
   isAiAssistantOpen: boolean;
+  onAgentsClick?: () => void;
   onProfileSettingsClick: () => void;
   onKeybindingsClick: () => void;
   onToggleNavigator: () => void;
@@ -182,6 +183,7 @@ export function GlobalHeader({
   isSqlEditorOpen,
   onAiAssistantClick,
   isAiAssistantOpen,
+  onAgentsClick,
   onProfileSettingsClick,
   onKeybindingsClick,
   onToggleNavigator,
@@ -230,11 +232,9 @@ export function GlobalHeader({
     sendWindowAction,
     canUseDesktop: isDesktopApp,
     isMac: isMacDesktopApp,
-    isWindows: isWindowsDesktopApp,
     isLinuxCloseOnly,
   } = useDesktopWindow();
   const macLeftControlsInset = isMacDesktopApp ? 56 : 0;
-  const windowsFrameInset = isWindowsDesktopApp ? "var(--tauri-frame-controls-width, 138px)" : undefined;
   const unreadCount = notifications.filter((n) => !n.read_at).length;
   const editorLabel = getEditorLabel(dbType);
   const [studioConnected, setStudioConnected] = useState(false);
@@ -497,7 +497,6 @@ export function GlobalHeader({
         isMacDesktopApp ? "mac-header" : "",
       )}
       data-tauri-drag-region="deep"
-      style={windowsFrameInset ? { paddingRight: windowsFrameInset } : undefined}
     >
       {/* Left */}
       <div
@@ -1040,6 +1039,31 @@ export function GlobalHeader({
           </StudioTooltip>
         </div>
 
+        {onAgentsClick && (
+          <div
+            className={cn(
+              "shrink-0 hidden lg:block transition-all duration-200",
+              activeDropdown && "blur-[4px] pointer-events-none opacity-50",
+            )}
+          >
+            <StudioTooltip label="Agents">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "border rounded-lg",
+                  "border-studio-border bg-background/15 text-muted-foreground/40 hover:bg-background/25 hover:text-foreground/60",
+                  studio.activeSleekLayout ? "w-7 h-7" : "w-8 h-8",
+                )}
+                onClick={onAgentsClick}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/ai-agent.png" alt="" className="w-5 h-5 rounded-[3px] object-cover dark:invert" />
+              </Button>
+            </StudioTooltip>
+          </div>
+        )}
+
         <div
           className={cn(
             "shrink-0 hidden lg:block transition-all duration-200",
@@ -1254,7 +1278,7 @@ export function GlobalHeader({
           </DropdownMenu>
         </div>
 
-        {isDesktopApp && !isMacDesktopApp && !isWindowsDesktopApp && (!studio.hideWindowActions || isLinuxCloseOnly) && (
+        {isDesktopApp && !isMacDesktopApp && (!studio.hideWindowActions || isLinuxCloseOnly) && (
           <div
             className={cn(
               "flex items-center gap-1 ml-1 border-l border-studio-border transition-all duration-200",

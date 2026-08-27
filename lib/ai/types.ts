@@ -1,6 +1,14 @@
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflows/types";
 
-export type AgentProvider = "openai" | "google" | "anthropic" | "openrouter" | "kilo" | "ollama" | "external";
+/** Providers pinned in the settings UI and given special-cased resolution. */
+export type KnownAgentProvider = "openai" | "google" | "anthropic" | "openrouter" | "kilo" | "ollama" | "external";
+
+/**
+ * Any provider id the Pi agent SDK supports (see `lib/ai/pi-provider-catalog.ts`)
+ * can be configured too — `providers` is keyed dynamically, not just by the
+ * pinned ids above.
+ */
+export type AgentProvider = KnownAgentProvider | (string & {});
 
 export type GlobalAiProviderConfig = {
   apiKey: string;
@@ -12,7 +20,7 @@ export type AiPermissionMode = "schema_only" | "schema_with_data";
 
 export type GlobalAiSettings = {
   permissionMode: AiPermissionMode;
-  providers: Record<AgentProvider, GlobalAiProviderConfig>;
+  providers: Record<string, GlobalAiProviderConfig>;
 };
 
 export type AgentChatHistoryMessage = {
@@ -24,6 +32,44 @@ export type LightSchemaContextTable = {
   schema: string;
   table: string;
   columns: Array<{ name: string; type: string }>;
+};
+
+/** Column change marker for ```schema-plan blocks (engine-neutral). */
+export type SchemaPlanColumnChange =
+  | "added"
+  | "removed"
+  | "unchanged"
+  | "modified";
+
+export type SchemaPlanColumn = {
+  name: string;
+  type: string;
+  change: SchemaPlanColumnChange;
+  /** Previous type when change === "modified" */
+  previousType?: string;
+  nullable?: boolean;
+  note?: string;
+};
+
+export type SchemaPlanTable = {
+  schema: string;
+  table: string;
+  action: "create" | "alter" | "drop";
+  columns: SchemaPlanColumn[];
+};
+
+/**
+ * Structured schema proposal for plan mode.
+ * Emitted as a fenced ```schema-plan JSON block.
+ */
+export type SchemaPlan = {
+  title?: string;
+  summary?: string;
+  mode?: "plan" | "build";
+  tables: SchemaPlanTable[];
+  notes?: string[];
+  /** Optional DDL for later apply — not auto-executed in plan mode. */
+  applySql?: string;
 };
 
 export type LightDashboardContext = {

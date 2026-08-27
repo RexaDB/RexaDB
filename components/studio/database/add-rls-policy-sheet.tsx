@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { SelectWithSearch } from "@/components/ui/select-with-search";
 import { useSheetCloseConfirm } from "@/hooks/use-sheet-close-confirm";
 import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
-import { Search, Shield, Terminal, Lock } from "@/lib/icon-theme/lucide-react";
+import { Search, Shield, Terminal, Lock, ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import { cn } from "@/lib/utils";
 import { highlightSql } from "@/lib/ai/sql-highlight";
 import { handleTextareaTabKey } from "@/lib/studio/textarea-utils";
@@ -237,12 +237,14 @@ export function AddRlsPolicySheet({
   const [form, setForm] = useState<PolicyValues>({ ...DEFAULTS });
   const [templateSearch, setTemplateSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [view, setView] = useState<"editor" | "templates">("editor");
 
   // Reset form when sheet opens
   useEffect(() => {
     if (open) {
       setForm({ ...DEFAULTS, table: initialTable || "" });
       setTemplateSearch("");
+      setView("editor");
     }
   }, [open, initialTable]);
 
@@ -271,6 +273,7 @@ export function AddRlsPolicySheet({
       usingExpression: tpl.using,
       withCheckExpression: tpl.withCheck,
     }));
+    setView("editor");
   };
 
   const isDirty = useMemo(
@@ -321,30 +324,59 @@ export function AddRlsPolicySheet({
   ) => setForm((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
         contained={shellLayout}
         onInteractOutside={handleInteractOutside}
-        className="bg-background border-border text-foreground p-0 gap-0 flex flex-col data-[side=right]:sm:max-w-[1020px] w-full"
+        showCloseButton={false}
+        className={cn(
+          "bg-background border-border text-foreground p-0 gap-0 flex flex-col",
+          shellLayout ? "data-[side=right]:sm:max-w-[1020px]" : "data-[side=right]:sm:max-w-[1020px] w-full",
+        )}
       >
         {ConfirmDialog}
         {/* Header */}
         <SheetHeader className="px-6 py-5 border-b border-border shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-primary/10">
-              <Shield className="w-4 h-4 text-primary" />
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-1.5 rounded-lg bg-primary/10 shrink-0">
+                <Shield className="w-4 h-4 text-primary" />
+              </div>
+              <SheetTitle className="text-sm font-semibold truncate">
+                {view === "templates"
+                  ? "Choose a template"
+                  : "Create a new Row Level Security policy"}
+              </SheetTitle>
             </div>
-            <SheetTitle className="text-sm font-semibold">
-              Create a new Row Level Security policy
-            </SheetTitle>
+            {view === "templates" ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs gap-1.5 shrink-0"
+                onClick={() => setView("editor")}
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Back
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs gap-1.5 shrink-0"
+                onClick={() => setView("templates")}
+              >
+                <Search className="w-3.5 h-3.5" />
+                Templates
+              </Button>
+            )}
           </div>
         </SheetHeader>
 
         {/* Body */}
         <div className="flex flex-1 min-h-0">
-          {/* ── Left Panel: Policy Builder ── */}
-          <div className="flex flex-col flex-1 overflow-y-auto border-r border-border min-w-0">
+          {view === "editor" && (
+          <div className="flex flex-col flex-1 overflow-y-auto min-w-0">
             <div className="flex-1 p-6 space-y-5">
               {/* Policy Name + Table */}
               <div className="grid grid-cols-2 gap-4">
@@ -596,68 +628,69 @@ export function AddRlsPolicySheet({
               </Button>
             </div>
           </div>
+          )}
 
-          {/* ── Right Panel: Templates ── */}
-          <div className="w-[340px] shrink-0 flex flex-col overflow-hidden bg-muted/20">
+          {view === "templates" && (
+          <div className="flex flex-col flex-1 overflow-hidden min-w-0">
             {/* Templates header */}
-            <div className="px-4 pt-5 pb-3 border-b border-border shrink-0">
-              <p className="text-sm font-semibold text-foreground mb-3">
-                Templates
-              </p>
-              <div className="relative">
+            <div className="px-6 pt-5 pb-3 border-b border-border shrink-0">
+              <div className="relative max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
                 <Input
                   value={templateSearch}
                   onChange={(e) => setTemplateSearch(e.target.value)}
                   placeholder="Search templates"
                   className="pl-9 h-8 text-xs bg-muted/30 border-border focus-visible:ring-primary/40"
+                  autoFocus
                 />
               </div>
             </div>
 
             {/* Template list */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {filteredTemplates.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  onClick={() => applyTemplate(tpl)}
-                  className="w-full text-left p-3.5 rounded-lg border border-border bg-background hover:border-primary/30 hover:bg-primary/[0.03] transition-all group"
-                >
-                  <div className="flex items-start gap-3">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-xs font-boldtracking-widest shrink-0 px-1.5 py-0.5 mt-0.5 border",
-                        COMMAND_STYLES[tpl.command],
-                      )}
-                    >
-                      {tpl.command}
-                    </Badge>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors leading-snug">
-                        {tpl.title}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                        {tpl.description}
-                      </p>
-                      {(tpl.using || tpl.withCheck) && (
-                        <div className="mt-2 space-y-1">
-                          {tpl.using && (
-                            <code className="block text-xs font-mono text-primary/70 bg-primary/5 px-2 py-0.5 rounded">
-                              USING ({tpl.using})
-                            </code>
-                          )}
-                          {tpl.withCheck && (
-                            <code className="block text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded">
-                              WITH CHECK ({tpl.withCheck})
-                            </code>
-                          )}
-                        </div>
-                      )}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="grid grid-cols-2 gap-3">
+                {filteredTemplates.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    onClick={() => applyTemplate(tpl)}
+                    className="w-full text-left p-3.5 rounded-lg border border-border bg-background hover:border-primary/30 hover:bg-primary/[0.03] transition-all group"
+                  >
+                    <div className="flex items-start gap-3">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-xs font-boldtracking-widest shrink-0 px-1.5 py-0.5 mt-0.5 border",
+                          COMMAND_STYLES[tpl.command],
+                        )}
+                      >
+                        {tpl.command}
+                      </Badge>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors leading-snug">
+                          {tpl.title}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                          {tpl.description}
+                        </p>
+                        {(tpl.using || tpl.withCheck) && (
+                          <div className="mt-2 space-y-1">
+                            {tpl.using && (
+                              <code className="block text-xs font-mono text-primary/70 bg-primary/5 px-2 py-0.5 rounded">
+                                USING ({tpl.using})
+                              </code>
+                            )}
+                            {tpl.withCheck && (
+                              <code className="block text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded">
+                                WITH CHECK ({tpl.withCheck})
+                              </code>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
 
               {filteredTemplates.length === 0 && (
                 <div className="py-10 text-center text-xs text-muted-foreground/50">
@@ -666,6 +699,7 @@ export function AddRlsPolicySheet({
               )}
             </div>
           </div>
+          )}
         </div>
       </SheetContent>
     </Sheet>

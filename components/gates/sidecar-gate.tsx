@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { LoadingDotSpinner } from "@/components/studio/loading-dot-spinner";
+import { AppBootSkeleton } from "@/components/gates/app-boot-skeleton";
 
 // The Rust side's own health-check fallback (src-tauri/src/lib.rs spawn_sidecar)
 // can take up to ~65s in the worst case (5s initial wait + 30 retries * 2s) to
@@ -89,9 +89,5 @@ export function SidecarGate({ children }: { children: React.ReactNode }) {
 
   if (ready) return <>{children}</>;
 
-  return (
-    <div className="flex h-dvh w-dvw items-center justify-center bg-background">
-      <LoadingDotSpinner size="lg" />
-    </div>
-  );
+  return <AppBootSkeleton />;
 }

@@ -11,6 +11,7 @@ import {
   Rows3,
   Clock4,
 } from "@/lib/icon-theme/lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -270,7 +271,7 @@ export function PendingChangesSheet({
   if (pendingCount === 0) return null;
 
   return (
-    <Sheet open={isReviewSheetOpen} onOpenChange={setIsReviewSheetOpen}>
+    <Sheet open={isReviewSheetOpen} onOpenChange={setIsReviewSheetOpen} modal={!shellLayout}>
       <SheetTrigger asChild>
         <Button
           variant="ghost"
@@ -284,7 +285,13 @@ export function PendingChangesSheet({
           )}
         </Button>
       </SheetTrigger>
-      <SheetContent className="w-full sm:max-w-[500px] flex flex-col p-0 border-l border-border bg-background" contained={shellLayout}>
+      <SheetContent
+        className={cn(
+          "flex flex-col p-0 bg-background",
+          shellLayout ? "border-border" : "w-full sm:max-w-[500px] border-l border-border",
+        )}
+        contained={shellLayout}
+      >
         <SheetHeader className="p-6 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-sm">
             Pending Changes

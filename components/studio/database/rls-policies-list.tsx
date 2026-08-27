@@ -513,6 +513,7 @@ export function RlsPoliciesList({
       <Sheet
         open={!!editingPolicy}
         onOpenChange={(open) => !open && setEditingPolicy(null)}
+        modal={!shellLayout}
       >
         <SheetContent
           side="right"
@@ -533,8 +534,8 @@ export function RlsPoliciesList({
           </SheetHeader>
 
           {editingPolicy && (
-            <div className="flex-1 flex flex-col min-h-0 p-6 gap-4 overflow-hidden">
-              <div className="space-y-4 min-h-0 overflow-y-auto">
+            <div className="flex-1 flex flex-col min-h-0 p-6 gap-4 overflow-y-auto">
+              <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-muted-foreground">

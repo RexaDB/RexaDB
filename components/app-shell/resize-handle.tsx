@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { forwardRef, useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type ResizeHandleProps = {
@@ -16,12 +16,12 @@ type ResizeHandleProps = {
  * lights up on hover/drag and spans the full length of the resized edge.
  * Three dots sit in the middle as a resting affordance (no background pill).
  */
-export function ResizeHandle({
+export const ResizeHandle = forwardRef<HTMLDivElement, ResizeHandleProps>(function ResizeHandle({
   orientation,
   onMouseDown,
   className,
   style,
-}: ResizeHandleProps) {
+}, ref) {
   const isVertical = orientation === "vertical";
   const [dragging, setDragging] = useState(false);
 
@@ -43,6 +43,7 @@ export function ResizeHandle({
 
   return (
     <div
+      ref={ref}
       role="separator"
       aria-orientation={isVertical ? "vertical" : "horizontal"}
       data-dragging={dragging ? "" : undefined}
@@ -89,4 +90,4 @@ export function ResizeHandle({
       </div>
     </div>
   );
-}
+});

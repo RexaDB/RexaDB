@@ -18,7 +18,7 @@ export function AuthProviderSheet({ open, config, onSave, onOpenChange }: AuthPr
   const label = config?.name || "Custom Provider";
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent side="right" contained={shellLayout} className="bg-studio-bg border-studio-border text-foreground w-[min(520px,92vw)] p-0 flex flex-col">
         <SheetHeader className="px-6 py-5 border-b border-studio-border">
           <SheetTitle className="text-sm font-semibold">{label}</SheetTitle>

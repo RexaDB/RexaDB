@@ -403,6 +403,263 @@ fn remove_jdbc_driver(app: tauri::AppHandle, name: String) -> Result<(), String>
     Ok(())
 }
 
+// ─── Desktop-local settings (mirrors lib/db/file-settings.ts) ──────────────
+//
+// The sidecar only writes settings.json once the user runs the in-app
+// migration dialog (some installs stay on the old SQLite storage
+// indefinitely if they dismiss it — see settings-migration-dialog.tsx).
+// These commands never create or migrate that file themselves: if it
+// doesn't exist yet, every getter/setter below returns None/false and the
+// frontend falls back to the sidecar's HTTP endpoints, which still own
+// creation and the SQLite legacy path. Once the file exists, everything
+// here bypasses the sidecar entirely.
+static SETTINGS_FILE_LOCK: Mutex<()> = Mutex::new(());
+
+// Deliberately independent of get_app_data_dir() above — settings.json has
+// always lived in the OS-standard config dir ("Rexa DB", matching
+// file-settings.ts's getAppDataDirSync()), not the legacy Electron/Tauri
+// app-data dir that auth-storage.json and keybindings.json use.
+fn get_desktop_settings_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from(home).join("Library/Application Support/Rexa DB")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA")
+            .unwrap_or_else(|_| format!("{}\\AppData\\Roaming", home));
+        PathBuf::from(appdata).join("Rexa DB")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let xdg = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", home));
+        PathBuf::from(xdg).join("Rexa DB")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        PathBuf::from(".").join("Rexa DB")
+    }
+}
+
+fn read_desktop_settings() -> Option<serde_json::Value> {
+    let path = get_desktop_settings_dir().join("settings.json");
+    let content = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if value.is_object() {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+// Atomic write: temp file + rename, same as file-settings.ts's writeSettingsJson.
+fn write_desktop_settings(data: &serde_json::Value) -> Result<(), String> {
+    let dir = get_desktop_settings_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("settings.json");
+    let tmp_path = dir.join("settings.json.tmp");
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
+    fs::write(&tmp_path, json).map_err(|e| e.to_string())?;
+    fs::rename(&tmp_path, &path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Read-modify-write against settings.json, serialized against concurrent
+/// Rust-side writers. Returns Ok(false) (no-op) if the file doesn't exist
+/// yet, so callers can fall back to the sidecar instead of originating a
+/// migration Rust has no business starting.
+fn update_desktop_settings<F>(mutate: F) -> Result<bool, String>
+where
+    F: FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+{
+    let _guard = SETTINGS_FILE_LOCK.lock().unwrap();
+    let Some(mut current) = read_desktop_settings() else {
+        return Ok(false);
+    };
+    {
+        let obj = current
+            .as_object_mut()
+            .ok_or_else(|| "settings.json is not an object".to_string())?;
+        mutate(obj);
+        obj.insert("_version".to_string(), serde_json::json!(1));
+    }
+    write_desktop_settings(&current)?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn settings_get_app_font_family() -> Option<String> {
+    let data = read_desktop_settings()?;
+    Some(
+        data.get("app_font_family")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    )
+}
+
+#[tauri::command]
+fn settings_save_app_font_family(font_family: Option<String>) -> Result<bool, String> {
+    let normalized = font_family.unwrap_or_default().trim().to_string();
+    update_desktop_settings(|obj| {
+        if normalized.is_empty() {
+            obj.remove("app_font_family");
+        } else {
+            obj.insert("app_font_family".to_string(), serde_json::json!(normalized));
+        }
+    })
+}
+
+#[derive(Serialize)]
+struct AppThemeSettings {
+    #[serde(rename = "appThemeId")]
+    app_theme_id: String,
+    #[serde(rename = "customAppThemes")]
+    custom_app_themes: String,
+}
+
+#[tauri::command]
+fn settings_get_app_theme() -> Option<AppThemeSettings> {
+    let data = read_desktop_settings()?;
+    Some(AppThemeSettings {
+        app_theme_id: data
+            .get("app_theme_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("zinc-dark-white")
+            .to_string(),
+        custom_app_themes: data
+            .get("custom_app_themes")
+            .and_then(|v| v.as_str())
+            .unwrap_or("[]")
+            .to_string(),
+    })
+}
+
+#[tauri::command]
+fn settings_save_app_theme(app_theme_id: String, custom_app_themes: String) -> Result<bool, String> {
+    let theme_id = {
+        let t = app_theme_id.trim();
+        if t.is_empty() { "zinc-dark-white".to_string() } else { t.to_string() }
+    };
+    let themes = {
+        let t = custom_app_themes.trim();
+        if t.is_empty() { "[]".to_string() } else { t.to_string() }
+    };
+    update_desktop_settings(|obj| {
+        obj.insert("app_theme_id".to_string(), serde_json::json!(theme_id));
+        obj.insert("custom_app_themes".to_string(), serde_json::json!(themes));
+    })
+}
+
+#[derive(Serialize)]
+struct EditorThemeSettings {
+    #[serde(rename = "editorThemeId")]
+    editor_theme_id: String,
+    #[serde(rename = "customEditorThemes")]
+    custom_editor_themes: String,
+}
+
+#[tauri::command]
+fn settings_get_editor_theme() -> Option<EditorThemeSettings> {
+    let data = read_desktop_settings()?;
+    Some(EditorThemeSettings {
+        editor_theme_id: data
+            .get("editor_theme_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto")
+            .to_string(),
+        custom_editor_themes: data
+            .get("custom_editor_themes")
+            .and_then(|v| v.as_str())
+            .unwrap_or("[]")
+            .to_string(),
+    })
+}
+
+#[tauri::command]
+fn settings_save_editor_theme(
+    editor_theme_id: String,
+    custom_editor_themes: String,
+) -> Result<bool, String> {
+    let theme_id = {
+        let t = editor_theme_id.trim();
+        if t.is_empty() { "auto".to_string() } else { t.to_string() }
+    };
+    let themes = {
+        let t = custom_editor_themes.trim();
+        if t.is_empty() { "[]".to_string() } else { t.to_string() }
+    };
+    update_desktop_settings(|obj| {
+        obj.insert("editor_theme_id".to_string(), serde_json::json!(theme_id));
+        obj.insert("custom_editor_themes".to_string(), serde_json::json!(themes));
+    })
+}
+
+#[tauri::command]
+fn settings_get_studio_settings() -> Option<serde_json::Value> {
+    let data = read_desktop_settings()?;
+    Some(
+        data.get("studio_settings")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    )
+}
+
+#[tauri::command]
+fn settings_save_studio_settings(settings: serde_json::Value) -> Result<bool, String> {
+    update_desktop_settings(|obj| {
+        obj.insert("studio_settings".to_string(), settings);
+    })
+}
+
+// Keybindings live in the legacy app-data dir (get_app_data_dir), not the
+// "Rexa DB" settings dir — same file resolveDbPath("keybindings.json")
+// resolves to on the sidecar, since REXADB_USER_DATA_DIR is set from
+// get_app_data_dir() when the sidecar is spawned below.
+fn get_keybindings_path(app: &tauri::AppHandle) -> PathBuf {
+    get_app_data_dir(app).join("keybindings.json")
+}
+
+#[derive(Serialize)]
+struct KeybindingsResult {
+    data: serde_json::Value,
+    #[serde(rename = "filePath")]
+    file_path: String,
+}
+
+#[tauri::command]
+fn settings_get_keybindings(app: tauri::AppHandle) -> Option<KeybindingsResult> {
+    let path = get_keybindings_path(&app);
+    let content = fs::read_to_string(&path).ok()?;
+    let data: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if !data.is_object() {
+        return None;
+    }
+    Some(KeybindingsResult {
+        data,
+        file_path: path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn settings_save_keybindings(
+    app: tauri::AppHandle,
+    keybindings: serde_json::Value,
+) -> Result<bool, String> {
+    let _guard = SETTINGS_FILE_LOCK.lock().unwrap();
+    let path = get_keybindings_path(&app);
+    // Only ever overwrite a file the sidecar has already seeded (with
+    // defaults + any legacy per-connection migration) — Rust doesn't know
+    // the default keybinding set, so it must not be the one to create this.
+    if !path.exists() {
+        return Ok(false);
+    }
+    let json = serde_json::to_string_pretty(&keybindings).map_err(|e| e.to_string())?;
+    fs::write(&path, format!("{}\n", json)).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 impl SidecarState {
     fn new() -> Self {
@@ -526,10 +783,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_frame::FramePluginBuilder::new().auto_titlebar(true).build())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
+            // On Windows, strip the native title bar so our custom header
+            // (WindowControls in the app header) owns the entire top strip —
+            // same approach as Athas/VS Code. No tauri-plugin-frame overlay,
+            // so no pointer-event blocking.
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_decorations(false);
+            }
 
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
@@ -568,6 +833,16 @@ pub fn run() {
             save_jdbc_driver_manifest,
             load_jdbc_drivers,
             remove_jdbc_driver,
+            settings_get_app_font_family,
+            settings_save_app_font_family,
+            settings_get_app_theme,
+            settings_save_app_theme,
+            settings_get_editor_theme,
+            settings_save_editor_theme,
+            settings_get_studio_settings,
+            settings_save_studio_settings,
+            settings_get_keybindings,
+            settings_save_keybindings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

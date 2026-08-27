@@ -23,7 +23,7 @@ async function withPgClientRead<T>(
         if (params && params.length > 0) {
           params.forEach((p, i) => {
             const escaped = typeof p === "string" ? `'${String(p).replace(/'/g, "''")}'` : String(p);
-            q = q.replace(new RegExp(`\\$${i + 1}\\b`), escaped);
+            q = q.replace(new RegExp(`\\$${i + 1}\\b`, "g"), escaped);
           });
         }
         const { executeDbQuery } = await import("./db-engine/query");
@@ -55,7 +55,7 @@ async function withPgClientWrite(
         if (params && params.length > 0) {
           params.forEach((p, i) => {
             const escaped = typeof p === "string" ? `'${String(p).replace(/'/g, "''")}'` : String(p);
-            q = q.replace(new RegExp(`\\$${i + 1}\\b`), escaped);
+            q = q.replace(new RegExp(`\\$${i + 1}\\b`, "g"), escaped);
           });
         }
         const { executeDbQuery } = await import("./db-engine/query");

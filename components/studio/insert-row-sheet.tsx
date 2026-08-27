@@ -7,6 +7,7 @@ import {
   Sheet,
   SheetContent,
   SheetHeader,
+  SheetTitle,
   SheetDescription,
   SheetFooter,
 } from '@/components/ui/sheet';
@@ -68,6 +69,7 @@ export function InsertRowSheet({
         {ConfirmDialog}
         <div className="flex flex-col h-full">
           <SheetHeader className="h-12 border-b shrink-0 flex items-center px-4">
+            <SheetTitle className="sr-only">Insert row{selectedTable ? ` into ${selectedTable}` : ""}</SheetTitle>
             <SheetDescription className="text-xs text-muted-foreground">
               Add a new record to <span className="font-mono text-primary bg-primary/10 px-1 rounded">{selectedTable}</span>.
             </SheetDescription>

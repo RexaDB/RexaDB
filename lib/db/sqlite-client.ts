@@ -79,6 +79,11 @@ function quoteIdentifier(value: string) {
   return quoteSqliteIdentifier(value);
 }
 
+function effectiveSchema(schema: string): string {
+  const s = String(schema || "").trim();
+  return s ? s : "main";
+}
+
 function normalizeFsPath(decodedPath: string) {
   if (/^\/[a-zA-Z]:\//.test(decodedPath)) {
     return decodedPath.slice(1);
@@ -463,8 +468,9 @@ export async function executeSqliteQuery(
 
 export async function getSqliteTables(connectionString: string, schema: string) {
   return await withDb(connectionString, async (db) => {
+    const s = effectiveSchema(schema);
     const rows = await db.all(
-      `SELECT name FROM ${quoteIdentifier(schema)}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
+      `SELECT name FROM ${quoteIdentifier(s)}.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
     );
     return rows.map((row) => String(row.name));
   });
@@ -472,8 +478,9 @@ export async function getSqliteTables(connectionString: string, schema: string) 
 
 export async function getSqliteViews(connectionString: string, schema: string) {
   return await withDb(connectionString, async (db) => {
+    const s = effectiveSchema(schema);
     const rows = await db.all(
-      `SELECT name FROM ${quoteIdentifier(schema)}.sqlite_master WHERE type = 'view' ORDER BY name`,
+      `SELECT name FROM ${quoteIdentifier(s)}.sqlite_master WHERE type = 'view' ORDER BY name`,
     );
     return rows.map((row) => String(row.name));
   });
@@ -496,11 +503,12 @@ export async function getSqliteTableStructure(
   table: string,
 ) {
   return await withDb(connectionString, async (db) => {
+    const s = effectiveSchema(schema);
     const tableInfo = (await db.all(
-      `PRAGMA ${quoteIdentifier(schema)}.table_info(${quoteIdentifier(table)});`,
+      `PRAGMA ${quoteIdentifier(s)}.table_info(${quoteIdentifier(table)});`,
     )) as unknown as SqliteTableInfoRow[];
     const foreignKeys = (await db.all(
-      `PRAGMA ${quoteIdentifier(schema)}.foreign_key_list(${quoteIdentifier(table)});`,
+      `PRAGMA ${quoteIdentifier(s)}.foreign_key_list(${quoteIdentifier(table)});`,
     )) as unknown as SqliteForeignKeyRow[];
     const fkColumns = new Set(foreignKeys.map((fk) => fk.from));
 
@@ -521,8 +529,9 @@ export async function getSqlitePrimaryKey(
   table: string,
 ) {
   return await withDb(connectionString, async (db) => {
+    const s = effectiveSchema(schema);
     const tableInfo = (await db.all(
-      `PRAGMA ${quoteIdentifier(schema)}.table_info(${quoteIdentifier(table)});`,
+      `PRAGMA ${quoteIdentifier(s)}.table_info(${quoteIdentifier(table)});`,
     )) as unknown as SqliteTableInfoRow[];
     const orderedPkColumns = tableInfo
       .filter((column) => Number(column.pk || 0) > 0)
@@ -537,8 +546,9 @@ export async function getSqliteForeignKeys(
   table: string,
 ) {
   return await withDb(connectionString, async (db) => {
+    const s = effectiveSchema(schema);
     const foreignKeys = (await db.all(
-      `PRAGMA ${quoteIdentifier(schema)}.foreign_key_list(${quoteIdentifier(table)});`,
+      `PRAGMA ${quoteIdentifier(s)}.foreign_key_list(${quoteIdentifier(table)});`,
     )) as unknown as SqliteForeignKeyRow[];
     return foreignKeys.map((fk) => ({
       column_name: fk.from,
@@ -557,7 +567,8 @@ export async function deleteSqliteRows(
   pkValues: unknown[],
 ) {
   return await withDb(connectionString, async (db) => {
-    const tableRef = `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+    const s = effectiveSchema(schema);
+    const tableRef = `${quoteIdentifier(s)}.${quoteIdentifier(table)}`;
     const placeholders = pkValues.map(() => "?").join(", ");
     const info = await db.run(
       `DELETE FROM ${tableRef} WHERE ${quoteIdentifier(pkColumn)} IN (${placeholders})`,
@@ -577,7 +588,8 @@ export async function updateSqliteRows(
   }>,
 ) {
   return await withDb(connectionString, async (db) => {
-    const tableRef = `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+    const s = effectiveSchema(schema);
+    const tableRef = `${quoteIdentifier(s)}.${quoteIdentifier(table)}`;
     await db.run("BEGIN");
     try {
       for (const update of updates) {
@@ -616,7 +628,8 @@ export async function getSqliteReferencedRecord(
   keyValues: Record<string, unknown>,
 ) {
   return await withDb(connectionString, async (db) => {
-    const tableRef = `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+    const s = effectiveSchema(schema);
+    const tableRef = `${quoteIdentifier(s)}.${quoteIdentifier(table)}`;
 
     const result = buildKeyConditions(quoteIdentifier, keyValues);
     if (!result) return { row: null, fields: [] };

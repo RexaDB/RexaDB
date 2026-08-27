@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { ArrowUp, X, Plus, Shield, Settings } from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api-base";
 
 import { AiPermissionDialog } from "@/components/studio/ai/ai-permission-dialog";
 import { AiPromptInput } from "@/components/studio/ai/ai-prompt-input";
@@ -28,6 +29,11 @@ import { AiMentionMenu } from "@/components/studio/ai/ai-mention-menu";
 import { AiMessageList } from "@/components/studio/ai/ai-message-list";
 import type { GlobalAiSettings } from "@/lib/api/actions-client";
 import { AiModelPicker } from "@/components/studio/ai/ai-model-picker";
+import AgentSidebarPromptBar from "@/components/studio/ai/agent-sidebar-prompt-bar";
+import LoadingState from "@/components/studio/ai/loading-state";
+import AgentTrace from "@/components/studio/ai/agent-trace";
+import ApprovalCard from "@/components/studio/ai/approval-card";
+import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
 import { useAiUser } from "@/hooks/use-ai-user";
@@ -51,6 +57,10 @@ interface AiChatSheetProps {
   /** Chat (thread) to select when the panel opens. */
   initialChatId?: string | null;
   startNewChatToken?: number;
+  /** Incrementing token to force re-select even when initialChatId is unchanged. */
+  initialChatSelectToken?: number;
+  /** Called whenever the sheet's internal active chat changes (incl. "New Chat"). */
+  onActiveChatChange?: (chatId: string | null) => void;
   dashboards?: any[];
   connectionId: number;
   connectionString: string;
@@ -87,6 +97,8 @@ export function AiChatSheet({
   initialPrompt,
   initialChatId,
   startNewChatToken,
+  initialChatSelectToken,
+  onActiveChatChange,
   dashboards = [],
   connectionId,
   connectionString,
@@ -212,6 +224,7 @@ export function AiChatSheet({
     settings,
     chats,
     messages,
+    steps,
     isLoading,
     isSending,
     activeChatId,
@@ -221,6 +234,9 @@ export function AiChatSheet({
     startNewChat,
     removeChat,
     loadChats,
+    pendingApproval,
+    setPendingApproval,
+    stopGeneration,
   } = useAiAssistant({
     connectionId,
     connectionString,
@@ -231,6 +247,15 @@ export function AiChatSheet({
     workflowContext,
     userId,
   });
+
+  const onActiveChatChangeRef = useRef(onActiveChatChange);
+  useEffect(() => {
+    onActiveChatChangeRef.current = onActiveChatChange;
+  });
+  useEffect(() => {
+    onActiveChatChangeRef.current?.(activeChatId);
+  }, [activeChatId]);
+
   const rankedMentionCatalog = useMemo(() => {
     return [...mentionCatalog].sort((a, b) => {
       const aSelected = a.schema === selectedNamespace ? 0 : 1;
@@ -291,6 +316,159 @@ export function AiChatSheet({
     [dashboardMentionItems, rankedMentionCatalog],
   );
 
+  // ── PromptBar sidebar wiring (replaces classic AiPromptInput + AiModelPicker) ──
+  const discoveredAgents = useDiscoveredAgents();
+
+  const sidebarModels = useMemo(() => {
+    if (!settings) return null;
+    const { agents, llmModels } = getConfiguredModels(settings, discoveredAgents);
+    const models: Array<{ key: string; name: string; tag?: string; provider: string; model: string }> = [];
+    for (const a of agents) {
+      models.push({ key: `external:${a.id}`, name: a.model, tag: "Agent", provider: "external", model: a.id });
+    }
+    for (const m of llmModels) {
+      models.push({ key: `${m.provider}:${m.model}`, name: m.model, tag: m.provider, provider: m.provider, model: m.model });
+    }
+    // Return actual configured models — may be empty if the user has not
+    // configured any provider. The pill must point at *real* models, not the
+    // demo defaults (sprinkles/vanilla).
+    return models;
+  }, [settings, discoveredAgents]);
+
+  const sidebarSources = useMemo(() => {
+    const sources: Array<{ key: string; name: string; desc: string; glyph?: string }> = [
+      { key: "attach", name: "Add photos & files", desc: "Upload from your computer", glyph: "clip" },
+    ];
+    // tables first (up to 20 for menu brevity)
+    for (const entry of rankedMentionCatalog.slice(0, 20)) {
+      sources.push({
+        key: `table:${entry.schema}.${entry.table}`,
+        name: `${entry.schema}.${entry.table}`,
+        desc: `${entry.columns.length} columns`,
+        glyph: "table",
+      });
+    }
+    // dashboards
+    for (const d of dashboardMentionItems.slice(0, 10)) {
+      sources.push({ key: `dash:${d.value}`, name: d.label, desc: `@${d.value}`, glyph: "layers" });
+    }
+    // generic helpers
+    sources.push(
+      { key: "web", name: "Web search", desc: "Real-time news and info", glyph: "globe" },
+      { key: "cmd", name: "Commands", desc: "Type / to see commands", glyph: "command" },
+    );
+    return sources;
+  }, [rankedMentionCatalog, dashboardMentionItems]);
+
+  const sidebarCommands = useMemo(
+    () => [
+      { key: "explain", name: "/explain", desc: "Explain a query plan" },
+      { key: "summarize", name: "/summarize", desc: "Summarize a table" },
+      { key: "generate", name: "/generate", desc: "Generate SQL" },
+      { key: "compare", name: "/compare", desc: "Compare schemas" },
+    ],
+    [],
+  );
+
+  const selectedModelKey = useMemo(() => {
+    if (currentProvider && currentModel) {
+      // external agents use "external:<id>" as key, llm models use "<provider>:<model>"
+      const direct = `${currentProvider}:${currentModel}`;
+      if (sidebarModels?.some((m) => m.key === direct)) return direct;
+      // fallback for legacy stored values where currentModel already equals the key
+      if (sidebarModels?.some((m) => m.key === currentModel)) return currentModel;
+      return direct;
+    }
+    if (currentModel && sidebarModels?.some((m) => m.key === currentModel)) return currentModel;
+    if (sidebarModels && sidebarModels[0]) return sidebarModels[0].key;
+    return undefined;
+  }, [currentProvider, currentModel, sidebarModels]);
+
+  const handlePromptBarSend = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setMessage("");
+      // If there's a pending tool-based approval, the typed text is the answer to that approval.
+      // Submit it via the approval API and return — don't also send as a new user message,
+      // otherwise the agent gets two turns and hangs waiting for the tool.
+      if (pendingApproval) {
+        try {
+          const firstQ = pendingApproval.questions[0];
+          if (firstQ) {
+            const matched = firstQ.options.find((opt) => trimmed.toLowerCase().includes(opt.toLowerCase()));
+            const answers = matched
+              ? [{ question: firstQ.q, type: firstQ.type, selected: [matched] }]
+              : [{ question: firstQ.q, type: firstQ.type as string, selected: [], custom: trimmed }];
+            await apiFetch("/api/agent/approval/submit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ toolCallId: pendingApproval.id, answers }),
+            });
+            setPendingApproval(null);
+            return;
+          }
+        } catch {}
+      }
+      const provider = currentProvider || Object.keys(settings?.providers || {})[0] || "openai";
+      const model = currentModel || "";
+      await sendMessage(trimmed, provider, model);
+    },
+    [currentProvider, currentModel, sendMessage, settings, pendingApproval, setPendingApproval],
+  );
+
+  const handleApprovalSubmit = useCallback(
+    async (answers: { question: string; type: string; selected: string[]; custom?: string }[]) => {
+      const answered = answers.filter((a) => a.selected.length > 0 || (a.custom && a.custom.trim()));
+      // Tool-based approval: resolve the pending tool and return — do NOT send a new user message,
+      // otherwise the agent hangs waiting for the tool while also getting a new turn.
+      if (pendingApproval) {
+        const toSubmit = answered.length ? answered : [];
+        try {
+          await apiFetch("/api/agent/approval/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ toolCallId: pendingApproval.id, answers: toSubmit }),
+          });
+        } catch {}
+        setPendingApproval(null);
+        return;
+      }
+      if (answered.length === 0) return;
+      const formatted = answered
+        .map((a) => {
+          const parts = [...a.selected];
+          if (a.custom?.trim()) parts.push(a.custom.trim());
+          return `Q: ${a.question}\nA: ${parts.join(", ")}`;
+        })
+        .join("\n\n");
+      const prompt = `Approval answers:\n${formatted}`;
+      const provider = currentProvider || Object.keys(settings?.providers || {})[0] || "openai";
+      const model = currentModel || "";
+      await sendMessage(prompt, provider, model);
+    },
+    [currentProvider, currentModel, sendMessage, settings, pendingApproval, setPendingApproval],
+  );
+
+  const handlePromptBarModelChange = useCallback(
+    (m: { key: string; provider: string; model: string }) => {
+      setCurrentProvider(m.provider);
+      setCurrentModel(m.model);
+    },
+    [],
+  );
+
+  // Auto-select the first *actual* model once settings load — so the pill
+  // reflects the user's real configuration instead of the demo defaults.
+  useEffect(() => {
+    if (!settings) return;
+    if (currentProvider || currentModel) return;
+    if (!sidebarModels || sidebarModels.length === 0) return;
+    const first = sidebarModels[0];
+    setCurrentProvider(first.provider);
+    setCurrentModel(first.model);
+  }, [settings, sidebarModels, currentProvider, currentModel]);
+
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (!composerRef.current?.contains(event.target as Node)) {
@@ -325,7 +503,7 @@ export function AiChatSheet({
   useEffect(() => {
     if (!isOpen || !initialChatId) return;
     setActiveChatId(initialChatId);
-  }, [isOpen, initialChatId, setActiveChatId]);
+  }, [isOpen, initialChatId, initialChatSelectToken, setActiveChatId]);
 
   const handleSendMessage = async () => {
     if (!message.trim()) return;
@@ -495,115 +673,82 @@ export function AiChatSheet({
               onSendToSql={onSendToSql}
               userName={userName}
               workflowApplyBusy={workflowApplyBusy}
+              onApprovalSubmit={handleApprovalSubmit}
             />
+            {pendingApproval && (
+              <div className="px-4 pt-2 pb-2">
+                <div className="mx-auto max-w-2xl">
+                  <ApprovalCard
+                    questions={pendingApproval.questions}
+                    onAnswersSubmit={(answers) => {
+                      setPendingApproval(null);
+                      void handleApprovalSubmit(answers);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            {isSending && messages.length > 0 && (
+              <div className="px-4 pt-2 pb-2">
+                <div className="mx-auto max-w-2xl">
+                  <AgentTrace steps={steps} active={isSending} />
+                </div>
+              </div>
+            )}
+            {isSending && messages.length === 0 && (
+              <div className="px-4 pt-6">
+                <div className="mx-auto max-w-2xl">
+                  <AgentTrace steps={steps} active={isSending} />
+                </div>
+              </div>
+            )}
+            {!isSending && isLoading && messages.length === 0 && (
+              <div className="px-4 pt-6">
+                <div className="mx-auto max-w-2xl">
+                  <LoadingState label="Generating" variant="Drive" active={isLoading} />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-3">
             <div className="pointer-events-auto relative" ref={composerRef}>
-              <AiMentionMenu
-                activeIndex={activeMentionIndex}
-                items={mentionItems}
-                onSelect={handleMentionSelect}
+              {/* Agent sidebar prompt bar — replaces legacy AiPromptInput + AiModelPicker.
+                  Sidebar-shaped composer with @ sources, / commands, model picker, and sweep. */}
+              <AgentSidebarPromptBar
+                value={message}
+                onChange={(v) => {
+                  setMessage(v);
+                  setActiveMentionIndex(0);
+                  setIsMentionMenuOpen(/(?:^|\s)@([a-zA-Z0-9_.-]*)$/.test(v));
+                }}
+                onSend={(text) => void handlePromptBarSend(text)}
+                onStop={stopGeneration}
+                isStreaming={isSending}
+                placeholder="Write a message..."
+                disabled={isLoading}
+                sources={sidebarSources as any}
+                commands={sidebarCommands}
+                // Pill + actual models: always point at the user's real config,
+                // not the demo "sprinkles/vanilla" fixtures.
+                models={
+                  sidebarModels
+                    ? sidebarModels.map((m) => ({ key: m.key, name: m.name, tag: m.tag }))
+                    : // settings still loading — show empty rather than demo defaults;
+                      // the bar will update once sidebarModels resolves
+                      []
+                }
+                selectedModelKey={selectedModelKey}
+                onModelChange={(m) => {
+                  const found = sidebarModels?.find((x) => x.key === m.key);
+                  if (found) handlePromptBarModelChange(found);
+                }}
+                onAddModels={_onOpenSettings}
+                validMentions={validMentions}
+                variant="Pill"
+                demo={false}
+                tall={false}
               />
-              <div className="rounded-lg border border-border/80 bg-background px-2.5 py-2 shadow-lg">
-                <AiPromptInput
-                  disabled={isLoading || isSending}
-                  onChange={(nextValue) => {
-                    setMessage(nextValue);
-                    setActiveMentionIndex(0);
-                    setIsMentionMenuOpen(
-                      /(?:^|\s)@([a-zA-Z0-9_.-]*)$/.test(nextValue),
-                    );
-                  }}
-                  onFocus={() => {
-                    if (/(?:^|\s)@([a-zA-Z0-9_.-]*)$/.test(message)) {
-                      setIsMentionMenuOpen(true);
-                    }
-                  }}
-                  onBlur={(event) => {
-                    if (
-                      !composerRef.current?.contains(
-                        event.relatedTarget as Node | null,
-                      )
-                    ) {
-                      setIsMentionMenuOpen(false);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (mentionItems.length > 0 && event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setActiveMentionIndex(
-                        (current) => (current + 1) % mentionItems.length,
-                      );
-                      return;
-                    }
-                    if (mentionItems.length > 0 && event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setActiveMentionIndex(
-                        (current) =>
-                          (current - 1 + mentionItems.length) %
-                          mentionItems.length,
-                      );
-                      return;
-                    }
-                    if (
-                      mentionItems.length > 0 &&
-                      (event.key === "Enter" || event.key === "Tab")
-                    ) {
-                      event.preventDefault();
-                      handleMentionSelect(
-                        mentionItems[activeMentionIndex] || mentionItems[0],
-                      );
-                      return;
-                    }
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      void handleSendMessage();
-                    }
-                  }}
-                  placeholder="Ask a question... (@ to mention)"
-                  validMentions={validMentions}
-                  value={message}
-                />
-
-                <div className="mt-2 flex items-center justify-between">
-                  {settings ? (
-                    <AiModelPicker
-                      currentProvider={currentProvider}
-                      currentModel={currentModel}
-                      onAddModels={_onOpenSettings}
-                      onSelectProvider={(provider, model) => {
-                        setCurrentProvider(provider);
-                        setCurrentModel(model);
-                      }}
-                      settings={settings}
-                    />
-                  ) : (
-                    <div />
-                  )}
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        className="h-7 w-7 rounded-lg"
-                        disabled={isLoading || isSending || !message.trim()}
-                        onClick={() => void handleSendMessage()}
-                        size="icon"
-                      >
-                        <ArrowUp className="h-3 w-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      className="rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground shadow-md"
-                      hideArrow
-                      side="top"
-                      sideOffset={6}
-                    >
-                      Send
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
             </div>
           </div>
         </div>

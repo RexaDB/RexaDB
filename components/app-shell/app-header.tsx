@@ -88,6 +88,18 @@ export type AppHeaderProps = AppHeaderTabsProps & {
 	 * should act as the macOS titlebar. Defaults to true.
 	 */
 	windowDragRegion?: boolean;
+	/**
+	 * Hide the window controls (minimize/maximize/close) from this tab strip.
+	 * Used in Modern UI, where the floating title bar already renders them in
+	 * the top-right corner. Defaults to false.
+	 */
+	hideWindowControls?: boolean;
+	/**
+	 * Show the Home / frequently-viewed-tabs controls that appear in the tab
+	 * strip when the sidebar is collapsed. Modern UI already has its own nav
+	 * rail with a Home item, so this is New-Layout-only. Defaults to true.
+	 */
+	showCollapsedNavControls?: boolean;
 };
 
 export function AppHeader({
@@ -115,11 +127,12 @@ export function AppHeader({
 	onClosePane,
 	className,
 	windowDragRegion = true,
+	hideWindowControls = false,
+	showCollapsedNavControls = true,
 }: AppHeaderProps) {
 	const { state: sidebarState } = useSidebar();
-	const { isMaximized, sendWindowAction, canUseDesktop, isMac, isWindows, isLinuxCloseOnly } = useDesktopWindow();
+	const { isMaximized, sendWindowAction, canUseDesktop, isMac, isLinuxCloseOnly } = useDesktopWindow();
 	const sidebarCollapsed = sidebarState === "collapsed";
-	const windowsFrameInset = isWindows ? "var(--tauri-frame-controls-width, 138px)" : undefined;
 	const trafficLightInset = isMac ? macTrafficLightInset : 0;
 
 	return (
@@ -127,16 +140,14 @@ export function AppHeader({
 			className={cn(
 				// h-9 + p-1 matches tab height (h-7) so left/right inset equals top/bottom.
 				"relative sticky top-0 z-50 flex h-9 shrink-0 items-center justify-between gap-1 p-1",
-				windowDragRegion && isWindows && "app-drag-region",
+				windowDragRegion && "app-drag-region",
 				className
 			)}
 			data-tauri-drag-region={windowDragRegion ? "deep" : "false"}
 			style={
 				trafficLightInset && sidebarCollapsed
 					? { paddingLeft: `${trafficLightInset}px` }
-					: windowsFrameInset
-						? { paddingRight: windowsFrameInset }
-						: undefined
+					: undefined
 			}
 		>
 			{!isMac && !hideUserAvatar && sidebarCollapsed && (
@@ -146,7 +157,7 @@ export function AppHeader({
 			)}
 			<div className="flex min-w-0 flex-1 items-center gap-1">
 				<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
-					{sidebarCollapsed && tabs.length > 0 && (
+					{showCollapsedNavControls && sidebarCollapsed && tabs.length > 0 && (
 						<>
 							{showHome && (
 								<Tooltip>
@@ -311,7 +322,7 @@ export function AppHeader({
 				{isMac && !hideUserAvatar && (
 					<NavUser name={user?.name} email={user?.email} />
 				)}
-				{canUseDesktop && !isMac && !isWindows && (
+				{canUseDesktop && !isMac && !hideWindowControls && (
 					<WindowControls
 						isMaximized={isMaximized}
 						onMinimize={() => sendWindowAction("minimize")}

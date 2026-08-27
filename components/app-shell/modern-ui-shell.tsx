@@ -8,11 +8,18 @@ import { AppHeader } from "@/components/app-shell/app-header";
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import type { AppHeaderTabsProps } from "@/components/app-shell/app-shared";
 import { useTranslucentShell } from "@/hooks/use-translucent-shell";
-import { ModernUIRail } from "@/components/app-shell/modern-ui-rail";
+import { ModernUIRail, type ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
+import {
+	Dialog,
+	DialogContent,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { SettingsView } from "@/components/studio/settings-view";
 import { ModernSqlEditorPanel } from "@/components/app-shell/modern-sql-editor-panel";
 import { ModernVscodeHeader } from "@/components/app-shell/modern-vscode-header";
 import { ModernStatusBar } from "@/components/app-shell/modern-status-bar";
 import { ResizeHandle } from "@/components/app-shell/resize-handle";
+import { SheetDockContext } from "@/components/ui/sheet";
 import { buildShortcutCombo } from "@/lib/studio/keybindings";
 
 /**
@@ -25,11 +32,29 @@ export type ModernUIShellProps = {
 	children: React.ReactNode;
 	/** Studio state used to drive the navigation rail. */
 	studio: any;
+	/** Local-only connection switch handler for the title-bar connection
+	 *  dropdown. When omitted, the dropdown navigates to `/studio/{id}`. */
+	onHeaderSelectConnection?: (conn: import("@/lib/db/schema").Connection) => void | Promise<void>;
 	/** Custom sidebar body. When set, replaces the default connections nav. */
 	sidebarContent?: React.ReactNode;
+	/** Active section id for the default sidebar body (when `sidebarContent`
+	 *  is omitted), e.g. "connections" | "analytics" | "settings". */
+	activePath?: string;
+	/** Called with a section id when a default-sidebar nav item is selected. */
+	onNavigate?: (path: string) => void;
+	/** Called when the default sidebar's "New Connection" action is pressed. */
+	onNewConnection?: () => void;
+	/** Default sidebar: currently selected connection (drives the picker). */
+	selectedConnectionId?: number | null;
+	/** Default sidebar: called when a connection is picked in the list. */
+	onSelectConnection?: (id: number, name?: string, type?: string | null) => void;
+	/** Connections shown in the default sidebar's list. */
+	connections?: import("@/lib/db/schema").Connection[];
 	/** AI chat panel rendered as an in-flow column to the right of the content
 	 *  card. It pushes/squeezes the content card like the app sidebar does. */
 	aiChatPanel?: React.ReactNode;
+	/** Called when the Agents button is clicked (opens agents in a new window). */
+	onAgentsClick?: () => void;
 	/** SQL editor sheet (Cmd+E) rendered as an in-flow column like the AI chat. */
 	sqlSheetPanel?: React.ReactNode;
 	/** Controlled SQL sheet open state. */
@@ -54,6 +79,32 @@ export type ModernUIShellProps = {
 	onOpenSearch?: () => void;
 	/** User keybindings so the layout controls show real, custom combos. */
 	keybindings?: Record<string, any>;
+	/** Overrides the rail's studio-derived nav items (dashboard/tables/sql/...)
+	 *  with a custom set. Used by surfaces with no active studio connection,
+	 *  e.g. the connections list. */
+	railItems?: ModernUIRailItem[];
+	/** Highlighted item id when `railItems` is provided. */
+	railActiveId?: string | null;
+	/** Overrides the rail's bottom "Settings" item to route elsewhere instead
+	 *  of the built-in studio SettingsView dialog. */
+	onSettingsClick?: () => void;
+	/** Highlights the rail's "Settings" item when routing via `onSettingsClick`. */
+	settingsActive?: boolean;
+	/** Skips rendering the built-in settings Dialog. Set by callers (like
+	 *  StudioInterface) that render their own settings Dialog as a sibling
+	 *  outside the shell, so it keeps the same position in the tree — and
+	 *  doesn't get remounted — when the layout switches away from Modern UI. */
+	hideSettingsDialog?: boolean;
+	/** Shows the rail's bottom "Home" item. Defaults to true. */
+	railShowHome?: boolean;
+	/** Shows the rail's bottom "Workspace" item. Defaults to true. */
+	railShowWorkspace?: boolean;
+	/** Whether the bottom "SQL Editor" panel (Cmd+J) is available. It renders
+	 *  `<ModernSqlEditorPanel studio={studio} />`, which needs a full studio
+	 *  session (query execution, snippets, etc.) — disable on surfaces with no
+	 *  active studio connection, e.g. the connections list, to avoid crashing
+	 *  on `studio.connection.id`. Defaults to true. */
+	enableBottomSqlPanel?: boolean;
 	// Background noise
 	noiseBgEnabled?: boolean;
 	noiseBgOpacity?: number;
@@ -66,8 +117,16 @@ export type ModernUIShellProps = {
 export function ModernUIShell({
 	children,
 	studio,
+	onHeaderSelectConnection,
 	sidebarContent,
+	activePath,
+	onNavigate,
+	onNewConnection,
+	selectedConnectionId,
+	onSelectConnection,
+	connections,
 	aiChatPanel,
+	onAgentsClick,
 	sqlSheetPanel,
 	isSqlSheetOpen,
 	threadsPanel,
@@ -92,6 +151,14 @@ export function ModernUIShell({
 	onQueryHistory,
 	onOpenSearch,
 	keybindings,
+	railItems,
+	railActiveId,
+	onSettingsClick,
+	settingsActive,
+	hideSettingsDialog,
+	railShowHome = true,
+	railShowWorkspace = true,
+	enableBottomSqlPanel = true,
 	noiseBgEnabled,
 	noiseBgOpacity = 30,
 	noiseBgSize = 50,
@@ -104,6 +171,15 @@ export function ModernUIShell({
 	const [panelOpen, setPanelOpen] = useState(false);
 	const [activityBarOpen, setActivityBarOpen] = useState(true);
 	const [statusBarOpen, setStatusBarOpen] = useState(true);
+	// The main studio session shares its settings-modal state (`use-studio.ts`)
+	// so Cmd+, and other "open settings" actions outside this component (e.g.
+	// the sidebar's Settings row) open the same modal instead of a separate one.
+	// Surfaces without a full studio session (e.g. the connections list) fall
+	// back to local state.
+	const [localSettingsOpen, setLocalSettingsOpen] = useState(false);
+	const hasControlledSettingsModal = typeof studio?.setSettingsModalOpen === "function";
+	const settingsOpen = hasControlledSettingsModal ? !!studio.settingsModalOpen : localSettingsOpen;
+	const setSettingsOpen = hasControlledSettingsModal ? studio.setSettingsModalOpen : setLocalSettingsOpen;
 	const [sidebarWidth, setSidebarWidth] = useState(256);
 	const [aiWidth, setAiWidth] = useState(400);
 	const [sqlSheetWidth, setSqlSheetWidth] = useState(480);
@@ -111,6 +187,12 @@ export function ModernUIShell({
 	const [sqlEditorHeight, setSqlEditorHeight] = useState(240);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
+	// DOM node for `contained` sheets (Insert Row, Add Column, etc.) to portal
+	// into, so they dock as an in-flow column next to the content card instead
+	// of floating over it — same treatment as the AI chat / SQL / threads
+	// panels below. State (not a plain ref) so SheetDockContext re-renders
+	// consumers once the node exists.
+	const [dockContainer, setDockContainer] = useState<HTMLDivElement | null>(null);
 	// Height of the strip between the window top and the content card. Measured
 	// so the floating title bar (and its search bar) stays vertically centered
 	// in that strip without hard-coding a value.
@@ -152,6 +234,7 @@ export function ModernUIShell({
 				// Bottom panel is separate from the floating SQL sheet
 				// (TOGGLE_GLOBAL_SQL_PANEL / Cmd+E).
 				case "TOGGLE_BOTTOM_PANEL":
+					if (!enableBottomSqlPanel) break;
 					event.preventDefault();
 					event.stopImmediatePropagation();
 					setPanelOpen((open) => !open);
@@ -172,7 +255,7 @@ export function ModernUIShell({
 		};
 		window.addEventListener("keydown", onKeyDown, true);
 		return () => window.removeEventListener("keydown", onKeyDown, true);
-	}, [keybindings]);
+	}, [keybindings, enableBottomSqlPanel]);
 
 	const handleAiResizeStart = (e: React.MouseEvent) => {
 		e.preventDefault();
@@ -296,6 +379,7 @@ export function ModernUIShell({
 	}, [noiseBgEnabled, noiseBgSize, noiseBgColor]);
 
 	return (
+		<SheetDockContext.Provider value={dockContainer}>
 		<div className="overflow-hidden" data-translucent={noiseBgTranslucent ? "" : undefined}>
 			<TooltipProvider>
 			<div className="relative flex h-svh min-w-0 flex-col bg-sidebar" ref={rootRef}>
@@ -307,7 +391,9 @@ export function ModernUIShell({
 					keybindings={keybindings}
 					activityBarOpen={activityBarOpen}
 					onToggleActivityBar={() => setActivityBarOpen((open) => !open)}
-					onTogglePanel={() => setPanelOpen((open) => !open)}
+					onTogglePanel={
+						enableBottomSqlPanel ? () => setPanelOpen((open) => !open) : undefined
+					}
 					panelOpen={panelOpen}
 					onToggleSidebar={() => onSidebarOpenChange?.(!sidebarOpen)}
 					sidebarOpen={sidebarOpen}
@@ -320,6 +406,7 @@ export function ModernUIShell({
 					canBack={canBack}
 					canForward={canForward}
 					connection={studio?.connection ?? null}
+					onSelectConnection={onHeaderSelectConnection}
 				/>
 				{/* Row of the rail + sidebar/content area. Grows to fill the window
 				    so the footer can sit at the very bottom. When the status bar is
@@ -336,7 +423,16 @@ export function ModernUIShell({
 					    between the window edge and the parent card. */}
 					{activityBarOpen && (
 						<div className="relative z-30 h-full shrink-0">
-							<ModernUIRail studio={studio} />
+							<ModernUIRail
+								studio={studio}
+								settingsOpen={settingsActive ?? settingsOpen}
+								onSettingsToggle={() => setSettingsOpen((o: boolean) => !o)}
+								items={railItems}
+								activeId={railActiveId}
+								onSettingsClick={onSettingsClick}
+								showHome={railShowHome}
+								showWorkspace={railShowWorkspace}
+							/>
 						</div>
 					)}
 					{/* The rest of the New Layout chrome. The transform re-anchors the
@@ -386,6 +482,12 @@ export function ModernUIShell({
 						sidebarWidth={sidebarWidth}
 						onSidebarWidthChange={setSidebarWidth}
 						hideHeaderControls
+						activePath={activePath}
+						onNavigate={onNavigate}
+						onNewConnection={onNewConnection}
+						selectedConnectionId={selectedConnectionId}
+						onSelectConnection={onSelectConnection}
+						connections={connections}
 						onBack={onBack}
 						onForward={onForward}
 						canBack={canBack}
@@ -440,6 +542,12 @@ export function ModernUIShell({
 									// Only the floating Modern title bar is a window drag region;
 									// double-click on the tab list must not maximize.
 									windowDragRegion={false}
+									// The floating ModernVscodeHeader already renders window
+									// controls in the top-right corner; hide the duplicate here.
+									hideWindowControls
+									// Modern UI's own nav rail already has a Home item; don't
+									// duplicate Home/history/back/forward in the tab strip too.
+									showCollapsedNavControls={false}
 									// Padding lives on AppHeader (p-1) so tab inset matches all sides.
 									className="border-b border-border"
 								/>
@@ -452,7 +560,7 @@ export function ModernUIShell({
 					    SqlEditor. It pushes the content card up but never the AI
 					    chat panel. The resize handle is the 4px strip between the
 					    card and the panel. */}
-						{panelOpen && (
+						{panelOpen && enableBottomSqlPanel && (
 							<>
 								<ResizeHandle
 									orientation="horizontal"
@@ -475,6 +583,13 @@ export function ModernUIShell({
 							</>
 						)}
 						</div>
+						{/* Docking target for `contained` sheets (Insert Row, Add Column,
+					    FK picker, etc.) — each portals in its own resize handle + card.
+					    `contents` so the portaled elements become direct flex items of
+					    the row above (a definite-width container) rather than children
+					    of a shrink-to-fit wrapper, which would make any percentage-based
+					    sheet width (e.g. `w-full`) resolve against an indeterminate size. */}
+						<div ref={setDockContainer} className="contents" />
 						{/* SQL editor sheet (Cmd+E): same in-flow column pattern as AI chat. */}
 						{isSqlSheetOpen && sqlSheetPanel && (
 							<>
@@ -553,6 +668,7 @@ export function ModernUIShell({
 						studio={studio}
 						isAskAIOpen={isAskAIOpen}
 						onAskAI={onAskAI}
+						onAgentsClick={onAgentsClick}
 						onQueryHistory={onQueryHistory}
 						threadsOpen={threadsOpen}
 						onToggleThreads={onToggleThreads}
@@ -560,6 +676,19 @@ export function ModernUIShell({
 				)}
 			</div>
 			</TooltipProvider>
+			{!hideSettingsDialog && (
+				<Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+					<DialogContent
+						hideCloseButton
+						className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+						overlayClassName="bg-black/40"
+					>
+						<DialogTitle className="sr-only">Settings</DialogTitle>
+						<SettingsView studio={studio} />
+					</DialogContent>
+				</Dialog>
+			)}
 		</div>
+		</SheetDockContext.Provider>
 	);
 }

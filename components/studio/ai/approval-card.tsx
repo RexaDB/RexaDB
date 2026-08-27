@@ -1,0 +1,418 @@
+"use client";
+
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { Button } from "@/components/ui/button";
+
+/* ─────────────────────────────────────────────────────────
+ * APPROVAL CARD (human-in-the-loop) — adapted for RexaDB
+ * Tokens mapped: --line→--border, --ink→--foreground, etc.
+ * One question at a time, slide + rolling counter.
+ * Single-choice auto-advances; multi-select waits.
+ * ───────────────────────────────────────────────────────── */
+
+export type ApprovalQuestion = {
+  q: string;
+  type: "radio" | "check";
+  options: string[];
+};
+
+const DEFAULT_QUESTIONS: ApprovalQuestion[] = [
+  {
+    q: "How many flavors should we launch?",
+    type: "radio",
+    options: ["Three (core line)", "Five (full case)", "Just one hero"],
+  },
+  {
+    q: "Which mix-ins should we stock?",
+    type: "check",
+    options: ["Chocolate chips", "Waffle bits", "Sprinkles"],
+  },
+  {
+    q: "Which market do we enter first?",
+    type: "radio",
+    options: ["Food trucks", "Grocery freezers", "Scoop shops"],
+  },
+];
+
+const ROLL_MS = 400;
+const SLIDE = "360ms cubic-bezier(0.22, 1, 0.36, 1)";
+
+function RollingDigits({ value }: { value: string }) {
+  const prevRef = useRef(value);
+  const [oldVal, setOldVal] = useState(value);
+  const [newVal, setNewVal] = useState(value);
+  const [rolling, setRolling] = useState(false);
+  const [shifted, setShifted] = useState(false);
+  const [dir, setDir] = useState<"up" | "down">("up");
+
+  useEffect(() => {
+    if (prevRef.current === value) return;
+    const from = prevRef.current;
+    prevRef.current = value;
+    const fromN = parseInt(from, 10);
+    const toN = parseInt(value, 10);
+    setDir(Number.isFinite(fromN) && Number.isFinite(toN) && toN < fromN ? "down" : "up");
+    setOldVal(from);
+    setNewVal(value);
+    setRolling(true);
+    setShifted(false);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setShifted(true));
+    });
+    const done = setTimeout(() => {
+      setRolling(false);
+      setOldVal(value);
+      setShifted(false);
+    }, ROLL_MS);
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(done);
+    };
+  }, [value]);
+
+  const chars = rolling ? newVal : oldVal;
+  return (
+    <>
+      {Array.from({ length: chars.length }, (_, i) => {
+        const o = oldVal[i] ?? "";
+        const n = chars[i] ?? "";
+        if (!rolling || o === n) {
+          return <span key={`${i}-${n}`}>{n}</span>;
+        }
+        const top = dir === "down" ? n : o;
+        const bottom = dir === "down" ? o : n;
+        const restY = dir === "down" ? "0" : "-1em";
+        const startY = dir === "down" ? "-1em" : "0";
+        return (
+          <span key={`${i}-${o}-${n}-${dir}`} style={{ display: "inline-block", position: "relative", overflow: "hidden", height: "1em", lineHeight: "1em", verticalAlign: "-0.05em" }}>
+            <span style={{ display: "flex", flexDirection: "column", transition: "transform 350ms cubic-bezier(0.4, 0, 0.2, 1)", transform: `translateY(${shifted ? restY : startY})` }}>
+              <span style={{ height: "1em", lineHeight: "1em" }}>{top}</span>
+              <span style={{ height: "1em", lineHeight: "1em" }}>{bottom}</span>
+            </span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function Ico({ path, size = 14, sw = 2 }: { path: React.ReactNode; size?: number; sw?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {path}
+    </svg>
+  );
+}
+
+// Lightweight GlideMenu replacement — gliding highlight (fixed hover)
+function GlideOptions({ children }: { children: React.ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoverEl, setHoverEl] = useState<HTMLElement | null>(null);
+  const [highlight, setHighlight] = useState<{ top: number; height: number; visible: boolean }>({ top: 0, height: 0, visible: false });
+
+  const updateHighlight = (el: HTMLElement | null) => {
+    const container = containerRef.current;
+    if (!container || !el) {
+      setHighlight((h) => ({ ...h, visible: false }));
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    setHighlight({ top: rect.top - containerRect.top, height: rect.height, visible: true });
+  };
+
+  useLayoutEffect(() => {
+    updateHighlight(hoverEl);
+  }, [hoverEl]);
+
+  // keep highlight in place on scroll/resize
+  useEffect(() => {
+    if (!hoverEl) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const onScroll = () => updateHighlight(hoverEl);
+    container.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [hoverEl]);
+
+  // clone children to attach hover handlers directly to [data-menu-row] elements
+  const enhanced = (() => {
+    const arr = Array.isArray(children) ? children : [children];
+    return arr.map((child: any, i: number) => {
+      if (!child || typeof child !== "object" || !("props" in child)) return child;
+      const origEnter = child.props.onMouseEnter as unknown as ((e: any) => void) | undefined;
+      const origLeave = child.props.onMouseLeave as unknown as ((e: any) => void) | undefined;
+      return (
+        <div
+          key={child.key ?? i}
+          onMouseEnter={(e) => {
+            const row = (e.currentTarget.querySelector("[data-menu-row]") as HTMLElement) || (e.currentTarget as HTMLElement);
+            // if the child itself is the row, use it
+            const target = (child.props["data-menu-row"] !== undefined ? e.currentTarget : row) as HTMLElement;
+            // find the actual row element
+            const rowEl = e.currentTarget.querySelector<HTMLElement>("[data-menu-row]") || e.currentTarget;
+            setHoverEl(rowEl as HTMLElement);
+            origEnter?.(e);
+          }}
+        >
+          {child}
+        </div>
+      );
+    });
+  })();
+
+  // Simpler: attach directly via event delegation on container
+  const handleEnter = (e: React.MouseEvent) => {
+    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-menu-row]");
+    if (target && containerRef.current?.contains(target)) {
+      setHoverEl(target);
+    }
+  };
+  const handleLeave = (e: React.MouseEvent) => {
+    const related = e.relatedTarget as HTMLElement | null;
+    if (!related || !containerRef.current?.contains(related) || !related.closest("[data-menu-row]")) {
+      // only hide if leaving the whole menu
+      const isLeavingMenu = !containerRef.current?.contains(related as Node);
+      if (isLeavingMenu) setHoverEl(null);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative mt-2.5 flex flex-col gap-1" onMouseMove={handleEnter} onMouseLeave={() => setHoverEl(null)}>
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 rounded-lg bg-muted"
+        style={{
+          top: highlight.top,
+          height: highlight.height,
+          opacity: highlight.visible ? 1 : 0,
+          transition: "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease",
+        }}
+      />
+      <div className="relative z-10 flex flex-col gap-1">{children}</div>
+    </div>
+  );
+}
+
+export default function ApprovalCard({
+  questions: propQuestions,
+  onSubmitted,
+  onAnswersSubmit,
+  resettable = true,
+}: {
+  questions?: ApprovalQuestion[];
+  onSubmitted?: () => void;
+  onAnswersSubmit?: (answers: { question: string; type: string; selected: string[]; custom?: string }[]) => void;
+  resettable?: boolean;
+  variant?: string;
+} = {}) {
+  const QUESTIONS = propQuestions && propQuestions.length > 0 ? propQuestions : DEFAULT_QUESTIONS;
+  const [qi, setQi] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, number[]>>({});
+  const [custom, setCustom] = useState<Record<number, string>>({});
+  const [sent, setSent] = useState(false);
+  const [open, setOpen] = useState(true);
+
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const questionRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const measured = useRef(false);
+  const [viewportH, setViewportH] = useState<number | undefined>(undefined);
+  const [trackY, setTrackY] = useState(0);
+  const [animate, setAnimate] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  const last = qi === QUESTIONS.length - 1;
+  const selected = answers[qi] ?? [];
+  const hasAnswer = selected.length > 0 || Boolean(custom[qi]?.trim());
+
+  const sync = (withAnim: boolean) => {
+    const item = questionRefs.current[qi];
+    if (!item) return;
+    const reduce = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setViewportH(item.offsetHeight);
+    setTrackY(item.offsetTop);
+    setAnimate(withAnim && !reduce);
+  };
+
+  useLayoutEffect(() => {
+    const withAnim = measured.current;
+    measured.current = true;
+    sync(withAnim);
+    setReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qi, answers, custom, open, sent]);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => sync(measured.current));
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qi]);
+
+  useEffect(() => () => { if (advanceTimer.current) clearTimeout(advanceTimer.current); }, []);
+
+  const goTo = (next: number) => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    setQi(Math.min(Math.max(next, 0), QUESTIONS.length - 1));
+  };
+
+  const send = () => {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    // Build answers payload for harness
+    const payload = QUESTIONS.map((q, idx) => {
+      const picked = answers[idx] ?? [];
+      const selectedLabels = picked.map((i) => q.options[i]).filter(Boolean);
+      return {
+        question: q.q,
+        type: q.type,
+        selected: selectedLabels,
+        custom: custom[idx]?.trim() || undefined,
+      };
+    });
+    onAnswersSubmit?.(payload);
+    setSent(true);
+    onSubmitted?.();
+  };
+
+  const advance = () => {
+    if (last) send();
+    else goTo(qi + 1);
+  };
+
+  const toggle = (index: number) => {
+    const type = QUESTIONS[qi].type;
+    setAnswers((current) => {
+      const picked = current[qi] ?? [];
+      const next = type === "radio" ? [index] : picked.includes(index) ? picked.filter((item) => item !== index) : [...picked, index];
+      return { ...current, [qi]: next };
+    });
+    if (type === "radio" && !last) {
+      setCustom((current) => ({ ...current, [qi]: "" }));
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+      advanceTimer.current = setTimeout(() => {
+        setQi((current) => Math.min(QUESTIONS.length - 1, current + 1));
+      }, 480);
+    } else if (type === "radio") {
+      setCustom((current) => ({ ...current, [qi]: "" }));
+    }
+  };
+
+  const reset = () => {
+    setQi(0);
+    setAnswers({});
+    setCustom({});
+    setSent(false);
+    setOpen(true);
+    measured.current = false;
+  };
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="rounded-lg bg-card px-3 py-2 text-[12.5px] font-medium text-foreground shadow-sm border border-border transition-colors hover:bg-muted">
+        Open approval
+      </button>
+    );
+  }
+
+  if (sent) {
+    return (
+      <div className="flex w-full max-w-[320px] items-center gap-3" style={{ animation: "pop-in 260ms cubic-bezier(0.23,1,0.32,1) both" }}>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 py-1 pr-2.5 pl-1 text-[12.5px] font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="flex size-[18px] items-center justify-center rounded-full bg-emerald-500 text-white">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+          </span>
+          Answers sent
+        </span>
+        {resettable && (
+          <button type="button" onClick={reset} className="text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+            Start over
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-[320px]">
+      <div className="relative overflow-hidden rounded-xl bg-card shadow-sm border border-border" style={{ animation: "fade-up 380ms cubic-bezier(0.23,1,0.32,1) both" }}>
+        <button type="button" aria-label="Dismiss" onClick={() => setOpen(false)} className="absolute right-2.5 top-2.5 z-10 flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+          <Ico size={14} sw={2.2} path={<path d="M18 6L6 18M6 6l12 12" />} />
+        </button>
+        <div className="p-4">
+          <div className="overflow-hidden" style={{ height: viewportH, transition: animate ? `height ${SLIDE}` : undefined }} aria-live="polite">
+            <div style={{ display: "flex", flexDirection: "column", gap: 26, transform: `translate3d(0, ${-trackY}px, 0)`, transition: animate ? `transform ${SLIDE}` : undefined, willChange: "transform" }}>
+              {QUESTIONS.map((question, qIdx) => {
+                const active = qIdx === qi;
+                if (!ready && !active) return null;
+                const picked = answers[qIdx] ?? [];
+                const questionStyle: CSSProperties = { opacity: active ? 1 : 0, transition: animate ? `opacity ${SLIDE}` : undefined, pointerEvents: active ? undefined : "none" };
+                return (
+                  <div key={qIdx} ref={(el) => { questionRefs.current[qIdx] = el; }} aria-hidden={active ? undefined : true} style={questionStyle}>
+                    <div className="pr-7 text-[14px] font-medium text-foreground">{question.q}</div>
+                    <GlideOptions>
+                      {question.options.map((option, i) => {
+                        const on = picked.includes(i);
+                        return (
+                          <button key={option} type="button" data-menu-row aria-pressed={on} tabIndex={active ? 0 : -1} onClick={() => { if (active) toggle(i); }} className="relative z-10 flex w-full items-center gap-1.5 rounded-lg pl-1 pr-2 py-1 text-left">
+                            <span className={`flex size-4 shrink-0 items-center justify-center transition-colors duration-200 ${question.type === "radio" ? "rounded-full" : "rounded-[5px]"} ${on ? "bg-foreground text-background" : "shadow-[inset_0_0_0_1.5px_var(--border)] text-transparent"}`}>
+                              {question.type === "radio" ? (
+                                <span className="size-1.5 rounded-full bg-background transition-transform duration-200" style={{ transform: on ? "scale(1)" : "scale(0)" }} />
+                              ) : (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                              )}
+                            </span>
+                            <span className={`text-[13px] leading-none transition-colors duration-200 ${on ? "text-foreground" : "text-muted-foreground"}`}>{option}</span>
+                          </button>
+                        );
+                      })}
+                      <label data-menu-row className="relative z-10 flex items-center gap-1.5 rounded-lg pl-1 pr-2 py-1">
+                        <input
+                          value={custom[qIdx] ?? ""}
+                          tabIndex={active ? 0 : -1}
+                          onChange={(event) => {
+                            if (!active) return;
+                            setCustom((c) => ({ ...c, [qIdx]: event.target.value }));
+                            if (question.type === "radio") setAnswers((c) => ({ ...c, [qIdx]: [] }));
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && hasAnswer) { event.preventDefault(); advance(); }
+                          }}
+                          placeholder="Something else…"
+                          aria-label="Custom answer"
+                          className="min-w-0 flex-1 bg-transparent pl-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
+                        />
+                      </label>
+                    </GlideOptions>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-2.5">
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <button type="button" aria-label="Previous question" disabled={qi <= 0} onClick={() => goTo(qi - 1)} className="flex size-[18px] items-center justify-center rounded-[5px] transition-colors enabled:hover:text-foreground disabled:opacity-30">
+              <Ico size={14} path={<path d="M18 15l-6-6-6 6" />} />
+            </button>
+            <span className="inline-flex items-center text-[12px] font-medium tabular-nums text-muted-foreground" style={{ letterSpacing: "-0.1px", lineHeight: 1 }}>
+              <RollingDigits value={`${qi + 1} / ${QUESTIONS.length}`} />
+            </span>
+            <button type="button" aria-label="Next question" disabled={last} onClick={() => goTo(qi + 1)} className="flex size-[18px] items-center justify-center rounded-[5px] transition-colors enabled:hover:text-foreground disabled:opacity-30">
+              <Ico size={14} path={<path d="M6 9l6 6 6-6" />} />
+            </button>
+          </div>
+          <div className="-mr-0.5 flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" onClick={() => (last ? setOpen(false) : goTo(qi + 1))}>Skip</Button>
+            <Button variant="default" size="sm" disabled={!hasAnswer} onClick={advance}>{last ? "Send" : "Continue"}</Button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes pop-in { 0% { transform: scale(0.95); opacity:0; } 100% { transform: scale(1); opacity:1; } } @keyframes fade-up { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }`}</style>
+    </div>
+  );
+}

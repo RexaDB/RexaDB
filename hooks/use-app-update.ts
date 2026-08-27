@@ -10,7 +10,7 @@ function debug(...args: unknown[]) {
   if (DEBUG) console.log("[updater]", ...args);
 }
 
-const IS_LINUX = navigator.platform === "Linux" || navigator.platform?.includes("Linux");
+const IS_LINUX = navigator.platform === "Linux x86_64" || navigator.platform?.includes("Linux");
 
 const GITHUB_LATEST_RELEASE =
   "https://api.github.com/repos/rexadbapp/rexadb-app/releases/latest";

@@ -3,6 +3,8 @@ import { createTool } from "@mastra/core/tools";
 
 import { ok, fail } from "./ai-shared";
 import { createThemeTools } from "@/lib/ai/theme-tools";
+import { createTaskTools } from "@/lib/ai/task-tools";
+import { createApprovalTools } from "@/lib/ai/approval-tools";
 import { detectConnectionDbType, getMongoDatabaseFromConnectionString } from "@/lib/db/connection-type";
 import {
   fetchAllTablesWithColumns,
@@ -111,6 +113,8 @@ export function createRexaDbTools(context: AgentToolContext) {
 
   return {
     ...createThemeTools(),
+    ...createTaskTools({ emitStep: context.emitStep }),
+    ...createApprovalTools(),
     describe_connection_capabilities: createTool({
       id: "describe_connection_capabilities",
       description: "Describe which read-only capabilities are available for the current backend.",
@@ -212,7 +216,9 @@ export function createRexaDbTools(context: AgentToolContext) {
           if (dbType === "redis") {
             return fail("Redis does not expose table schemas.");
           }
-          const result = await fetchTableStructure(context.connectionString, namespace || context.defaultNamespace || "", table);
+          let schema = namespace || context.defaultNamespace || "";
+          if (dbType === "sqlite" && !schema) schema = "main";
+          const result = await fetchTableStructure(context.connectionString, schema, table);
           return result.success ? ok({ table, structure: result.data || [] }) : fail(result.error);
         } catch (error) {
           return fail(error);

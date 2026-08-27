@@ -16,9 +16,8 @@ import {
   Check,
   Database,
 } from "@/lib/icon-theme/lucide-react";
-import { LogoIcon } from "@/components/logo";
 import { Input } from "@/components/ui/input";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,10 +52,9 @@ import type {
   CustomEditorTheme,
   MonacoThemeRef,
 } from "@/lib/studio/editor-themes";
-import {
-  preventTextSelection,
-  allowTextSelection,
-} from "@/lib/prevent-text-selection";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
+import { cn } from "@/lib/utils";
 
 interface DatabaseFunction {
   schema: string;
@@ -92,6 +90,7 @@ interface FunctionsListProps {
   customEditorThemes?: CustomEditorTheme[];
   vimMode?: boolean;
   schemaData?: Record<string, any>;
+  onAskAI?: () => void;
 }
 
 const DEFAULT_SHEET_WIDTH = 1152;
@@ -116,15 +115,15 @@ export function FunctionsList({
   customEditorThemes = [],
   vimMode = false,
   schemaData = {},
+  onAskAI,
 }: FunctionsListProps) {
+  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
+  const shellLayout = appShellLayout || modernUiLayout;
   const [search, setSearch] = useState("");
   const [selectedFunction, setSelectedFunction] =
     useState<DatabaseFunction | null>(null);
   const [definitionDraft, setDefinitionDraft] = useState("");
   const [isSavingDefinition, setIsSavingDefinition] = useState(false);
-  const [sheetWidth, setSheetWidth] = useState(RESIZED_DEFAULT_SHEET_WIDTH);
-  const [isResizingSheet, setIsResizingSheet] = useState(false);
-  const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const schemaFunctions = functions.filter((f) => f.schema === selectedSchema);
 
@@ -172,8 +171,6 @@ export function FunctionsList({
     setSelectedFunction(null);
     setDefinitionDraft("");
     setIsSavingDefinition(false);
-    setIsResizingSheet(false);
-    resizeStartRef.current = null;
   };
 
   const handleCancelEdit = () => closeFunctionViewer();
@@ -201,42 +198,6 @@ export function FunctionsList({
       setIsSavingDefinition(false);
     }
   };
-
-  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    resizeStartRef.current = { startX: e.clientX, startWidth: sheetWidth };
-    setIsResizingSheet(true);
-    document.body.style.cursor = "col-resize";
-    preventTextSelection();
-  };
-
-  useEffect(() => {
-    if (!isResizingSheet) return;
-    const onMouseMove = (e: MouseEvent) => {
-      const start = resizeStartRef.current;
-      if (!start) return;
-      const delta = start.startX - e.clientX;
-      const viewportMax = Math.max(900, window.innerWidth - 24);
-      const maxWidth = Math.min(MAX_SHEET_WIDTH, viewportMax);
-      const next = Math.min(
-        maxWidth,
-        Math.max(MIN_SHEET_WIDTH, start.startWidth + delta),
-      );
-      setSheetWidth(next);
-    };
-    const onMouseUp = () => {
-      setIsResizingSheet(false);
-      resizeStartRef.current = null;
-      document.body.style.cursor = "";
-      allowTextSelection();
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [isResizingSheet]);
 
   if (fetchingFunctions && functions.length === 0) {
     return (
@@ -336,8 +297,9 @@ export function FunctionsList({
           <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" onClick={() => {}}>
-                <LogoIcon width={16} height={16} />
+              <Button variant="outline" size="icon" onClick={onAskAI}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
@@ -377,8 +339,9 @@ export function FunctionsList({
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="icon" onClick={() => {}}>
-                        <LogoIcon width={16} height={16} />
+                      <Button variant="outline" size="icon" onClick={onAskAI}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
@@ -535,26 +498,26 @@ export function FunctionsList({
         <div className="h-8" />
       </div>
 
-      {selectedFunction ? (
-        <div className="fixed inset-0 z-[100]">
-          <button
-            type="button"
-            aria-label="Close function definition panel"
-            className="absolute inset-0 bg-black/25 backdrop-blur-sm"
-            onClick={closeFunctionViewer}
-          />
-          <aside
-            className="absolute right-0 top-0 h-full flex flex-col p-0 gap-0 bg-background border-l border-border text-foreground shadow-2xl"
-            style={{ width: `min(95vw, ${sheetWidth}px)` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="hidden sm:block absolute left-0 top-0 h-full w-2 -translate-x-1 cursor-col-resize select-none"
-              onMouseDown={handleResizeStart}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize function definition panel"
-            />
+      <Sheet
+        open={!!selectedFunction}
+        onOpenChange={(open) => { if (!open) closeFunctionViewer(); }}
+        modal={!shellLayout}
+      >
+        <SheetContent
+          side="right"
+          contained={shellLayout}
+          className={cn(
+            "bg-background text-foreground flex flex-col p-0 gap-0",
+            !shellLayout && "data-[side=right]:sm:max-w-none",
+          )}
+          style={{ width: `min(95vw, ${RESIZED_DEFAULT_SHEET_WIDTH}px)` }}
+          minResizeWidth={MIN_SHEET_WIDTH}
+          maxResizeWidth={MAX_SHEET_WIDTH}
+          resizeHandleLabel="Resize function definition panel"
+        >
+            <SheetTitle className="sr-only">
+              {selectedFunction?.name || "Function definition"}
+            </SheetTitle>
             <div className="p-6 border-b border-border shrink-0">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
@@ -648,9 +611,8 @@ export function FunctionsList({
                 {isSavingDefinition ? "Saving..." : "Save"}
               </Button>
             </div>
-          </aside>
-        </div>
-      ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

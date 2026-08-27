@@ -33,7 +33,7 @@ export function useGlobalAppFontFamily(persist = false) {
     };
   }, []);
 
-  useAppFontFamily(customFontFamily);
+  useAppFontFamily(customFontFamily, isLoaded);
 
   useEffect(() => {
     if (!persist || !isLoaded) return;

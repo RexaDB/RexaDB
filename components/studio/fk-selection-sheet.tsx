@@ -175,7 +175,7 @@ export function FKSelectionSheet({
   );
 
   return (
-    <Sheet open={isFKSelectionSheetOpen} onOpenChange={handleOpenChange}>
+    <Sheet open={isFKSelectionSheetOpen} onOpenChange={handleOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
         contained={shellLayout}

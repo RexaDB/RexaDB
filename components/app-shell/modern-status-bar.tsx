@@ -2,7 +2,7 @@
 
 import { Loader2, Check } from "@/lib/icon-theme/lucide-react";
 import { DatabaseIcon } from "@/lib/icon-theme/solar-icons";
-import { Clock, MessagesSquare, Sparkles } from "lucide-react";
+import { Clock, MessagesSquare, Sparkles, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,6 +16,7 @@ export function ModernStatusBar({
   studio,
   isAskAIOpen,
   onAskAI,
+  onAgentsClick,
   onQueryHistory,
   threadsOpen,
   onToggleThreads,
@@ -23,6 +24,7 @@ export function ModernStatusBar({
   studio: any;
   isAskAIOpen?: boolean;
   onAskAI?: () => void;
+  onAgentsClick?: () => void;
   onQueryHistory?: () => void;
   threadsOpen?: boolean;
   onToggleThreads?: () => void;
@@ -67,6 +69,17 @@ export function ModernStatusBar({
           >
             <Sparkles className="size-3 shrink-0" />
             Ask AI
+          </button>
+        )}
+        {onAgentsClick && (
+          <button
+            type="button"
+            onClick={onAgentsClick}
+            className={buttonClass}
+            title="Agents"
+          >
+            <Bot className="size-3 shrink-0" />
+            Agents
           </button>
         )}
         {onQueryHistory && (
