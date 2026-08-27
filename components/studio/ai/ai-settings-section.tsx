@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Plus, X } from "@/lib/icon-theme/lucide-react";
+import { Plus, X, ArrowRight } from "@/lib/icon-theme/lucide-react";
 
 import {
   Accordion,
@@ -20,37 +20,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { GlobalAiSettings } from "@/lib/api/actions-client";
 import {
-  getGlobalAiSettings,
-  saveGlobalAiSettings,
-  type GlobalAiSettings,
-} from "@/lib/api/actions-client";
+  useAiProviderSettings,
+  PINNED_PROVIDERS,
+  logoFor,
+  logoNeedsInvert,
+} from "@/hooks/use-ai-provider-settings";
 
-const providerMeta = {
-  openai: { label: "OpenAI", icon: "/providers/openai.svg" },
-  anthropic: { label: "Anthropic", icon: "/providers/anthropic_black.svg" },
-  google: { label: "Google", icon: "/providers/google.svg" },
-  openrouter: { label: "OpenRouter", icon: "/providers/openrouter_light.svg" },
-  kilo: { label: "Kilo Code", icon: "/providers/kilo.svg" },
-  ollama: {
-    label: "Ollama",
-    icon: "/providers/ollama-logo-black-light-svg.svg",
-  },
-} as const;
+function ProviderAvatar({ provider, label }: { provider: string; label: string }) {
+  const icon = logoFor(provider);
+  if (icon) {
+    return (
+      <Image
+        alt={label}
+        className={logoNeedsInvert(provider) ? "dark:invert" : ""}
+        height={20}
+        src={icon}
+        width={20}
+      />
+    );
+  }
+  return (
+    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
+      {label.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
 
-export function AiSettingsSection() {
-  const [settings, setSettings] = useState<GlobalAiSettings | null>(null);
+export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () => void }) {
+  const { settings, updateSettings, updateProvider, labelFor } = useAiProviderSettings();
   const [openItem, setOpenItem] = useState<string>("");
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    void (async () => {
-      const result = await getGlobalAiSettings();
-      if (result.success && result.data) {
-        setSettings(result.data);
-      }
-    })();
-  }, []);
 
   const modelCount = useMemo(
     () =>
@@ -71,25 +72,21 @@ export function AiSettingsSection() {
 
   if (!settings) return null;
 
-  const updateSettings = (next: GlobalAiSettings) => {
-    setSettings(next);
-    void saveGlobalAiSettings(next);
-  };
-
-  const iconToneClass = (provider: keyof typeof providerMeta) => {
-    if (provider === "google") return "";
-    return "dark:invert";
-  };
-
   return (
     <section className="space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold tracking-tight text-foreground">
-          Models
-        </h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Configure provider access and permissions.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">
+            Models
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Configure provider access and permissions.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="h-8 shrink-0 px-2.5 text-xs" onClick={onOpenProviders}>
+          Configure providers
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Button>
       </div>
 
       {/* Permissions Card */}
@@ -125,28 +122,17 @@ export function AiSettingsSection() {
         value={openItem}
         onValueChange={setOpenItem}
       >
-        {/* LLM Provider Accordions */}
-        {Object.entries(providerMeta).map(([provider, meta]) => {
-          const config =
-            settings.providers[provider as keyof typeof settings.providers];
+        {/* Pinned provider accordions — the rest of the Pi SDK catalog lives on the dedicated Providers page. */}
+        {PINNED_PROVIDERS.map((provider) => {
+          const config = settings.providers[provider];
+          if (!config) return null;
+          const label = labelFor(provider);
 
           const addModel = () => {
             const nextModel = (modelDrafts[provider] || "").trim();
             if (!nextModel) return;
-            updateSettings({
-              ...settings,
-              providers: {
-                ...settings.providers,
-                [provider]: {
-                  ...config,
-                  models: Array.from(new Set([...config.models, nextModel])),
-                },
-              },
-            });
-            setModelDrafts((prev) => ({
-              ...prev,
-              [provider]: "",
-            }));
+            updateProvider(provider, { models: Array.from(new Set([...config.models, nextModel])) });
+            setModelDrafts((prev) => ({ ...prev, [provider]: "" }));
           };
 
           return (
@@ -157,20 +143,12 @@ export function AiSettingsSection() {
             >
               <AccordionTrigger className="px-4 py-3 transition-colors hover:bg-muted/50 hover:no-underline focus-visible:border-transparent focus-visible:ring-0">
                 <div className="flex flex-1 items-center gap-3 min-w-0">
-                  <Image
-                    alt={meta.label}
-                    className={iconToneClass(
-                      provider as keyof typeof providerMeta,
-                    )}
-                    height={20}
-                    src={meta.icon}
-                    width={20}
-                  />
+                  <ProviderAvatar provider={provider} label={label} />
 
                   <div className="flex flex-col items-start truncate">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-foreground">
-                        {meta.label}
+                        {label}
                       </span>
                     </div>
                     <span className="text-xs text-muted-foreground truncate">
@@ -193,18 +171,7 @@ export function AiSettingsSection() {
                       placeholder="sk-..."
                       className="h-8 font-mono text-xs"
                       value={config.apiKey}
-                      onChange={(event) => {
-                        updateSettings({
-                          ...settings,
-                          providers: {
-                            ...settings.providers,
-                            [provider]: {
-                              ...config,
-                              apiKey: event.target.value,
-                            },
-                          },
-                        });
-                      }}
+                      onChange={(event) => updateProvider(provider, { apiKey: event.target.value })}
                     />
                   </div>
 
@@ -224,20 +191,11 @@ export function AiSettingsSection() {
                           <Button
                             size="icon-xs"
                             variant="ghost"
-                            onClick={() => {
-                              updateSettings({
-                                ...settings,
-                                providers: {
-                                  ...settings.providers,
-                                  [provider]: {
-                                    ...config,
-                                    models: config.models.filter(
-                                      (item) => item !== model,
-                                    ),
-                                  },
-                                },
-                              });
-                            }}
+                            onClick={() =>
+                              updateProvider(provider, {
+                                models: config.models.filter((item) => item !== model),
+                              })
+                            }
                           >
                             <X className="h-3 w-3" />
                           </Button>
@@ -283,20 +241,7 @@ export function AiSettingsSection() {
                       <Input
                         className="h-8 font-mono text-xs"
                         value={config.baseUrl || ""}
-                        onChange={(event) =>
-                          updateSettings({
-                            ...settings,
-                            providers: {
-                              ...settings.providers,
-                              [provider]: {
-                                ...settings.providers[
-                                  provider as keyof typeof settings.providers
-                                ],
-                                baseUrl: event.target.value,
-                              },
-                            },
-                          })
-                        }
+                        onChange={(event) => updateProvider(provider, { baseUrl: event.target.value })}
                       />
                     </div>
                   )}

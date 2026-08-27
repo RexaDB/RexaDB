@@ -9,6 +9,10 @@ import { AiWorkflowBlock } from "@/components/studio/ai/ai-workflow-block";
 import { renderInlineMarkdown } from "@/components/studio/ai/ai-inline-markdown";
 import { AiSqlBlock } from "@/components/studio/ai/ai-sql-block";
 import { parseDashboardBlock, parseThemeBlock, parseWorkflowBlock } from "@/lib/ai/chat-blocks";
+import { parseTaskBlock } from "@/lib/ai/task-block";
+import { parseApprovalBlock } from "@/lib/ai/approval-block";
+import TaskRows from "@/components/studio/ai/task-rows";
+import ApprovalCard from "@/components/studio/ai/approval-card";
 import { parseMarkdownBlocks } from "@/lib/ai/markdown-blocks";
 import type { AgentWorkflowPlan } from "@/lib/ai/types";
 
@@ -22,6 +26,7 @@ export function AiMessageContent({
   onApplyEditorTheme,
   onApplyWorkflow,
   workflowApplyBusy,
+  onApprovalSubmit,
 }: {
   content: string;
   dashboardApplyLabel?: string;
@@ -32,6 +37,7 @@ export function AiMessageContent({
   onApplyEditorTheme?: (block: ThemeBlockData) => void;
   onApplyWorkflow: (plan: AgentWorkflowPlan) => void;
   workflowApplyBusy?: boolean;
+  onApprovalSubmit?: (answers: { question: string; type: string; selected: string[]; custom?: string }[]) => void;
 }) {
   const blocks = parseMarkdownBlocks(content);
 
@@ -120,6 +126,29 @@ export function AiMessageContent({
                   key={index}
                   onApplyWorkflow={onApplyWorkflow}
                   plan={workflowPlan}
+                />
+              );
+            }
+          }
+
+          if (["tasks", "task", "task-rows", "task_rows"].includes(block.language.toLowerCase())) {
+            const taskBlock = parseTaskBlock(`\`\`\`${block.language}\n${block.code}\n\`\`\``);
+            if (taskBlock) {
+              return <TaskRows key={index} tasks={taskBlock.tasks} variant={taskBlock.variant} />;
+            }
+          }
+
+          if (["approval", "ask", "questions", "question"].includes(block.language.toLowerCase())) {
+            const approvalBlock = parseApprovalBlock(`\`\`\`${block.language}\n${block.code}\n\`\`\``);
+            if (approvalBlock) {
+              return (
+                <ApprovalCard
+                  key={index}
+                  questions={approvalBlock.questions}
+                  onAnswersSubmit={(answers) => {
+                    onApprovalSubmit?.(answers);
+                  }}
+                  resettable={approvalBlock.resettable}
                 />
               );
             }

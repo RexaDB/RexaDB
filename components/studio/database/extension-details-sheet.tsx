@@ -58,7 +58,7 @@ export function ExtensionDetailsSheet({
   ].filter(Boolean) as string[];
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
         contained={shellLayout}

@@ -5,7 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
 import { AppShell } from "@/components/app-shell/app-shell";
+import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
+import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { V128OnboardingModal } from "@/components/v128-onboarding-modal";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
@@ -13,6 +16,10 @@ import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
 import { supabase } from "@/lib/supabase/client";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { getDefaultKeybindings, buildShortcutCombo } from "@/lib/studio/keybindings";
+import { subscribeToLayoutPrefs } from "@/lib/studio/layout-prefs-cache";
+import { Database as DatabaseIcon } from "@/lib/icon-theme/solar-icons";
+import { ProviderLogo } from "@/components/shared/provider-logo";
 
 const CONNECTIONS_TAB: AppTab = {
   id: "connections",
@@ -48,7 +55,15 @@ export function ConnectionsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
   const [newConnectionTrigger, setNewConnectionTrigger] = useState(0);
-  const { setAppShellLayout } = useAppSettings();
+  const { setAppShellLayout, modernUiLayout } = useAppSettings();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const keybindings = useMemo(() => getDefaultKeybindings(), []);
+
+  // A layout change swaps the entire shell this modal sits next to — close it
+  // the instant that happens instead of keeping a dialog open across its
+  // parent tree being rebuilt around it.
+  useEffect(() => subscribeToLayoutPrefs(() => setSettingsModalOpen(false)), []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -200,13 +215,14 @@ export function ConnectionsPage() {
     );
   }, []);
 
+  // Settings opens as a modal (matching both shells' rail/sidebar "Settings"
+  // entry) instead of a tab, in New Layout and Modern UI alike.
   const handleNavigate = useCallback(
     (path: string) => {
       if (path === "connections") openTab(CONNECTIONS_TAB);
       else if (path === "supabase") openTab(SUPABASE_TAB);
       else if (path === "spacetimedb") openTab(SPACETIMEDB_TAB);
-      else if (path === "settings")
-        openTab({ id: "settings", kind: "settings", title: "Settings" });
+      else if (path === "settings") setSettingsModalOpen(true);
     },
     [openTab],
   );
@@ -223,6 +239,30 @@ export function ConnectionsPage() {
       });
     },
     [openTab, connections],
+  );
+
+  const railItems: ModernUIRailItem[] = useMemo(
+    () => [
+      {
+        id: "connections",
+        label: "Connections",
+        icon: <DatabaseIcon className="w-5 h-5 shrink-0" />,
+        onClick: () => openTab(CONNECTIONS_TAB),
+      },
+      {
+        id: "supabase",
+        label: "Supabase",
+        icon: <ProviderLogo type="supabase" className="w-5 h-5 shrink-0" />,
+        onClick: () => openTab(SUPABASE_TAB),
+      },
+      {
+        id: "spacetimedb",
+        label: "SpacetimeDB",
+        icon: <ProviderLogo type="spacetimedb" className="w-5 h-5 shrink-0" />,
+        onClick: () => openTab(SPACETIMEDB_TAB),
+      },
+    ],
+    [openTab],
   );
 
   // Studio-style tab shortcuts: Cmd/Ctrl+W close, Cmd/Ctrl+1–9 switch tab.
@@ -256,28 +296,48 @@ export function ConnectionsPage() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [tabs, activeTabId, closeTab, activate]);
 
-  return (
+  // Sidebar toggle (default Cmd+B) and settings (default Cmd+,) keybindings.
+  // The studio handles these itself via its own keydown listener; this page
+  // has no studio session, so it needs its own to keep the shortcuts working
+  // here too. Settings opens the same modal as the rail's Settings button.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const combo = buildShortcutCombo(e);
+      if (!combo) return;
+      const type = keybindings[combo]?.type;
+      if (type === "TOGGLE_SIDEBAR") {
+        e.preventDefault();
+        e.stopPropagation();
+        setSidebarOpen((open) => !open);
+      } else if (type === "OPEN_SETTINGS") {
+        e.preventDefault();
+        e.stopPropagation();
+        setSettingsModalOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [keybindings]);
+
+  const shellProps = {
+    user: { name: displayName, email },
+    tabs,
+    activeTabId,
+    onActivateTab: activate,
+    onCloseTab: closeTab,
+    onNewTab: () => openTab(CONNECTIONS_TAB),
+    sidebarOpen,
+    onSidebarOpenChange: setSidebarOpen,
+    onBack: goBack,
+    onForward: goForward,
+    canBack: nav.index > 0,
+    canForward: nav.index < nav.stack.length - 1,
+    onHome: () => openTab(CONNECTIONS_TAB),
+  };
+
+  const content = (
     <>
-    <V128OnboardingModal onEnableLayout={() => setAppShellLayout(true)} />
-    <AppShell
-      activePath={section}
-      onNavigate={handleNavigate}
-      onNewConnection={() => { openTab(CONNECTIONS_TAB); setNewConnectionTrigger((n) => n + 1); }}
-      selectedConnectionId={selectedConnectionId}
-      onSelectConnection={handleSelectConnection}
-      connections={connections}
-      user={{ name: displayName, email }}
-      tabs={tabs}
-      activeTabId={activeTabId}
-      onActivateTab={activate}
-      onCloseTab={closeTab}
-      onNewTab={() => openTab(CONNECTIONS_TAB)}
-      onBack={goBack}
-      onForward={goForward}
-      canBack={nav.index > 0}
-      canForward={nav.index < nav.stack.length - 1}
-      onHome={() => openTab(CONNECTIONS_TAB)}
-    >
       {section === "connections" && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ConnectionManager
@@ -318,13 +378,84 @@ export function ConnectionsPage() {
         </div>
       )}
 
-      {section === "settings" && (
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <AppSettingsView />
-        </div>
-      )}
+    </>
+  );
 
-    </AppShell>
+  // `modernUiLayout` starts from a fast localStorage cache (see
+  // hooks/use-global-studio-settings.ts), so the shell can be picked and
+  // `content` (ConnectionManager) mounted immediately — its own connections
+  // /auth fetches then run in parallel with the settings load instead of
+  // waiting for it, which is what made boot noticeably slower. This relies
+  // on ConnectionManager's own loading gate (connectionsLoading /
+  // authResolved / workspaceAuthLoaded) to keep real, populated content from
+  // appearing before it's ready; in the rare case the cached guess was
+  // wrong, the shell corrects itself once `modernUiLayout` updates, same as
+  // it always would from a normal state change. If that correction were
+  // ever slower than ConnectionManager's own load, real content could very
+  // briefly appear in the wrong shell — worth revisiting only if that
+  // actually starts happening in practice.
+
+  return (
+    <>
+      <V128OnboardingModal onEnableLayout={() => setAppShellLayout(true)} />
+      {modernUiLayout ? (
+        <ModernUIShell
+          {...shellProps}
+          studio={{ connection: selectedConnection }}
+          onHeaderSelectConnection={(conn) =>
+            handleSelectConnection(conn.id, conn.name, conn.connectionType)
+          }
+          activePath={section}
+          onNavigate={handleNavigate}
+          onNewConnection={() => {
+            openTab(CONNECTIONS_TAB);
+            setNewConnectionTrigger((n) => n + 1);
+          }}
+          selectedConnectionId={selectedConnectionId}
+          onSelectConnection={handleSelectConnection}
+          connections={connections}
+          keybindings={keybindings}
+          railItems={railItems}
+          railActiveId={
+            section === "connections" || section === "supabase" || section === "spacetimedb"
+              ? section
+              : null
+          }
+          onSettingsClick={() => setSettingsModalOpen(true)}
+          settingsActive={settingsModalOpen}
+          hideSettingsDialog
+          railShowHome={false}
+          railShowWorkspace={false}
+          enableBottomSqlPanel={false}
+        >
+          {content}
+        </ModernUIShell>
+      ) : (
+        <AppShell
+          {...shellProps}
+          activePath={section}
+          onNavigate={handleNavigate}
+          onNewConnection={() => {
+            openTab(CONNECTIONS_TAB);
+            setNewConnectionTrigger((n) => n + 1);
+          }}
+          selectedConnectionId={selectedConnectionId}
+          onSelectConnection={handleSelectConnection}
+          connections={connections}
+        >
+          {content}
+        </AppShell>
+      )}
+      <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
+        <DialogContent
+          hideCloseButton
+          className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          overlayClassName="bg-black/40"
+        >
+          <DialogTitle className="sr-only">Settings</DialogTitle>
+          <AppSettingsView />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

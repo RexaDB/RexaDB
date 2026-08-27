@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/app-shell/app-header";
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import type { AppHeaderTabsProps } from "@/components/app-shell/app-shared";
 import type { Connection } from "@/lib/db/schema";
-import { Sparkles, Clock } from "lucide-react";
+import { Sparkles, Clock, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslucentShell } from "@/hooks/use-translucent-shell";
 
@@ -33,6 +33,7 @@ export type AppShellProps = {
 	/** Bottom-bar actions (Linear-style, bottom-right of content panel) */
 	onAskAI?: () => void;
 	isAskAIOpen?: boolean;
+	onAgentsClick?: () => void;
 	onQueryHistory?: () => void;
 	// Background noise
 	noiseBgEnabled?: boolean;
@@ -68,6 +69,7 @@ export function AppShell({
 	showHome,
 	onAskAI,
 	isAskAIOpen,
+	onAgentsClick,
 	onQueryHistory,
 	noiseBgEnabled,
 	noiseBgOpacity = 30,
@@ -183,6 +185,16 @@ export function AppShell({
 							>
 								<Sparkles className="size-3" />
 								Ask AI
+							</button>
+						)}
+						{onAgentsClick && (
+							<button
+								type="button"
+								onClick={onAgentsClick}
+								className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-all text-muted-foreground/60 hover:bg-white/8 hover:text-foreground"
+							>
+								<Bot className="size-3" />
+								Agents
 							</button>
 						)}
 						{onQueryHistory && (

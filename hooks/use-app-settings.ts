@@ -124,5 +124,6 @@ export function useAppSettings(planCode = "free") {
     setNoiseBgColor: settings.setNoiseBgColor,
     noiseBgTranslucent: settings.noiseBgTranslucent,
     setNoiseBgTranslucent: settings.setNoiseBgTranslucent,
+    isLoaded: settings.isLoaded,
   };
 }

@@ -8,9 +8,9 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,26 +18,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Kbd } from "@/components/ui/kbd";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
-  Check,
-  Code2,
-  Keyboard,
-  PaletteIcon,
-  Pencil,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  EllipsisVertical,
+  FileJson,
   Plus,
+  RotateCcw,
   Search,
+  AlertTriangle,
   Trash2,
-  WandSparkles,
+  X,
 } from "@/lib/icon-theme/lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -47,18 +50,17 @@ import {
   buildShortcutCombo,
   describeBinding,
   formatShortcutForPlatform,
+  getDefaultKeybindings,
 } from "@/lib/studio/keybindings";
+import { getKeybindingsFile } from "@/lib/api/actions-client";
+import { openExternalUrl } from "@/lib/desktop";
 
-interface KeybindingsViewProps {
-  studio: StudioKeybindingsModel;
-}
-
-type KeybindingMode = "ui" | "config";
-
-type KeybindingActionId = (typeof KEYBINDING_ACTIONS)[number]["id"];
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface KeybindingBinding {
-  type: KeybindingActionId;
+  type: string;
   schema?: string;
   table?: string;
   database?: string;
@@ -71,16 +73,824 @@ interface KeybindingBinding {
 
 type KeybindingMap = Record<string, KeybindingBinding>;
 
-interface NewBinding {
-  combo: string;
-  type: KeybindingActionId;
-  schema: string;
-  table: string;
-  database: string;
-  index: number;
-  view: string;
-  sidebar: string;
+// ---------------------------------------------------------------------------
+// Helpers (adapted from t3code's keybinding logic)
+// ---------------------------------------------------------------------------
+
+/** Render a combo string as a group of Kbd "pills", matching t3code's design. */
+function KeybindingPill({ value }: { value: string }) {
+  const parts = value.split("+");
+  return (
+    <KbdGroup className="bg-transparent p-0 shadow-none">
+      {parts.map((part) => (
+        <Kbd key={part} className="min-w-6 justify-center px-1.5">
+          {part === "Cmd"
+            ? "⌘"
+            : part === "Shift"
+              ? "⇧"
+              : part === "Alt"
+                ? "⌥"
+                : part === "Ctrl"
+                  ? "⌃"
+                  : part.length === 1
+                    ? part.toUpperCase()
+                    : part}
+        </Kbd>
+      ))}
+    </KbdGroup>
+  );
 }
+
+/** Build a flat row object from the keybinding map for table rendering. */
+interface KeybindingRow {
+  id: string;
+  combo: string;
+  binding: KeybindingBinding;
+  actionName: string;
+  description: string;
+  isDefault: boolean;
+}
+
+function buildRows(
+  keybindings: KeybindingMap,
+  query: string,
+): KeybindingRow[] {
+  const defaults = getDefaultKeybindings();
+  const entries = Object.entries(keybindings).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+
+  const rows: KeybindingRow[] = entries.map(([combo, binding]) => {
+    const actionName =
+      KEYBINDING_ACTIONS.find((action) => action.id === binding.type)?.name ||
+      binding.type;
+    return {
+      id: combo,
+      combo,
+      binding,
+      actionName,
+      description: describeBinding(binding),
+      isDefault:
+        defaults[combo]?.type === binding.type &&
+        JSON.stringify(defaults[combo]) === JSON.stringify({ ...binding, combo }),
+    };
+  });
+
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter(
+    (row) =>
+      row.combo.toLowerCase().includes(q) ||
+      row.actionName.toLowerCase().includes(q) ||
+      row.description.toLowerCase().includes(q) ||
+      row.binding.type.toLowerCase().includes(q),
+  );
+}
+
+/** Detect conflicts: same combo used by multiple bindings. */
+function findConflicts(
+  allRows: KeybindingRow[],
+  combo: string,
+  excludeId?: string,
+): string[] {
+  if (!combo.trim()) return [];
+  return allRows
+    .filter(
+      (row) =>
+        row.id !== excludeId &&
+        row.combo.toLowerCase() === combo.toLowerCase(),
+    )
+    .map((row) => row.actionName);
+}
+
+// ---------------------------------------------------------------------------
+// Action field editors (for bindings that take extra params like schema/table)
+// ---------------------------------------------------------------------------
+
+function ActionFieldsEditor({
+  binding,
+  onChange,
+}: {
+  binding: KeybindingBinding;
+  onChange: (patch: Partial<KeybindingBinding>) => void;
+}) {
+  const action = KEYBINDING_ACTIONS.find((a) => a.id === binding.type);
+  if (!action) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {action.fields.includes("schema") ? (
+        <Select
+          value={binding.schema ?? "public"}
+          onValueChange={(v) => onChange({ schema: v })}
+        >
+          <SelectTrigger className="h-7 w-28 rounded-sm !bg-inherit text-[13px]">
+            <SelectValue placeholder="Schema" />
+          </SelectTrigger>
+          <SelectContent className="max-h-64">
+            <SelectItem value="public">public</SelectItem>
+            <SelectItem value="information_schema">information_schema</SelectItem>
+          </SelectContent>
+        </Select>
+      ) : null}
+
+      {action.fields.includes("table") ? (
+        <Input
+          value={binding.table ?? ""}
+          onChange={(e) => onChange({ table: e.target.value })}
+          placeholder="table name"
+          className="h-7 w-28 rounded-sm !bg-inherit text-[13px]"
+        />
+      ) : null}
+
+      {action.fields.includes("database") ? (
+        <Input
+          value={binding.database ?? ""}
+          onChange={(e) => onChange({ database: e.target.value })}
+          placeholder="database"
+          className="h-7 w-28 rounded-sm !bg-inherit text-[13px]"
+        />
+      ) : null}
+
+      {action.fields.includes("view") ? (
+        <Select
+          value={binding.view ?? "schema"}
+          onValueChange={(v) => onChange({ view: v })}
+        >
+          <SelectTrigger className="h-7 w-28 rounded-sm !bg-inherit text-[13px]">
+            <SelectValue placeholder="View" />
+          </SelectTrigger>
+          <SelectContent className="max-h-64">
+            {DB_VIEWS.map((view) => (
+              <SelectItem key={view.id} value={view.id}>
+                {view.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
+
+      {action.fields.includes("sidebar") ? (
+        <Select
+          value={binding.sidebar ?? "tables"}
+          onValueChange={(v) => onChange({ sidebar: v })}
+        >
+          <SelectTrigger className="h-7 w-28 rounded-sm !bg-inherit text-[13px]">
+            <SelectValue placeholder="Sidebar" />
+          </SelectTrigger>
+          <SelectContent className="max-h-64">
+            {SIDEBAR_VIEWS.map((view) => (
+              <SelectItem key={view.id} value={view.id}>
+                {view.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
+
+      {action.fields.includes("index") ? (
+        <Input
+          type="number"
+          min={0}
+          value={binding.index ?? 0}
+          onChange={(e) =>
+            onChange({ index: parseInt(e.target.value || "0", 10) || 0 })
+          }
+          className="h-7 w-16 rounded-sm !bg-inherit text-[13px]"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Key capture input (records pressed keys into a combo string)
+// ---------------------------------------------------------------------------
+
+function KeyCaptureInput({
+  value,
+  isRecording,
+  onRecordStart,
+  onRecordEnd,
+  onChange,
+  placeholder = "Unassigned",
+  ariaLabel,
+}: {
+  value: string;
+  isRecording: boolean;
+  onRecordStart: () => void;
+  onRecordEnd: () => void;
+  onChange: (combo: string) => void;
+  placeholder?: string;
+  ariaLabel: string;
+}) {
+  return (
+    <Input
+      data-keybinding-capture=""
+      autoFocus={isRecording}
+      aria-label={ariaLabel}
+      value={isRecording ? "" : value}
+      placeholder={isRecording ? "Press shortcut" : placeholder}
+      className={cn(
+        "h-7 w-44 rounded-md text-[13px]",
+        isRecording && "border-primary/70 bg-primary/5",
+      )}
+      onFocus={onRecordStart}
+      onBlur={onRecordEnd}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Tab") return;
+        e.preventDefault();
+        if (e.key === "Escape") {
+          onChange("");
+          onRecordEnd();
+          return;
+        }
+        const combo = buildShortcutCombo({
+          key: e.key,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+        });
+        if (!combo) return;
+        onChange(combo);
+        onRecordEnd();
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Conflict warning (t3code style)
+// ---------------------------------------------------------------------------
+
+function ConflictWarning({ labels }: { labels: string[] }) {
+  if (labels.length === 0) return null;
+  const description =
+    labels.length === 1
+      ? `Conflicts with ${labels[0]}.`
+      : `Conflicts with ${labels.slice(0, 3).join(", ")}${labels.length > 3 ? ", and more" : ""}.`;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={0}
+            aria-label={description}
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-amber-500 outline-none transition-colors hover:bg-amber-500/10 focus-visible:ring-2 focus-visible:ring-amber-500/25"
+          >
+            <AlertTriangle className="size-3.5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-72 whitespace-normal leading-relaxed">
+          {description} The most recent matching binding wins when both conditions can apply.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Existing keybinding row (t3code table design)
+// ---------------------------------------------------------------------------
+
+function KeybindingTableRow({
+  row,
+  allRows,
+  isSaving,
+  onSave,
+  onReset,
+  onRemove,
+}: {
+  row: KeybindingRow;
+  allRows: KeybindingRow[];
+  isSaving: boolean;
+  onSave: (combo: string, binding: KeybindingBinding) => void;
+  onReset: (row: KeybindingRow) => void;
+  onRemove: (row: KeybindingRow) => void;
+}) {
+  const [keyDraft, setKeyDraft] = useState(row.combo);
+  const [bindingDraft, setBindingDraft] = useState<KeybindingBinding>(
+    row.binding,
+  );
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Sync local draft when the row changes externally
+  useEffect(() => {
+    setKeyDraft(row.combo);
+    setBindingDraft(row.binding);
+  }, [row.combo, row.binding]);
+
+  const isDirty =
+    keyDraft !== row.combo ||
+    JSON.stringify(bindingDraft) !== JSON.stringify(row.binding);
+
+  const showPill =
+    !isRecording && keyDraft === row.combo && keyDraft.length > 0 && !isDirty;
+  const conflictLabels = findConflicts(allRows, keyDraft, row.id);
+  const canReset = !row.isDefault;
+  const canRemove = true;
+  const hasRowActions = canReset || canRemove;
+
+  const save = () => {
+    onSave(keyDraft, bindingDraft);
+  };
+
+  return (
+    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm hover:bg-accent/40">
+      {/* Command */}
+      <div className="min-w-0 pr-4">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  aria-label={row.binding.type}
+                  className="truncate text-[13px] font-medium text-foreground"
+                >
+                  {row.actionName}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top">{row.binding.type}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      </div>
+
+      {/* Keybinding */}
+      <div className="flex min-w-0 items-center gap-2 pr-4">
+        {showPill ? (
+          <button
+            type="button"
+            onClick={() => setIsRecording(true)}
+            aria-label={`Edit shortcut for ${row.actionName}`}
+            className="group inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent px-1.5 outline-none transition-colors hover:border-border/70 hover:bg-background focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24"
+          >
+            <KeybindingPill value={row.combo} />
+            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/0 transition-opacity group-hover:text-muted-foreground/70 group-focus-visible:text-muted-foreground/70">
+              Edit
+            </span>
+          </button>
+        ) : (
+          <KeyCaptureInput
+            value={keyDraft}
+            isRecording={isRecording}
+            onRecordStart={() => setIsRecording(true)}
+            onRecordEnd={() => setIsRecording(false)}
+            onChange={setKeyDraft}
+            ariaLabel={`Keybinding for ${row.actionName}`}
+          />
+        )}
+        {isDirty ? (
+          <Button
+            size="sm"
+            disabled={isSaving || keyDraft.trim().length === 0}
+            onClick={save}
+          >
+            {isSaving ? "Saving" : "Save"}
+          </Button>
+        ) : null}
+      </div>
+
+      {/* Action params */}
+      <div className="pr-4">
+        <ActionFieldsEditor
+          binding={bindingDraft}
+          onChange={(patch) =>
+            setBindingDraft((prev) => ({ ...prev, ...patch }))
+          }
+        />
+      </div>
+
+      {/* Status / actions */}
+      <div className="flex items-center justify-end gap-1">
+        <ConflictWarning labels={conflictLabels} />
+        {hasRowActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-7 text-muted-foreground hover:text-foreground"
+                disabled={isSaving}
+                aria-label={`Actions for ${row.actionName}`}
+              >
+                <EllipsisVertical className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-36">
+              {canReset ? (
+                <DropdownMenuItem
+                  disabled={isSaving}
+                  onClick={() => onReset(row)}
+                >
+                  <RotateCcw className="size-3.5" />
+                  Reset to default
+                </DropdownMenuItem>
+              ) : null}
+              {canRemove ? (
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={isSaving}
+                  onClick={() => onRemove(row)}
+                >
+                  <Trash2 className="size-3.5" />
+                  Remove
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        <span className="sr-only">
+          {formatShortcutForPlatform(row.combo)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// New keybinding row (t3code "add" row)
+// ---------------------------------------------------------------------------
+
+function NewKeybindingTableRow({
+  allRows,
+  isSaving,
+  onSave,
+  onCancel,
+}: {
+  allRows: KeybindingRow[];
+  isSaving: boolean;
+  onSave: (combo: string, binding: KeybindingBinding) => void;
+  onCancel: () => void;
+}) {
+  const [combo, setCombo] = useState("");
+  const [binding, setBinding] = useState<KeybindingBinding>({
+    type: "TOGGLE_COMMAND_MENU",
+  });
+  const [isRecording, setIsRecording] = useState(false);
+  const actionName =
+    KEYBINDING_ACTIONS.find((a) => a.id === binding.type)?.name ||
+    "new keybinding";
+  const conflictLabels = findConflicts(allRows, combo, "new");
+
+  return (
+    <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] items-center px-4 py-1.5 text-sm hover:bg-accent/40">
+      <div className="min-w-0 pr-4">
+        <Select
+          value={binding.type}
+          onValueChange={(v) =>
+            setBinding((prev) => ({ ...prev, type: v }))
+          }
+        >
+          <SelectTrigger className="h-7 w-full max-w-60 text-xs">
+            <SelectValue placeholder="Command" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72 min-w-56">
+            {KEYBINDING_ACTIONS.map((action) => (
+              <SelectItem
+                key={action.id}
+                value={action.id}
+                className="min-h-7 w-full py-1 text-xs"
+              >
+                <span className="truncate">{action.name}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 pr-4">
+        <KeyCaptureInput
+          value={combo}
+          isRecording={isRecording}
+          onRecordStart={() => setIsRecording(true)}
+          onRecordEnd={() => setIsRecording(false)}
+          onChange={setCombo}
+          ariaLabel={`Keybinding for ${actionName}`}
+        />
+        <Button
+          size="sm"
+          disabled={isSaving || combo.trim().length === 0}
+          onClick={() => onSave(combo, binding)}
+        >
+          {isSaving ? "Saving" : "Save"}
+        </Button>
+      </div>
+      <div className="pr-4">
+        <ActionFieldsEditor
+          binding={binding}
+          onChange={(patch) => setBinding((prev) => ({ ...prev, ...patch }))}
+        />
+      </div>
+      <div className="flex items-center justify-end gap-1">
+        <ConflictWarning labels={conflictLabels} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="size-7 text-muted-foreground hover:text-foreground"
+          disabled={isSaving}
+          aria-label="Cancel new keybinding"
+          onClick={onCancel}
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expandable header search (t3code design)
+// ---------------------------------------------------------------------------
+
+function ExpandableHeaderSearch({
+  query,
+  onChange,
+  isOpen,
+  onOpenChange,
+  inputRef,
+  collapsedAccessory,
+}: {
+  query: string;
+  onChange: (next: string) => void;
+  isOpen: boolean;
+  onOpenChange: (next: boolean) => void;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  collapsedAccessory?: React.ReactNode;
+}) {
+  if (!isOpen) {
+    return (
+      <>
+        {collapsedAccessory}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => onOpenChange(true)}
+                aria-label="Search keybindings"
+              >
+                <Search className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Search keybindings</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        ref={inputRef}
+        autoFocus
+        type="search"
+        value={query}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        onBlur={() => {
+          if (query.length === 0) onOpenChange(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onChange("");
+            onOpenChange(false);
+          }
+        }}
+        placeholder="Search keybindings"
+        aria-label="Search keybindings"
+        className="h-7 w-44 pl-7 text-xs"
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KeybindingsPanel — the t3code-style settings panel
+// ---------------------------------------------------------------------------
+
+interface KeybindingsPanelProps {
+  keybindings: KeybindingMap;
+  setKeybindings: Dispatch<SetStateAction<KeybindingMap>>;
+}
+
+export function KeybindingsPanel({
+  keybindings,
+  setKeybindings,
+}: KeybindingsPanelProps) {
+  const [query, setQuery] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [isAddingBinding, setIsAddingBinding] = useState(false);
+  const [savingCombo, setSavingCombo] = useState<string | null>(null);
+  const [openingJsonFile, setOpeningJsonFile] = useState(false);
+
+  const openJsonFile = async () => {
+    setOpeningJsonFile(true);
+    try {
+      const result = await getKeybindingsFile();
+      const filePath = result?.filePath;
+      if (!result.success || !filePath) {
+        throw new Error(result.error || "keybindings.json path unavailable");
+      }
+      await openExternalUrl(filePath);
+    } catch (error) {
+      console.error("Failed to open keybindings.json", error);
+      toast.error("Couldn't open keybindings.json");
+    } finally {
+      setOpeningJsonFile(false);
+    }
+  };
+
+  const rows = useMemo(
+    () => buildRows(keybindings, query),
+    [keybindings, query],
+  );
+
+  // Cmd/Ctrl+F opens search (t3code behavior)
+  useEffect(() => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod || e.altKey || e.key.toLowerCase() !== "f") return;
+      const target = e.target;
+      if (
+        target !== searchInputRef.current &&
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setIsSearchOpen(true);
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const saveKeybinding = (combo: string, binding: KeybindingBinding) => {
+    const trimmed = combo.trim();
+    if (!trimmed) return;
+    setSavingCombo(combo);
+    setKeybindings((prev) => {
+      const next = { ...prev };
+      // Remove any old entry that maps to this combo (replace)
+      delete next[combo];
+      next[trimmed] = { ...binding, combo: trimmed };
+      return next;
+    });
+    setSavingCombo(null);
+    setIsAddingBinding(false);
+  };
+
+  const removeKeybinding = (row: KeybindingRow) => {
+    setKeybindings((prev) => {
+      const next = { ...prev };
+      delete next[row.combo];
+      return next;
+    });
+  };
+
+  const resetKeybinding = (row: KeybindingRow) => {
+    const defaults = getDefaultKeybindings();
+    const defaultBinding = defaults[row.combo];
+    if (!defaultBinding) {
+      // If there's no default for this combo, just remove it
+      removeKeybinding(row);
+      return;
+    }
+    setKeybindings((prev) => ({
+      ...prev,
+      [row.combo]: { ...defaultBinding, combo: row.combo },
+    }));
+  };
+
+  const bindingsCount = (
+    <span className="text-[11px] text-muted-foreground">
+      {rows.length + (isAddingBinding ? 1 : 0)}{" "}
+      {rows.length + (isAddingBinding ? 1 : 0) === 1 ? "binding" : "bindings"}
+    </span>
+  );
+
+  return (
+    <TooltipProvider>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Keybindings</h2>
+          <p className="text-xs text-muted-foreground">
+            Customize keyboard shortcuts. Click a keybinding to edit, or add a
+            new one.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <ExpandableHeaderSearch
+            query={query}
+            onChange={setQuery}
+            isOpen={isSearchOpen}
+            onOpenChange={setIsSearchOpen}
+            inputRef={searchInputRef}
+            collapsedAccessory={bindingsCount}
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setIsAddingBinding(true)}
+                aria-label="Add keybinding"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Add keybinding</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Open keybindings.json"
+                disabled={openingJsonFile}
+                onClick={() => void openJsonFile()}
+              >
+                <FileJson className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Open keybindings.json</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card/60">
+        <ScrollArea className="w-full max-w-full rounded-none">
+          <div className="min-w-[680px]">
+            {/* Column headers */}
+            <div className="grid grid-cols-[minmax(190px,1.1fr)_minmax(220px,0.85fr)_minmax(210px,1fr)_60px] border-b border-border/70 bg-muted/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+              <div>Command</div>
+              <div>Keybinding</div>
+              <div>Parameters</div>
+              <div className="text-right">Status</div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y divide-border/60">
+              {isAddingBinding ? (
+                <NewKeybindingTableRow
+                  allRows={rows}
+                  isSaving={savingCombo !== null}
+                  onSave={saveKeybinding}
+                  onCancel={() => setIsAddingBinding(false)}
+                />
+              ) : null}
+              {rows.map((row) => (
+                <KeybindingTableRow
+                  key={row.id}
+                  row={row}
+                  allRows={rows}
+                  isSaving={savingCombo === row.combo}
+                  onSave={(combo, binding) => {
+                    setKeybindings((prev) => {
+                      const next = { ...prev };
+                      if (combo !== row.combo) delete next[row.combo];
+                      next[combo] = { ...binding, combo };
+                      return next;
+                    });
+                  }}
+                  onReset={resetKeybinding}
+                  onRemove={removeKeybinding}
+                />
+              ))}
+              {rows.length === 0 && !isAddingBinding ? (
+                <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  No keybindings match your search.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KeybindingsView — standalone tab wrapper (kept for backward compatibility)
+// ---------------------------------------------------------------------------
 
 interface StudioKeybindingsModel {
   keybindings: KeybindingMap;
@@ -90,754 +900,20 @@ interface StudioKeybindingsModel {
   databases: string[];
 }
 
-const EMPTY_BINDING_TEMPLATE: NewBinding = {
-  combo: "",
-  type: "NAVIGATE_TABLE",
-  schema: "public",
-  table: "",
-  database: "",
-  index: 0,
-  view: "schema",
-  sidebar: "tables",
-};
-
-function validateConfig(input: unknown): {
-  valid: KeybindingMap | null;
-  error: string | null;
-} {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return {
-      valid: null,
-      error: "Config must be a JSON object where keys are shortcut combos.",
-    };
-  }
-
-  const actionsById = new Map(
-    KEYBINDING_ACTIONS.map((action) => [action.id, action]),
-  );
-  const source = input as Record<string, unknown>;
-
-  for (const [combo, rawBinding] of Object.entries(source)) {
-    if (!combo.trim()) {
-      return { valid: null, error: "Shortcut keys cannot be empty." };
-    }
-
-    if (
-      !rawBinding ||
-      typeof rawBinding !== "object" ||
-      Array.isArray(rawBinding)
-    ) {
-      return {
-        valid: null,
-        error: `Shortcut \"${combo}\" must be an object with at least a \"type\" field.`,
-      };
-    }
-
-    const binding = rawBinding as Record<string, unknown>;
-    const rawType = binding.type;
-
-    if (typeof rawType !== "string" || !actionsById.has(rawType)) {
-      return {
-        valid: null,
-        error: `Shortcut \"${combo}\" uses an unknown action type.`,
-      };
-    }
-
-    const action = actionsById.get(rawType)!;
-    for (const field of action.fields) {
-      const value = binding[field];
-      if (value === undefined || value === null || value === "") {
-        return {
-          valid: null,
-          error: `Shortcut \"${combo}\" is missing required field \"${field}\".`,
-        };
-      }
-    }
-
-    if (
-      action.fields.includes("index") &&
-      (!Number.isInteger(binding.index) || (binding.index as number) < 0)
-    ) {
-      return {
-        valid: null,
-        error: `Shortcut \"${combo}\" must have a non-negative integer \"index\".`,
-      };
-    }
-
-    if (
-      action.fields.includes("view") &&
-      !DB_VIEWS.some((view) => view.id === binding.view)
-    ) {
-      return {
-        valid: null,
-        error: `Shortcut \"${combo}\" has invalid \"view\" value.`,
-      };
-    }
-
-    if (
-      action.fields.includes("sidebar") &&
-      !SIDEBAR_VIEWS.some((view) => view.id === binding.sidebar)
-    ) {
-      return {
-        valid: null,
-        error: `Shortcut \"${combo}\" has invalid \"sidebar\" value.`,
-      };
-    }
-  }
-
-  return { valid: source as KeybindingMap, error: null };
+interface KeybindingsViewProps {
+  studio: StudioKeybindingsModel;
 }
 
 export function KeybindingsView({ studio }: KeybindingsViewProps) {
-  const { keybindings, setKeybindings, schemas, tables, databases } = studio;
-
-  const [mode, setMode] = useState<KeybindingMode>("ui");
-  const [newBinding, setNewBinding] = useState<NewBinding>(
-    EMPTY_BINDING_TEMPLATE,
-  );
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [editingCombo, setEditingCombo] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [configText, setConfigText] = useState(
-    JSON.stringify(keybindings, null, 2),
-  );
-  const [configError, setConfigError] = useState<string | null>(null);
-  const [showModeToggle, setShowModeToggle] = useState<boolean | undefined>(
-    undefined,
-  );
-  const headerRowRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = headerRowRef.current;
-    if (!el) return;
-
-    const check = () => {
-      const avail = el.clientWidth;
-      const hide = avail < 420;
-      console.log("[keybindings] container width:", avail, "hide:", hide);
-      setShowModeToggle(!hide);
-    };
-
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const selectedAction = KEYBINDING_ACTIONS.find(
-    (action) => action.id === newBinding.type,
-  );
-  const canonicalConfigText = useMemo(
-    () => JSON.stringify(keybindings, null, 2),
-    [keybindings],
-  );
-
-  const sortedBindings = useMemo(
-    () => Object.entries(keybindings).sort(([a], [b]) => a.localeCompare(b)),
-    [keybindings],
-  );
-
-  const filteredBindings = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return sortedBindings;
-
-    return sortedBindings.filter(([combo, binding]) => {
-      const actionName =
-        KEYBINDING_ACTIONS.find((action) => action.id === binding.type)?.name ||
-        binding.type;
-      const description = describeBinding(binding);
-      return `${combo} ${actionName} ${description}`
-        .toLowerCase()
-        .includes(query);
-    });
-  }, [searchQuery, sortedBindings]);
-
-  const switchMode = (nextMode: KeybindingMode) => {
-    setMode(nextMode);
-    if (nextMode === "config") {
-      setConfigText(canonicalConfigText);
-      setConfigError(null);
-    }
-  };
-
-  const addBinding = () => {
-    if (!newBinding.combo) return;
-
-    setKeybindings((prev) => {
-      const next = { ...prev };
-      if (editingCombo) delete next[editingCombo];
-      next[newBinding.combo] = { ...newBinding };
-      return next;
-    });
-
-    setNewBinding(EMPTY_BINDING_TEMPLATE);
-    setEditingCombo(null);
-  };
-
-  const removeBinding = (combo: string) => {
-    setKeybindings((prev) => {
-      const next = { ...prev };
-      delete next[combo];
-      return next;
-    });
-  };
-
-  const startEditing = (combo: string, binding: KeybindingBinding) => {
-    setEditingCombo(combo);
-    setNewBinding({
-      combo,
-      type: binding.type,
-      schema: binding.schema ?? "",
-      table: binding.table ?? "",
-      database: binding.database ?? "",
-      index: typeof binding.index === "number" ? binding.index : 0,
-      view: binding.view ?? "schema",
-      sidebar: binding.sidebar ?? "tables",
-    });
-  };
-
-  const cancelEditing = () => {
-    setEditingCombo(null);
-    setNewBinding(EMPTY_BINDING_TEMPLATE);
-  };
-
-  const applyConfig = () => {
-    try {
-      const parsed = JSON.parse(configText);
-      const { valid, error } = validateConfig(parsed);
-      if (error || !valid) {
-        setConfigError(error || "Configuration is invalid.");
-        return;
-      }
-
-      setKeybindings(valid);
-      const formatted = JSON.stringify(valid, null, 2);
-      setConfigText(formatted);
-      setConfigError(null);
-    } catch {
-      setConfigError("Invalid JSON. Check commas, quotes, and braces.");
-    }
-  };
-
-  const formatConfig = () => {
-    try {
-      const parsed = JSON.parse(configText);
-      setConfigText(JSON.stringify(parsed, null, 2));
-      setConfigError(null);
-    } catch {
-      setConfigError("Cannot format invalid JSON.");
-    }
-  };
-
-  const resetConfig = () => {
-    setConfigText(canonicalConfigText);
-    setConfigError(null);
-  };
-
-  const existingCombo = newBinding.combo && keybindings[newBinding.combo];
-  const isConfigDirty = configText !== canonicalConfigText;
-
-  useEffect(() => {
-    if (!isCapturing) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault();
-      const combo = buildShortcutCombo(event);
-      if (!combo) return;
-      setNewBinding((prev) => ({ ...prev, combo }));
-      setIsCapturing(false);
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCapturing]);
+  const { keybindings, setKeybindings } = studio;
 
   return (
     <div className="flex-1 h-full overflow-auto bg-background text-foreground">
-      <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6 px-4 sm:px-6 py-6 sm:py-10">
-        <header className="flex flex-col gap-3 sm:gap-4 rounded-lg sm:rounded-lg border border-border bg-card/40 p-4 sm:p-5">
-          <div
-            ref={headerRowRef}
-            className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="space-y-1">
-              <h2 className="text-sm sm:text-sm font-semibold">Keybindings</h2>
-              <p className="text-xs sm:text-xs text-muted-foreground">
-                Customize shortcuts in a visual editor or edit the raw JSON
-                config like VS Code.
-              </p>
-            </div>
-            {showModeToggle === true ? (
-              <div
-                className="inline-flex items-center rounded-lg border border-border bg-muted/30 p-0.5 w-full sm:w-auto"
-                role="tablist"
-              >
-                <button
-                  role="tab"
-                  aria-selected={mode === "ui"}
-                  onClick={() => switchMode("ui")}
-                  className={cn(
-                    "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs sm:text-xs font-medium transition-all whitespace-nowrap flex-1 sm:flex-initial",
-                    mode === "ui"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <PaletteIcon className="h-3.5 w-3.5" />
-                  Visual
-                </button>
-                <button
-                  role="tab"
-                  aria-selected={mode === "config"}
-                  onClick={() => switchMode("config")}
-                  className={cn(
-                    "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs sm:text-xs font-medium transition-all whitespace-nowrap flex-1 sm:flex-initial",
-                    mode === "config"
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Code2 className="h-3.5 w-3.5" />
-                  Config
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </header>
-
-        {mode === "ui" ? (
-          <div
-            style={{
-              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-            }}
-            className="grid gap-4 sm:gap-6"
-          >
-            <Card className="border-border bg-card/60 min-w-0">
-              <CardHeader>
-                <CardTitle className="text-sm sm:text-sm">
-                  {editingCombo ? "Edit Shortcut" : "Create Shortcut"}
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-xs">
-                  {editingCombo
-                    ? "Modify the key combo or action. Saving will update the original shortcut."
-                    : "Assign a key combo to any supported action. Existing combos are replaced."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 sm:space-y-4">
-                <div className="space-y-1.5 sm:space-y-2">
-                  <Label className="text-xs sm:text-xs text-muted-foreground">
-                    Action
-                  </Label>
-                  <Select
-                    value={newBinding.type}
-                    onValueChange={(value: KeybindingActionId) =>
-                      setNewBinding((prev) => ({ ...prev, type: value }))
-                    }
-                  >
-                    <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                      <SelectValue placeholder="Select an action" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-64 sm:max-h-72">
-                      {KEYBINDING_ACTIONS.map((action) => (
-                        <SelectItem
-                          key={action.id}
-                          value={action.id}
-                          className="text-xs sm:text-xs"
-                        >
-                          {action.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5 sm:space-y-2">
-                  <Label className="text-xs sm:text-xs text-muted-foreground">
-                    Key Combination
-                  </Label>
-                  <div className="flex gap-1.5 sm:gap-2">
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "h-8 sm:h-9 flex-1 border-dashed font-mono text-xs sm:text-xs",
-                        isCapturing &&
-                          "border-primary bg-primary/10 text-primary",
-                      )}
-                      onClick={() => setIsCapturing(true)}
-                    >
-                      {isCapturing
-                        ? "Press keys..."
-                        : newBinding.combo || "Click to record"}
-                    </Button>
-                    {newBinding.combo ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 sm:h-9 sm:w-9"
-                        onClick={() =>
-                          setNewBinding((prev) => ({ ...prev, combo: "" }))
-                        }
-                      >
-                        <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                  {existingCombo && editingCombo !== newBinding.combo ? (
-                    <p className="text-xs sm:text-xs text-amber-600 dark:text-amber-400">
-                      This combo already exists and will be overwritten.
-                    </p>
-                  ) : null}
-                </div>
-
-                {selectedAction?.fields.includes("schema") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      Schema
-                    </Label>
-                    <Select
-                      value={newBinding.schema}
-                      onValueChange={(value) =>
-                        setNewBinding((prev) => ({ ...prev, schema: value }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                        <SelectValue placeholder="Select schema" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 sm:max-h-72">
-                        {schemas.map((schema) => (
-                          <SelectItem
-                            key={schema}
-                            value={schema}
-                            className="text-xs sm:text-xs"
-                          >
-                            {schema}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-
-                {selectedAction?.fields.includes("table") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      Table
-                    </Label>
-                    <Select
-                      value={newBinding.table}
-                      onValueChange={(value) =>
-                        setNewBinding((prev) => ({ ...prev, table: value }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                        <SelectValue placeholder="Select table" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 sm:max-h-72">
-                        {tables.map((table) => (
-                          <SelectItem
-                            key={table}
-                            value={table}
-                            className="text-xs sm:text-xs"
-                          >
-                            {table}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-
-                {selectedAction?.fields.includes("database") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      Database
-                    </Label>
-                    <Select
-                      value={newBinding.database}
-                      onValueChange={(value) =>
-                        setNewBinding((prev) => ({ ...prev, database: value }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                        <SelectValue placeholder="Select database" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 sm:max-h-72">
-                        {databases.map((database) => (
-                          <SelectItem
-                            key={database}
-                            value={database}
-                            className="text-xs sm:text-xs"
-                          >
-                            {database}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-
-                {selectedAction?.fields.includes("view") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      View
-                    </Label>
-                    <Select
-                      value={newBinding.view}
-                      onValueChange={(value) =>
-                        setNewBinding((prev) => ({ ...prev, view: value }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                        <SelectValue placeholder="Select view" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 sm:max-h-72">
-                        {DB_VIEWS.map((view) => (
-                          <SelectItem
-                            key={view.id}
-                            value={view.id}
-                            className="text-xs sm:text-xs"
-                          >
-                            {view.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-
-                {selectedAction?.fields.includes("sidebar") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      Sidebar View
-                    </Label>
-                    <Select
-                      value={newBinding.sidebar}
-                      onValueChange={(value) =>
-                        setNewBinding((prev) => ({ ...prev, sidebar: value }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 sm:h-9 bg-background text-xs sm:text-xs">
-                        <SelectValue placeholder="Select sidebar" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-64 sm:max-h-72">
-                        {SIDEBAR_VIEWS.map((view) => (
-                          <SelectItem
-                            key={view.id}
-                            value={view.id}
-                            className="text-xs sm:text-xs"
-                          >
-                            {view.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-
-                {selectedAction?.fields.includes("index") ? (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-xs text-muted-foreground">
-                      Tab Index
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={newBinding.index}
-                      onChange={(e) =>
-                        setNewBinding((prev) => ({
-                          ...prev,
-                          index: parseInt(e.target.value || "0", 10) || 0,
-                        }))
-                      }
-                      className="h-8 sm:h-9 bg-background text-xs sm:text-xs"
-                    />
-                  </div>
-                ) : null}
-
-                <div className="flex gap-2">
-                  <Button
-                    onClick={addBinding}
-                    disabled={!newBinding.combo}
-                    className="h-8 sm:h-9 flex-1 gap-1.5 text-xs sm:text-xs"
-                  >
-                    {editingCombo ? (
-                      <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    ) : (
-                      <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    )}
-                    {editingCombo ? "Update Shortcut" : "Save Shortcut"}
-                  </Button>
-                  {editingCombo ? (
-                    <Button
-                      variant="outline"
-                      onClick={cancelEditing}
-                      className="h-8 sm:h-9 gap-1.5 text-xs sm:text-xs"
-                    >
-                      Cancel
-                    </Button>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card/60 min-w-0">
-              <CardHeader className="gap-2 sm:gap-3">
-                <div className="flex items-start sm:items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-sm sm:text-sm">
-                      Active Shortcuts
-                    </CardTitle>
-                    <CardDescription className="text-xs sm:text-xs">
-                      Your shortcuts are matched exactly against pressed key
-                      combos.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="secondary" className="text-xs sm:text-xs h-5">
-                    {sortedBindings.length}
-                  </Badge>
-                </div>
-
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 sm:left-3 top-1/2 h-3 w-3 sm:h-3.5 sm:w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search shortcuts"
-                    className="h-8 sm:h-9 pl-7 sm:pl-8 text-xs sm:text-xs"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {filteredBindings.length === 0 ? (
-                  <div className="flex min-h-40 sm:min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 text-center p-4">
-                    <Keyboard className="mb-2 sm:mb-3 h-7 w-7 sm:h-9 sm:w-9 text-muted-foreground/40" />
-                    <p className="text-xs sm:text-sm font-medium">
-                      No shortcuts found
-                    </p>
-                    <p className="text-xs sm:text-xs text-muted-foreground">
-                      Try changing your search or add a new keybinding.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 sm:space-y-2">
-                    {filteredBindings.map(([combo, binding]) => {
-                      const actionName =
-                        KEYBINDING_ACTIONS.find(
-                          (action) => action.id === binding.type,
-                        )?.name || binding.type;
-                      return (
-                        <div
-                          key={combo}
-                          className="group flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-lg border border-border bg-background/70 px-2.5 sm:px-3 py-2 min-w-0"
-                        >
-                          <div className="min-w-0 space-y-1 w-full sm:w-auto">
-                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                              <Kbd className="text-xs sm:text-xs">{combo}</Kbd>
-                              <p className="truncate text-xs sm:text-sm font-medium">
-                                {actionName}
-                              </p>
-                            </div>
-                            <p className="truncate text-xs sm:text-xs text-muted-foreground">
-                              {describeBinding(binding)}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => startEditing(combo, binding)}
-                            >
-                              <Pencil className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeBinding(combo)}
-                            >
-                              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <Card className="border-border bg-card/60 min-w-0">
-            <CardHeader className="gap-2 sm:gap-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle className="text-sm sm:text-sm">
-                    `keybindings.json` Editor
-                  </CardTitle>
-                  <CardDescription className="text-xs sm:text-xs">
-                    Edit the full configuration directly. Apply only after JSON
-                    validates.
-                  </CardDescription>
-                </div>
-                <Badge variant="outline" className="w-fit text-xs sm:text-xs">
-                  VS Code-style config mode
-                </Badge>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/20 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-xs text-muted-foreground">
-                Format example:{" "}
-                <code className="text-xs">{`{"${formatShortcutForPlatform("Cmd+K")}": {"type": "TOGGLE_COMMAND_MENU"}}`}</code>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2.5 sm:space-y-3">
-              <Textarea
-                value={configText}
-                onChange={(e) => {
-                  setConfigText(e.target.value);
-                  if (configError) setConfigError(null);
-                }}
-                spellCheck={false}
-                className="min-h-[280px] sm:min-h-[420px] resize-y font-mono text-xs sm:text-xs"
-              />
-
-              {configError ? (
-                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-xs text-destructive">
-                  {configError}
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <Button
-                  onClick={applyConfig}
-                  className="gap-1.5 h-7 sm:h-8 text-xs sm:text-xs"
-                  size="sm"
-                >
-                  <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                  Apply Config
-                </Button>
-                <Button
-                  onClick={formatConfig}
-                  variant="secondary"
-                  className="gap-1.5 h-7 sm:h-8 text-xs sm:text-xs"
-                  size="sm"
-                >
-                  <WandSparkles className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                  Format JSON
-                </Button>
-                <Button
-                  onClick={resetConfig}
-                  variant="ghost"
-                  className="h-7 sm:h-8 text-xs sm:text-xs"
-                  size="sm"
-                >
-                  Revert Changes
-                </Button>
-                <span className="text-xs sm:text-xs text-muted-foreground">
-                  {isConfigDirty ? "Unsaved config changes" : "Config in sync"}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      <div className="mx-auto max-w-5xl px-4 py-6">
+        <KeybindingsPanel
+          keybindings={keybindings}
+          setKeybindings={setKeybindings}
+        />
       </div>
     </div>
   );

@@ -142,7 +142,7 @@ function renderDashboardInstructions() {
   ].join("\n");
 }
 
-function renderSchemaContext(tables: LightSchemaContextTable[]) {
+export function renderSchemaContext(tables: LightSchemaContextTable[]) {
   if (!tables.length) return "No lightweight schema context was provided.";
   return tables
     .map((table) => {
@@ -151,6 +151,53 @@ function renderSchemaContext(tables: LightSchemaContextTable[]) {
         .join(", ");
       return `- ${table.schema}.${table.table}${columns ? ` (${columns})` : ""}`;
     })
+    .join("\n");
+}
+
+/**
+ * Compact DB context block for external coding-agent harnesses (Claude Code,
+ * OpenCode, Codex, …) that do not load RexaDB's full system prompt.
+ */
+export function buildAgentDatabaseContext(input: {
+  dbType: string;
+  connectionName?: string;
+  connectionId?: number | string;
+  selectedNamespace?: string;
+  schemaContext?: LightSchemaContextTable[];
+  /** Absolute or relative path to SCHEMA.md in the sandbox, when materialized. */
+  schemaFilePath?: string;
+}): string {
+  const schemaBody = renderSchemaContext(input.schemaContext || []);
+  const hasSchema =
+    Array.isArray(input.schemaContext) && input.schemaContext.length > 0;
+
+  return [
+    "CRITICAL CONTEXT — read this before doing anything else:",
+    "You are inside RexaDB Agents, talking about a LIVE database connection the user selected in RexaDB.",
+    "You are NOT reviewing a local coding project. The working directory is only a temporary sandbox.",
+    "SCHEMA.md (if present) is a catalog dump of that LIVE connection — treat it as the database, not as app source.",
+    'When the user says "this database", "this schema", or "what do you think about this", they mean the LIVE RexaDB connection below.',
+    "Do not invent a demo schema. Do not talk as if this is a greenfield Postgres project unless the live catalog truly is empty.",
+    "",
+    `Database type: ${input.dbType}.`,
+    input.connectionName ? `RexaDB connection name: ${input.connectionName}.` : null,
+    input.connectionId != null ? `RexaDB connection id: ${input.connectionId}.` : null,
+    input.selectedNamespace
+      ? `Current namespace/schema: ${input.selectedNamespace}.`
+      : null,
+    `Tables in catalog: ${hasSchema ? input.schemaContext!.length : 0}.`,
+    input.schemaFilePath
+      ? `Sandbox schema snapshot file: ${input.schemaFilePath}`
+      : "Sandbox schema snapshot file: SCHEMA.md",
+    "",
+    hasSchema
+      ? "LIVE database catalog (tables with columns and types) — authoritative:"
+      : "LIVE database catalog was not loaded for this turn. Say you cannot see tables yet and ask the user to reconnect.",
+    hasSchema ? schemaBody : null,
+    "",
+    "Respond as a database assistant for this connection. Prefer concrete observations about the catalog above.",
+  ]
+    .filter((line) => line !== null && line !== undefined)
     .join("\n");
 }
 
@@ -239,6 +286,36 @@ export function renderWorkflowInstructions() {
   ].join("\n");
 }
 
+function renderTaskInstructions() {
+  return [
+    "Task output rules:",
+    "When breaking down multi-step work, or when the user asks to create/track tasks, use EITHER a tool call or a fenced block:",
+    "Option A — Tool: call `create_tasks` with { tasks: [{ label, amount?, status?, details? }], variant? } to create tasks, then `update_task` to change status (pending → in_progress → completed/failed).",
+    "Option B — Markdown: output a single fenced ```tasks block containing JSON. The opening ```tasks fence must start at the beginning of its own line, with a blank line before and after.",
+    "The ```tasks block MUST contain ONLY JSON. Top-level schema: {\"variant\": \"Capsules\"|\"List\", \"tasks\": [{ \"id\": \"optional\", \"label\": \"...\", \"amount\": \"...\", \"status\": \"pending\"|\"in_progress\"|\"completed\"|\"failed\", \"details\": [{ \"label\": \"...\", \"meta\": \"...\" }] }]}",
+    "Use status `pending` for not started, `in_progress` for active, `completed` for done, `failed` for errors.",
+    "Each task's `details` are expandable rows shown when the task is opened.",
+    "Keep labels concise (3-5 words) and amounts short (e.g. '12 suppliers', '7 SKUs').",
+    "Example tasks JSON:",
+    '{"variant":"Capsules","tasks":[{"label":"Verified vendor records","amount":"12 suppliers","status":"completed","details":[{"label":"Matched tax and contact IDs","meta":"12/12"},{"label":"Flagged stale records","meta":"0"}]},{"label":"Build reorder task list","amount":"7 SKUs","status":"in_progress","details":[{"label":"Reading POS export","meta":"3 files"},{"label":"Scoring stockout risk","meta":"68%"}]},{"label":"Draft supplier emails","amount":"2 messages","status":"failed","details":[{"label":"Cone supplier follow-up","meta":"draft"},{"label":"Pistachio reorder note","meta":"draft"}]}]}',
+  ].join("\n");
+}
+
+function renderApprovalInstructions() {
+  return [
+    "Approval / Ask output rules:",
+    "When you need human input, confirmation, or a decision, ask via EITHER a tool or a fenced block:",
+    "Option A — Tool: call `ask_questions` with { questions: [{ q, type: \"radio\"|\"check\", options: string[] }] } (1-5 questions, 1-6 options each) or `ask_approval` for a single question. The UI will show an approval card with slide animation, rolling counter, and pill actions.",
+    "Option B — Markdown: output a single fenced ```approval block containing JSON. The opening ```approval fence must start at the beginning of its own line, with a blank line before and after.",
+    "The ```approval block MUST contain ONLY JSON. Top-level schema: {\"questions\": [{ \"q\": \"...\", \"type\": \"radio\"|\"check\", \"options\": [\"...\"] }], \"resettable\": true }",
+    "Use type `radio` for single-choice (auto-advances), `check` for multi-select (waits for Continue). Include a \"Something else…\" custom input automatically — no need to add it as an option.",
+    "Keep questions concise and options short (3-5 words). The card shows one question at a time, with step counter that rolls like an odometer.",
+    "When the user submits answers, they will be sent back as a new user message formatted as approval answers. Do not ask the same questions again.",
+    "Example approval JSON:",
+    '{"questions":[{"q":"How many flavors should we launch?","type":"radio","options":["Three (core line)","Five (full case)","Just one hero"]},{"q":"Which mix-ins should we stock?","type":"check","options":["Chocolate chips","Waffle bits","Sprinkles"]}]}',
+  ].join("\n");
+}
+
 export function renderWorkflowContext(context: AgentWorkflowContext): string {
   if (!context) return "";
 
@@ -271,14 +348,17 @@ export function buildAgentInstructions(input: {
   workflowContext?: AgentWorkflowContext;
 }) {
   return [
-    "You are Rexa DB's database copilot.",
+    "You are Rexa DB's database copilot for a LIVE database connection the user selected in RexaDB.",
     "You are NOT a coding assistant. Do not analyze, comment on, or reference the app's source code, project structure, working directory, or frameworks (Tauri, Rust, etc.). Your entire focus is the user's connected database.",
+    'When the user says "this database" or "this schema", they mean the live RexaDB connection described below — not a local file and not a greenfield project.',
     `Connection type: ${input.dbType}.`,
     input.selectedNamespace ? `Current namespace: ${input.selectedNamespace}.` : null,
     input.permissionMode === "schema_only"
-      ? "Permission mode: schema only. You may inspect schemas and metadata, but you must not read table rows or execute data-reading queries."
-      : "Permission mode: schema plus read-only data. You may inspect schemas and read database data, but only in read-only ways.",
-    "Use tools for schema discovery instead of guessing.",
+      ? "Permission mode: schema only. You may inspect schemas and metadata (list_tables, get_table_schema, describe_connection_capabilities, list_namespaces, search_schema), but you must not read table rows or execute data-reading queries (sample_rows, run_readonly_query will be blocked — just describe tables/columns instead)."
+      : "Permission mode: schema plus read-only data. You may inspect schemas and read database data, but only in read-only ways. All DB tools are pre-approved — call them directly without asking for permission.",
+    "Use tools for schema discovery instead of guessing. All DB tools are already approved — never say 'I need permission' or 'user rejected'; just call the tool.",
+    "For a quick snapshot (what's inside this database): ALWAYS call list_tables first, then get_table_schema for 2-3 interesting tables, and optionally sample_rows for a tiny preview (when allowed). Summarize table counts, row counts, and a few sample rows. Do not call read/bash on the SQLite file itself — use the DB tools.",
+    "SQLite note: the schema is 'main' — if a tool needs a namespace, use 'main' or leave it empty; both work. Do not try to read the .db file via filesystem tools.",
     "When the user references a dashboard token like `@dashboard.some-name-abc123`, use the dashboard tools to inspect that dashboard before proposing changes.",
     "You may only execute read-only database access through tools.",
     "Never claim a mutation was executed.",
@@ -289,6 +369,8 @@ export function buildAgentInstructions(input: {
     renderDashboardInstructions(),
     renderThemeInstructions(),
     renderWorkflowInstructions(),
+    renderTaskInstructions(),
+    renderApprovalInstructions(),
     input.workflowContext ? renderWorkflowContext(input.workflowContext) : null,
     "Keep answers concise and concrete.",
     "If a capability is unavailable on this backend, say so plainly.",

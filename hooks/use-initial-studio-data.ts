@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { getWorkspaceSnippets, getWorkspaceHistory } from "@/lib/supabase/workspace";
 import {
-  getStudioFolders, getStudioSnippets, getStudioHistory, getStudioTags, getStudioTableTags, getStudioTabs, getStudioSettings
+  getStudioFolders, getStudioSnippets, getStudioHistory, getStudioTags, getStudioTableTags, getStudioTabs, getStudioSettings, getKeybindingsFile
 } from "@/lib/api/actions-client";
 import { Connection } from "@/lib/db/schema";
 import { getDefaultKeybindings, normalizeKeybindingsForPlatform, withMissingDefaultKeybindings } from "@/lib/studio/keybindings";
@@ -80,12 +80,20 @@ export function useInitialStudioData({
       const useCloudHistory = storageMode === "cloud" && workspaceId && accessToken;
       const canLoadCloudSnippets = storageMode === "cloud" && Boolean(workspaceId && accessToken);
 
-      const [tagsRes, tableTagsRes, tabsRes, settingsRes] = await Promise.all([
+      const [tagsRes, tableTagsRes, tabsRes, settingsRes, keybindingsRes] = await Promise.all([
         getStudioTags(connection.id),
         getStudioTableTags(connection.id),
         getStudioTabs(connection.id),
         getStudioSettings(connection.id),
+        getKeybindingsFile().catch(() => null),
       ]);
+
+      // Keybindings are a global preference (keybindings.json), not per-connection.
+      if (keybindingsRes?.success && keybindingsRes.data) {
+        setKeybindings(normalizeKeybindingsForPlatform(withMissingDefaultKeybindings(keybindingsRes.data)));
+      } else {
+        setKeybindings(normalizeKeybindingsForPlatform(getDefaultKeybindings()));
+      }
 
       let foldersRes: any = null;
       let snippetsRes: any = null;
@@ -274,7 +282,7 @@ export function useInitialStudioData({
         }
         if (
           !delayedUiRestoreBlockedRef.current &&
-          (settings.sidebarView === "dashboard" || settings.sidebarView === "tables" || settings.sidebarView === "sql" || settings.sidebarView === "database" || settings.sidebarView === "import-export" || settings.sidebarView === "auth" || settings.sidebarView === "themes")
+          (settings.sidebarView === "dashboard" || settings.sidebarView === "tables" || settings.sidebarView === "sql" || settings.sidebarView === "database" || settings.sidebarView === "import-export" || settings.sidebarView === "auth" || settings.sidebarView === "themes" || settings.sidebarView === "workflows" || settings.sidebarView === "agents")
         ) {
           setSidebarView(settings.sidebarView);
         }
@@ -291,25 +299,6 @@ export function useInitialStudioData({
           (settings.sidebarBehavior === "open" || settings.sidebarBehavior === "closed" || settings.sidebarBehavior === "expandable")
         ) {
           setSidebarBehavior(settings.sidebarBehavior);
-        }
-        if (settings.keybindings) {
-          try {
-            const parsedKeybindings = JSON.parse(settings.keybindings);
-            const hasBindings =
-              parsedKeybindings &&
-              typeof parsedKeybindings === "object" &&
-              !Array.isArray(parsedKeybindings) &&
-              Object.keys(parsedKeybindings).length > 0;
-            const baseBindings = hasBindings
-              ? withMissingDefaultKeybindings(parsedKeybindings)
-              : getDefaultKeybindings();
-            setKeybindings(normalizeKeybindingsForPlatform(baseBindings));
-          } catch (e) {
-            console.error("Failed to parse keybindings", e);
-            setKeybindings(normalizeKeybindingsForPlatform(getDefaultKeybindings()));
-          }
-        } else {
-          setKeybindings(normalizeKeybindingsForPlatform(getDefaultKeybindings()));
         }
         if (settings.searchSettings) {
           try {
@@ -335,8 +324,6 @@ export function useInitialStudioData({
             console.error("Failed to parse split view settings", e);
           }
         }
-      } else {
-        setKeybindings(getDefaultKeybindings());
       }
       if (cancelled) return;
       setIsDataLoaded(true);

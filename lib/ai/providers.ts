@@ -38,7 +38,7 @@ export function resolveLanguageModel(
     return {
       provider: resolved.provider,
       modelId: resolved.modelId,
-      model: { id: `openai/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey },
+      model: { id: `openai/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey, url: resolved.baseUrl },
     };
   }
 
@@ -46,7 +46,7 @@ export function resolveLanguageModel(
     return {
       provider: resolved.provider,
       modelId: resolved.modelId,
-      model: { id: `google/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey },
+      model: { id: `google/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey, url: resolved.baseUrl },
     };
   }
 
@@ -54,7 +54,7 @@ export function resolveLanguageModel(
     return {
       provider: resolved.provider,
       modelId: resolved.modelId,
-      model: { id: `anthropic/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey },
+      model: { id: `anthropic/${resolved.modelId}` as `${string}/${string}`, apiKey: resolved.apiKey, url: resolved.baseUrl },
     };
   }
 
@@ -70,13 +70,18 @@ export function resolveLanguageModel(
     };
   }
 
+  // Any other provider — openrouter/kilo/external, or any provider from the
+  // Pi SDK's full catalog (lib/ai/pi-provider-catalog.ts) the user has added
+  // in settings. If they gave a custom base URL, use it as an OpenAI-compatible
+  // gateway; otherwise pass the provider id through so pi-agent.ts can resolve
+  // the SDK's own native endpoint/API format for it.
   return {
     provider: resolved.provider,
     modelId: resolved.modelId,
     model: {
-      id: `openai/${resolved.modelId}` as `${string}/${string}`,
+      id: `${resolved.provider}/${resolved.modelId}` as `${string}/${string}`,
       apiKey: resolved.apiKey,
-      url: resolved.baseUrl || "https://openrouter.ai/api/v1",
+      url: resolved.baseUrl,
     },
   };
 }

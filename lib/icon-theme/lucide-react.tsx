@@ -93,6 +93,7 @@ import {
   GripVertical as LucideGripVertical,
   GripVerticalIcon as LucideGripVerticalIcon,
   HardDrive as LucideHardDrive,
+  Hammer as LucideHammer,
   Hash as LucideHash,
   HelpCircleIcon as LucideHelpCircleIcon,
   History as LucideHistory,
@@ -188,6 +189,7 @@ import {
   Wand2 as LucideWand2,
   WandSparkles as LucideWandSparkles,
   Workflow as LucideWorkflow,
+  Wrench as LucideWrench,
   X as LucideX,
   XCircle as LucideXCircle,
   XIcon as LucideXIcon,
@@ -204,6 +206,7 @@ import {
   Pause as LucidePause,
   Info as LucideInfo,
   SearchX as LucideSearchX,
+  WrapText as LucideWrapText,
 
 } from "lucide-react/dist/esm/lucide-react.js";
 
@@ -399,6 +402,8 @@ export const Wand2 = createThemedLucideIcon("Wand2", LucideWand2);
 export const WandSparkles = createThemedLucideIcon("WandSparkles", LucideWandSparkles);
 export const Workflow = createThemedLucideIcon("Workflow", LucideWorkflow);
 export const X = createThemedLucideIcon("X", LucideX);
+export const Hammer = createThemedLucideIcon("Hammer", LucideHammer);
+export const Wrench = createThemedLucideIcon("Wrench", LucideWrench);
 export const XCircle = createThemedLucideIcon("XCircle", LucideXCircle);
 export const XIcon = createThemedLucideIcon("XIcon", LucideXIcon);
 export const Zap = createThemedLucideIcon("Zap", LucideZap);
@@ -415,6 +420,7 @@ export const Table = createThemedLucideIcon("Table", LucideTable);
 export const Pause = createThemedLucideIcon("Pause", LucidePause);
 export const Info = createThemedLucideIcon("Info", LucideInfo);
 export const SearchX = createThemedLucideIcon("SearchX", LucideSearchX);
+export const WrapText = createThemedLucideIcon("WrapText", LucideWrapText);
 export const AuthIcon = createThemedLucideIcon("AuthIcon", CustomAuthIcon);
 export const TableEditorIcon = createThemedLucideIcon("TableEditorIcon", CustomTableEditorIcon);
 export const DatabaseIcon = createThemedLucideIcon("DatabaseIcon", CustomDatabaseIcon);

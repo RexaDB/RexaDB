@@ -26,13 +26,14 @@ import { NavigationRailItem } from "./navigation-rail-item";
 import { SidebarBehaviorControl } from "./sidebar-behavior-control";
 
 interface NavigationRailProps {
-  sidebarView: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null;
-  setSidebarView: (view: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows") => void;
+  sidebarView: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents" | null;
+  setSidebarView: (view: "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents") => void;
   onDashboardClick: () => void;
   onTableClick: () => void;
   onSqlClick: () => void;
   onDatabaseClick: () => void;
   onSettingsClick: () => void;
+  onAgentsClick?: () => void;
   onConnectStudioClick?: () => void;
   dbType: ConnectionDbType;
   connectionType?: string;
@@ -53,6 +54,7 @@ export function NavigationRail({
   onSqlClick,
   onDatabaseClick,
   onSettingsClick,
+  onAgentsClick,
   onConnectStudioClick,
   dbType,
   connectionType,
@@ -149,6 +151,19 @@ export function NavigationRail({
             setSidebarView("workflows");
           }}
           active={sidebarView === "workflows"}
+          expanded={railExpanded}
+        />
+        <NavigationRailItem
+          label="Agents"
+          icon={
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/ai-agent.png" alt="" className="w-6 h-6 shrink-0 rounded-[3px] object-cover dark:invert" />
+          }
+          onClick={() => {
+            setSidebarView("agents");
+            onAgentsClick?.();
+          }}
+          active={sidebarView === "agents"}
           expanded={railExpanded}
         />
       </div>

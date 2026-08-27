@@ -7,6 +7,8 @@ import { STUDIO_TAB_ICONS } from "@/lib/studio/tab-registry";
 import { resolvePaneForTab } from "@/lib/studio/split-layout";
 import { AppShell } from "@/components/app-shell/app-shell";
 import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { SettingsView } from "@/components/studio/settings-view";
 import { StudioShellSidebar } from "./studio-shell-sidebar";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
@@ -37,6 +39,8 @@ import { WorkflowsSidebar } from "./workflows-sidebar";
 import { ShortcutNavigator } from "./shortcut-navigator";
 import { AiChatSheet } from "./ai/ai-chat-sheet";
 import { AiThreadsSidebar } from "./ai/ai-threads-sidebar";
+import { AgentsPanel } from "./agents/agents-panel";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { normalizeWorkflowPlan } from "@/lib/workflows/agent-plan";
 import type {
@@ -76,8 +80,11 @@ export function StudioInterface({
   const [isGlobalSqlSheetOpen, setIsGlobalSqlSheetOpen] = useState(false);
   const [isUniversalSearchOpen, setIsUniversalSearchOpen] = useState(false);
   const [isAiSheetOpen, setIsAiSheetOpen] = useState(false);
+  const [isAgentsPanelOpen, setIsAgentsPanelOpen] = useState(false);
   const [isThreadsOpen, setIsThreadsOpen] = useState(false);
   const [aiInitialChatId, setAiInitialChatId] = useState<string | null>(null);
+  const [aiActiveChatId, setAiActiveChatId] = useState<string | null>(null);
+  const [aiSelectChatToken, setAiSelectChatToken] = useState(0);
   const [isThemeCreatorOpen, setIsThemeCreatorOpen] = useState(false);
   const [aiInitialPrompt, setAiInitialPrompt] = useState<string | null>(null);
   const [aiStartNewChatToken, setAiStartNewChatToken] = useState(0);
@@ -241,6 +248,10 @@ export function StudioInterface({
       }
       return nextOpen;
     });
+  }, []);
+
+  const handleToggleAgentsPanel = useCallback(() => {
+    setIsAgentsPanelOpen((open) => !open);
   }, []);
 
   const handleEditDashboardWithAi = useCallback((dashboard: any) => {
@@ -699,6 +710,19 @@ export function StudioInterface({
     </>
   );
 
+  const agentSchemaContext = Object.values(studio.schemaData || {})
+    .map((entry: any) => ({
+      schema: String(entry?.schema || studio.selectedSchema || ""),
+      table: String(entry?.name || ""),
+      columns: Array.isArray(entry?.columns)
+        ? entry.columns.slice(0, 20).map((column: any) => ({
+            name: String(column?.name || ""),
+            type: String(column?.type || "text"),
+          }))
+        : [],
+    }))
+    .filter((entry: any) => entry.table);
+
   const aiChatSheetProps = {
     dashboardApplyLabel:
       aiDashboardTarget.mode === "edit" ? "Apply Changes" : "Create Dashboard",
@@ -707,6 +731,8 @@ export function StudioInterface({
     initialPrompt: aiInitialPrompt,
     initialChatId: aiInitialChatId,
     startNewChatToken: aiStartNewChatToken,
+    initialChatSelectToken: aiSelectChatToken,
+    onActiveChatChange: (chatId: string | null) => setAiActiveChatId(chatId),
     onOpenChange: (nextOpen: boolean) => {
       if (nextOpen) {
         setIsGlobalSqlSheetOpen(false);
@@ -720,18 +746,7 @@ export function StudioInterface({
     connectionString: studio.currentConnectionString,
     dbType: studio.dbType,
     selectedNamespace: studio.selectedSchema,
-    schemaContext: Object.values(studio.schemaData || {})
-      .map((entry: any) => ({
-        schema: String(entry?.schema || studio.selectedSchema || ""),
-        table: String(entry?.name || ""),
-        columns: Array.isArray(entry?.columns)
-          ? entry.columns.slice(0, 20).map((column: any) => ({
-              name: String(column?.name || ""),
-              type: String(column?.type || "text"),
-            }))
-          : [],
-      }))
-      .filter((entry: any) => entry.table),
+    schemaContext: agentSchemaContext,
     onOpenSettings: () => studio.openSettingsTab("ai"),
     onRunSql: handleRunAiSql,
     onSendToSql: handleSendAiSqlToEditor,
@@ -785,6 +800,7 @@ export function StudioInterface({
           isSqlEditorOpen={isGlobalSqlSheetOpen}
           onAiAssistantClick={handleToggleAiSheet}
           isAiAssistantOpen={isAiSheetOpen}
+          onAgentsClick={handleToggleAgentsPanel}
           onProfileSettingsClick={studio.openProfileSettingsTab}
           onKeybindingsClick={studio.openKeybindingsTab}
           onToggleNavigator={() =>
@@ -901,6 +917,7 @@ export function StudioInterface({
                   studio.setSidebarView("database");
                 }}
                 onSettingsClick={studio.openSettingsTab}
+                onAgentsClick={handleToggleAgentsPanel}
                 onConnectStudioClick={studio.openConnectStudioTab}
                 dbType={studio.dbType}
                 connectionType={studio.connection?.connectionType ?? undefined}
@@ -930,6 +947,7 @@ export function StudioInterface({
             onEditDashboardWithAi={handleEditDashboardWithAi}
             onOpenThemeCreator={handleOpenThemeCreator}
             onOpenIconThemeCreator={handleOpenIconThemeCreator}
+            onAskAI={handleToggleAiSheet}
             studio={studio}
             snippetSplitDrag={studio.snippetSplitDrag}
             dashboardSplitDrag={studio.dashboardSplitDrag}
@@ -1141,6 +1159,34 @@ export function StudioInterface({
         isFKSelectionSheetOpen={studio.isFKSelectionSheetOpen}
       />
 
+      <Sheet
+        open={isAgentsPanelOpen}
+        onOpenChange={setIsAgentsPanelOpen}
+        modal={!shellLayout}
+      >
+        <SheetContent
+          side="right"
+          contained={shellLayout}
+          showCloseButton={false}
+          className="p-0 gap-0 flex flex-col"
+          style={{ width: "min(420px, 92vw)" }}
+          minResizeWidth={320}
+          maxResizeWidth={700}
+          resizeHandleLabel="Resize agents panel"
+        >
+          <SheetTitle className="sr-only">Agents</SheetTitle>
+          <AgentsPanel
+            isOpen={isAgentsPanelOpen}
+            onOpenChange={setIsAgentsPanelOpen}
+            connectionId={studio.connection.id}
+            connectionString={studio.currentConnectionString}
+            dbType={studio.dbType}
+            selectedNamespace={studio.selectedSchema}
+            schemaContext={agentSchemaContext}
+          />
+        </SheetContent>
+      </Sheet>
+
       {studio.tabSplitDrag && (
         <div
           className="fixed pointer-events-none select-none z-[99999] h-10 flex items-center gap-2 px-3 text-xs border border-studio-border bg-studio-tab-active text-foreground shadow-lg"
@@ -1170,6 +1216,7 @@ export function StudioInterface({
     onSidebarOpenChange: studio.setIsSidebarVisible,
     onAskAI: handleToggleAiSheet,
     isAskAIOpen: isAiSheetOpen,
+    onAgentsClick: handleToggleAgentsPanel,
     onQueryHistory: studio.openHistoryTab,
     user: { name: displayName, email: authUser?.email },
     noiseBgEnabled: studio.noiseBgEnabled,
@@ -1180,13 +1227,36 @@ export function StudioInterface({
     noiseBgTranslucent: studio.noiseBgTranslucent,
   };
 
+  // Rendered as a stable sibling in every branch below (same position in the
+  // tree each time) so switching shells — Modern UI / New Layout / plain —
+  // never unmounts/remounts the dialog while it's open. It used to live
+  // inside ModernUIShell's own branch only, so flipping the layout toggle
+  // while Modern UI's dialog was open swapped it for a structurally
+  // different tree (AppShell + a sibling Dialog vs. a Dialog nested deep
+  // inside ModernUIShell) — React tore the whole thing down and remounted a
+  // fresh SettingsView, which just looked like the modal "re-rendering"
+  // without the shell underneath ever visibly changing.
+  const settingsDialog = (
+    <Dialog open={studio.settingsModalOpen} onOpenChange={studio.setSettingsModalOpen}>
+      <DialogContent
+        hideCloseButton
+        className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+        overlayClassName="bg-black/40"
+      >
+        <DialogTitle className="sr-only">Settings</DialogTitle>
+        <SettingsView studio={studio} />
+      </DialogContent>
+    </Dialog>
+  );
+
   if (modernUiLayout) {
     const threadsPanel = (
       <AiThreadsSidebar
         connectionId={studio.connection.id}
-        activeChatId={aiInitialChatId}
+        activeChatId={aiActiveChatId ?? aiInitialChatId}
         onSelectChat={(chatId) => {
           setAiInitialChatId(chatId);
+          setAiSelectChatToken((t) => t + 1);
           setAiDashboardTarget({ mode: "create" });
           setIsAiSheetOpen(true);
         }}
@@ -1327,35 +1397,47 @@ export function StudioInterface({
       />
     );
     return (
-      <ModernUIShell
-        studio={studio}
-        {...appShellProps}
-        aiChatPanel={<AiChatSheet {...aiChatSheetProps} embedded />}
-        sqlSheetPanel={sqlSheetPanel}
-        isSqlSheetOpen={isGlobalSqlSheetOpen}
-        threadsPanel={threadsPanel}
-        threadsOpen={isThreadsOpen}
-        onToggleThreads={() => setIsThreadsOpen((open) => !open)}
-        sidebarContent={<StudioShellSidebar studio={studio} hideBack />}
-        sidebarOpen={studio.sidebarView !== null && studio.isSidebarVisible}
-        onOpenSearch={() => setIsUniversalSearchOpen(true)}
-        keybindings={studio.keybindings}
-        onSidebarOpenChange={(open) => {
-          // Keep classic visibility + Modern UI view in sync so the header
-          // toggle and TOGGLE_SIDEBAR hotkey behave the same way.
-          studio.setIsSidebarVisible(open);
-          if (!open) studio.setSidebarView(null);
-          else studio.setSidebarView((current: typeof studio.sidebarView) => current ?? "tables");
-        }}
-      >
-        {layout}
-      </ModernUIShell>
+      <>
+        <ModernUIShell
+          studio={studio}
+          {...appShellProps}
+          aiChatPanel={<AiChatSheet {...aiChatSheetProps} embedded />}
+          sqlSheetPanel={sqlSheetPanel}
+          isSqlSheetOpen={isGlobalSqlSheetOpen}
+          threadsPanel={threadsPanel}
+          threadsOpen={isThreadsOpen}
+          onToggleThreads={() => setIsThreadsOpen((open) => !open)}
+          sidebarContent={<StudioShellSidebar studio={studio} hideBack />}
+          sidebarOpen={studio.sidebarView !== null && studio.isSidebarVisible}
+          onOpenSearch={() => setIsUniversalSearchOpen(true)}
+          keybindings={studio.keybindings}
+          onSidebarOpenChange={(open) => {
+            studio.setIsSidebarVisible(open);
+            if (!open) studio.setSidebarView(null);
+            else studio.setSidebarView((current: typeof studio.sidebarView) => current ?? "tables");
+          }}
+          hideSettingsDialog
+        >
+          {layout}
+        </ModernUIShell>
+        {settingsDialog}
+      </>
     );
   }
 
-  if (!appShellLayout) return layout;
+  if (!appShellLayout) {
+    return (
+      <>
+        {layout}
+        {settingsDialog}
+      </>
+    );
+  }
 
   return (
-    <AppShell {...appShellProps}>{layout}</AppShell>
+    <>
+      <AppShell {...appShellProps}>{layout}</AppShell>
+      {settingsDialog}
+    </>
   );
 }

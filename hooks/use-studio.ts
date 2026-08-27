@@ -29,6 +29,7 @@ import type { RedisCreateKeyInput, RedisKeyInfo } from "@/types/redis";
 import { getRedisKeyCommand, updateRedisConnectionStringDatabase } from "@/lib/db/redis-utils";
 import { buildRedisCreateCommands } from "@/lib/db/redis-create-commands";
 import { buildShortcutCombo, getDefaultKeybindings, withMissingDefaultKeybindings } from "@/lib/studio/keybindings";
+import { subscribeToLayoutPrefs } from "@/lib/studio/layout-prefs-cache";
 import { generateActionId, executeSqlWithHistory } from "@/lib/studio/execute-with-review";
 import type { SettingsSectionId } from "@/components/studio/settings/settings-sidebar";
 import type { EditColumnPayload, AddColumnPayload } from "@/components/studio/grid/types";
@@ -1013,7 +1014,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1025,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -8197,11 +8198,19 @@ END $$;`.trim();
   }, [openTabs, activeTabId, switchTab, addTabAndSwitch]);
 
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId | undefined>(undefined);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
+  // Settings opens as a modal (matches the rail's Settings gear icon), not a tab.
   const openSettingsTab = useCallback((section?: SettingsSectionId) => {
     setSettingsInitialSection(section);
-    openSimpleTab('settings', 'settings', 'Settings');
-  }, [openSimpleTab]);
+    setSettingsModalOpen(true);
+  }, []);
+
+  // A layout change (New Layout <-> Modern UI <-> plain) swaps the entire
+  // shell this modal is rendered next to. Close it the instant that happens
+  // rather than trying to keep a dialog open across its parent tree being
+  // torn down and rebuilt around it.
+  useEffect(() => subscribeToLayoutPrefs(() => setSettingsModalOpen(false)), []);
 
   const openProfileSettingsTab = useCallback(() => {
     openSimpleTab('profile-settings', 'profile-settings', 'Profile Settings');
@@ -8682,6 +8691,8 @@ END $$;`.trim();
     openConnectStudioTab,
     openManageWorkspacesTab,
     settingsInitialSection,
+    settingsModalOpen,
+    setSettingsModalOpen,
     openSettingsTab,
     openProfileSettingsTab,
     openKeybindingsTab,

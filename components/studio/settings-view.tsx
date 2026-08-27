@@ -87,6 +87,7 @@ import {
   type CustomAppTheme,
 } from "@/lib/studio/app-themes";
 import { AiSettingsSection } from "@/components/studio/ai/ai-settings-section";
+import { AiProvidersPage } from "@/components/studio/ai/ai-providers-page";
 import { IconThemeSetting } from "@/components/studio/settings/icon-theme-setting";
 import { CustomFontSetting } from "@/components/studio/settings/custom-font-setting";
 import { ThemesSection } from "@/components/studio/settings/themes-section";
@@ -100,6 +101,7 @@ import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
+import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 
 function AddThemeMenu({
   onBrowseThemes,
@@ -414,6 +416,8 @@ interface StudioSettingsModel {
   searchSettings: any;
   setSearchSettings: (value: any) => void;
   settingsInitialSection?: SettingsSectionId;
+  keybindings: Record<string, any>;
+  setKeybindings: Dispatch<SetStateAction<Record<string, any>>>;
 }
 
 interface SettingsViewProps {
@@ -710,6 +714,8 @@ export function SettingsView({
     setRlsPolicyTabEditor,
     searchSettings,
     setSearchSettings,
+    keybindings,
+    setKeybindings,
   } = studio;
 
   const {
@@ -796,6 +802,10 @@ export function SettingsView({
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(
     studio.settingsInitialSection ?? "general",
   );
+  const [showProviders, setShowProviders] = useState(false);
+  useEffect(() => {
+    if (activeSection !== "ai") setShowProviders(false);
+  }, [activeSection]);
   const [workspaceLoggingIn, setWorkspaceLoggingIn] = useState(false);
   const [savedWorkspaces, setSavedWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
@@ -1213,29 +1223,33 @@ export function SettingsView({
 
   return (
     <div className="flex-1 overflow-auto bg-background text-foreground h-full">
-      <div className="mx-auto flex max-w-5xl gap-5 px-4 py-6">
+      <div className="flex h-full min-h-0">
         <SettingsSidebar
           activeSection={activeSection}
           onSelect={setActiveSection}
         />
 
-        <div className="min-w-0 flex-1 space-y-8">
+        <div className="min-w-0 flex-1 space-y-8 overflow-auto px-8 py-6">
           {activeSection === "ai" ? (
-            <section className="space-y-4">
-              <AiSettingsSection />
-              <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
-                <div className="flex flex-col">
-                  <span className="font-medium text-xs">Slash AI Trigger</span>
-                  <span className="text-xs text-muted-foreground">
-                    Type / in an empty editor to activate AI mode.
-                  </span>
+            showProviders ? (
+              <AiProvidersPage onBack={() => setShowProviders(false)} />
+            ) : (
+              <section className="space-y-4">
+                <AiSettingsSection onOpenProviders={() => setShowProviders(true)} />
+                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-xs">Slash AI Trigger</span>
+                    <span className="text-xs text-muted-foreground">
+                      Type / in an empty editor to activate AI mode.
+                    </span>
+                  </div>
+                  <Switch
+                    checked={slashAiTrigger}
+                    onCheckedChange={setSlashAiTrigger}
+                  />
                 </div>
-                <Switch
-                  checked={slashAiTrigger}
-                  onCheckedChange={setSlashAiTrigger}
-                />
-              </div>
-            </section>
+              </section>
+            )
           ) : null}
 
           {activeSection === "general" ? (
@@ -1455,7 +1469,7 @@ export function SettingsView({
                 {/* Modern UI (copy of the New Layout with a navigation rail) */}
                 <ToggleSetting
                   title="Modern UI"
-                  description="A copy of the New Layout with an always-visible navigation rail. Separate from the New Layout setting."
+                  description="A copy of the New Layout with an always-visible navigation rail. Turning this on turns off New Layout, and vice versa."
                   value={modernUiLayout}
                   onChange={setModernUiLayout}
                 />
@@ -1810,6 +1824,15 @@ export function SettingsView({
                   ]}
                 />
               </div>
+            </section>
+          ) : null}
+
+          {activeSection === "keybindings" ? (
+            <section className="space-y-4">
+              <KeybindingsPanel
+                keybindings={keybindings}
+                setKeybindings={setKeybindings}
+              />
             </section>
           ) : null}
 

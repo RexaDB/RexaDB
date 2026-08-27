@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   getGlobalStudioSettings,
   saveGlobalStudioSettings,
@@ -16,8 +16,23 @@ import type {
   SqlFormatSettingsRequired,
 } from "@/lib/studio/types";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
+import {
+  DEFAULT_LAYOUT_PREFS,
+  getLayoutPrefsSnapshot,
+  subscribeToLayoutPrefs,
+  setLayoutPrefs,
+  hydrateLayoutPrefsFromDb,
+} from "@/lib/studio/layout-prefs-cache";
 
 export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
+
+// Layout settings load asynchronously (disk/DB round trip via
+// getGlobalStudioSettings), so the very first render always uses the
+// hardcoded defaults below — briefly flashing the wrong shell (e.g. New
+// Layout before Modern UI) until the async load resolves. Caching the last
+// known value in localStorage lets the initial render start correct, the
+// same trick app/layout.tsx already uses for the theme. See
+// lib/studio/layout-prefs-cache.ts for why both flags share one cache entry.
 
 interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   appZoom: number;
@@ -106,8 +121,29 @@ export function useGlobalStudioSettings(persist = false) {
   const [skeletonLoaders, setSkeletonLoaders] = useState<boolean>(false);
   const [sleekLayout, setSleekLayout] = useState<boolean>(false);
   const [activeSleekLayout, setActiveSleekLayout] = useState<boolean>(false);
-  const [appShellLayout, setAppShellLayout] = useState<boolean>(true);
-  const [modernUiLayout, setModernUiLayout] = useState<boolean>(false);
+  // A page can mount many instances of this hook at once (this component's
+  // own, the zoom wrapper, assorted sheets each pulling one unrelated
+  // field), so these two flags live in a single shared external store
+  // (lib/studio/layout-prefs-cache.ts) instead of per-instance useState —
+  // every instance reads and writes the exact same canonical value, with no
+  // events to rebroadcast and no risk of one instance's stale write
+  // reverting another's fresh one.
+  const layoutPrefs = useSyncExternalStore(
+    subscribeToLayoutPrefs,
+    getLayoutPrefsSnapshot,
+    () => DEFAULT_LAYOUT_PREFS,
+  );
+  const appShellLayout = layoutPrefs.appShellLayout;
+  const modernUiLayout = layoutPrefs.modernUiLayout;
+  // "New Layout" and "Modern UI" are mutually exclusive shells — turning one
+  // on turns the other off. Turning one off doesn't force the other on (the
+  // user can still land on the plain/legacy layout with neither set).
+  const setAppShellLayout = useCallback((value: boolean) => {
+    setLayoutPrefs({ appShellLayout: value, modernUiLayout: value ? false : getLayoutPrefsSnapshot().modernUiLayout });
+  }, []);
+  const setModernUiLayout = useCallback((value: boolean) => {
+    setLayoutPrefs({ appShellLayout: value ? false : getLayoutPrefsSnapshot().appShellLayout, modernUiLayout: value });
+  }, []);
   const [showTabIndicator, setShowTabIndicator] = useState<boolean>(true);
   const [iconThemeId, setIconThemeId] = useState<string>(DEFAULT_ICON_THEME_ID);
   const [customIconThemes, setCustomIconThemes] = useState<CustomIconTheme[]>(
@@ -205,12 +241,10 @@ export function useGlobalStudioSettings(persist = false) {
           setSleekLayout(d.sleekLayout);
           setActiveSleekLayout(d.sleekLayout);
         }
-        if (d.appShellLayout !== undefined) {
-          setAppShellLayout(d.appShellLayout);
-        }
-        if (d.modernUiLayout !== undefined) {
-          setModernUiLayout(d.modernUiLayout);
-        }
+        hydrateLayoutPrefsFromDb({
+          appShellLayout: d.appShellLayout,
+          modernUiLayout: d.modernUiLayout,
+        });
         if (d.restoreAppState !== undefined) {
           setRestoreAppState(d.restoreAppState);
         }

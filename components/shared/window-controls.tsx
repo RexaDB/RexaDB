@@ -1,8 +1,16 @@
 "use client";
 
-import { Minus, Square, Copy, X } from "@/lib/icon-theme/lucide-react";
+import {
+  CornersIn,
+  CornersOut,
+  Minus,
+  X,
+} from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { StudioTooltip } from "@/components/studio/studio-tooltip";
+
+const controlClass =
+  "size-6 rounded-[min(var(--radius-md),10px)] text-muted-foreground transition-colors hover:text-foreground hover:bg-muted";
 
 export function WindowControls({
   isMaximized,
@@ -19,15 +27,15 @@ export function WindowControls({
 }) {
   if (wayland) {
     return (
-      <div className="flex items-center ml-1">
+      <div className="flex items-center">
         <StudioTooltip label="Close">
           <Button
             variant="ghost"
-            size="icon"
-            className="w-8 h-8 text-muted-foreground/60 hover:text-red-500 hover:bg-red-500/10"
+            size="icon-xs"
+            className="size-6 rounded-[min(var(--radius-md),10px)] text-muted-foreground transition-colors hover:bg-destructive hover:text-white"
             onClick={onClose}
           >
-            <X className="w-3.5 h-3.5" />
+            <X weight="bold" className="size-3" />
           </Button>
         </StudioTooltip>
       </div>
@@ -35,35 +43,39 @@ export function WindowControls({
   }
 
   return (
-    <div className="flex items-center gap-1 ml-1 border-l border-studio-border">
+    <div className="flex items-center gap-0.5">
       <StudioTooltip label="Minimize">
         <Button
           variant="ghost"
-          size="icon"
-          className="w-8 h-8 text-muted-foreground/60 hover:text-foreground hover:bg-studio-bg"
+          size="icon-xs"
+          className={controlClass}
           onClick={onMinimize}
         >
-          <Minus className="w-3.5 h-3.5" />
+          <Minus weight="bold" className="size-3" />
         </Button>
       </StudioTooltip>
       <StudioTooltip label={isMaximized ? "Restore" : "Maximize"}>
         <Button
           variant="ghost"
-          size="icon"
-          className="w-8 h-8 text-muted-foreground/60 hover:text-foreground hover:bg-studio-bg"
+          size="icon-xs"
+          className={controlClass}
           onClick={onMaximizeToggle}
         >
-          {isMaximized ? <Copy className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+          {isMaximized ? (
+            <CornersIn weight="duotone" className="size-3.5" />
+          ) : (
+            <CornersOut weight="duotone" className="size-3.5" />
+          )}
         </Button>
       </StudioTooltip>
       <StudioTooltip label="Close">
         <Button
           variant="ghost"
-          size="icon"
-          className="w-8 h-8 text-muted-foreground/60 hover:text-red-500 hover:bg-red-500/10"
+          size="icon-xs"
+          className="size-6 rounded-[min(var(--radius-md),10px)] text-muted-foreground transition-colors hover:bg-destructive hover:text-white"
           onClick={onClose}
         >
-          <X className="w-3.5 h-3.5" />
+          <X weight="bold" className="size-3" />
         </Button>
       </StudioTooltip>
     </div>

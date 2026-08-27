@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import {
   createAgentSession,
@@ -11,6 +10,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 
+import { getAgentSandboxCwd } from "@/lib/agents/sandbox-cwd";
+import { getPiProviderMeta } from "@/lib/ai/pi-provider-catalog";
 import { createPiDbTools, type PiToolContext } from "@/lib/ai/pi-tools";
 import { buildAgentInstructions } from "@/lib/ai/system-prompt";
 import { resolveLanguageModel } from "@/lib/ai/providers";
@@ -25,9 +26,9 @@ import type {
 export type PiSseEvent =
   | { type: "step"; message: string }
   | { type: "assistant_delta"; message: string }
-  | { type: "tool_start"; tool: string; command: string }
-  | { type: "tool_output"; output: string }
-  | { type: "tool_end"; exitCode: number };
+  | { type: "tool_start"; tool: string; command: string; toolCallId?: string }
+  | { type: "tool_output"; output: string; isError?: boolean; toolCallId?: string }
+  | { type: "tool_end"; exitCode: number; toolCallId?: string };
 
 export type PiThinkingLevel = "minimal" | "low" | "medium" | "high";
 
@@ -42,6 +43,8 @@ export type PiAgentInput = {
   schemaContext?: LightSchemaContextTable[];
   dashboardContext?: LightDashboardContext[];
   workflowContext?: AgentWorkflowContext;
+  /** Sandbox working directory surfaced to the model (prevents stale cwd claims). */
+  workingDirectory?: string;
   emitStep: (message: string) => void;
   thinkingLevel?: PiThinkingLevel;
 };
@@ -67,7 +70,7 @@ function parsePiModelSpec(modelIdWithPrefix: string, url?: string): PiModelSpec 
         piProvider: "anthropic",
         modelId,
         api: "anthropic-messages",
-        baseUrl: "https://api.anthropic.com",
+        baseUrl: hasCustomUrl ? url! : "https://api.anthropic.com",
         reasoning: false,
       };
     case "google":
@@ -75,7 +78,7 @@ function parsePiModelSpec(modelIdWithPrefix: string, url?: string): PiModelSpec 
         piProvider: "google",
         modelId,
         api: "google-generative-ai",
-        baseUrl: "https://generativelanguage.googleapis.com",
+        baseUrl: hasCustomUrl ? url! : "https://generativelanguage.googleapis.com",
         reasoning: false,
       };
     case "openai":
@@ -94,22 +97,48 @@ function parsePiModelSpec(modelIdWithPrefix: string, url?: string): PiModelSpec 
             baseUrl: "https://api.openai.com/v1",
             reasoning: false,
           };
-    default:
-      return hasCustomUrl
-        ? {
-            piProvider: "openai",
-            modelId,
-            api: "openai-completions",
-            baseUrl: url!,
-            reasoning: false,
-          }
-        : {
-            piProvider: "openai",
-            modelId,
-            api: "openai-responses",
-            baseUrl: "https://api.openai.com/v1",
-            reasoning: false,
-          };
+    default: {
+      // A user-configured custom endpoint (openrouter/kilo/ollama/external,
+      // or any Pi-SDK provider the user pointed at a self-hosted/regional
+      // gateway) — treat it as an OpenAI-compatible passthrough.
+      if (hasCustomUrl) {
+        // ModelRuntime only keeps a runtime API key attached to a provider it
+        // actually knows about (its builtin catalog, or a configured/extension
+        // provider) — for anything else it deletes the provider entry outright
+        // on the next recompose, so the key silently stops resolving ("No API
+        // key found for <id>"). "kilo"/"ollama"/any unlisted custom gateway
+        // aren't in the SDK's catalog, so key them under "openai" (always a
+        // real builtin) and let the custom base URL do the actual routing.
+        const isKnownPiProvider = !!getPiProviderMeta(prefix);
+        return {
+          piProvider: isKnownPiProvider ? prefix : "openai",
+          modelId,
+          api: "openai-completions",
+          baseUrl: url!,
+          reasoning: false,
+        };
+      }
+      // Any other provider from the Pi SDK's full catalog (groq, mistral,
+      // cerebras, xai, bedrock, vertex, ...) — resolve its native API format
+      // and default base URL straight from the SDK instead of guessing.
+      const meta = getPiProviderMeta(prefix);
+      if (meta) {
+        return {
+          piProvider: prefix,
+          modelId,
+          api: meta.api || "openai-completions",
+          baseUrl: meta.baseUrl || "https://api.openai.com/v1",
+          reasoning: false,
+        };
+      }
+      return {
+        piProvider: "openai",
+        modelId,
+        api: "openai-responses",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: false,
+      };
+    }
   }
 }
 
@@ -128,7 +157,7 @@ function buildFallbackModel(spec: PiModelSpec): Model<any> {
   };
 }
 
-function buildPiSystemPrompt(input: Pick<PiAgentInput, "dbType" | "selectedNamespace" | "schemaContext" | "permissionMode" | "workflowContext">, tools: ReturnType<typeof createPiDbTools>) {
+function buildPiSystemPrompt(input: Pick<PiAgentInput, "dbType" | "selectedNamespace" | "schemaContext" | "permissionMode" | "workflowContext"> & { workingDirectory?: string }, tools: ReturnType<typeof createPiDbTools>) {
   const instructions = buildAgentInstructions({
     dbType: input.dbType,
     selectedNamespace: input.selectedNamespace,
@@ -137,23 +166,32 @@ function buildPiSystemPrompt(input: Pick<PiAgentInput, "dbType" | "selectedNames
     workflowContext: input.workflowContext,
   });
   const toolsList = tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
-  return [
-    instructions,
-    "",
+  const lines: string[] = [instructions, ""];
+  if (input.workingDirectory) {
+    lines.push(
+      `Working directory (authoritative — when asked where you are running, always report this path regardless of conversation history): ${input.workingDirectory}`,
+      "",
+    );
+  }
+  lines.push(
     "Available tools:",
     toolsList,
     "",
     "Use these tools to inspect schemas, run queries, and retrieve data from the connected database.",
+    "All listed DB tools are pre-approved — call them directly, never ask the user for permission, and never report 'user rejected permission'. If a tool fails, report its exact error.",
+    "For SQLite, the only namespace is 'main' — use it or leave namespace empty. Never try to read the .db file with read/bash; use list_tables / get_table_schema / sample_rows / run_readonly_query instead.",
     "Never fabricate tool results. If a tool fails, report the error message to the user.",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ session: AgentSession; dispose: () => void }> {
   const resolved = resolveLanguageModel(input.settings, input.provider as any, input.model);
   const spec = parsePiModelSpec(resolved.model.id, resolved.model.url);
+  const sandboxCwd = input.workingDirectory || getAgentSandboxCwd();
 
   const modelRuntime = await ModelRuntime.create({
-    authPath: join(tmpdir(), "rexadb-pi-agent", "auth.json"),
+    authPath: join(sandboxCwd, "auth.json"),
     modelsPath: null,
     refreshOnCreate: false,
   });
@@ -173,7 +211,10 @@ export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ sess
   };
   const tools = createPiDbTools(toolContext);
 
-  const systemPrompt = buildPiSystemPrompt(input, tools);
+  const systemPrompt = buildPiSystemPrompt(
+    { ...input, workingDirectory: sandboxCwd },
+    tools,
+  );
 
   const resourceLoader = {
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
@@ -189,15 +230,28 @@ export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ sess
     reload: async () => {},
   };
 
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  // Sandbox is ephemeral and has no .pi trust file — mark it trusted so
+  // read/bash don't get blocked with "user rejected permission".
+  try { (settingsManager as any).setProjectTrusted?.(true); } catch {}
+
+  // When `tools` allowlist is provided, pi only enables those names.
+  // Include both the read-only filesystem tools and our custom DB tools,
+  // otherwise `list_tables` etc are filtered out and the model gets
+  // "Tool list_tables not found" (which surfaces as empty/permission errors).
+  const dbToolNames = tools.map((t) => t.name);
   const { session } = await createAgentSession({
-    cwd: join(tmpdir(), "rexadb-pi-agent"),
+    cwd: sandboxCwd,
     model,
     modelRuntime,
     customTools: tools,
-    noTools: "builtin",
+    // Keep basic read-only filesystem tools so the agent can inspect the sandbox
+    // (SCHEMA.md, working directory) without being rejected as "permission denied".
+    // Write/edit remain disabled — DB writes go through our custom tools.
+    tools: ["read", "bash", "ls", "grep", "find", ...dbToolNames],
     thinkingLevel: input.thinkingLevel ?? "low",
     sessionManager: SessionManager.inMemory(),
-    settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
+    settingsManager,
     resourceLoader,
   });
 
@@ -248,7 +302,7 @@ export async function streamPiResponse(params: {
       }
       case "tool_execution_start": {
         params.emit({ type: "step", message: event.toolName });
-        params.emit({ type: "tool_start", tool: event.toolName, command: JSON.stringify(event.args ?? {}) });
+        params.emit({ type: "tool_start", tool: event.toolName, command: JSON.stringify(event.args ?? {}), toolCallId: (event as any).toolCallId });
         break;
       }
       case "tool_execution_end": {
@@ -258,8 +312,8 @@ export async function streamPiResponse(params: {
               .map((part: any) => part.text)
               .join("\n")
           : "";
-        params.emit({ type: "tool_output", output });
-        params.emit({ type: "tool_end", exitCode: event.isError ? 1 : 0 });
+        params.emit({ type: "tool_output", output, isError: event.isError, toolCallId: (event as any).toolCallId });
+        params.emit({ type: "tool_end", exitCode: event.isError ? 1 : 0, toolCallId: (event as any).toolCallId });
         break;
       }
       default:

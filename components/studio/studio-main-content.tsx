@@ -136,6 +136,8 @@ interface StudioMainContentProps {
   onEditDashboardWithAi: (dashboard: any) => void;
   onOpenThemeCreator?: () => void;
   onOpenIconThemeCreator?: () => void;
+  /** Opens the Ask AI panel — wired to "Create with RexaDB Assistant". */
+  onAskAI?: () => void;
   snippetSplitDrag?: {
     snippet: any;
     mouseX: number;
@@ -165,6 +167,7 @@ export function StudioMainContent({
   onEditDashboardWithAi,
   onOpenThemeCreator,
   onOpenIconThemeCreator,
+  onAskAI,
   snippetSplitDrag,
   dashboardSplitDrag,
   tabSplitDrag,
@@ -1314,6 +1317,7 @@ export function StudioMainContent({
                     customEditorThemes={customEditorThemes}
                     vimMode={studio.vimMode}
                     schemaData={schemaData}
+                    onAskAI={onAskAI}
                   />
                 ) : paneDatabaseView === "extensions" ? (
                   <ExtensionsList
@@ -1329,6 +1333,7 @@ export function StudioMainContent({
                     schemas={schemas}
                     selectedSchema={selectedSchema}
                     onSchemaChange={setSelectedSchema}
+                    onAskAI={onAskAI}
                   />
                 ) : paneDatabaseView === "enums" ? (
                   <EnumsList

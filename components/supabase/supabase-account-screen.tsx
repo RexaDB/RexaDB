@@ -13,6 +13,7 @@ import type { SupabaseMgmtAccount } from "@/lib/supabase-mgmt/token-store";
 import { buildSupabaseMgmtConnectionString } from "@/lib/db/supabase-mgmt-client";
 import {
   registerActiveSupabaseProjects,
+  parseProjectRef,
 } from "@/lib/supabase-mgmt/register";
 import { openExternalUrl } from "@/lib/desktop";
 import type { Project, Organization } from "supabase-client-sdk";
@@ -69,6 +70,12 @@ export function SupabaseAccountsScreen({
   const [emails, setEmails] = useState<Record<string, string>>({});
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
+
+  const connectedProjectRefs = new Set(
+    existingConnectionStrings
+      .map((conn) => parseProjectRef(conn))
+      .filter((ref): ref is string => Boolean(ref)),
+  );
 
   const loadProjects = useCallback(async () => {
     const account = accounts.find((a) => a.id === activeAccountId);
@@ -148,7 +155,9 @@ export function SupabaseAccountsScreen({
     {} as Record<string, Project[]>,
   );
 
-  const handleConnect = async (project: Project) => {    if (!activeAccount) return;
+  const handleConnect = async (project: Project) => {
+    if (!activeAccount) return;
+    if (connectedProjectRefs.has(project.ref)) return;
     setConnectingRef(project.ref);
     try {
       const connectionString = buildSupabaseMgmtConnectionString(
@@ -446,12 +455,17 @@ export function SupabaseAccountsScreen({
                                 size="sm"
                                 className="h-7 shrink-0 gap-1 text-xs"
                                 onClick={() => void handleConnect(project)}
-                                disabled={connectingRef === project.ref}
+                                disabled={
+                                  connectingRef === project.ref ||
+                                  connectedProjectRefs.has(project.ref)
+                                }
                               >
                                 {connectingRef === project.ref ? (
                                   <Loader2 className="h-3 w-3 animate-spin" />
                                 ) : null}
-                                Connect
+                                {connectedProjectRefs.has(project.ref)
+                                  ? "Connected"
+                                  : "Connect"}
                               </Button>
                               <Button
                                 variant="ghost"

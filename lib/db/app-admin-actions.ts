@@ -1,7 +1,7 @@
 import {
   settingsFileExists,
   readSettingsJson,
-  writeSettingsJson,
+  queueSettingsUpdate,
 } from "./file-settings";
 import { isPostgresConnection } from "./pg-connection";
 import {
@@ -109,15 +109,16 @@ export async function saveAppFontFamily(fontFamily: string | null) {
   try {
     // If JSON file exists (migration already happened), write to JSON
     if (await settingsFileExists()) {
-      const fileData = (await readSettingsJson()) || {};
-      const normalized = typeof fontFamily === "string" ? fontFamily.trim() : "";
-      if (!normalized) {
-        delete fileData.app_font_family;
-      } else {
-        fileData.app_font_family = normalized;
-      }
-      fileData._version = 1;
-      const written = await writeSettingsJson(fileData);
+      const written = await queueSettingsUpdate((fileData) => {
+        const normalized = typeof fontFamily === "string" ? fontFamily.trim() : "";
+        if (!normalized) {
+          delete fileData.app_font_family;
+        } else {
+          fileData.app_font_family = normalized;
+        }
+        fileData._version = 1;
+        return fileData;
+      });
       if (written) return { success: true };
     }
 
@@ -258,12 +259,13 @@ export async function saveGlobalAppThemeSettings(settings: {
   try {
     // If JSON file exists (migration already happened), write to JSON
     if (await settingsFileExists()) {
-      const fileData = (await readSettingsJson()) || {};
-      fileData.app_theme_id = String(settings.appThemeId || "zinc-dark-white").trim() || "zinc-dark-white";
-      // fallow-ignore-next-line code-duplication
-      fileData.custom_app_themes = String(settings.customAppThemes || "[]").trim() || "[]";
-      fileData._version = 1;
-      const written = await writeSettingsJson(fileData);
+      const written = await queueSettingsUpdate((fileData) => {
+        fileData.app_theme_id = String(settings.appThemeId || "zinc-dark-white").trim() || "zinc-dark-white";
+        // fallow-ignore-next-line code-duplication
+        fileData.custom_app_themes = String(settings.customAppThemes || "[]").trim() || "[]";
+        fileData._version = 1;
+        return fileData;
+      });
       if (written) return { success: true };
     }
 
@@ -395,12 +397,13 @@ export async function saveGlobalEditorThemeSettings(settings: {
   try {
     // If JSON file exists (migration already happened), write to JSON
     if (await settingsFileExists()) {
-      const fileData = (await readSettingsJson()) || {};
-      fileData.editor_theme_id = String(settings.editorThemeId || "auto").trim() || "auto";
-      // fallow-ignore-next-line code-duplication
-      fileData.custom_editor_themes = String(settings.customEditorThemes || "[]").trim() || "[]";
-      fileData._version = 1;
-      const written = await writeSettingsJson(fileData);
+      const written = await queueSettingsUpdate((fileData) => {
+        fileData.editor_theme_id = String(settings.editorThemeId || "auto").trim() || "auto";
+        // fallow-ignore-next-line code-duplication
+        fileData.custom_editor_themes = String(settings.customEditorThemes || "[]").trim() || "[]";
+        fileData._version = 1;
+        return fileData;
+      });
       if (written) return { success: true };
     }
 
@@ -500,10 +503,11 @@ export async function saveGlobalStudioSettings(settings: Record<string, any>) {
   try {
     // If JSON file exists (migration already happened), write to JSON
     if (await settingsFileExists()) {
-      const fileData = (await readSettingsJson()) || {};
-      fileData.studio_settings = settings;
-      fileData._version = 1;
-      const written = await writeSettingsJson(fileData);
+      const written = await queueSettingsUpdate((fileData) => {
+        fileData.studio_settings = settings;
+        fileData._version = 1;
+        return fileData;
+      });
       if (written) return { success: true };
       // Fall through to SQLite on write failure
     }

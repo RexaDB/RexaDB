@@ -26,6 +26,7 @@
     "@reui": "https://reui.io/r/{style}/{name}.json",
     "@efferd": "https://efferd.com/r/{style}/{name}.json",
     "@blocks-so": "https://blocks.so/r/{name}.json",
-    "@fancy": "https://www.fancycomponents.dev/r/{name}.json"
+    "@fancy": "https://www.fancycomponents.dev/r/{name}.json",
+    "@dotmatrix": "https://dotmatrix.zzzzshawn.cloud/r/{name}.json"
   }
 }

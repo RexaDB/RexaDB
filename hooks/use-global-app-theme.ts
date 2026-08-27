@@ -61,6 +61,15 @@ const ALL_THEME_VAR_KEYS = [
 
 const DEFAULT_DARK_THEME_ID = "zinc-dark-white";
 
+// The resolved theme CSS variables only get applied to `document.documentElement`
+// from a `useEffect` here, once this hook has mounted and (often) loaded the
+// real settings asynchronously — so every boot starts on the default theme
+// and visibly switches to the user's real theme a moment later. Caching the
+// last-applied variables lets the blocking inline script in app/layout.tsx's
+// <head> (which already does this for plain light/dark) apply them before
+// the very first paint instead.
+const APP_THEME_VARS_STORAGE_KEY = "rexa-db-app-theme-vars";
+
 function getSystemColorScheme(): "light" | "dark" {
   if (typeof window === "undefined") return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -125,41 +134,47 @@ export function useGlobalAppTheme(persist = false) {
     let cancelled = false;
 
     const load = async () => {
-      let result: Awaited<ReturnType<typeof getGlobalAppThemeSettings>>;
+      let result: Awaited<ReturnType<typeof getGlobalAppThemeSettings>> | null = null;
       try {
         result = await getGlobalAppThemeSettings();
       } catch {
-        if (cancelled) return;
-        return;
+        result = null;
       }
       if (cancelled) return;
-      const hasData = result.success && (
+      // `isLoaded` must be set regardless of whether saved data was found —
+      // it's what gates the color-applying effect below. Returning early
+      // without setting it (the previous behavior here) left `isLoaded`
+      // permanently false for anyone without an explicitly saved theme
+      // (the common case), which now means NO theme colors ever get applied
+      // — a completely unstyled app, not just a fallback to the default.
+      const hasData = !!result && result.success && (
         (typeof result.data?.appThemeId === "string" && result.data.appThemeId) ||
         (typeof result.data?.customAppThemes === "string" && result.data.customAppThemes !== "[]")
       );
-      if (!hasData) return;
-      const nextAppThemeId = result.success && typeof result.data?.appThemeId === "string"
-        ? result.data.appThemeId || DEFAULT_DARK_THEME_ID
-        : DEFAULT_DARK_THEME_ID;
-      let nextCustomThemes: CustomAppTheme[] = [];
-      if (result.success && typeof result.data?.customAppThemes === "string") {
-        try {
-          const parsed = JSON.parse(result.data.customAppThemes);
-          if (Array.isArray(parsed)) {
-            nextCustomThemes = parsed.filter((theme) =>
-              theme &&
-              typeof theme.id === "string" &&
-              typeof theme.name === "string" &&
-              (theme.base === "light" || theme.base === "dark") &&
-              typeof theme.colors === "object"
-            );
+      if (hasData && result) {
+        const nextAppThemeId = typeof result.data?.appThemeId === "string"
+          ? result.data.appThemeId || DEFAULT_DARK_THEME_ID
+          : DEFAULT_DARK_THEME_ID;
+        let nextCustomThemes: CustomAppTheme[] = [];
+        if (typeof result.data?.customAppThemes === "string") {
+          try {
+            const parsed = JSON.parse(result.data.customAppThemes);
+            if (Array.isArray(parsed)) {
+              nextCustomThemes = parsed.filter((theme) =>
+                theme &&
+                typeof theme.id === "string" &&
+                typeof theme.name === "string" &&
+                (theme.base === "light" || theme.base === "dark") &&
+                typeof theme.colors === "object"
+              );
+            }
+          } catch {
+            nextCustomThemes = [];
           }
-        } catch {
-          nextCustomThemes = [];
         }
+        setAppThemeId(nextAppThemeId);
+        setCustomAppThemes(nextCustomThemes);
       }
-      setAppThemeId(nextAppThemeId);
-      setCustomAppThemes(nextCustomThemes);
       setIsLoaded(true);
     };
 
@@ -171,9 +186,17 @@ export function useGlobalAppTheme(persist = false) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // `appThemeId`/`customAppThemes` start from readInitialThemeAppearance(),
+    // which currently always resolves to the hardcoded defaults (nothing
+    // populates the #rexadb-initial-appearance template it reads) — so
+    // `selectedAppTheme` is the *default* theme, not the user's real one,
+    // until the async load below resolves. Applying it before `isLoaded`
+    // would stomp over the correct colors the boot script in app/layout.tsx
+    // already applied from the localStorage cache, causing a visible flash
+    // to the wrong (default) theme on every mount.
+    if (!isLoaded) return;
     const root = document.documentElement;
     if (!selectedAppTheme) {
-      if (!isLoaded) return;
       appliedThemeVarsRef.current.forEach((key) => root.style.removeProperty(key));
       appliedThemeVarsRef.current = [];
       ALL_THEME_VAR_KEYS.forEach((key) => root.style.removeProperty(key));
@@ -198,6 +221,26 @@ export function useGlobalAppTheme(persist = false) {
     root.style.colorScheme = selectedAppTheme.base;
     setTheme(selectedAppTheme.base);
   }, [appThemeId, isLoaded, selectedAppTheme, setTheme, systemColorScheme]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isLoaded) return;
+    try {
+      if (selectedAppTheme) {
+        window.localStorage.setItem(
+          APP_THEME_VARS_STORAGE_KEY,
+          JSON.stringify({
+            id: selectedAppTheme.id,
+            base: selectedAppTheme.base,
+            colors: selectedAppTheme.colors,
+          }),
+        );
+      } else {
+        window.localStorage.removeItem(APP_THEME_VARS_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedAppTheme, isLoaded]);
 
   useEffect(() => {
     if (!persist || !isLoaded) return;

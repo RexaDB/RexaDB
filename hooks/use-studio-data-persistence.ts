@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { type Snippet, type Folder, type DashboardWidgetType, type DashboardConditionOperator, type DashboardConditionActionType, type DashboardFolder, type Dashboard, type AgentGeneratedWidgetType, type AgentGeneratedWidgetPlan, type AgentDashboardPlan, type AgentChatMessage, type AgentChatHistoryMessage, type SchemaContextTable, type QueryValidationShapeResult, type SqlEditorEngine, type StudioSplitViewState } from "@/lib/studio/types";
 import type { SidebarBehavior } from "@/lib/studio/sidebar-behavior";
+import { saveKeybindingsFile } from "@/lib/api/actions-client";
 
 interface UseStudioDataPersistenceProps {
   connectionId: number;
@@ -14,7 +15,7 @@ interface UseStudioDataPersistenceProps {
   openTabs: Array<{ id: string; type: 'table' | 'key' | 'sql' | 'create-table' | 'create-key' | 'create-enum' | 'create-index' | 'create-trigger' | 'create-schema' | 'create-database' | 'dashboard' | 'import-export' | 'history' | 'analytics' | 'advisor' | 'workflow' | 'database-schema' | 'database-tables' | 'database-functions' | 'database-extensions' | 'database-triggers' | 'database-enums' | 'database-indexes' | 'database-rls-policies' | 'database-sessions' | 'database-locks' | 'database-explain-plan' | 'database-backup-restore' | 'database-spacetimedb-reducers' | 'database-spacetimedb-logs' | 'database-spacetimedb-schema' | 'rls-policy-edit' | 'auth-users' | 'auth-sessions' | 'auth-providers' | 'settings' | 'agent-settings' | 'profile-settings' | 'keybindings' | 'connect-studio' | 'manage-workspaces' | 'snapshots' | 'snapshot-table' | 'diff-table'; name: string; schema?: string; query?: string }>;
   activeTabId: string | null;
   sidebarSortMode: 'alphabetical' | 'tags';
-  sidebarView: 'dashboard' | 'tables' | 'sql' | 'database' | 'import-export' | 'auth' | 'themes' | 'workflows';
+  sidebarView: 'dashboard' | 'tables' | 'sql' | 'database' | 'import-export' | 'auth' | 'themes' | 'workflows' | 'agents';
   sidebarBehavior: SidebarBehavior;
   keybindings: Record<string, any>;
   searchSettings: any;
@@ -167,14 +168,25 @@ export function useStudioDataPersistence({
         sidebarSortMode,
         sidebarView,
         sidebarBehavior,
-        keybindings: JSON.stringify(keybindings),
         searchSettings: JSON.stringify(searchSettings),
         splitView: JSON.stringify(splitView),
       }, "settings");
     } else {
       settingsDidMountRef.current = true;
     }
-  }, [activeTabId, sidebarSortMode, sidebarView, sidebarBehavior, keybindings, searchSettings, splitView, queueStudioSave, isDataLoaded]);
+  }, [activeTabId, sidebarSortMode, sidebarView, sidebarBehavior, searchSettings, splitView, queueStudioSave, isDataLoaded]);
+
+  // Keybindings are a global preference, saved to keybindings.json rather
+  // than per-connection SQLite settings — see lib/db/keybindings-store.ts.
+  const keybindingsDidMountRef = useRef(false);
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    if (keybindingsDidMountRef.current) {
+      void saveKeybindingsFile(keybindings);
+    } else {
+      keybindingsDidMountRef.current = true;
+    }
+  }, [keybindings, isDataLoaded]);
 
   const tagsDidMountRef = useRef(false);
   useEffect(() => {

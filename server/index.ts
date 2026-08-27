@@ -10,6 +10,7 @@ import "drizzle-orm/bun-sqlite";
 import "nearley";
 import { extractIndexColumns } from "../lib/db/pg-utils";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
+import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 function log(...args: any[]) {
   let i = 0;
   const parts: string[] = [];
@@ -120,9 +121,9 @@ app.get("/health", (_req, res) => {
 });
 
 // Supabase Management API proxy (avoids CORS in the browser)
-app.all("/api/supabase-mgmt/proxy/*proxyPath", async (req, res) => {
+app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
   try {
-    const targetPath = (req.params as any).proxyPath;
+    const targetPath = (req.params as any)[0];
     const qs = Object.keys(req.query).length
       ? "?" + new URLSearchParams(req.query as Record<string, string>).toString()
       : "";
@@ -160,9 +161,9 @@ app.all("/api/supabase-mgmt/proxy/*proxyPath", async (req, res) => {
 // webview can't because of CORS. The target host comes from ?host= — the
 // login flow targets spacetimedb.com, while database listing targets the
 // cloud host (customizable like `spacetime server add` in the CLI).
-app.all("/api/spacetimedb-mgmt/proxy/*proxyPath", async (req, res) => {
+app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
   try {
-    const targetPath = (req.params as any).proxyPath;
+    const targetPath = (req.params as any)[0];
     const host = String(req.query.host || "spacetimedb.com");
     // Cloud/maincloud hosts speak TLS; loopback/self-hosted servers usually
     // speak plain HTTP. Let an explicit http:// prefix win, then sniff.
@@ -795,7 +796,22 @@ app.get("/api/ai/chats", async (req, res) => {
 
 app.get("/api/ai/settings", simpleGetRoute(mod.getGlobalAiSettings));
 
+app.get("/api/ai/providers", simpleGetRoute(async () => {
+  const { listAiProviderCatalog } = await import("../lib/ai/pi-provider-catalog");
+  return listAiProviderCatalog();
+}));
+
 app.post("/api/ai/settings", simplePostRoute(body => mod.saveGlobalAiSettings(body.settings)));
+
+app.get("/api/keybindings", simpleGetRoute(async () => {
+  const { getKeybindings } = await import("../lib/db/keybindings-store");
+  return getKeybindings();
+}));
+
+app.post("/api/keybindings", simplePostRoute(async (body) => {
+  const { saveKeybindings } = await import("../lib/db/keybindings-store");
+  return saveKeybindings(body.keybindings);
+}));
 
 // JSON-file-backed chat storage for Studio AI assistant
 import {
@@ -1665,6 +1681,7 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       schemaContext,
       dashboardContext,
       workflowContext: lightWorkflowContext || { existing: [], current: null },
+      workingDirectory: getAgentSandboxCwd(),
       emitStep: (message: string) => {
         if (!aborted) {
           res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
@@ -1696,6 +1713,23 @@ app.post("/api/agent/chat/stream", async (req, res) => {
   }
 });
 
+app.post("/api/agent/approval/submit", async (req, res) => {
+  try {
+    const { toolCallId, answers } = req.body as { toolCallId?: string; answers?: unknown };
+    if (!toolCallId) {
+      return res.status(400).json({ error: "toolCallId required" });
+    }
+    const { resolvePendingApproval } = await import("../lib/ai/pending-approvals");
+    const ok = resolvePendingApproval(String(toolCallId), answers);
+    if (!ok) {
+      return res.status(404).json({ error: "No pending approval for this ID. It may have timed out." });
+    }
+    res.json({ ok: true, toolCallId });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Failed to submit approval" });
+  }
+});
+
 app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
   try {
     const { permissionMode } = req.body;
@@ -1715,6 +1749,7 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
       selectedNamespace: namespace,
       schemaContext,
       dashboardContext: [],
+      workingDirectory: getAgentSandboxCwd(),
       emitStep: (message: string) => {
         if (!aborted) {
           res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
@@ -2059,10 +2094,600 @@ app.get("/api/workflows/:id/runs", async (req, res) => {
   }
 })();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent Harness Endpoints — cached like t3code's providerStatusCache
+// ─────────────────────────────────────────────────────────────────────────────
+let providersRefreshPromise: Promise<any> | null = null;
+
+async function refreshProvidersCacheInBackground() {
+  if (providersRefreshPromise) return providersRefreshPromise;
+  providersRefreshPromise = (async () => {
+    try {
+      const { detectProviders } = await import("../lib/agents/detect-providers");
+      const { listProviderModels } = await import("../lib/agents/list-provider-models");
+      const { listProviderModes } = await import("../lib/agents/list-provider-modes");
+      const { readServerProviderCache, writeServerProviderCache } = await import(
+        "../lib/agents/provider-cache-server"
+      );
+      const { mergeCachedProviders } = await import("../lib/agents/provider-cache");
+      const previous = readServerProviderCache();
+      const providers = await detectProviders();
+      const providersWithModels = await Promise.all(
+        providers.map(async (p) => {
+          const [models, modes] = await Promise.all([
+            listProviderModels(p.id, p.binaryPath),
+            listProviderModes(p.id, p.binaryPath),
+          ]);
+          return { ...p, models, modes };
+        }),
+      );
+      const merged = mergeCachedProviders(providersWithModels, previous?.providers ?? null);
+      writeServerProviderCache(merged);
+      return merged;
+    } catch (err: any) {
+      log("[agents/detect] background refresh error:", err.message);
+      return null;
+    } finally {
+      providersRefreshPromise = null;
+    }
+  })();
+  return providersRefreshPromise;
+}
+
+app.get("/api/agents/detect", async (_req, res) => {
+  try {
+    const { readServerProviderCache, writeServerProviderCache } = await import(
+      "../lib/agents/provider-cache-server"
+    );
+    const cached = readServerProviderCache();
+    const now = Date.now();
+    const freshMs = 30_000; // 30s fresh, like t3's quick revalidate
+    const staleMs = 5 * 60_000; // 5 min stale-while-revalidate
+    const isFresh = cached && now - cached.cachedAt < freshMs;
+    const isStaleUsable = cached && now - cached.cachedAt < staleMs;
+
+    // Instant path: serve from disk cache (hydrated) — mirrors t3's hydrateCachedProvider
+    if (isFresh && cached) {
+      res.json({ providers: cached.providers, cached: true });
+      return;
+    }
+    if (isStaleUsable && cached) {
+      res.json({ providers: cached.providers, cached: true, stale: true });
+      // Revalidate in background without blocking
+      void refreshProvidersCacheInBackground();
+      return;
+    }
+
+    // No usable cache — try to serve stale anyway while we probe, else probe blocking
+    if (cached && cached.providers.length > 0) {
+      res.json({ providers: cached.providers, cached: true, stale: true });
+      void refreshProvidersCacheInBackground();
+      return;
+    }
+
+    // Cold start: no cache file yet — probe and populate (first run still ~2-3s, then instant)
+    const fresh = await refreshProvidersCacheInBackground();
+    if (fresh && fresh.length > 0) {
+      res.json({ providers: fresh });
+      return;
+    }
+    // Fallback to live probe if background failed
+    const { detectProviders } = await import("../lib/agents/detect-providers");
+    const { listProviderModels } = await import("../lib/agents/list-provider-models");
+    const { listProviderModes } = await import("../lib/agents/list-provider-modes");
+    const providers = await detectProviders();
+    const providersWithModels = await Promise.all(
+      providers.map(async (p) => {
+        const [models, modes] = await Promise.all([
+          listProviderModels(p.id, p.binaryPath),
+          listProviderModes(p.id, p.binaryPath),
+        ]);
+        return { ...p, models, modes };
+      }),
+    );
+    try {
+      writeServerProviderCache(providersWithModels);
+    } catch {}
+    res.json({ providers: providersWithModels });
+  } catch (err: any) {
+    log("[agents/detect] error:", err.message);
+    // Last resort: try to return stale cache even on error
+    try {
+      const { readServerProviderCache } = await import("../lib/agents/provider-cache-server");
+      const cached = readServerProviderCache();
+      if (cached) {
+        res.json({ providers: cached.providers, cached: true, stale: true, error: err.message });
+        return;
+      }
+    } catch {}
+    res.json({ providers: [], error: err.message });
+  }
+});
+
+app.get("/api/agents/models/:providerId", async (req, res) => {
+  try {
+    const providerId = req.params.providerId as any;
+    // Instant path via server cache (like t3's ProviderRegistry.getProviders)
+    try {
+      const { readServerProviderCache } = await import("../lib/agents/provider-cache-server");
+      const cached = readServerProviderCache();
+      const hit = cached?.providers.find((p) => p.id === providerId);
+      if (hit?.models && hit.models.length > 0) {
+        res.json({ models: hit.models, cached: true });
+        return;
+      }
+    } catch {}
+    const { detectProviders } = await import("../lib/agents/detect-providers");
+    const { listProviderModels } = await import("../lib/agents/list-provider-models");
+    const providers = await detectProviders();
+    const provider = providers.find((p) => p.id === providerId);
+    const models = await listProviderModels(providerId, provider?.binaryPath);
+    res.json({ models });
+  } catch (err: any) {
+    log("[agents/models] error:", err.message);
+    res.json({ models: [], error: err.message });
+  }
+});
+
+app.post("/api/agents/chat/stream", async (req, res) => {
+  try {
+    const {
+      provider,
+      prompt,
+      history,
+      connectionId,
+      connectionString,
+      connectionName,
+      dbType,
+      schemaContext,
+      mode,
+      appMode,
+    } = req.body;
+
+    if (!provider || !prompt) {
+      res.status(400).json({ error: "provider and prompt are required" });
+      return;
+    }
+
+    const { REXADB_PLAN_MODE, REXADB_BUILD_MODE } = await import(
+      "../lib/agents/app-modes"
+    );
+    const resolvedAppMode =
+      appMode && typeof appMode === "object" && typeof appMode.id === "string"
+        ? {
+            id: String(appMode.id),
+            label: String(appMode.label || appMode.id),
+            kind:
+              appMode.kind === "build" || appMode.kind === "custom"
+                ? appMode.kind
+                : ("plan" as const),
+            allowSqlRead: appMode.allowSqlRead !== false,
+            allowSqlWrite: appMode.allowSqlWrite === true,
+            promptRules: String(appMode.promptRules || ""),
+            mapsToProviderMode: appMode.mapsToProviderMode,
+          }
+        : appMode?.id === "rexadb-build"
+          ? REXADB_BUILD_MODE
+          : REXADB_PLAN_MODE;
+
+    // Prefer a per-connection sandbox so schemas never bleed across DBs.
+    const agentCwd = getAgentSandboxCwd(connectionId);
+    const { materializeAgentSandbox, AGENT_SCHEMA_FILENAME } = await import(
+      "../lib/agents/sandbox-cwd"
+    );
+
+    // Resolve schema: trust the client when present, otherwise fetch live from the DB.
+    let schemaTables = Array.isArray(schemaContext) ? schemaContext : [];
+    if (
+      schemaTables.length === 0 &&
+      typeof connectionString === "string" &&
+      connectionString &&
+      dbType !== "redis"
+    ) {
+      try {
+        const result = await mod.fetchAllTablesWithColumns(connectionString, {});
+        if (result?.success && Array.isArray(result.data)) {
+          const grouped = new Map<
+            string,
+            { schema: string; table: string; columns: Array<{ name: string; type: string }> }
+          >();
+          for (const row of result.data) {
+            const schema = String(row?.table_schema || row?.schema || "").trim();
+            const table = String(row?.table_name || row?.name || "").trim();
+            if (!schema || !table) continue;
+            const key = `${schema}.${table}`;
+            const existing = grouped.get(key) || { schema, table, columns: [] };
+            const columnName = String(row?.column_name || "").trim();
+            if (columnName) {
+              existing.columns.push({
+                name: columnName,
+                type: String(row?.data_type || "text"),
+              });
+            }
+            grouped.set(key, existing);
+          }
+          schemaTables = Array.from(grouped.values());
+          log(
+            `[agents/chat/stream] loaded ${schemaTables.length} tables server-side for connection`,
+            connectionId ?? connectionName ?? "",
+          );
+        }
+      } catch (err: any) {
+        log("[agents/chat/stream] server-side schema fetch failed:", err?.message);
+      }
+    }
+
+    materializeAgentSandbox(agentCwd, {
+      dbType: String(dbType || "unknown"),
+      connectionName:
+        typeof connectionName === "string" && connectionName
+          ? connectionName
+          : undefined,
+      connectionId:
+        connectionId !== undefined && connectionId !== null
+          ? connectionId
+          : undefined,
+      schemaContext: schemaTables,
+    });
+    if (schemaTables.length === 0) {
+      log(
+        "[agents/chat/stream] warning: schemaContext empty — agent may not see tables",
+      );
+    }
+
+    if (provider === "rexadb") {
+      // Route to existing built-in agent — pick the first configured provider
+      // (like t3's resolveModelScope) instead of hardcoding ollama/llama3.
+      const settingsResult = await mod.getGlobalAiSettings();
+      if (!settingsResult.success) {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.write(`data: ${JSON.stringify({ type: "error", content: "Failed to load AI settings: " + (settingsResult.error || "unknown") })}\n\n`);
+        res.end();
+        return;
+      }
+      const allSettings = settingsResult.data as any;
+      const providerPriority: string[] = ["openai", "anthropic", "google", "openrouter", "kilo", "ollama", "external"];
+      let picked: { provider: string; model: string } | null = null;
+      for (const p of providerPriority) {
+        const cfg = allSettings.providers?.[p];
+        if (!cfg || cfg.enabled === false) continue;
+        if (p !== "ollama" && !cfg.apiKey?.trim()) continue;
+        // Prefer the first model in the list (often the free one for kilo) over defaultModel
+        const modelId = (cfg.models?.[0] || cfg.defaultModel || cfg.model || "").trim() || (p === "ollama" ? "llama3" : "");
+        if (modelId) {
+          picked = { provider: p, model: modelId };
+          break;
+        }
+      }
+      // Fallback to any provider with a key, else ollama
+      if (!picked) {
+        for (const [p, cfg] of Object.entries(allSettings.providers || {})) {
+          const c = cfg as any;
+          if (c?.enabled === false) continue;
+          if (c?.apiKey?.trim() && (c.models?.[0] || c.defaultModel || c.model)) {
+            picked = { provider: p, model: (c.models?.[0] || c.defaultModel || c.model).trim() };
+            break;
+          }
+        }
+      }
+      if (!picked) {
+        // No provider configured — surface a clear error instead of empty response
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.write(`data: ${JSON.stringify({ type: "error", content: "No AI provider is configured. Please add an API key in Settings → AI (OpenAI, Anthropic, etc.) and try again." })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        res.end();
+        return;
+      }
+
+      const resolved = await resolveAiReq(
+        {
+          body: {
+            provider: picked.provider,
+            model: picked.model,
+            prompt,
+            connectionString,
+            dbType,
+            schemaContext: schemaTables,
+          },
+        } as any,
+        res,
+      );
+      if (!resolved) return;
+
+      // Use a mutable aborted flag so emitStep / isAborted see live value
+      const abortState = { aborted: false };
+      req.on("close", () => { abortState.aborted = true; });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      const permissionMode = resolvedAppMode.allowSqlWrite
+        ? "schema_with_data"
+        : resolvedAppMode.allowSqlRead
+          ? "schema_with_data"
+          : "schema_only";
+      const modePrefixedPrompt = resolvedAppMode.promptRules
+        ? `${resolvedAppMode.promptRules}\n\nUser request:\n${prompt}`
+        : prompt;
+
+      // Translate Pi's assistant_delta → harness text_delta so use-agent-harness renders it
+      const piToHarnessEmit = (event: any) => {
+        if (abortState.aborted) return;
+        if (event.type === "assistant_delta" && event.message) {
+          res.write(`data: ${JSON.stringify({ type: "text_delta", content: event.message })}\n\n`);
+        } else if (event.type === "step" && event.message) {
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "step", input: { message: event.message }, label: event.message })}\n\n`);
+        } else if (event.type === "tool_start") {
+          let input: any = {};
+          try { input = event.command ? JSON.parse(event.command) : {}; } catch {}
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: event.tool || "tool", input, label: event.tool || "tool", command: event.command })}\n\n`);
+        } else if (event.type === "tool_output") {
+          res.write(`data: ${JSON.stringify({ type: "tool_output", output: event.output || "", isError: !!event.isError })}\n\n`);
+        } else if (event.type === "tool_end") {
+          // no-op, harness will complete on tool_output
+        } else if (event.type === "assistant_done" || event.type === "done") {
+          // handled after streamPiResponse
+        }
+      };
+
+      const piInput: PiAgentInput = {
+        settings: resolved.settings,
+        provider: resolved.provider,
+        model: resolved.model,
+        permissionMode,
+        connectionString: resolved.connectionString,
+        dbType: resolved.dbType,
+        selectedNamespace: resolved.namespace,
+        schemaContext: schemaTables.length > 0 ? schemaTables : resolved.schemaContext,
+        dashboardContext: [],
+        workflowContext: { existing: [], current: null },
+        workingDirectory: agentCwd,
+        emitStep: (message: string) => {
+          if (!abortState.aborted) {
+            res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "step", input: { message }, label: message })}\n\n`);
+          }
+        },
+      };
+
+      const { session, dispose } = await createRexaDbPiSession(piInput);
+      try {
+        const fullText = await streamPiResponse({
+          session,
+          history: history || [],
+          prompt: modePrefixedPrompt,
+          emit: piToHarnessEmit,
+          isAborted: () => abortState.aborted,
+        });
+        if (!abortState.aborted) {
+          if (!fullText.trim()) {
+            res.write(`data: ${JSON.stringify({ type: "error", content: "The assistant returned an empty response. Please try rephrasing your request or check that your AI provider is configured correctly." })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          } else {
+            // fullText already streamed via text_delta, just signal completion
+            res.write(`data: ${JSON.stringify({ type: "done", content: fullText })}\n\n`);
+          }
+        }
+      } catch (err: any) {
+        if (!abortState.aborted) {
+          const msg = err?.message || String(err);
+          // Surface Pi errors (including "model not found", empty, etc.) as harness errors
+          res.write(`data: ${JSON.stringify({ type: "error", content: msg })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        }
+      } finally {
+        dispose();
+      }
+      res.end();
+      return;
+    }
+
+    // External CLI harness
+    const { getHarnessClient, spawnHarness } = await import("../lib/agents/harness-clients");
+    const { buildAgentDatabaseContext } = await import("../lib/ai/system-prompt");
+    const { buildRexaMcpServerConfig } = await import("../lib/agents/mcp/config");
+    const client = getHarnessClient(provider);
+
+    const mcp =
+      typeof connectionString === "string" && connectionString
+        ? buildRexaMcpServerConfig({
+            connectionString,
+            dbType: String(dbType || "unknown"),
+            connectionName:
+              typeof connectionName === "string" ? connectionName : undefined,
+            appMode: resolvedAppMode,
+          })
+        : undefined;
+
+    // Prefer app-mode → provider CLI mapping when the client didn't send a mode.
+    const providerMode =
+      (typeof mode === "string" && mode) ||
+      resolvedAppMode.mapsToProviderMode?.[provider as keyof typeof resolvedAppMode.mapsToProviderMode] ||
+      undefined;
+
+    // Inject live connection + schema + app-mode rules into the prompt AND SCHEMA.md.
+    const dbContext = buildAgentDatabaseContext({
+      dbType: String(dbType || "unknown"),
+      connectionName:
+        typeof connectionName === "string" && connectionName
+          ? connectionName
+          : undefined,
+      connectionId:
+        connectionId !== undefined && connectionId !== null
+          ? connectionId
+          : undefined,
+      selectedNamespace: undefined,
+      schemaContext: schemaTables,
+      // Absolute path — a bare filename left the model guessing (it tried
+      // "/SCHEMA.md" at filesystem root and got "File not found").
+      schemaFilePath: path.join(agentCwd, AGENT_SCHEMA_FILENAME),
+    });
+    const modeRules = resolvedAppMode.promptRules
+      ? `\n\nAgent mode (${resolvedAppMode.label}):\n${resolvedAppMode.promptRules}`
+      : "";
+    const harnessPrompt = `${dbContext}${modeRules}\n\nUser request:\n${prompt}`;
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    let aborted = false;
+    let finished = false;
+    let childProcess: any = null;
+    const finish = () => {
+      if (!finished) {
+        finished = true;
+        try { res.end(); } catch {}
+      }
+    };
+    req.on("close", () => {
+      aborted = true;
+      try { childProcess?.kill("SIGTERM"); } catch {}
+    });
+
+    // Interactive harnesses (Cursor / Grok via ACP JSON-RPC over stdio)
+    if (typeof (client as any).runPrompt === "function") {
+      try {
+        await (client as any).runPrompt({
+          prompt: harnessPrompt,
+          cwd: agentCwd,
+          history,
+          mode: providerMode,
+          mcp,
+          onEvent: (event: any) => {
+            if (aborted || finished) return;
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+            if (event.type === "done") finish();
+          },
+          onSpawn: (proc: any) => {
+            req.on("close", () => {
+              try { proc.kill("SIGTERM"); } catch {}
+            });
+          },
+        });
+        if (!aborted) {
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        }
+      } catch (err: any) {
+        if (!aborted) {
+          res.write(`data: ${JSON.stringify({ type: "error", content: err.message })}\n\n`);
+        }
+      } finally {
+        finish();
+      }
+      return;
+    }
+
+    childProcess = spawnHarness(provider, {
+      prompt: harnessPrompt,
+      cwd: agentCwd,
+      history,
+      mode: providerMode,
+      mcp,
+    }).process;
+
+    let buffer = "";
+
+    childProcess.stdout?.on("data", (chunk: Buffer) => {
+      if (aborted || finished) return;
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const events = client.parseLineAll
+          ? client.parseLineAll(line)
+          : (() => {
+              const e = client.parseLine(line);
+              return e ? [e] : [];
+            })();
+        for (const event of events) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (event.type === "done") {
+            finish();
+            return;
+          }
+        }
+      }
+    });
+
+    childProcess.stderr?.on("data", (chunk: Buffer) => {
+      if (aborted) return;
+      const text = chunk.toString().trim();
+      if (text) {
+        log(`[agents/${provider}] stderr:`, text.slice(0, 200));
+      }
+    });
+
+    childProcess.on("close", (code: number | null) => {
+      if (aborted) return;
+      // Flush remaining buffer
+      if (buffer.trim()) {
+        const events = client.parseLineAll
+          ? client.parseLineAll(buffer)
+          : (() => {
+              const e = client.parseLine(buffer);
+              return e ? [e] : [];
+            })();
+        for (const event of events) {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (event.type === "done") {
+            finish();
+            return;
+          }
+        }
+      }
+      if (!aborted) {
+        if (code !== 0) {
+          res.write(
+            `data: ${JSON.stringify({ type: "error", content: `Agent exited with code ${code}` })}\n\n`,
+          );
+        }
+        res.write(`data: ${JSON.stringify({ type: "done", exitCode: code })}\n\n`);
+        finish();
+      }
+    });
+
+    childProcess.on("error", (err: Error) => {
+      if (aborted || finished) return;
+      log(`[agents/${provider}] spawn error:`, err.message);
+      res.write(`data: ${JSON.stringify({ type: "error", content: err.message })}\n\n`);
+      finish();
+    });
+  } catch (err: any) {
+    log("[agents/chat/stream] error:", err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ type: "error", content: err.message })}\n\n`);
+      res.end();
+    }
+  }
+});
+
 function startServer(port: number, maxPort: number = 3900) {
   const server = app.listen(port, "127.0.0.1", () => {
     log(`[rexadb-server] listening on port ${port}`);
     logToFile(`listening on port ${port}`);
+    // Warm provider cache in background so first /api/agents/detect is instant (t3 pattern)
+    setTimeout(() => {
+      void refreshProvidersCacheInBackground().catch(() => {});
+    }, 500);
     // Write port file for frontend discovery
     const dataDir = process.env.REXADB_USER_DATA_DIR || "/tmp";
     try {

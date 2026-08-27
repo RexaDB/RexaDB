@@ -1283,10 +1283,14 @@ export function ConnectionManager({
         return [];
       }
     }
-    const local = (await getConnections()) ?? [];
-    return local.filter(
-      (c: any) => !c.connectionString?.startsWith("workspace:"),
-    );
+    try {
+      const local = (await getConnections()) ?? [];
+      return local.filter(
+        (c: any) => !c.connectionString?.startsWith("workspace:"),
+      );
+    } catch {
+      return [];
+    }
   }, [workspaceMode]);
 
   const fetchConnectionGroups = useCallback(async (): Promise<any[]> => {
@@ -1599,13 +1603,18 @@ export function ConnectionManager({
 
   const loadConnections = async () => {
     setConnectionsLoading(true);
-    const [conns, groups] = await Promise.all([
-      fetchConnections(),
-      fetchConnectionGroups(),
-    ]);
-    setConnections(conns);
-    setConnectionGroups(groups);
-    setConnectionsLoading(false);
+    try {
+      const [conns, groups] = await Promise.all([
+        fetchConnections(),
+        fetchConnectionGroups(),
+      ]);
+      setConnections(conns);
+      setConnectionGroups(groups);
+    } finally {
+      // Always clear the loading gate, even on an unexpected failure —
+      // otherwise the whole page hangs on the loading state forever.
+      setConnectionsLoading(false);
+    }
   };
 
   const canUseCloudSync = Boolean(user && plan.cloudEnabled && !localMode);
@@ -1753,14 +1762,22 @@ export function ConnectionManager({
   }, [cloudSyncKey]);
 
   useEffect(() => {
-    initStudioAuth().then(() => {
-      const auth = loadStudioAuth();
-      const active =
-        typeof window !== "undefined" &&
-        window.sessionStorage.getItem("workspace:active") === "1";
-      setWorkspaceMode(!!auth && active);
-      setWorkspaceAuthLoaded(true);
-    });
+    initStudioAuth()
+      .then(() => {
+        const auth = loadStudioAuth();
+        const active =
+          typeof window !== "undefined" &&
+          window.sessionStorage.getItem("workspace:active") === "1";
+        setWorkspaceMode(!!auth && active);
+      })
+      .catch(() => {
+        // Fall through to non-workspace mode rather than hanging the whole
+        // page's loading gate forever on a failed/unavailable auth check.
+        setWorkspaceMode(false);
+      })
+      .finally(() => {
+        setWorkspaceAuthLoaded(true);
+      });
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.connected !== undefined) {
@@ -3317,12 +3334,21 @@ export function ConnectionManager({
   }, []);
 
   if (connectionsLoading || !authResolved || !workspaceAuthLoaded) {
+    // The surrounding shell (sidebar/rail/header) is already real and
+    // already visible via AppShell/ModernUIShell — this is just the content
+    // pane, which fills in a moment later. `h-full` (not `h-screen`) keeps it
+    // inside that pane instead of breaking out to the viewport, and it's
+    // filled with the same bg the real content uses so there's no color pop
+    // on the transition. A small contained spinner (not full-viewport) makes
+    // it read as "loading" instead of a blank/broken void.
     return (
-      <div className="flex h-screen items-center justify-center bg-studio-bg text-foreground">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-6 w-6 animate-spin rounded-lg border-2 border-primary border-t-transparent" />
-          <span className="text-sm text-muted-foreground">Loading...</span>
-        </div>
+      <div
+        className={cn(
+          "flex items-center justify-center bg-studio-bg",
+          hideHeader ? "h-full" : "h-screen",
+        )}
+      >
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
   }

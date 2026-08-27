@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getStudioBootstrap } from "@/lib/api/actions-client";
 import type { Connection } from "@/lib/db/schema";
 import type { StudioInitialUiState } from "@/lib/studio/types";
@@ -9,13 +9,21 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState<Connection | null>(null);
   const [initialUiState, setInitialUiState] = useState<StudioInitialUiState>(emptyUiState);
+  const prevConnectionIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
     if (!connectionId) {
+      prevConnectionIdRef.current = null;
       setConnection(null);
       setLoading(false);
       return;
+    }
+
+    // Full-page loading only when the connection itself changes (not schema query param).
+    if (prevConnectionIdRef.current !== connectionId) {
+      prevConnectionIdRef.current = connectionId;
+      setLoading(true);
     }
 
     void (async () => {

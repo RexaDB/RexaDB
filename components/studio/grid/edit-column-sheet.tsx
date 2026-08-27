@@ -307,7 +307,7 @@ export function EditColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
         contained={shellLayout}

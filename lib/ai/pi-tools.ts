@@ -324,7 +324,9 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
           if (dbType === "redis") {
             failTool("Redis does not expose table schemas.");
           }
-          const result = await fetchTableStructure(context.connectionString, namespace(params.namespace), params.table);
+          let schema = namespace(params.namespace);
+          if (dbType === "sqlite" && !schema) schema = "main";
+          const result = await fetchTableStructure(context.connectionString, schema, params.table);
           if (!result.success) failTool(result.error);
           return textResult({ table: params.table, structure: result.data || [] });
         } catch (error) {
@@ -610,6 +612,107 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
         } catch (error) {
           failTool(error);
         }
+      },
+    }),
+    defineTool({
+      name: "create_tasks",
+      label: "Create tasks",
+      description: "Create a list of tasks to track multi-step work. Each task has a label, optional amount, status, and details. Tasks are shown with the TaskRows UI.",
+      promptSnippet: "create_tasks - create tasks for multi-step work, e.g. create_tasks({tasks:[{label:'Verified vendor records', amount:'12 suppliers', status:'completed'}]})",
+      parameters: Type.Object({
+        tasks: Type.Array(
+          Type.Object({
+            label: Type.String({ description: "Task title, e.g. 'Verified vendor records'" }),
+            amount: Type.Optional(Type.String({ description: "Amount, e.g. '12 suppliers'" })),
+            status: Type.Optional(Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed"), Type.Literal("failed")])),
+            details: Type.Optional(
+              Type.Array(
+                Type.Object({
+                  label: Type.String(),
+                  meta: Type.Optional(Type.String()),
+                }),
+              ),
+            ),
+          }),
+        ),
+        variant: Type.Optional(Type.Union([Type.Literal("Capsules"), Type.Literal("List")])),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Creating ${params.tasks.length} tasks`);
+        const normalized = params.tasks.map((t: any, i: number) => ({
+          id: `task-${Date.now()}-${i}`,
+          label: t.label,
+          amount: t.amount,
+          status: t.status || "pending",
+          details: t.details,
+          createdAt: Date.now(),
+        }));
+        return textResult({ tasks: normalized, variant: params.variant || "Capsules", message: `Created ${normalized.length} tasks` });
+      },
+    }),
+    defineTool({
+      name: "update_task",
+      label: "Update task",
+      description: "Update a task's status or details.",
+      promptSnippet: "update_task - update a task, e.g. update_task({taskId:'task-123', status:'completed'})",
+      parameters: Type.Object({
+        taskId: Type.String({ description: "ID of the task to update" }),
+        status: Type.Optional(Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed"), Type.Literal("failed")])),
+        label: Type.Optional(Type.String()),
+        amount: Type.Optional(Type.String()),
+        details: Type.Optional(
+          Type.Array(
+            Type.Object({
+              label: Type.String(),
+              meta: Type.Optional(Type.String()),
+            }),
+          ),
+        ),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Updating task ${params.taskId} → ${params.status || "details"}`);
+        return textResult({ taskId: params.taskId, status: params.status, message: `Updated task ${params.taskId}` });
+      },
+    }),
+    defineTool({
+      name: "ask_questions",
+      label: "Ask questions",
+      description: "Ask the user one or more questions that require human input. The UI shows an approval card with radio/check options and a custom input. Use for clarifications, choices, or confirmations. This tool will wait for the user's answer and return it.",
+      promptSnippet: "ask_questions - ask the user questions, e.g. ask_questions({questions:[{q:'How many flavors?', type:'radio', options:['Three','Five']}]})",
+      parameters: Type.Object({
+        questions: Type.Array(
+          Type.Object({
+            q: Type.String({ description: "Question text" }),
+            type: Type.Union([Type.Literal("radio"), Type.Literal("check")], { description: "radio for single-choice, check for multi-select" }),
+            options: Type.Array(Type.String(), { minItems: 1, maxItems: 6 }),
+          }),
+          { minItems: 1, maxItems: 5 },
+        ),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Asking ${params.questions.length} question(s) — waiting for user`);
+        const { createPendingApproval } = await import("@/lib/ai/pending-approvals");
+        // Use toolCallId as the key so the client can resolve the correct pending approval
+        const answers = await createPendingApproval(toolCallId, params.questions);
+        return textResult({ answers, message: "User provided answers", questions: params.questions });
+      },
+    }),
+    defineTool({
+      name: "ask_approval",
+      label: "Ask approval",
+      description: "Ask for approval on a single decision (shorthand for ask_questions with one radio question). This tool will wait for the user's answer.",
+      promptSnippet: "ask_approval - ask for approval, e.g. ask_approval({question:'Proceed?', options:['Yes','No']})",
+      parameters: Type.Object({
+        question: Type.String({ description: "Question text" }),
+        options: Type.Array(Type.String(), { minItems: 1, maxItems: 6 }),
+        type: Type.Optional(Type.Union([Type.Literal("radio"), Type.Literal("check")])),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Asking for approval: ${params.question} — waiting for user`);
+        const { createPendingApproval } = await import("@/lib/ai/pending-approvals");
+        const questions = [{ q: params.question, type: params.type || "radio", options: params.options }];
+        const answers = await createPendingApproval(toolCallId, questions);
+        return textResult({ answers, questions, message: "User provided answer" });
       },
     }),
   ];

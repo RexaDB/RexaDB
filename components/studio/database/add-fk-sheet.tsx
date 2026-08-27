@@ -110,7 +110,7 @@ export function AddFKSheet({
   if (!data) return null;
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
       <SheetContent
         side="right"
         contained={shellLayout}
