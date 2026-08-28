@@ -14,6 +14,7 @@ import {
   CloudOff,
   Settings,
   LogOut,
+  LogIn,
   Server,
 } from "@/lib/icon-theme/lucide-react";
 import type { ReactNode } from "react";
@@ -25,6 +26,7 @@ interface UserAvatarDropdownProps {
   localMode?: boolean;
   onOpenSettings?: () => void;
   onLogout: () => void;
+  onSignIn?: () => void;
   sleekLayout?: boolean;
   children?: ReactNode;
   plan?: { label?: string };
@@ -37,6 +39,7 @@ export function UserAvatarDropdown({
   localMode,
   onOpenSettings,
   onLogout,
+  onSignIn,
   sleekLayout,
   children,
   plan,
@@ -99,7 +102,7 @@ export function UserAvatarDropdown({
           <Settings className="w-3.5 h-3.5" />
           Settings
         </DropdownMenuItem>
-        {user && (
+        {user ? (
           <>
             <DropdownMenuSeparator className="bg-studio-border" />
             <DropdownMenuItem
@@ -110,6 +113,19 @@ export function UserAvatarDropdown({
               Sign Out
             </DropdownMenuItem>
           </>
+        ) : (
+          onSignIn && (
+            <>
+              <DropdownMenuSeparator className="bg-studio-border" />
+              <DropdownMenuItem
+                onClick={onSignIn}
+                className="gap-2 text-xs cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Sign In
+              </DropdownMenuItem>
+            </>
+          )
         )}
       </DropdownMenuContent>
     </DropdownMenu>

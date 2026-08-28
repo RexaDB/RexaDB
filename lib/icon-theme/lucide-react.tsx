@@ -116,6 +116,7 @@ import {
   Loader2 as LucideLoader2,
   Loader2Icon as LucideLoader2Icon,
   Lock as LucideLock,
+  LogIn as LucideLogIn,
   LogOut as LucideLogOut,
   LogOutIcon as LucideLogOutIcon,
   Mail as LucideMail,
@@ -328,6 +329,7 @@ export const List = createThemedLucideIcon("List", LucideList);
 export const Loader2 = createThemedLucideIcon("Loader2", LucideLoader2);
 export const Loader2Icon = createThemedLucideIcon("Loader2Icon", LucideLoader2Icon);
 export const Lock = createThemedLucideIcon("Lock", LucideLock);
+export const LogIn = createThemedLucideIcon("LogIn", LucideLogIn);
 export const LogOut = createThemedLucideIcon("LogOut", LucideLogOut);
 export const LogOutIcon = createThemedLucideIcon("LogOutIcon", LucideLogOutIcon);
 export const Mail = createThemedLucideIcon("Mail", LucideMail);

@@ -224,6 +224,103 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
   }
 });
 
+// Neon CLI integration — spawns the real `neon` binary (npm package
+// `neonctl`) so login/consent is genuinely Neon's own software, never a
+// reimplementation of its OAuth flow under its identity. See lib/neon-cli/.
+app.post("/api/neon-cli/detect", async (_req, res) => {
+  try {
+    const { detectNeonCli } = await import("../lib/neon-cli/cli-runner");
+    res.json({ success: true, ...(await detectNeonCli()) });
+  } catch (e: any) {
+    res.json({ success: false, installed: false, error: e.message });
+  }
+});
+
+const NEON_PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+app.post("/api/neon-cli/login", async (req, res) => {
+  const profile = String(req.body?.profile || "").trim();
+  if (!NEON_PROFILE_NAME_RE.test(profile)) {
+    res.status(400).json({ success: false, error: "Invalid profile name" });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  const send = (event: Record<string, unknown>) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+  let aborted = false;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    res.end();
+  };
+
+  try {
+    const { spawnNeonAuthLogin } = await import("../lib/neon-cli/cli-runner");
+    const child = spawnNeonAuthLogin(profile);
+
+    req.on("close", () => {
+      aborted = true;
+      try { child.kill("SIGTERM"); } catch {}
+    });
+
+    const forwardLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const urlMatch = trimmed.match(/https?:\/\/\S+/);
+      if (urlMatch) {
+        send({ type: "open-url", url: urlMatch[0], message: trimmed });
+      } else {
+        send({ type: "log", message: trimmed });
+      }
+    };
+
+    let buffer = "";
+    const onChunk = (chunk: Buffer) => {
+      if (aborted) return;
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) forwardLine(line);
+    };
+    child.stdout?.on("data", onChunk);
+    child.stderr?.on("data", onChunk);
+
+    child.on("close", (code) => {
+      if (aborted) return;
+      if (buffer.trim()) forwardLine(buffer);
+      if (code === 0) {
+        send({ type: "done", success: true });
+      } else {
+        send({ type: "error", message: `neon auth exited with code ${code}` });
+      }
+      finish();
+    });
+
+    child.on("error", (err) => {
+      if (aborted || finished) return;
+      send({ type: "error", message: err.message });
+      finish();
+    });
+  } catch (e: any) {
+    send({ type: "error", message: e.message });
+    finish();
+  }
+});
+
+app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));
+app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
+app.post("/api/neon-cli/branches", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonBranchesList(body.profile, body.projectId)));
+app.post("/api/neon-cli/databases", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonDatabasesList(body.profile, body.projectId, body.branchId)));
+app.post("/api/neon-cli/roles", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonRolesList(body.profile, body.projectId, body.branchId)));
+app.post("/api/neon-cli/remove-profile", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProfileRemove(body.profile)));
+
 // Load actions-core at module init — forces Bun to bundle it and all static deps
 const actionsCore = require("../lib/db/actions-core");
 const mod = actionsCore;

@@ -9,12 +9,13 @@ import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
 import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { V128OnboardingModal } from "@/components/v128-onboarding-modal";
+import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
 import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
 import { supabase } from "@/lib/supabase/client";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
+import { ONBOARDING_COMPLETE_KEY } from "@/lib/onboarding";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { getDefaultKeybindings, buildShortcutCombo } from "@/lib/studio/keybindings";
 import { subscribeToLayoutPrefs } from "@/lib/studio/layout-prefs-cache";
@@ -39,6 +40,12 @@ const SPACETIMEDB_TAB: AppTab = {
   title: "SpacetimeDB",
 };
 
+const NEON_TAB: AppTab = {
+  id: "neon",
+  kind: "neon",
+  title: "Neon",
+};
+
 export function ConnectionsPage() {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
@@ -55,9 +62,10 @@ export function ConnectionsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
   const [newConnectionTrigger, setNewConnectionTrigger] = useState(0);
-  const { setAppShellLayout, modernUiLayout } = useAppSettings();
+  const { modernUiLayout, appThemeId, setAppThemeId } = useAppSettings();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const keybindings = useMemo(() => getDefaultKeybindings(), []);
 
   // A layout change swaps the entire shell this modal sits next to — close it
@@ -72,10 +80,17 @@ export function ConnectionsPage() {
   }, []);
 
   useEffect(() => {
+    const markOnboardingComplete = () => {
+      try {
+        window.localStorage.setItem(ONBOARDING_COMPLETE_KEY, "1");
+      } catch {}
+    };
+
     const hydrate = async () => {
       try {
         const { data } = await supabase.auth.getSession();
         if (data.session?.user) {
+          markOnboardingComplete();
           const synced = await syncAuthenticatedUserProfile(data.session.user);
           if (synced.result.success && synced.user) {
             const name =
@@ -90,7 +105,17 @@ export function ConnectionsPage() {
         }
         const profile = await getStoredUserProfile();
         if (profile.success && profile.data) {
+          markOnboardingComplete();
           setDisplayName(profile.data.name || "User");
+          return;
+        }
+        // No session and no stored profile — this is a brand new install.
+        // Grandfather anyone who somehow already flagged onboarding complete
+        // (e.g. cleared their profile but kept localStorage) out of the flow.
+        const alreadyOnboarded =
+          window.localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "1";
+        if (!alreadyOnboarded) {
+          setOnboardingOpen(true);
         }
       } catch {}
     };
@@ -159,6 +184,19 @@ export function ConnectionsPage() {
     [activate],
   );
 
+  const reorderTabs = useCallback((sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    setTabs((prev) => {
+      const fromIndex = prev.findIndex((t) => t.id === sourceId);
+      const toIndex = prev.findIndex((t) => t.id === targetId);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, []);
+
   const closeTab = useCallback(
     (id: string) => {
       // Don't close the sole home tab.
@@ -222,6 +260,7 @@ export function ConnectionsPage() {
       if (path === "connections") openTab(CONNECTIONS_TAB);
       else if (path === "supabase") openTab(SUPABASE_TAB);
       else if (path === "spacetimedb") openTab(SPACETIMEDB_TAB);
+      else if (path === "neon") openTab(NEON_TAB);
       else if (path === "settings") setSettingsModalOpen(true);
     },
     [openTab],
@@ -260,6 +299,12 @@ export function ConnectionsPage() {
         label: "SpacetimeDB",
         icon: <ProviderLogo type="spacetimedb" className="w-5 h-5 shrink-0" />,
         onClick: () => openTab(SPACETIMEDB_TAB),
+      },
+      {
+        id: "neon",
+        label: "Neon",
+        icon: <ProviderLogo type="neon" className="w-5 h-5 shrink-0" />,
+        onClick: () => openTab(NEON_TAB),
       },
     ],
     [openTab],
@@ -326,6 +371,7 @@ export function ConnectionsPage() {
     activeTabId,
     onActivateTab: activate,
     onCloseTab: closeTab,
+    onReorderTab: reorderTabs,
     onNewTab: () => openTab(CONNECTIONS_TAB),
     sidebarOpen,
     onSidebarOpenChange: setSidebarOpen,
@@ -349,6 +395,7 @@ export function ConnectionsPage() {
             onViewAnalytics={(id) => handleSelectConnection(id)}
             onOpenSupabaseAccounts={() => openTab(SUPABASE_TAB)}
             onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
+            onOpenNeonAccounts={() => openTab(NEON_TAB)}
           />
         </div>
       )}
@@ -365,6 +412,16 @@ export function ConnectionsPage() {
             hideHeader
             initialScreen="spacetimedb-account"
             onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
+          />
+        </div>
+      )}
+
+      {section === "neon" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ConnectionManager
+            hideHeader
+            initialScreen="neon-cli"
+            onOpenNeonAccounts={() => openTab(NEON_TAB)}
           />
         </div>
       )}
@@ -397,7 +454,20 @@ export function ConnectionsPage() {
 
   return (
     <>
-      <V128OnboardingModal onEnableLayout={() => setAppShellLayout(true)} />
+      <OnboardingFlow
+        open={onboardingOpen}
+        appThemeId={appThemeId}
+        setAppThemeId={setAppThemeId}
+        onComplete={({ name, email: onboardedEmail }) => {
+          setDisplayName(name);
+          if (onboardedEmail) setEmail(onboardedEmail);
+          try {
+            window.localStorage.setItem(ONBOARDING_COMPLETE_KEY, "1");
+          } catch {}
+          setOnboardingOpen(false);
+          void loadConns();
+        }}
+      />
       {modernUiLayout ? (
         <ModernUIShell
           {...shellProps}
@@ -417,7 +487,10 @@ export function ConnectionsPage() {
           keybindings={keybindings}
           railItems={railItems}
           railActiveId={
-            section === "connections" || section === "supabase" || section === "spacetimedb"
+            section === "connections" ||
+            section === "supabase" ||
+            section === "spacetimedb" ||
+            section === "neon"
               ? section
               : null
           }

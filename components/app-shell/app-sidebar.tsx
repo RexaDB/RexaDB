@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
   Sidebar,
@@ -239,13 +238,7 @@ export function AppSidebar({
                 isActive={activePath === "supabase"}
                 onClick={() => onNavigate?.("supabase")}
               >
-                <Image
-                  src="/providers/supabase.png"
-                  alt="Supabase"
-                  width={16}
-                  height={16}
-                  className="size-4 rounded-[3px] object-contain"
-                />
+                <ProviderLogo type="supabase" className="size-4" />
                 <span>Supabase</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -257,6 +250,16 @@ export function AppSidebar({
               >
                 <SpacetimeDbBrandImage className="size-4" />
                 <span>SpacetimeDB</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem className="mt-1">
+              <SidebarMenuButton
+                className={FLAT_ITEM}
+                isActive={activePath === "neon"}
+                onClick={() => onNavigate?.("neon")}
+              >
+                <ProviderLogo type="neon" className="size-4" />
+                <span>Neon</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

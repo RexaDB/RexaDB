@@ -218,8 +218,8 @@ insert into public.subscription_plans (
 )
 values
   ('free', 'Free', 'Local usage only, community support, no cloud features', 0, 0, 'usd', false, 3, null, null, 1, true),
-  ('pro', 'Pro', 'Cloud enabled with higher limits, performance features, email support', 2900, 29000, 'usd', true, 25, 100000, 10240, 1, true),
-  ('team', 'Team', 'Cloud enabled with collaboration, roles, shared billing, integrations', 9900, 99000, 'usd', true, 100, 500000, 51200, 10, true),
+  ('pro', 'Pro', 'Cloud enabled with higher limits, performance features, email support', 2900, 29000, 'usd', true, null, 100000, 10240, 1, true),
+  ('team', 'Team', 'Cloud enabled with collaboration, roles, shared billing, integrations', 9900, 99000, 'usd', true, null, 500000, 51200, 10, true),
   ('enterprise', 'Enterprise', 'Cloud enabled with SSO/SAML, compliance, SLA, dedicated support', 0, null, 'usd', true, null, null, null, null, true)
 on conflict (code)
 do update

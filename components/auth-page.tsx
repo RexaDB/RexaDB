@@ -155,13 +155,17 @@ export function AuthPage() {
 
     console.log("[AUTH TRACE] verifyOtp success, user:", user.email);
 
+    // Session is already established at this point — don't strand an
+    // authenticated user on the auth screen just because the best-effort
+    // local profile sync (e.g. sidecar hiccup) failed. Warn and proceed;
+    // the profile will resync on next hydrate (see hooks/use-auth-state.ts).
     const syncResult = await syncAuthenticatedUserProfile(user);
     if (!syncResult.result.success) {
+      console.error("[AUTH TRACE] profile sync failed:", syncResult.result.error);
       toast.error(
         syncResult.result.error ||
-          "Authentication succeeded, but your local profile did not sync.",
+          "Signed in, but your local profile did not sync yet.",
       );
-      return;
     }
 
     setOtp("");

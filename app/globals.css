@@ -2122,7 +2122,6 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   cursor: default;
 }
 
-
 /* ── Activity bar (from activitybarpart.css + activityaction.css) ── */
 .monaco-workbench .part.activitybar {
   width: 48px;
@@ -2512,7 +2511,6 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   z-index: 2147483647;
   animation: translucent-frost-keepalive 1.2s linear infinite;
 }
-
 
 /* ── Pixel-grid loading state (chat "Thinking" loader) ─────────────────── */
 @keyframes pixel-on {

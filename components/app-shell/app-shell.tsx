@@ -60,6 +60,7 @@ export function AppShell({
 	activeTabId,
 	onActivateTab,
 	onCloseTab,
+	onReorderTab,
 	onNewTab,
 	onBack,
 	onForward,
@@ -151,6 +152,7 @@ export function AppShell({
 					activeTabId={activeTabId}
 					onActivateTab={onActivateTab}
 					onCloseTab={onCloseTab}
+					onReorderTab={onReorderTab}
 					onNewTab={onNewTab}
 					onBack={onBack}
 					onForward={onForward}

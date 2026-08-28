@@ -30,7 +30,7 @@ INSERT INTO public.subscription_plans
 VALUES
   ('otl', 'One-Time License',
    'Perpetual license with 12 months of updates',
-   49900, 'usd', true, 25, 10240, 1, 3,
+   49900, 'usd', true, null, 10240, 1, 3,
    true, true)
 ON CONFLICT (code) DO UPDATE
   SET name = excluded.name,

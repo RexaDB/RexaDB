@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   listSpacetimeDbDatabases,
   type SpacetimeDbCloudDatabase,
@@ -10,17 +9,17 @@ import {
 import type { SpacetimeDbMgmtAccount } from "@/lib/spacetimedb-mgmt/token-store";
 import { buildSpacetimeDbConnectionString } from "@/lib/spacetimedb-mgmt/register";
 import { registerSpacetimeDbDatabases } from "@/lib/spacetimedb-mgmt/register";
+import { ProviderAccountsHeader } from "@/components/shared/provider-accounts/header";
+import { AccountChips, type AccountChipItem } from "@/components/shared/provider-accounts/account-chips";
+import { ProviderEmptyState } from "@/components/shared/provider-accounts/empty-state";
+import { ProviderListToolbar } from "@/components/shared/provider-accounts/list-toolbar";
+import { ResourceRow } from "@/components/shared/provider-accounts/resource-row";
 import { toast } from "sonner";
 import {
-  LogOut,
   Database,
-  Plus,
-  Search,
   Download,
   RefreshCw,
   Loader2,
-  Fingerprint,
-  Server,
 } from "@/lib/icon-theme/lucide-react";
 import { SpacetimeDbLogo } from "@/components/shared/provider-logo";
 
@@ -174,176 +173,81 @@ export function SpacetimeDbAccountsScreen({
   const accountLabel = (account: SpacetimeDbMgmtAccount) =>
     formatIdentity(account.identity) || "SpacetimeDB account";
 
+  const logo = <SpacetimeDbLogo className="h-[22px] w-[22px] text-foreground/80" />;
+
+  const accountChips: AccountChipItem[] = accounts.map((account) => ({
+    id: account.id,
+    label: accountLabel(account),
+    initial: (account.identity || "S").slice(0, 1).toUpperCase(),
+  }));
+
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
-            <SpacetimeDbLogo className="h-6 w-6 text-foreground/80" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold">SpacetimeDB Accounts</h2>
-            <p className="text-xs text-muted-foreground">
-              Browse, connect, and import your SpacetimeDB databases.
-            </p>
-          </div>
-        </div>
-      </div>
+      <ProviderAccountsHeader
+        logo={logo}
+        title="SpacetimeDB"
+        description="Browse, connect, and import your SpacetimeDB databases."
+      />
 
       {accounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-studio-border/60 bg-studio-bg/60 px-6 py-16 text-center">
-          <SpacetimeDbLogo className="mb-4 h-11 w-11 text-foreground/80" />
-          <h3 className="text-sm font-semibold">No SpacetimeDB account linked</h3>
-          <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Log in with GitHub to link your SpacetimeDB identity, then browse
-            your Maincloud databases and connect them here.
-          </p>
-          <Button
-            onClick={onAddAccount}
-            className="mt-5 h-9 gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            Log in to SpacetimeDB
-          </Button>
-        </div>
+        <ProviderEmptyState
+          logo={logo}
+          title="No SpacetimeDB account linked"
+          description="Log in with GitHub to link your SpacetimeDB identity, then browse your Maincloud databases and connect them here."
+          actionLabel="Log in to SpacetimeDB"
+          onAction={onAddAccount}
+        />
       ) : (
-        <div className="space-y-6">
-          <section className="rounded-xl border border-studio-border/60 bg-studio-bg/60">
-            <div className="flex items-center justify-between border-b border-studio-border/50 px-4 py-3">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Linked accounts
-              </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 text-xs"
-                onClick={onAddAccount}
-                disabled={!canAddAccount}
-                title={
-                  canAddAccount
-                    ? "Link another SpacetimeDB account"
-                    : "Upgrade to Pro to link more accounts"
-                }
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Link account
-              </Button>
-            </div>
-            <div className="space-y-2 p-4">
-              {accounts.map((account) => {
-                const isActive = account.id === activeAccountId;
-                return (
-                  <button
-                    key={account.id}
-                    type="button"
-                    onClick={() => onSwitchAccount(account.id)}
-                    className={`w-full flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
-                      isActive
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-studio-border/60 bg-studio-bg/40 hover:border-studio-border hover:bg-studio-row-hover/80"
-                    }`}
+        <>
+          <AccountChips
+            accounts={accountChips}
+            activeId={activeAccountId}
+            onSwitch={onSwitchAccount}
+            onRemove={onRemoveAccount}
+            onAdd={onAddAccount}
+            canAdd={canAddAccount}
+            addLabel="Add SpacetimeDB account"
+          />
+
+          <section className="overflow-hidden rounded-xl border border-studio-border/60 bg-studio-bg/40">
+            <ProviderListToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search databases..."
+              actions={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => void loadDatabases()}
+                    disabled={loading}
+                    title="Refresh databases"
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
-                      <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate font-mono">
-                          {accountLabel(account)}
-                        </span>
-                        {isActive && (
-                          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        <Server className="mr-1 inline h-3 w-3" />
-                        {account.host || "maincloud.spacetimedb.com"}
-                      </div>
-                    </div>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      title="Remove this account"
-                      className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveAccount(account.id);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.stopPropagation();
-                          onRemoveAccount(account.id);
-                        }
-                      }}
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+                    <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5 bg-primary text-xs text-primary-foreground hover:bg-primary/90"
+                    onClick={handleImportAll}
+                    disabled={importing || !activeAccount}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {importing ? "Importing..." : "Import all"}
+                  </Button>
+                </>
+              }
+            />
 
-          <section className="rounded-xl border border-studio-border/60 bg-studio-bg/60">
-            <div className="flex items-center justify-between border-b border-studio-border/50 px-4 py-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Databases
-                </h3>
-                {activeAccount && (
-                  <span className="text-xs text-muted-foreground truncate">
-                    — {accountLabel(activeAccount)}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => void loadDatabases()}
-                  disabled={loading}
-                  title="Refresh databases"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
-                  onClick={handleImportAll}
-                  disabled={importing || !activeAccount}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  {importing ? "Importing..." : "Import all"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="p-4">
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Search databases..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 h-9 bg-background/70 border-border/60 text-sm"
-                />
-              </div>
-
+            <div className="p-2">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
               ) : loadError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center">
-                  <p className="text-sm font-medium text-destructive">
-                    Failed to load databases
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {loadError}
-                  </p>
+                <div className="m-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center">
+                  <p className="text-sm font-medium text-destructive">Failed to load databases</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     This account&apos;s token may have expired or the server
                     host is unreachable. Switch accounts or remove this account
@@ -351,50 +255,37 @@ export function SpacetimeDbAccountsScreen({
                   </p>
                 </div>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-0.5">
                   {filteredDatabases.map((database) => {
                     const name = displayName(database);
                     const key = `${database.identity}:${name}`;
                     return (
-                      <div
+                      <ResourceRow
                         key={database.identity}
-                        className="flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/40 p-3"
-                      >
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
-                          <Database className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">
-                            {name}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {formatIdentity(database.identity)}
-                            {database.names.length > 1
-                              ? ` · ${database.names.slice(1).join(", ")}`
-                              : ""}
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 shrink-0 gap-1 text-xs"
-                          onClick={() => void handleConnect(database)}
-                          disabled={connectingKey === key}
-                        >
-                          {connectingKey === key ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : null}
-                          Connect
-                        </Button>
-                      </div>
+                        icon={<Database className="h-4 w-4 text-muted-foreground" />}
+                        title={name}
+                        subtitle={`${formatIdentity(database.identity)}${
+                          database.names.length > 1 ? ` · ${database.names.slice(1).join(", ")}` : ""
+                        }`}
+                        trailing={
+                          <Button
+                            size="sm"
+                            className="h-6 shrink-0 gap-1 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
+                            onClick={() => void handleConnect(database)}
+                            disabled={connectingKey === key}
+                          >
+                            {connectingKey === key ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                            Connect
+                          </Button>
+                        }
+                      />
                     );
                   })}
 
                   {databases.length === 0 && (
                     <div className="py-8 text-center text-sm text-muted-foreground">
                       No databases found for this identity. Publish one with{" "}
-                      <code className="text-[11px]">spacetime publish</code>{" "}
-                      first.
+                      <code className="text-[11px]">spacetime publish</code> first.
                     </div>
                   )}
                   {databases.length > 0 && filteredDatabases.length === 0 && (
@@ -406,7 +297,7 @@ export function SpacetimeDbAccountsScreen({
               )}
             </div>
           </section>
-        </div>
+        </>
       )}
     </div>
   );

@@ -40,6 +40,7 @@ import {
   Shield,
   Settings,
   Workflow,
+  Layers,
 } from "@/lib/icon-theme/solar-icons";
 import {
   MoreHorizontal,
@@ -48,6 +49,9 @@ import {
   Download,
   Trash2,
   Loader2,
+  FunctionSquare,
+  Gauge,
+  Braces,
 } from "lucide-react";
 
 type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "import-export" | "themes" | null;
@@ -254,8 +258,16 @@ export function StudioShellSidebar({
     { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
     {
       id: "tables",
-      label: studio.databaseExplorer ? "Database Explorer" : "Tables",
-      Icon: Table2,
+      label: studio.databaseExplorer
+        ? "Database Explorer"
+        : studio.schemaExplorer
+          ? "Schema Explorer"
+          : "Tables",
+      Icon: studio.databaseExplorer
+        ? DbIcon
+        : studio.schemaExplorer
+          ? Layers
+          : Table2,
     },
     { id: "sql", label: "SQL Editor", Icon: Code2 },
     {
@@ -454,9 +466,89 @@ function ConnectionSwitcher({
   );
 }
 
+/** Collapsible section header used by Schema Explorer mode (Tables / Functions / Triggers / Indexes / Enums). */
+function SchemaSectionHeader({
+  label,
+  icon: Icon,
+  count,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-xs text-muted-foreground/80 transition-colors hover:text-foreground"
+    >
+      <ChevronRight
+        className={cn("size-3 shrink-0 transition-transform", expanded && "rotate-90")}
+      />
+      <Icon className="size-3.5 shrink-0" />
+      <span>{label}</span>
+      <span className="text-muted-foreground/50">({count})</span>
+    </button>
+  );
+}
+
+/** Expandable row for a schema object (function/trigger/index/enum) with inline detail lines. */
+function SchemaItemRow({
+  icon: Icon,
+  label,
+  detail,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  detail?: Array<{ term: string; value: string }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={ROW}
+      >
+        <Icon className="size-4 shrink-0" />
+        <span className="truncate">{label}</span>
+        {detail && detail.length > 0 && (
+          <ChevronRight
+            className={cn(
+              "ml-auto size-3 shrink-0 opacity-40 transition-transform",
+              expanded && "rotate-90",
+            )}
+          />
+        )}
+      </button>
+      {expanded && detail && detail.length > 0 && (
+        <div className="ml-6 mt-0.5 mb-1 space-y-0.5 border-l border-border/40 pl-2 text-xs">
+          {detail.map((d) => (
+            <div key={d.term} className="flex items-start gap-1.5">
+              <span className="shrink-0 text-muted-foreground/60">{d.term}:</span>
+              <span className="min-w-0 truncate text-foreground/80">{d.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TablesPanel({ studio }: { studio: any }) {
   const [q, setQ] = useState("");
   const [schemaMenuOpen, setSchemaMenuOpen] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    tables: true,
+    functions: true,
+    triggers: true,
+    indexes: true,
+    enums: true,
+  });
   const schemas: string[] = (studio.schemas ?? []).filter(
     (s: string) => !String(s).startsWith("pg_"),
   );
@@ -467,6 +559,38 @@ function TablesPanel({ studio }: { studio: any }) {
   const filtered = tables.filter((t) =>
     t.toLowerCase().includes(q.toLowerCase()),
   );
+
+  const schemaExplorer = Boolean(studio.schemaExplorer);
+  const isPostgres =
+    studio.dbType === "postgres" || studio.dbType === "supabase-mgmt";
+  const qLower = q.toLowerCase();
+
+  const functions: any[] = schemaExplorer && isPostgres ? (studio.functions ?? []) : [];
+  const triggers: any[] = schemaExplorer && isPostgres ? (studio.triggers ?? []) : [];
+  const indexes: any[] = schemaExplorer && isPostgres ? (studio.indexes ?? []) : [];
+  const enums: any[] = schemaExplorer && isPostgres ? (studio.enums ?? []) : [];
+
+  const filteredFunctions = qLower
+    ? functions.filter((f) => f.name?.toLowerCase().includes(qLower))
+    : functions;
+  const filteredTriggers = qLower
+    ? triggers.filter((t) => t.name?.toLowerCase().includes(qLower))
+    : triggers;
+  const filteredIndexes = qLower
+    ? indexes.filter((i) => i.name?.toLowerCase().includes(qLower))
+    : indexes;
+  const filteredEnums = (
+    qLower
+      ? enums.filter(
+          (e) => e.schema === selectedSchema && e.name?.toLowerCase().includes(qLower),
+        )
+      : enums.filter((e) => e.schema === selectedSchema)
+  );
+
+  function toggleSection(section: string) {
+    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  }
+
   return (
     <div className="flex flex-col gap-0.5">
       <div className="relative my-1">
@@ -474,7 +598,7 @@ function TablesPanel({ studio }: { studio: any }) {
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search tables..."
+          placeholder={schemaExplorer ? "Search..." : "Search tables..."}
           className="h-8 pl-7 text-sm"
         />
       </div>
@@ -535,25 +659,199 @@ function TablesPanel({ studio }: { studio: any }) {
           <Plus className="size-3.5" />
         </button>
       </div>
-      {filtered.length === 0 ? (
-        <div className="px-2 py-2 text-xs text-muted-foreground">
-          {q ? "No matches" : "No tables"}
-        </div>
+
+      {!schemaExplorer || !isPostgres ? (
+        filtered.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-muted-foreground">
+            {q ? "No matches" : "No tables"}
+          </div>
+        ) : (
+          filtered.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => studio.handleTableClick?.(t, studio.selectedSchema)}
+              className={cn(
+                ROW,
+                studio.selectedTable === t && "bg-white/10 text-foreground",
+              )}
+            >
+              <Table2 className="size-4 shrink-0" />
+              <span className="truncate">{t}</span>
+            </button>
+          ))
+        )
       ) : (
-        filtered.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => studio.handleTableClick?.(t, studio.selectedSchema)}
-            className={cn(
-              ROW,
-              studio.selectedTable === t && "bg-white/10 text-foreground",
+        <div className="flex flex-col gap-2">
+          {/* Tables */}
+          <div>
+            <SchemaSectionHeader
+              label="Tables"
+              icon={Table2}
+              count={filtered.length}
+              expanded={expandedSections.tables}
+              onToggle={() => toggleSection("tables")}
+            />
+            {expandedSections.tables && (
+              <div className="space-y-0.5">
+                {filtered.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No tables found
+                  </div>
+                ) : (
+                  filtered.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => studio.handleTableClick?.(t, studio.selectedSchema)}
+                      className={cn(
+                        ROW,
+                        studio.selectedTable === t && "bg-white/10 text-foreground",
+                      )}
+                    >
+                      <Table2 className="size-4 shrink-0" />
+                      <span className="truncate">{t}</span>
+                    </button>
+                  ))
+                )}
+              </div>
             )}
-          >
-            <Table2 className="size-4 shrink-0" />
-            <span className="truncate">{t}</span>
-          </button>
-        ))
+          </div>
+
+          {/* Functions */}
+          <div>
+            <SchemaSectionHeader
+              label="Functions"
+              icon={FunctionSquare}
+              count={filteredFunctions.length}
+              expanded={expandedSections.functions}
+              onToggle={() => toggleSection("functions")}
+            />
+            {expandedSections.functions && (
+              <div className="space-y-0.5">
+                {filteredFunctions.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No functions found
+                  </div>
+                ) : (
+                  filteredFunctions.map((f, idx) => (
+                    <SchemaItemRow
+                      key={`func-${f.name}-${idx}`}
+                      icon={FunctionSquare}
+                      label={f.name}
+                      detail={[
+                        ...(f.return_type ? [{ term: "Returns", value: f.return_type }] : []),
+                        ...(f.language ? [{ term: "Language", value: f.language }] : []),
+                      ]}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Triggers */}
+          <div>
+            <SchemaSectionHeader
+              label="Triggers"
+              icon={Workflow}
+              count={filteredTriggers.length}
+              expanded={expandedSections.triggers}
+              onToggle={() => toggleSection("triggers")}
+            />
+            {expandedSections.triggers && (
+              <div className="space-y-0.5">
+                {filteredTriggers.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No triggers found
+                  </div>
+                ) : (
+                  filteredTriggers.map((t, idx) => (
+                    <SchemaItemRow
+                      key={`trig-${t.name}-${idx}`}
+                      icon={Workflow}
+                      label={t.name}
+                      detail={[
+                        ...(t.table_name ? [{ term: "On", value: t.table_name }] : []),
+                        ...(t.timing || t.event
+                          ? [{ term: "Event", value: `${t.timing ?? ""} ${t.event ?? ""}`.trim() }]
+                          : []),
+                      ]}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Indexes */}
+          <div>
+            <SchemaSectionHeader
+              label="Indexes"
+              icon={Gauge}
+              count={filteredIndexes.length}
+              expanded={expandedSections.indexes}
+              onToggle={() => toggleSection("indexes")}
+            />
+            {expandedSections.indexes && (
+              <div className="space-y-0.5">
+                {filteredIndexes.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No indexes found
+                  </div>
+                ) : (
+                  filteredIndexes.map((i, idx) => (
+                    <SchemaItemRow
+                      key={`idx-${i.name}-${idx}`}
+                      icon={Gauge}
+                      label={i.name}
+                      detail={[
+                        ...(i.table_name ? [{ term: "On", value: i.table_name }] : []),
+                        { term: "Type", value: i.is_unique ? "UNIQUE" : "INDEX" },
+                        ...(i.columns?.length
+                          ? [{ term: "Columns", value: i.columns.join(", ") }]
+                          : []),
+                      ]}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Enums */}
+          <div>
+            <SchemaSectionHeader
+              label="Enums"
+              icon={Braces}
+              count={filteredEnums.length}
+              expanded={expandedSections.enums}
+              onToggle={() => toggleSection("enums")}
+            />
+            {expandedSections.enums && (
+              <div className="space-y-0.5">
+                {filteredEnums.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No enums found
+                  </div>
+                ) : (
+                  filteredEnums.map((e, idx) => (
+                    <SchemaItemRow
+                      key={`enum-${e.name}-${idx}`}
+                      icon={Braces}
+                      label={e.name}
+                      detail={
+                        e.values?.length
+                          ? [{ term: "Values", value: e.values.join(", ") }]
+                          : []
+                      }
+                    />
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

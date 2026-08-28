@@ -178,6 +178,8 @@ export async function runPgDumpSchemaOnly(
   connectionString: string,
   runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows: any[] }; error?: string }>
 ) {
+  const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
+  connectionString = await resolveEffectiveConnectionString(connectionString);
   const schemas = await getAllowedSchemasForDump(connectionString, runQuery);
   if (schemas.length === 0) {
     throw new Error("No accessible schemas found to export.");
@@ -247,6 +249,9 @@ export async function resetAndApplySql(connectionString: string, fullSql: string
   if (!isPostgresConnection(connectionString)) {
     throw new Error("SQL import is supported only for PostgreSQL connections.");
   }
+
+  const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
+  connectionString = await resolveEffectiveConnectionString(connectionString);
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
 

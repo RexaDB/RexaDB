@@ -74,6 +74,8 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   SpacetimeDbLogo,
+  SupabaseLogo,
+  NeonLogo,
   getProviderLogoUrl,
 } from "@/components/shared/provider-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -185,6 +187,15 @@ import {
   registerSpacetimeDbDatabases,
 } from "@/lib/spacetimedb-mgmt/register";
 import { listSpacetimeDbDatabases } from "@/lib/spacetimedb-mgmt/client";
+import { NeonLoginDialog } from "@/components/neon/neon-login-dialog";
+import { NeonAccountsScreen } from "@/components/neon/neon-account-screen";
+import {
+  getNeonCliAccounts,
+  removeNeonCliAccount,
+  type NeonCliAccount,
+} from "@/lib/neon-cli/profile-store";
+import { canAddNeonAccount } from "@/lib/neon-cli/limits";
+import { detectNeonCli } from "@/lib/neon-cli/detect";
 
 // Removed Pattern import
 
@@ -207,7 +218,8 @@ type ConnectionScreen =
   | "jdbc-picker"
   | "supabase"
   | "spacetimedb"
-  | "spacetimedb-account";
+  | "spacetimedb-account"
+  | "neon-cli";
 
 type PlanCode = "free" | "pro" | "team" | "enterprise" | "otl";
 type PlanEntitlements = {
@@ -234,6 +246,7 @@ export function ConnectionManager({
   initialScreen = "list",
   onOpenSupabaseAccounts,
   onOpenSpacetimedbAccounts,
+  onOpenNeonAccounts,
 }: {
   hideHeader?: boolean;
   isAnalyticsEnabled?: boolean;
@@ -244,10 +257,12 @@ export function ConnectionManager({
   initialScreen?: ConnectionScreen;
   onOpenSupabaseAccounts?: () => void;
   onOpenSpacetimedbAccounts?: () => void;
+  onOpenNeonAccounts?: () => void;
 }) {
   useGlobalAppFontFamily();
   const isSupabaseMode = initialScreen === "supabase";
   const isSpacetimeDbMode = initialScreen === "spacetimedb-account";
+  const isNeonCliMode = initialScreen === "neon-cli";
   const appTheme = useGlobalAppTheme(false);
   const {
     sleekLayout,
@@ -961,6 +976,20 @@ export function ConnectionManager({
         ? null
         : (getSpacetimeDbMgmtAccounts()[0]?.id ?? null),
   );
+  const [neonLoginOpen, setNeonLoginOpen] = useState(false);
+  const [neonAccounts, setNeonAccounts] = useState<NeonCliAccount[]>(
+    () => (typeof window === "undefined" ? [] : getNeonCliAccounts()),
+  );
+  const [activeNeonAccountId, setActiveNeonAccountId] = useState<
+    string | null
+  >(
+    () =>
+      typeof window === "undefined" ? null : (getNeonCliAccounts()[0]?.id ?? null),
+  );
+  const [neonCliInstalled, setNeonCliInstalled] = useState<boolean | null>(null);
+  const [neonCliChecking, setNeonCliChecking] = useState(false);
+  const [neonReconnectProfile, setNeonReconnectProfile] = useState<string | null>(null);
+  const [neonReloadSignal, setNeonReloadSignal] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -2236,6 +2265,97 @@ export function ConnectionManager({
     return res;
   };
 
+  const checkNeonCli = useCallback(async () => {
+    setNeonCliChecking(true);
+    try {
+      const result = await detectNeonCli();
+      setNeonCliInstalled(result.installed);
+      return result.installed;
+    } finally {
+      setNeonCliChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkNeonCli();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleAddNeonAccount = useCallback(async () => {
+    const check = canAddNeonAccount(entitlement.premiumActive, neonAccounts.length);
+    if (!check.allowed) {
+      toast.error(
+        "Free plan allows 1 linked Neon account. Upgrade to Pro to link more.",
+      );
+      openExternalUrl(REXADB_UPGRADE_URL);
+      return;
+    }
+    const installed = neonCliInstalled ?? (await checkNeonCli());
+    if (!installed) {
+      if (onOpenNeonAccounts) onOpenNeonAccounts();
+      else setConnectionScreen("neon-cli");
+      return;
+    }
+    setNeonReconnectProfile(null);
+    setNeonLoginOpen(true);
+  }, [entitlement.premiumActive, neonAccounts.length, neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
+
+  const handleReconnectNeonAccount = useCallback(async (profileName: string) => {
+    const installed = neonCliInstalled ?? (await checkNeonCli());
+    if (!installed) {
+      if (onOpenNeonAccounts) onOpenNeonAccounts();
+      else setConnectionScreen("neon-cli");
+      return;
+    }
+    setNeonReconnectProfile(profileName);
+    setNeonLoginOpen(true);
+  }, [neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
+
+  const handleRemoveNeonAccount = useCallback((id: string) => {
+    removeNeonCliAccount(id);
+    const next = getNeonCliAccounts();
+    setNeonAccounts(next);
+    setActiveNeonAccountId((cur) => {
+      if (cur !== id) return cur;
+      return next[0]?.id ?? null;
+    });
+    if (next.length === 0) {
+      if (onOpenNeonAccounts) onOpenNeonAccounts();
+      else setConnectionScreen("neon-cli");
+    }
+  }, [onOpenNeonAccounts]);
+
+  const handleNeonConnectDatabase = async (
+    payload: { name: string; connectionString: string; connectionType: string },
+    opts?: { silent?: boolean },
+  ) => {
+    const res = await createConnection({
+      name: payload.name,
+      connectionString: payload.connectionString,
+      connectionType: payload.connectionType,
+    });
+    if (res.success) {
+      if (opts?.silent) {
+        if (supabaseImportReloadTimerRef.current) {
+          window.clearTimeout(supabaseImportReloadTimerRef.current);
+        }
+        supabaseImportReloadTimerRef.current = window.setTimeout(() => {
+          supabaseImportReloadTimerRef.current = null;
+          void loadConnections();
+        }, 300);
+      } else {
+        await loadConnections();
+        if (!isNeonCliMode) {
+          setConnectionScreen("list");
+        }
+        toast.success(`Connected to ${payload.name}`);
+      }
+    } else if (!opts?.silent) {
+      toast.error((res as any).error ?? "Failed to create connection.");
+    }
+    return res;
+  };
+
   function terminalLog(
     type: "log" | "group" | "groupEnd" | "warn" | "error",
     ...args: any[]
@@ -3430,7 +3550,8 @@ export function ConnectionManager({
             displayName={displayName}
             showBackButton={
               connectionScreen === "settings" ||
-              connectionScreen === "supabase"
+              connectionScreen === "supabase" ||
+              connectionScreen === "neon-cli"
             }
             onBack={() => setConnectionScreen("list")}
             onCommandSearchClick={() => setCommandMenuOpen(true)}
@@ -3456,6 +3577,12 @@ export function ConnectionManager({
             onSpacetimedbClick={() =>
               setConnectionScreen(
                 connectionScreen === "spacetimedb-account" ? "list" : "spacetimedb-account",
+              )
+            }
+            neonActive={connectionScreen === "neon-cli"}
+            onNeonClick={() =>
+              setConnectionScreen(
+                connectionScreen === "neon-cli" ? "list" : "neon-cli",
               )
             }
             avatarDropdownChildren={
@@ -3991,6 +4118,10 @@ export function ConnectionManager({
                         >
                           {card.id === "spacetimedb" ? (
                             <SpacetimeDbLogo className="h-[14px] w-[14px] text-foreground" />
+                          ) : card.id === "supabase" ? (
+                            <SupabaseLogo className="h-[14px] w-[14px]" />
+                          ) : card.id === "neon" ? (
+                            <NeonLogo className="h-[14px] w-[14px]" />
                           ) : (
                             <Image
                               src={card.logoSrc}
@@ -4786,6 +4917,31 @@ export function ConnectionManager({
                 />
               </div>
             </div>
+          ) : connectionScreen === "neon-cli" ? (
+            <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
+              <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                <NeonAccountsScreen
+                  accounts={neonAccounts}
+                  activeAccountId={activeNeonAccountId}
+                  onSwitchAccount={setActiveNeonAccountId}
+                  onRemoveAccount={handleRemoveNeonAccount}
+                  onAddAccount={() => void handleAddNeonAccount()}
+                  canAddAccount={canAddNeonAccount(
+                    entitlement.premiumActive,
+                    neonAccounts.length,
+                  ).allowed}
+                  existingConnectionStrings={connections.map(
+                    (c) => c.connectionString,
+                  )}
+                  cliInstalled={neonCliInstalled}
+                  checkingCli={neonCliChecking}
+                  onRecheckCli={() => void checkNeonCli()}
+                  onConnectDatabase={handleNeonConnectDatabase}
+                  onReconnectAccount={(profileName) => void handleReconnectNeonAccount(profileName)}
+                  reloadSignal={neonReloadSignal}
+                />
+              </div>
+            </div>
           ) : connectionScreen === "new-select" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="flex min-h-full w-full flex-col items-center px-6 py-6">
@@ -4853,13 +5009,7 @@ export function ConnectionManager({
                     className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
                   >
                     <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
-                      <Image
-                        src="/providers/supabase.png"
-                        alt="Supabase"
-                        width={28}
-                        height={28}
-                        className="rounded-md object-contain"
-                      />
+                      <SupabaseLogo className="h-7 w-7" />
                     </div>
                     <div className="flex-1">
                       <div className="text-sm font-medium">
@@ -4912,6 +5062,37 @@ export function ConnectionManager({
                     </div>
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (neonAccounts.length > 0) {
+                        if (onOpenNeonAccounts) onOpenNeonAccounts();
+                        else setConnectionScreen("neon-cli");
+                      } else {
+                        void handleAddNeonAccount();
+                      }
+                    }}
+                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                  >
+                    <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                      <NeonLogo className="h-7 w-7" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">
+                        Neon Account
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {neonAccounts.length === 0
+                          ? "Sign in (via Neon CLI) to browse and connect your projects"
+                          : neonAccounts.length === 1
+                            ? `Signed in as ${
+                                neonAccounts[0]?.label || neonAccounts[0]?.profileName
+                              }`
+                            : `${neonAccounts.length} accounts linked`}
+                      </div>
+                    </div>
+                  </button>
+
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     {providerCards.map((card) => (
                       <button
@@ -4929,14 +5110,10 @@ export function ConnectionManager({
                       >
                         {card.id === "spacetimedb" ? (
                           <SpacetimeDbLogo className="mb-2 h-[26px] w-[26px] text-foreground opacity-80 transition-opacity group-hover:opacity-100" />
-                        ) : card.id === "jdbc" ? (
-                          <Image
-                            src={card.logoSrc}
-                            alt={card.label}
-                            width={26}
-                            height={26}
-                            className="mb-2 rounded-lg object-contain opacity-80 transition-opacity group-hover:opacity-100"
-                          />
+                        ) : card.id === "supabase" ? (
+                          <SupabaseLogo className="mb-2 h-[26px] w-[26px] opacity-80 transition-opacity group-hover:opacity-100" />
+                        ) : card.id === "neon" ? (
+                          <NeonLogo className="mb-2 h-[26px] w-[26px] opacity-80 transition-opacity group-hover:opacity-100" />
                         ) : (
                           <Image
                             src={card.logoSrc}
@@ -5022,11 +5199,12 @@ export function ConnectionManager({
                   </div>
                   {selectedProvider === "spacetimedb" ? (
                     <SpacetimeDbLogo className="h-[22px] w-[22px] text-foreground/60" />
+                  ) : selectedProvider === "supabase" || selectedProvider === "supabase-mgmt" ? (
+                    <SupabaseLogo className="h-[22px] w-[22px] opacity-60" />
+                  ) : selectedProvider === "neon" ? (
+                    <NeonLogo className="h-[22px] w-[22px] opacity-60" />
                   ) : selectedProvider &&
-                    (providerCards.some(
-                      (c) => c.id === selectedProvider,
-                    ) ||
-                      selectedProvider === "supabase-mgmt") ? (
+                    providerCards.some((c) => c.id === selectedProvider) ? (
                     <Image
                       src={getProviderLogoUrl(selectedProvider)}
                       alt={selectedProvider}
@@ -5964,6 +6142,26 @@ export function ConnectionManager({
               toast.info("No databases to import.");
             }
           });
+        }}
+      />
+
+      <NeonLoginDialog
+        open={neonLoginOpen}
+        reconnectProfile={neonReconnectProfile}
+        onOpenChange={(nextOpen) => {
+          setNeonLoginOpen(nextOpen);
+          if (!nextOpen) setNeonReconnectProfile(null);
+        }}
+        onLoginComplete={(account) => {
+          setNeonAccounts((prev) => {
+            const exists = prev.some((a) => a.id === account.id);
+            return exists ? prev : [...prev, account];
+          });
+          setActiveNeonAccountId(account.id);
+          setNeonReconnectProfile(null);
+          setNeonReloadSignal((n) => n + 1);
+          if (onOpenNeonAccounts) onOpenNeonAccounts();
+          else setConnectionScreen("neon-cli");
         }}
       />
     </div>

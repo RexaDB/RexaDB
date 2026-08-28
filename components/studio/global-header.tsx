@@ -1223,7 +1223,7 @@ export function GlobalHeader({
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator className="bg-studio-border" />
-              {!isSessionActive && userId !== "local" && (
+              {!isSessionActive && (
                 <>
                   <DropdownMenuItem
                     onClick={() => {
@@ -1236,7 +1236,7 @@ export function GlobalHeader({
                     }}
                     className="gap-2 text-[12px] cursor-pointer"
                   >
-                    Sign In Again
+                    {userId === "local" ? "Sign In" : "Sign In Again"}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-studio-border" />
                 </>

@@ -4,12 +4,6 @@ import dagre from "@dagrejs/dagre";
 import { toPng, toSvg } from "html-to-image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-function hexToRgb(hex: string): string {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result
-    ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}`
-    : "37, 99, 235";
-}
 import {
   ReactFlow,
   Background,
@@ -99,7 +93,7 @@ const TableNode = ({ data }: { data: TableData }) => {
   const HEADER_HEIGHT = 52;
   return (
     <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden min-w-72 select-none">
-      <div className="px-4 h-[52px] bg-[#111111] border-b border-border flex items-center justify-between gap-3 group drag-handle cursor-grab active:cursor-grabbing">
+      <div className="px-4 h-[52px] bg-studio-header-bg border-b border-border flex items-center justify-between gap-3 group drag-handle cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-3 min-w-0">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted/20">
             <TableIcon className="w-4 h-4 shrink-0 text-foreground/80" />
@@ -157,7 +151,7 @@ const TableNode = ({ data }: { data: TableData }) => {
             col.isPrimary ? (
               <Key
                 key="pk"
-                className="w-3.5 h-3.5 shrink-0 text-yellow-500/85 -rotate-45"
+                className="w-3.5 h-3.5 shrink-0 text-warning/85 -rotate-45"
               />
             ) : null,
             isIdentityColumn(col) ? (
@@ -288,19 +282,17 @@ export function SchemaDiagram({
 
   const currentTheme = (theme === "system" ? systemTheme : theme) as ColorMode;
 
+  // color-mix works with whatever format --primary happens to be (oklch,
+  // hex, or a color-mix expression from a custom theme), unlike manually
+  // parsing it as hex — which silently fell back to a hardcoded blue
+  // whenever the token wasn't a 6-digit hex string (e.g. the default light
+  // theme's oklch primary).
   const edgeColor = useMemo(() => {
-    const primaryColor =
-      getComputedStyle(document.documentElement)
-        .getPropertyValue("--primary")
-        .trim() || "#2563eb";
-    const alpha = currentTheme === "light" ? "0.6" : "0.4";
-    return `rgba(${hexToRgb(primaryColor)}, ${alpha})`;
+    const alphaPct = currentTheme === "light" ? "60%" : "40%";
+    return `color-mix(in srgb, var(--primary) ${alphaPct}, transparent)`;
   }, [currentTheme]);
-  const miniMapNodeColor = currentTheme === "light" ? "#111318" : "#cbd5e1";
-  const miniMapMaskColor =
-    currentTheme === "light"
-      ? "rgba(237, 237, 237, 0.8)"
-      : "rgba(17, 19, 24, 0.8)";
+  const miniMapNodeColor = "var(--muted-foreground)";
+  const miniMapMaskColor = "color-mix(in srgb, var(--studio-bg) 80%, transparent)";
 
   const filteredTables = useMemo(() => {
     if (!schemaData) return [] as TableData[];
@@ -564,10 +556,21 @@ export function SchemaDiagram({
           zoom: 1,
         };
 
+        // Resolve the actual canvas background from the theme so exports
+        // match what the user sees (including custom themes), instead of
+        // hardcoding #ffffff / #111111.
+        const exportBg =
+          (containerRef.current &&
+            getComputedStyle(containerRef.current).backgroundColor) ||
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--studio-bg")
+            .trim() ||
+          (currentTheme === "light" ? "#ffffff" : "#111111");
+
         if (format === "svg") {
           const data = await toSvg(reactFlowViewport, {
             cacheBust: true,
-            backgroundColor: currentTheme === "light" ? "#ffffff" : "#111111",
+            backgroundColor: exportBg,
             width,
             height,
             style: {
@@ -580,7 +583,7 @@ export function SchemaDiagram({
         } else {
           const data = await toPng(reactFlowViewport, {
             cacheBust: true,
-            backgroundColor: currentTheme === "light" ? "#ffffff" : "#111111",
+            backgroundColor: exportBg,
             pixelRatio: 2,
             width,
             height,
@@ -784,11 +787,7 @@ export function SchemaDiagram({
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1.2}
-          color={
-            currentTheme === "light"
-              ? "rgba(15, 23, 42, 0.14)"
-              : "rgba(255, 255, 255, 0.08)"
-          }
+          color={`color-mix(in srgb, var(--muted-foreground) ${currentTheme === "light" ? "18%" : "14%"}, transparent)`}
           className="opacity-90"
         />
         <Controls
@@ -924,7 +923,7 @@ export function SchemaDiagram({
           </div>
           <div className="w-px h-3 bg-border/80" />
           <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Key className="w-3 h-3 text-yellow-500/85 -rotate-45" />
+            <Key className="w-3 h-3 text-warning/85 -rotate-45" />
             Primary key
           </div>
           <div className="w-px h-3 bg-border/80" />
