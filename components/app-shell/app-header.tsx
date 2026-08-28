@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
+import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
 import { NavUser } from "@/components/navigation/nav-user";
 import { ProviderLogo, SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
 import type { AppTab, AppHeaderTabsProps } from "@/components/app-shell/app-shared";
@@ -42,20 +42,34 @@ function TabIcon({ tab }: { tab: AppTab }) {
 	}
 	if (tab.kind === "settings") return <SettingsIcon className="size-4" />;
 	if (tab.kind === "supabase") {
-		return (
-			<Image
-				src="/providers/supabase.png"
-				alt=""
-				width={16}
-				height={16}
-				className="size-4 rounded-[3px] object-contain"
-			/>
-		);
+		return <ProviderLogo type="supabase" className="size-4" />;
 	}
 	if (tab.kind === "spacetimedb") {
 		return <SpacetimeDbBrandImage className="size-4" />;
 	}
+	if (tab.kind === "neon") {
+		return <ProviderLogo type="neon" className="size-4" />;
+	}
 	return <DatabaseIcon className="size-4" />;
+}
+
+/**
+ * Splits tabs into contiguous runs sharing the same `paneId`, so each split-
+ * pane group gets its own drag-reorder scope — a tab can be dragged among
+ * its pane-mates, never across a pane boundary, since array order is also
+ * what encodes which visual pane-group block a tab belongs to.
+ */
+function groupTabsByPane(tabs: AppTab[]): AppTab[][] {
+	const groups: AppTab[][] = [];
+	for (const tab of tabs) {
+		const last = groups[groups.length - 1];
+		if (last && last[0].paneId === tab.paneId) {
+			last.push(tab);
+		} else {
+			groups.push([tab]);
+		}
+	}
+	return groups;
 }
 
 export type AppHeaderProps = AppHeaderTabsProps & {
@@ -109,6 +123,7 @@ export function AppHeader({
 	onActivateTab,
 	onCloseTab,
 	onNewTab,
+	onReorderTab,
 	onBack,
 	onForward,
 	canBack,
@@ -134,6 +149,7 @@ export function AppHeader({
 	const { isMaximized, sendWindowAction, canUseDesktop, isMac, isLinuxCloseOnly } = useDesktopWindow();
 	const sidebarCollapsed = sidebarState === "collapsed";
 	const trafficLightInset = isMac ? macTrafficLightInset : 0;
+	const tabGroups = useMemo(() => groupTabsByPane(tabs), [tabs]);
 
 	return (
 		<header
@@ -186,48 +202,63 @@ export function AppHeader({
 							/>
 						</>
 					)}
-					{tabs.map((tab, index) => {
-						const active = tab.id === activeTabId;
-						const newPaneGroup =
-							tab.paneId &&
-							index > 0 &&
-							tabs[index - 1].paneId !== tab.paneId;
-						return (
-							<Fragment key={tab.id}>
-								{newPaneGroup && (
-									<div className="mx-1.5 h-4 w-px shrink-0 self-center bg-foreground/30" />
-								)}
-								<div
-									onClick={() => onActivateTab?.(tab.id)}
-									className={cn(
-										"group flex h-7 min-w-24 max-w-52 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs transition-colors shrink-0 select-none",
-										active
-											? "bg-studio-tab-active text-foreground"
-											: "bg-black/5 dark:bg-white/[0.07] text-muted-foreground hover:bg-black/10 hover:text-foreground dark:hover:bg-white/[0.12]"
-									)}
-								>
-									<TabIcon tab={tab} />
-									<span className="flex-1 truncate">{tab.title}</span>
-									<button
-										type="button"
-										aria-label="Close tab"
-										onClick={(e) => {
-											e.stopPropagation();
-											onCloseTab?.(tab.id);
-										}}
-										className={cn(
-											"flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-white/10",
-											active
-												? "opacity-70 hover:opacity-100"
-												: "opacity-0 group-hover:opacity-100"
-										)}
-									>
-										<XIcon className="size-3" />
-									</button>
-								</div>
-							</Fragment>
-						);
-					})}
+					{tabGroups.map((group, groupIndex) => (
+						<Fragment key={group[0]?.id ?? groupIndex}>
+							{groupIndex > 0 && (
+								<div className="mx-1.5 h-4 w-px shrink-0 self-center bg-foreground/30" />
+							)}
+							<Sortable
+								value={group}
+								getItemValue={(t) => t.id}
+								strategy="horizontal"
+								onValueChange={() => {}}
+								onMove={({ activeIndex, overIndex }) => {
+									const source = group[activeIndex];
+									const target = group[overIndex];
+									if (source && target) onReorderTab?.(source.id, target.id);
+								}}
+								className="flex shrink-0 items-center gap-1.5"
+							>
+								{group.map((tab) => {
+									const active = tab.id === activeTabId;
+									return (
+										<SortableItem key={tab.id} value={tab.id} className="shrink-0">
+											<SortableItemHandle asChild cursor={false}>
+												<div
+													onClick={() => onActivateTab?.(tab.id)}
+													className={cn(
+														"group flex h-7 min-w-24 max-w-52 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs transition-colors select-none",
+														active
+															? "bg-studio-tab-active text-foreground"
+															: "bg-black/5 dark:bg-white/[0.07] text-muted-foreground hover:bg-black/10 hover:text-foreground dark:hover:bg-white/[0.12]"
+													)}
+												>
+													<TabIcon tab={tab} />
+													<span className="flex-1 truncate">{tab.title}</span>
+													<button
+														type="button"
+														aria-label="Close tab"
+														onClick={(e) => {
+															e.stopPropagation();
+															onCloseTab?.(tab.id);
+														}}
+														className={cn(
+															"flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-white/10",
+															active
+																? "opacity-70 hover:opacity-100"
+																: "opacity-0 group-hover:opacity-100"
+														)}
+													>
+														<XIcon className="size-3" />
+													</button>
+												</div>
+											</SortableItemHandle>
+										</SortableItem>
+									);
+								})}
+							</Sortable>
+						</Fragment>
+					))}
 					<Button
 						aria-label="New tab"
 						className="size-6 shrink-0 text-muted-foreground"

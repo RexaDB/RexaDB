@@ -1210,6 +1210,17 @@ export function StudioInterface({
     activeTabId: studio.activeTabId ?? undefined,
     onActivateTab: (id: string) => studio.switchTab(id),
     onCloseTab: (id: string) => studio.closeTabById?.(id),
+    onReorderTab: (sourceId: string, targetId: string) => {
+      studio.setOpenTabs((prev: typeof studio.openTabs) => {
+        const fromIndex = prev.findIndex((t) => t.id === sourceId);
+        const toIndex = prev.findIndex((t) => t.id === targetId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
+      });
+    },
     onNewTab: () => studio.openSqlEditor(),
     sidebarContent: <StudioShellSidebar studio={studio} />,
     sidebarOpen: studio.isSidebarVisible,

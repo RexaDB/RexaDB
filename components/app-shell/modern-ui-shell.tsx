@@ -139,6 +139,7 @@ export function ModernUIShell({
 	activeTabId,
 	onActivateTab,
 	onCloseTab,
+	onReorderTab,
 	onNewTab,
 	onBack,
 	onForward,
@@ -432,6 +433,7 @@ export function ModernUIShell({
 								onSettingsClick={onSettingsClick}
 								showHome={railShowHome}
 								showWorkspace={railShowWorkspace}
+								user={user}
 							/>
 						</div>
 					)}
@@ -525,6 +527,7 @@ export function ModernUIShell({
 									activeTabId={activeTabId}
 									onActivateTab={onActivateTab}
 									onCloseTab={onCloseTab}
+									onReorderTab={onReorderTab}
 									onNewTab={onNewTab}
 									onBack={onBack}
 									onForward={onForward}

@@ -241,6 +241,8 @@ export async function runDbBackup(
     const { execFileSync } = await import("child_process");
     const { resolvePgDumpBinary } = await import("./pg-dump");
     const { getPgHost, getPgPort, getPgDatabase, getPgUsername, getPgPassword } = await import("./pg-connection");
+    const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
+    connectionString = await resolveEffectiveConnectionString(connectionString);
 
     const pgDump = await resolvePgDumpBinary();
     if (!pgDump.binary) {
@@ -2489,8 +2491,10 @@ export async function testConnection(
         return { success: true };
       }
       case "postgres": {
+        const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
+        const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
         const pgMod = (globalThis as any).__pg || (await import("pg")).default;
-        const client = new pgMod.Client({ connectionString });
+        const client = new pgMod.Client({ connectionString: effectiveConnectionString });
         try {
           await client.connect();
           await client.query("SELECT 1");

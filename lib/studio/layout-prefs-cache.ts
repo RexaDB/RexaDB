@@ -30,8 +30,8 @@ export type LayoutPrefs = {
 };
 
 export const DEFAULT_LAYOUT_PREFS: LayoutPrefs = {
-  appShellLayout: true,
-  modernUiLayout: false,
+  appShellLayout: false,
+  modernUiLayout: true,
 };
 
 /**

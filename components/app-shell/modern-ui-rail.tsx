@@ -15,6 +15,7 @@ import {
 } from "@/lib/icon-theme/solar-icons";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
+import { NavUser } from "@/components/navigation/nav-user";
 
 /**
  * Modern UI's always-visible navigation rail. A brand-new, simple, fixed-width
@@ -38,6 +39,7 @@ export function ModernUIRail({
   onSettingsClick,
   showHome = true,
   showWorkspace = true,
+  user,
 }: {
   studio: any;
   settingsOpen?: boolean;
@@ -56,6 +58,9 @@ export function ModernUIRail({
   showHome?: boolean;
   /** Shows the bottom "Workspace" item. Defaults to true. */
   showWorkspace?: boolean;
+  /** Shows a profile/account avatar at the very bottom of the rail, matching
+   *  the user button New Layout shows. Omitted when there's no user info. */
+  user?: { name?: string; email?: string } | null;
 }) {
   const router = useRouter();
   const editorLabel = getEditorLabel(studio.dbType);
@@ -200,6 +205,14 @@ export function ModernUIRail({
               active={active}
             />
           ))}
+          {user && (
+            <>
+              <div className="mx-1 h-px shrink-0 bg-border/50" />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-transparent transition-colors hover:border-border/70 hover:bg-muted/20">
+                <NavUser name={user.name} email={user.email} dropdownAlign="end" dropdownSide="right" />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

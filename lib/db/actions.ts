@@ -352,15 +352,18 @@ async function applyPostgresSchemaToTarget(
       return { success: true, data: { appliedCount: 0 } };
     }
 
+    const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
+    const effectiveTargetConnectionString = await resolveEffectiveConnectionString(targetConnectionString);
+
     const { Client } = (globalThis as any).__pg || (await import("pg")).default;
     const client = new Client({
-      host: getPgHost(targetConnectionString),
-      port: getPgPort(targetConnectionString),
-      database: getPgDatabase(targetConnectionString),
-      user: getPgUsername(targetConnectionString),
-      password: getPgPassword(targetConnectionString),
+      host: getPgHost(effectiveTargetConnectionString),
+      port: getPgPort(effectiveTargetConnectionString),
+      database: getPgDatabase(effectiveTargetConnectionString),
+      user: getPgUsername(effectiveTargetConnectionString),
+      password: getPgPassword(effectiveTargetConnectionString),
       connectionTimeoutMillis: 15000,
-      ssl: getPgSslConfig(targetConnectionString),
+      ssl: getPgSslConfig(effectiveTargetConnectionString),
     });
 
     await client.connect();

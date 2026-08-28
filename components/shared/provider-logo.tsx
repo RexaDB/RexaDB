@@ -31,7 +31,66 @@ export function getProviderLogoUrl(type?: string | null): string {
 }
 
 import Image from "next/image";
+import { useId } from "react";
 import { Server } from "@/lib/icon-theme/lucide-react";
+
+export function SupabaseLogo({ className }: { className?: string }) {
+  const uid = useId();
+  const p0 = `supabase-p0-${uid}`;
+  const p1 = `supabase-p1-${uid}`;
+  return (
+    <span className={cn("inline-flex size-4 shrink-0 items-center justify-center", className)}>
+      <svg
+        viewBox="0 0 109 113"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-[78%] w-[78%]"
+      >
+        <path
+          d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627L99.1935 40.0627C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z"
+          fill={`url(#${p0})`}
+        />
+        <path
+          d="M63.7076 110.284C60.8481 113.885 55.0502 111.912 54.9813 107.314L53.9738 40.0627L99.1935 40.0627C107.384 40.0627 111.952 49.5228 106.859 55.9374L63.7076 110.284Z"
+          fill={`url(#${p1})`}
+          fillOpacity="0.2"
+        />
+        <path
+          d="M45.317 2.07103C48.1765 -1.53037 53.9745 0.442937 54.0434 5.041L54.4849 72.2922H9.83113C1.64038 72.2922 -2.92775 62.8321 2.1655 56.4175L45.317 2.07103Z"
+          fill="#3ECF8E"
+        />
+        <defs>
+          <linearGradient id={p0} x1="53.9738" y1="54.974" x2="94.1635" y2="71.8295" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#249361" />
+            <stop offset="1" stopColor="#3ECF8E" />
+          </linearGradient>
+          <linearGradient id={p1} x1="36.1558" y1="30.578" x2="54.4844" y2="65.0806" gradientUnits="userSpaceOnUse">
+            <stop />
+            <stop offset="1" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </span>
+  );
+}
+
+export function NeonLogo({ className }: { className?: string }) {
+  return (
+    <span className={cn("inline-flex size-4 shrink-0 items-center justify-center", className)}>
+      <svg
+        viewBox="0 0 64 64"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-[72%] w-[72%]"
+      >
+        <path
+          fill="#37C38F"
+          d="M63 0.0177909V63.5526L38.4178 42.2501V63.5526H0V0L63 0.0177909ZM7.72251 55.8389H30.6953V25.3238L55.2779 47.0476V7.72922L7.72251 7.71559V55.8389Z"
+        />
+      </svg>
+    </span>
+  );
+}
 
 export function SpacetimeDbBrandImage({ className }: { className?: string }) {
   return (
@@ -98,6 +157,12 @@ export function ProviderLogo({
 
   if (key === "spacetimedb") {
     return <SpacetimeDbLogo className={boxClass} />;
+  }
+  if (key === "supabase" || key === "supabase-mgmt") {
+    return <SupabaseLogo className={boxClass} />;
+  }
+  if (key === "neon") {
+    return <NeonLogo className={boxClass} />;
   }
   const logo = LOGO_MAP[key] || "/providers/postgres.png";
   if (

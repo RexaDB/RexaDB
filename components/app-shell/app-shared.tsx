@@ -18,7 +18,7 @@ export type SidebarNavGroup = {
 	items: SidebarNavItem[];
 };
 
-export type AppTabKind = "connections" | "analytics" | "settings" | "supabase" | "spacetimedb";
+export type AppTabKind = "connections" | "analytics" | "settings" | "supabase" | "spacetimedb" | "neon";
 
 export type AppHeaderTabsProps = {
 	/** Signed-in user displayed in the account menu. */
@@ -28,6 +28,8 @@ export type AppHeaderTabsProps = {
 	onActivateTab?: (id: string) => void;
 	onCloseTab?: (id: string) => void;
 	onNewTab?: () => void;
+	/** Drag-to-reorder: fired when a tab is dropped onto another tab. */
+	onReorderTab?: (sourceId: string, targetId: string) => void;
 	/** Navigation helpers shown in the tab list when the sidebar is collapsed. */
 	onBack?: () => void;
 	onForward?: () => void;

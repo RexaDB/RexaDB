@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { CommandSearchBar } from "@/components/ui/command-search-bar";
 import { UserAvatarDropdown } from "@/components/ui/user-avatar-dropdown";
@@ -21,8 +20,13 @@ import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import { supabase } from "@/lib/supabase/client";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
-import { SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
-import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
+import { SpacetimeDbBrandImage, SupabaseLogo, NeonLogo } from "@/components/shared/provider-logo";
+import {
+  activateLocalUserProfile,
+  getStoredLocalModeName,
+  loadStoredDisplayName,
+  syncAuthenticatedUserProfile,
+} from "@/lib/auth/user-profile";
 import { WindowControls } from "@/components/shared/window-controls";
 import { HeaderIconButton } from "@/components/shared/header-icon-button";
 import { toast } from "sonner";
@@ -45,6 +49,8 @@ export function ConnectionsHeader({
   onSupabaseClick,
   spacetimedbActive,
   onSpacetimedbClick,
+  neonActive,
+  onNeonClick,
   avatarDropdownChildren,
 }: {
   displayName?: string;
@@ -63,6 +69,8 @@ export function ConnectionsHeader({
   onSupabaseClick?: () => void;
   spacetimedbActive?: boolean;
   onSpacetimedbClick?: () => void;
+  neonActive?: boolean;
+  onNeonClick?: () => void;
   avatarDropdownChildren?: ReactNode;
 }) {
   const { sleekLayout, hideWindowActions } = useGlobalStudioSettings();
@@ -81,32 +89,85 @@ export function ConnectionsHeader({
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    const applySession = async (sessionUser: User) => {
+      if (!mounted) return;
+      setUser(sessionUser);
+      setIsSessionActive(true);
+      setLocalMode(false);
+      const syncedProfile = await syncAuthenticatedUserProfile(sessionUser);
+      if (!mounted) return;
+      if (syncedProfile.result.success && syncedProfile.user) {
+        setUser(syncedProfile.user);
+      }
+    };
+
+    const applyLocal = async () => {
+      if (!mounted) return;
+      setUser(null);
+      setIsSessionActive(false);
+      const storedName = getStoredLocalModeName();
+      if (storedName) setLocalDisplayName(storedName);
+      const profile = await getStoredUserProfile();
+      if (!mounted) return;
+      if (profile.success && profile.data) {
+        setLocalDisplayName(profile.data.name || "User");
+      }
+      setLocalMode(true);
+    };
+
     const hydrate = async () => {
       try {
         const { data } = await supabase.auth.getSession();
         if (data.session?.user) {
-          setUser(data.session.user);
-          setIsSessionActive(true);
-          setLocalMode(false);
-          const syncedProfile = await syncAuthenticatedUserProfile(data.session.user);
-          if (syncedProfile.result.success && syncedProfile.user) {
-            setUser(syncedProfile.user);
-          }
+          await applySession(data.session.user);
           return;
         }
-        const profile = await getStoredUserProfile();
-        if (profile.success && profile.data) {
-          setLocalDisplayName(profile.data.name || "User");
-          setLocalMode(true);
-        }
+        await applyLocal();
       } catch {}
     };
     void hydrate();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        void applySession(session.user);
+      } else {
+        void applyLocal();
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    // Reset immediately rather than waiting on the onAuthStateChange
+    // listener, which can race against activateLocalUserProfile below and
+    // briefly show the stale, previously-synced cloud name/email.
+    setUser(null);
+    setIsSessionActive(false);
+    setLocalMode(true);
+    setLocalDisplayName("User");
+    await activateLocalUserProfile("User");
     toast.success("Signed out.");
+  };
+
+  const handleSignIn = () => {
+    if (typeof window === "undefined") return;
+    const redirectUrl = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    window.location.href = `/auth?redirect_to=${redirectUrl}`;
   };
 
   // fallow-ignore-next-line code-duplication
@@ -138,6 +199,7 @@ export function ConnectionsHeader({
             localMode={localMode}
             onOpenSettings={() => {}}
             onLogout={handleLogout}
+            onSignIn={handleSignIn}
             sleekLayout={sleekLayout}
           >
             {avatarDropdownChildren || (
@@ -206,13 +268,8 @@ export function ConnectionsHeader({
             !isMac ? "rounded" : sleekLayout ? "h-8 w-8" : "h-9 w-9",
           )}
         >
-          <Image
-            src="/providers/supabase.png"
-            alt="Supabase"
-            width={16}
-            height={16}
+          <SupabaseLogo
             className={cn(
-              "rounded-[3px] object-contain",
               sleekLayout ? "w-3.5 h-3.5" : "w-4 h-4",
               supabaseActive ? "" : "opacity-60",
             )}
@@ -236,6 +293,24 @@ export function ConnectionsHeader({
             )}
           />
         </button>
+        <button
+          onClick={onNeonClick ?? (() => {})}
+          title={neonActive ? "Close Neon" : "Neon accounts"}
+          className={cn(
+            "flex items-center justify-center transition-colors no-drag",
+            !isMac
+              ? "h-8 w-8 hover:bg-studio-border/50"
+              : "border border-studio-border rounded-lg bg-background/15 hover:bg-background/25",
+            !isMac ? "rounded" : sleekLayout ? "h-8 w-8" : "h-9 w-9",
+          )}
+        >
+          <NeonLogo
+            className={cn(
+              sleekLayout ? "w-3.5 h-3.5" : "w-4 h-4",
+              neonActive ? "" : "opacity-60",
+            )}
+          />
+        </button>
         <HeaderIconButton
           icon={Settings}
           onClick={onSettingsClick || (() => {})}
@@ -252,6 +327,7 @@ export function ConnectionsHeader({
             localMode={localMode}
             onOpenSettings={() => {}}
             onLogout={handleLogout}
+            onSignIn={handleSignIn}
             sleekLayout={sleekLayout}
           >
             {avatarDropdownChildren || (

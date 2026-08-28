@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SupabaseLogo } from "@/components/shared/provider-logo";
 import {
   listProjects,
   listOrganizations,
@@ -17,17 +16,18 @@ import {
 } from "@/lib/supabase-mgmt/register";
 import { openExternalUrl } from "@/lib/desktop";
 import type { Project, Organization } from "supabase-client-sdk";
+import { ProviderAccountsHeader } from "@/components/shared/provider-accounts/header";
+import { AccountChips, type AccountChipItem } from "@/components/shared/provider-accounts/account-chips";
+import { ProviderEmptyState } from "@/components/shared/provider-accounts/empty-state";
+import { ProviderListToolbar } from "@/components/shared/provider-accounts/list-toolbar";
+import { ResourceRow } from "@/components/shared/provider-accounts/resource-row";
 import { toast } from "sonner";
 import {
-  LogOut,
   Database,
-  Plus,
-  Search,
   Download,
   ExternalLink,
   RefreshCw,
   Loader2,
-  Mail,
 } from "@/lib/icon-theme/lucide-react";
 
 interface SupabaseAccountsScreenProps {
@@ -220,285 +220,172 @@ export function SupabaseAccountsScreen({
   const accountLabel = (account: SupabaseMgmtAccount) =>
     accountEmail(account) || account.name || "Supabase account";
 
-  const statusColor = (status: string) => {
+  const statusMeta = (status: string): { label: string; className: string } => {
     if (status === "ACTIVE_HEALTHY" || status === "ACTIVE")
-      return "text-green-500";
-    if (status === "PAUSED") return "text-yellow-500";
-    if (status === "COMING_UP") return "text-blue-500";
-    return "text-muted-foreground";
+      return { label: "Active", className: "border-primary/20 bg-primary/10 text-primary" };
+    if (status === "PAUSED")
+      return { label: "Paused", className: "border-studio-border/60 bg-muted/40 text-muted-foreground" };
+    if (status === "COMING_UP")
+      return { label: "Starting", className: "border-studio-border/60 bg-muted/40 text-muted-foreground" };
+    return {
+      label: status.replace(/_/g, " "),
+      className: "border-studio-border/60 bg-muted/40 text-muted-foreground",
+    };
   };
+
+  const logo = <SupabaseLogo className="h-[22px] w-[22px]" />;
+
+  const accountChips: AccountChipItem[] = accounts.map((account) => ({
+    id: account.id,
+    label: accountLabel(account),
+    initial: accountLabel(account).slice(0, 1),
+  }));
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
-            <Image
-              src="/providers/supabase.png"
-              alt="Supabase"
-              width={26}
-              height={26}
-              className="rounded-md object-contain"
-            />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold">Supabase Accounts</h2>
-            <p className="text-xs text-muted-foreground">
-              Browse, connect, and import your Supabase projects.
-            </p>
-          </div>
-        </div>
-      </div>
+      <ProviderAccountsHeader
+        logo={logo}
+        title="Supabase"
+        description="Browse, connect, and import your Supabase projects."
+      />
 
       {accounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-studio-border/60 bg-studio-bg/60 px-6 py-16 text-center">
-          <Image
-            src="/providers/supabase.png"
-            alt="Supabase"
-            width={44}
-            height={44}
-            className="mb-4 rounded-lg object-contain opacity-80"
-          />
-          <h3 className="text-sm font-semibold">No Supabase account linked</h3>
-          <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Log in with your Supabase (supabase.com) account to browse your
-            projects and connect them here.
-          </p>
-          <Button
-            onClick={onAddAccount}
-            className="mt-5 h-9 gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            Log in to Supabase
-          </Button>
-        </div>
+        <ProviderEmptyState
+          logo={logo}
+          title="No Supabase account linked"
+          description="Log in with your Supabase (supabase.com) account to browse your projects and connect them here."
+          actionLabel="Log in to Supabase"
+          onAction={onAddAccount}
+        />
       ) : (
-        <div className="space-y-6">
-          <section className="rounded-xl border border-studio-border/60 bg-studio-bg/60">
-            <div className="flex items-center justify-between border-b border-studio-border/50 px-4 py-3">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Linked accounts
-              </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 text-xs"
-                onClick={onAddAccount}
-                disabled={!canAddAccount}
-                title={
-                  canAddAccount
-                    ? "Link another Supabase account"
-                    : "Upgrade to Pro to link more accounts"
-                }
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Link account
-              </Button>
-            </div>
-            <div className="space-y-2 p-4">
-              {accounts.map((account) => {
-                const isActive = account.id === activeAccountId;
-                return (
-                  <button
-                    key={account.id}
-                    type="button"
-                    onClick={() => onSwitchAccount(account.id)}
-                    className={`w-full flex items-center gap-3 rounded-lg border p-3 text-left transition-all ${
-                      isActive
-                        ? "border-primary/40 bg-primary/5"
-                        : "border-studio-border/60 bg-studio-bg/40 hover:border-studio-border hover:bg-studio-row-hover/80"
-                    }`}
+        <>
+          <AccountChips
+            accounts={accountChips}
+            activeId={activeAccountId}
+            onSwitch={onSwitchAccount}
+            onRemove={onRemoveAccount}
+            onAdd={onAddAccount}
+            canAdd={canAddAccount}
+            addLabel="Add Supabase account"
+          />
+
+          <section className="overflow-hidden rounded-xl border border-studio-border/60 bg-studio-bg/40">
+            <ProviderListToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search projects..."
+              actions={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => void loadProjects()}
+                    disabled={loading}
+                    title="Refresh projects"
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {accountLabel(account)}
-                        </span>
-                        {isActive && (
-                          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      {accountEmail(account) && account.name && (
-                        <div className="text-xs text-muted-foreground truncate">
-                          {account.name}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      title="Remove this account"
-                      className="shrink-0 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveAccount(account.id);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.stopPropagation();
-                          onRemoveAccount(account.id);
-                        }
-                      }}
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+                    <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5 bg-primary text-xs text-primary-foreground hover:bg-primary/90"
+                    onClick={handleImportAll}
+                    disabled={importing || !activeAccount}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {importing ? "Importing..." : "Import all active"}
+                  </Button>
+                </>
+              }
+            />
 
-          <section className="rounded-xl border border-studio-border/60 bg-studio-bg/60">
-            <div className="flex items-center justify-between border-b border-studio-border/50 px-4 py-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Projects
-                </h3>
-                {activeAccount && (
-                  <span className="text-xs text-muted-foreground truncate">
-                    — {accountLabel(activeAccount)}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => void loadProjects()}
-                  disabled={loading}
-                  title="Refresh projects"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
-                  onClick={handleImportAll}
-                  disabled={importing || !activeAccount}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  {importing ? "Importing..." : "Import all active"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="p-4">
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Search projects..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 h-9 bg-background/70 border-border/60 text-sm"
-                />
-              </div>
-
+            <div className="p-2">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
               ) : loadError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center">
-                  <p className="text-sm font-medium text-destructive">
-                    Failed to load projects
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {loadError}
-                  </p>
+                <div className="m-2 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center">
+                  <p className="text-sm font-medium text-destructive">Failed to load projects</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     This account&apos;s token may have expired. Switch accounts
                     or remove this account and log in again.
                   </p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {Object.entries(groupedProjects).map(
-                    ([orgName, orgProjects]) => (
-                      <div key={orgName}>
-                        <div className="mb-2 px-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                          {orgName}
-                        </div>
-                        <div className="space-y-1.5">
-                          {orgProjects.map((project) => (
-                            <div
-                              key={project.id}
-                              className="flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/40 p-3"
-                            >
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/60">
-                                <Database className="h-4 w-4 text-muted-foreground" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">
-                                  {project.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground truncate">
-                                  {project.ref} &middot; {project.region}
-                                </div>
-                              </div>
-                              <span
-                                className={`shrink-0 text-xs font-medium ${statusColor(project.status)}`}
-                              >
-                                {project.status === "ACTIVE_HEALTHY"
-                                  ? "Active"
-                                  : project.status === "PAUSED"
-                                    ? "Paused"
-                                    : project.status.replace(/_/g, " ")}
-                              </span>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 shrink-0 gap-1 text-xs"
-                                onClick={() => void handleConnect(project)}
-                                disabled={
-                                  connectingRef === project.ref ||
-                                  connectedProjectRefs.has(project.ref)
-                                }
-                              >
-                                {connectingRef === project.ref ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : null}
-                                {connectedProjectRefs.has(project.ref)
-                                  ? "Connected"
-                                  : "Connect"}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                                title="Open in Supabase dashboard"
-                                onClick={() =>
-                                  openExternalUrl(
-                                    `https://supabase.com/dashboard/project/${project.ref}/settings/database`,
-                                  )
-                                }
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
+                <div className="space-y-3">
+                  {Object.entries(groupedProjects).map(([orgName, orgProjects]) => (
+                    <div key={orgName}>
+                      <div className="mb-1 px-2.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {orgName}
                       </div>
-                    ),
-                  )}
+                      <div className="space-y-0.5">
+                        {orgProjects.map((project) => {
+                          const status = statusMeta(project.status);
+                          const isConnected = connectedProjectRefs.has(project.ref);
+                          return (
+                            <ResourceRow
+                              key={project.id}
+                              icon={<Database className="h-4 w-4 text-muted-foreground" />}
+                              title={project.name}
+                              subtitle={`${project.ref} · ${project.region}`}
+                              trailing={
+                                <>
+                                  <span
+                                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${status.className}`}
+                                  >
+                                    {status.label}
+                                  </span>
+                                  {isConnected ? (
+                                    <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                      Connected
+                                    </span>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      className="h-6 shrink-0 gap-1 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
+                                      onClick={() => void handleConnect(project)}
+                                      disabled={connectingRef === project.ref}
+                                    >
+                                      {connectingRef === project.ref ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : null}
+                                      Connect
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                                    title="Open in Supabase dashboard"
+                                    onClick={() =>
+                                      openExternalUrl(
+                                        `https://supabase.com/dashboard/project/${project.ref}/settings/database`,
+                                      )
+                                    }
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
 
                   {filteredProjects.length === 0 && (
                     <div className="py-8 text-center text-sm text-muted-foreground">
-                      {projects.length === 0
-                        ? "No projects found."
-                        : "No projects match your search."}
+                      {projects.length === 0 ? "No projects found." : "No projects match your search."}
                     </div>
                   )}
                 </div>
               )}
             </div>
           </section>
-        </div>
+        </>
       )}
     </div>
   );
