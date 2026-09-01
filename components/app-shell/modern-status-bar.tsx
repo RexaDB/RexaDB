@@ -1,16 +1,23 @@
 "use client";
 
-import { Loader2, Check } from "@/lib/icon-theme/lucide-react";
+import {
+  Cloud,
+  CloudOff,
+  Loader2,
+  Check,
+  AlertCircle,
+} from "@/lib/icon-theme/lucide-react";
 import { DatabaseIcon } from "@/lib/icon-theme/solar-icons";
 import { Clock, MessagesSquare, Sparkles, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSettingsSyncStatus } from "@/hooks/use-settings-sync-status";
 
 /**
  * VS Code-style status bar for the Modern UI — the real footer of the window.
  * Uses the outer shell background so the footer blends under the rail/sidebar
- * chrome. Carries, left to right: the connection name button,
- * the current database button, the schema cache status, and a button that opens
- * the AI threads sidebar. Hidden by the "Status Bar" toggle in Customize Layout.
+ * chrome. Left: connection, database, settings sync. Right: Ask AI / agents /
+ * history, schema cache, and AI threads. Hidden by the "Status Bar" toggle in
+ * Customize Layout.
  */
 export function ModernStatusBar({
   studio,
@@ -32,10 +39,47 @@ export function ModernStatusBar({
   const connectionName = studio.connection?.name || "No connection";
   const currentDatabase = studio.currentDatabase || "";
   const syncingSchema = Boolean(studio.fetchingSchemas);
+  const {
+    status: settingsSyncStatus,
+    lastSyncedAt,
+    error: settingsSyncError,
+    enabled: settingsSyncEnabled,
+    syncNow,
+  } = useSettingsSyncStatus();
 
   const itemClass =
     "flex min-h-6 items-center gap-1.5 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground";
   const buttonClass = cn(itemClass, "cursor-pointer");
+
+  const settingsSyncLabel = !settingsSyncEnabled
+    ? "Settings not synced"
+    : settingsSyncStatus === "syncing"
+      ? "Syncing settings…"
+      : settingsSyncStatus === "error"
+        ? "Settings sync failed"
+        : settingsSyncStatus === "synced"
+          ? "Settings synced"
+          : "Settings sync ready";
+
+  const settingsSyncTitle = !settingsSyncEnabled
+    ? "Settings stay on this device. Upgrade or sign in on a paid plan to sync."
+    : settingsSyncStatus === "error"
+      ? settingsSyncError || "Settings sync failed. Click to retry."
+      : lastSyncedAt
+        ? `Last synced ${new Date(lastSyncedAt).toLocaleString()}. Click to sync now.`
+        : "Click to sync settings now.";
+
+  const handleSettingsSyncClick = () => {
+    if (settingsSyncEnabled) {
+      syncNow();
+      return;
+    }
+    if (typeof studio.openProfileSettingsTab === "function") {
+      studio.openProfileSettingsTab();
+      return;
+    }
+    studio.openSettingsTab?.("general");
+  };
 
   return (
     <footer className="relative z-30 flex min-h-8 shrink-0 select-none items-center gap-1 bg-[var(--sidebar)] px-3 py-1">
@@ -58,6 +102,29 @@ export function ModernStatusBar({
         <span className="max-w-[140px] truncate">
           {currentDatabase || "Database"}
         </span>
+      </button>
+      <span className="mx-0.5 h-3 w-px shrink-0 bg-border" />
+      <button
+        type="button"
+        onClick={handleSettingsSyncClick}
+        className={cn(
+          buttonClass,
+          settingsSyncStatus === "error" && "text-destructive hover:text-destructive",
+        )}
+        title={settingsSyncTitle}
+      >
+        {!settingsSyncEnabled ? (
+          <CloudOff className="size-3 shrink-0" />
+        ) : settingsSyncStatus === "syncing" ? (
+          <Loader2 className="size-3 shrink-0 animate-spin" />
+        ) : settingsSyncStatus === "error" ? (
+          <AlertCircle className="size-3 shrink-0" />
+        ) : settingsSyncStatus === "synced" ? (
+          <Cloud className="size-3 shrink-0" />
+        ) : (
+          <Cloud className="size-3 shrink-0 opacity-70" />
+        )}
+        <span className="truncate">{settingsSyncLabel}</span>
       </button>
       <div className="ml-auto flex min-w-0 items-center gap-1">
         {onAskAI && (

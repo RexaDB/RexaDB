@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 
 import { readInitialAppearance } from "@/lib/studio/general-utils";
 import { getAppFontFamily, saveAppFontFamily } from "@/lib/api/actions-client";
+import {
+  emitSettingsSyncLocalChanged,
+  subscribeSettingsSyncApplied,
+} from "@/lib/studio/settings-sync-events";
 
 import { useAppFontFamily } from "./use-app-font-family";
 
@@ -36,8 +40,22 @@ export function useGlobalAppFontFamily(persist = false) {
   useAppFontFamily(customFontFamily, isLoaded);
 
   useEffect(() => {
+    return subscribeSettingsSyncApplied((detail) => {
+      if (detail.payload.appFontFamily === undefined) return;
+      setCustomFontFamily(
+        typeof detail.payload.appFontFamily === "string"
+          ? detail.payload.appFontFamily
+          : "",
+      );
+      setIsLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!persist || !isLoaded) return;
-    void saveAppFontFamily(customFontFamily);
+    void saveAppFontFamily(customFontFamily).then(() => {
+      emitSettingsSyncLocalChanged("appFontFamily");
+    });
   }, [customFontFamily, isLoaded, persist]);
 
   return { customFontFamily, setCustomFontFamily, isLoaded };

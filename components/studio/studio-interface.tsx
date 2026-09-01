@@ -5,25 +5,17 @@ import { toast } from "sonner";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
 import { STUDIO_TAB_ICONS } from "@/lib/studio/tab-registry";
 import { resolvePaneForTab } from "@/lib/studio/split-layout";
-import { AppShell } from "@/components/app-shell/app-shell";
 import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SettingsView } from "@/components/studio/settings-view";
 import { StudioShellSidebar } from "./studio-shell-sidebar";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
-import { NavigationRail } from "./navigation-rail";
-import { ExplorerSidebar } from "./explorer-sidebar";
-import { DatabaseExplorerSidebar } from "./database-explorer-sidebar";
 import { StudioMainContent } from "./studio-main-content";
 import { FKSelectionSheet } from "./fk-selection-sheet";
 import { AddFKSheet } from "./database/add-fk-sheet";
 import { InsertRowSheet } from "./insert-row-sheet";
-import { GlobalHeader } from "./global-header";
 import { useStudio } from "@/hooks/use-studio";
-import { SqlSnippetsSidebar } from "./sql-snippets-sidebar";
-import { DatabaseSidebar } from "./database-sidebar";
-import { AuthSidebar } from "./auth-sidebar";
 import { CommandMenu } from "./command-menu";
 import { UniversalSearch } from "./universal-search";
 import {
@@ -34,13 +26,10 @@ import {
   type SearchAllResult,
 } from "@/lib/api/actions-client";
 
-import { DashboardSidebar } from "./dashboard-sidebar";
-import { WorkflowsSidebar } from "./workflows-sidebar";
 import { ShortcutNavigator } from "./shortcut-navigator";
 import { AiChatSheet } from "./ai/ai-chat-sheet";
 import { AiThreadsSidebar } from "./ai/ai-threads-sidebar";
-import { AgentsPanel } from "./agents/agents-panel";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { openAgentsWindow } from "@/lib/agents/open-agents-window";
 import { cn } from "@/lib/utils";
 import { normalizeWorkflowPlan } from "@/lib/workflows/agent-plan";
 import type {
@@ -56,7 +45,6 @@ import {
 import { useStudioPanelShortcuts } from "@/hooks/use-studio-panel-shortcuts";
 import { SqlEditorPanel } from "./sql-editor-panel";
 import type { StudioInitialUiState } from "@/lib/studio/types";
-import type { Snippet } from "@/lib/studio/types";
 import { ThemeCreatorPanel } from "./theme-creator/theme-creator-panel";
 import { IconThemeCreatorPanel } from "./theme-creator/icon-theme-creator-panel";
 import {
@@ -80,7 +68,6 @@ export function StudioInterface({
   const [isGlobalSqlSheetOpen, setIsGlobalSqlSheetOpen] = useState(false);
   const [isUniversalSearchOpen, setIsUniversalSearchOpen] = useState(false);
   const [isAiSheetOpen, setIsAiSheetOpen] = useState(false);
-  const [isAgentsPanelOpen, setIsAgentsPanelOpen] = useState(false);
   const [isThreadsOpen, setIsThreadsOpen] = useState(false);
   const [aiInitialChatId, setAiInitialChatId] = useState<string | null>(null);
   const [aiActiveChatId, setAiActiveChatId] = useState<string | null>(null);
@@ -100,18 +87,6 @@ export function StudioInterface({
   const [globalSqlQuery, setGlobalSqlQuery] = useState("");
   const globalSqlSheetState =
     studio.sqlTabStates?.[studio.globalSqlContextId] ?? null;
-  const activeAuthTab = studio.openTabs.find(
-    (tab: any) => tab.id === studio.activeTabId,
-  );
-  const activeAuthView =
-    activeAuthTab?.type === "auth-users"
-      ? "users"
-      : activeAuthTab?.type === "auth-sessions"
-        ? "sessions"
-        : activeAuthTab?.type === "auth-providers"
-          ? "providers"
-          : null;
-
   const [handleOpenThemeCreator, handleCloseThemeCreator] = useToggleHandlers(setIsThemeCreatorOpen);
 
   const handleSaveTheme = useCallback(
@@ -152,32 +127,6 @@ export function StudioInterface({
       setIsThemeCreatorOpen(false);
     }
   }, [selectedAppTheme, isThemeCreatorOpen]);
-
-  const handleSnippetStartSplitDrag = useCallback(
-    (snippet: Snippet, mouseX: number, mouseY: number) => {
-      studio.startSnippetSplitDrag(snippet, mouseX, mouseY);
-    },
-    [studio],
-  );
-
-  const handleSnippetEndSplitDrag = useCallback(() => {
-    studio.endSnippetSplitDrag();
-  }, [studio]);
-
-  const handleDashboardStartSplitDrag = useCallback(
-    (
-      dashboard: { id: string; name: string },
-      mouseX: number,
-      mouseY: number,
-    ) => {
-      studio.startDashboardSplitDrag(dashboard, mouseX, mouseY);
-    },
-    [studio],
-  );
-
-  const handleDashboardEndSplitDrag = useCallback(() => {
-    studio.endDashboardSplitDrag();
-  }, [studio]);
 
   const openManageConnections = () => {
     if (typeof window !== "undefined") {
@@ -251,8 +200,8 @@ export function StudioInterface({
   }, []);
 
   const handleToggleAgentsPanel = useCallback(() => {
-    setIsAgentsPanelOpen((open) => !open);
-  }, []);
+    openAgentsWindow(studio.connection.id);
+  }, [studio.connection.id]);
 
   const handleEditDashboardWithAi = useCallback((dashboard: any) => {
     setAiDashboardTarget({ mode: "edit", dashboardId: dashboard?.id });
@@ -520,16 +469,7 @@ export function StudioInterface({
     [studio],
   );
 
-  // "New Layout": render the studio inside the shared <AppShell> (like the
-  // connections/analytics screens). The studio's own GlobalHeader, sidebars and
-  // per-pane tab bars are hidden; AppShell provides the chrome and the studio
-  // editor tabs are routed into AppShell's tab strip. "Modern UI" is a separate
-  // copy of the New Layout (its own shell with a navigation rail).
-  const appShellLayout = studio.appShellLayout;
-  const modernUiLayout = studio.modernUiLayout;
-  const shellLayout = appShellLayout || modernUiLayout;
   const splitEnabled = !!(studio.splitView?.enabled);
-  const sleekChrome = studio.activeSleekLayout && !shellLayout;
 
   const appShellTabs: AppTab[] = (studio.openTabs || []).map((t: any) => {
     const Icon = STUDIO_TAB_ICONS[t.type] ?? STUDIO_TAB_ICONS["table"];
@@ -544,171 +484,6 @@ export function StudioInterface({
           : undefined,
     };
   });
-
-  // The contextual explorer panel for the active sidebar section, reused by both
-  // the normal sidebar (beside the rail) and the New Layout's drill-in sidebar.
-  const studioExplorers = (
-    <>
-      {studio.sidebarView === "dashboard" && (
-        <DashboardSidebar
-          dashboards={studio.dashboards}
-          folders={studio.dashboardFolders}
-          activeTabId={studio.activeTabId}
-          openDashboardTab={studio.openDashboardTab}
-          createDashboard={studio.createDashboard}
-          updateDashboard={studio.updateDashboard}
-          onToggleShareDashboard={studio.toggleDashboardShare}
-          onUpdateDashboardPermissions={studio.updateDashboardPermissions}
-          sharingDashboardId={studio.sharingDashboardId}
-          receivedSharedDashboards={studio.receivedSharedDashboards}
-          deleteDashboard={studio.deleteDashboard}
-          addFolder={studio.addDashboardFolder}
-          updateFolder={studio.updateDashboardFolder}
-          deleteFolder={studio.deleteDashboardFolder}
-          isCloudEnabled={studio.canUseCloudDashboards}
-          onRefresh={studio.refreshDashboards}
-          sleek={studio.activeSleekLayout}
-          onStartSplitDrag={handleDashboardStartSplitDrag}
-          onEndSplitDrag={handleDashboardEndSplitDrag}
-          quickCreateDashboard={() => studio.createDashboard("New Dashboard")}
-          onExportDashboards={studio.handleExportDashboards}
-          onImportDashboards={studio.handleImportDashboards}
-        />
-      )}
-
-      {studio.sidebarView === "database" && (
-        <DatabaseSidebar
-          dbType={studio.dbType}
-          setDatabaseView={studio.openDatabaseTab}
-          openCreateDatabaseTab={studio.openCreateDatabaseTab}
-          onOpenSpacetimeDbReducers={studio.openSpacetimeDbReducers}
-          onOpenSpacetimeDbLogs={studio.openSpacetimeDbLogs}
-          onOpenSpacetimeDbSchema={studio.openSpacetimeDbSchema}
-          activeTabId={studio.activeTabId}
-          sleek={studio.activeSleekLayout}
-        />
-      )}
-
-      {studio.sidebarView === "auth" && (
-        <AuthSidebar
-          hasAuthSchema={studio.schemas.includes("auth")}
-          activeView={activeAuthView}
-          onOpenUsers={studio.openAuthUsersTab}
-          onOpenSessions={studio.openAuthSessionsTab}
-          onOpenProviders={studio.openAuthProvidersTab}
-          sleek={studio.activeSleekLayout}
-        />
-      )}
-
-      {studio.sidebarView === "tables" && studio.databaseExplorer && (
-        <DatabaseExplorerSidebar
-          dbType={studio.dbType}
-          schemas={studio.schemas}
-          selectedSchema={studio.selectedSchema}
-          setSelectedSchema={studio.setSelectedSchema}
-          allSchemaTables={studio.allSchemaTables}
-          fetchingAllSchema={studio.fetchingAllSchema}
-          loadAllSchemaData={studio.loadAllSchemaData}
-          handleTableClick={studio.handleTableClick}
-          openCreateTableTab={studio.openCreateTableTab}
-          openSqlEditor={studio.openSqlEditor}
-          copyTableSchema={studio.copyTableSchema}
-          duplicateTable={studio.duplicateTable}
-          emptyTable={studio.emptyTable}
-          deleteTable={studio.deleteTable}
-          viewTableSchema={studio.viewTableSchema}
-          sleek={studio.activeSleekLayout}
-        />
-      )}
-
-      {studio.sidebarView === "tables" && !studio.databaseExplorer && (
-        <ExplorerSidebar
-          dbType={studio.dbType}
-          schemas={studio.schemas}
-          selectedSchema={studio.selectedSchema}
-          setSelectedSchema={studio.setSelectedSchema}
-          fetchingSchemas={studio.fetchingSchemas}
-          tables={studio.tables}
-          selectedTable={studio.selectedTable}
-          fetchingTables={studio.fetchingTables}
-          tableSearch={studio.tableSearch}
-          setTableSearch={studio.setTableSearch}
-          viewTables={studio.viewTables}
-          openTabs={studio.openTabs}
-          activeTabId={studio.activeTabId}
-          handleTableClick={studio.handleTableClick}
-          schemaData={studio.schemaData}
-          openCreateTableTab={studio.openCreateTableTab}
-          openCreateKeyTab={studio.openCreateKeyTab}
-          refreshTablesSidebar={studio.refreshTablesSidebar}
-          openCreateSchemaTab={studio.openCreateSchemaTab}
-          tags={studio.tags}
-          tableTags={studio.tableTags}
-          sidebarSortMode={studio.sidebarSortMode}
-          setSidebarSortMode={studio.setSidebarSortMode}
-          addTag={studio.addTag}
-          toggleTableTag={studio.toggleTableTag}
-          openSqlEditor={studio.openSqlEditor}
-          copyTableSchema={studio.copyTableSchema}
-          duplicateTable={studio.duplicateTable}
-          emptyTable={studio.emptyTable}
-          deleteTable={studio.deleteTable}
-          exportData={studio.exportData}
-          sleek={studio.activeSleekLayout}
-          schemaExplorer={studio.schemaExplorer}
-          tableExpansion={studio.tableExpansion}
-          functions={studio.functions}
-          triggers={studio.triggers}
-          indexes={studio.indexes}
-          onCopyFunction={studio.copyFunctionSchema}
-          onCopyTrigger={studio.copyTriggerSchema}
-          onCopyIndex={studio.copyIndexSchema}
-          viewTableSchema={studio.viewTableSchema}
-          enums={studio.enums}
-          fetchingEnums={studio.fetchingEnums}
-          onCopyEnum={studio.copyEnumSchema}
-          onEditEnum={studio.openEditEnumTab}
-          onDeleteEnum={studio.handleDeleteEnum}
-          openCreateEnumTab={studio.openCreateEnumTab}
-        />
-      )}
-
-      {studio.sidebarView === "sql" && (
-        <SqlSnippetsSidebar
-          snippets={studio.snippets}
-          folders={studio.folders}
-          onSelectSnippet={studio.openSnippet}
-          onAddSnippet={studio.addSnippet}
-          onUpdateSnippet={studio.updateSnippet}
-          onDeleteSnippet={studio.deleteSnippet}
-          onAddFolder={studio.addFolder}
-          onUpdateFolder={studio.updateFolder}
-          onDeleteFolder={studio.deleteFolder}
-          onToggleShareSnippet={studio.toggleSnippetShare}
-          onUpdateSnippetPermissions={studio.updateSnippetPermissions}
-          sharingSnippetId={studio.sharingSnippetId}
-          receivedSharedSnippets={studio.receivedSharedSnippets}
-          currentQuery={studio.query}
-          onRefresh={studio.refreshCloudSnippets}
-          isCloudEnabled={studio.canUseCloudSnippets}
-          activeTabId={studio.activeTabId}
-          sleek={studio.activeSleekLayout}
-          onStartSplitDrag={handleSnippetStartSplitDrag}
-          onEndSplitDrag={handleSnippetEndSplitDrag}
-          onOpenSqlEditor={studio.openSqlEditor}
-          onImportSnippets={studio.handleImportSnippets}
-        />
-      )}
-
-      {studio.sidebarView === "workflows" && (
-        <WorkflowsSidebar
-          connectionId={studio.connection.id}
-          openWorkflowsTab={studio.openWorkflowsTab}
-          sleek={studio.activeSleekLayout}
-        />
-      )}
-    </>
-  );
 
   const agentSchemaContext = Object.values(studio.schemaData || {})
     .map((entry: any) => ({
@@ -764,55 +539,7 @@ export function StudioInterface({
   };
 
   const layout = (
-    <div
-      className={cn(
-        "flex flex-col text-foreground overflow-hidden",
-        shellLayout
-          ? "h-full relative"
-          : cn(
-              "h-screen bg-background",
-              studio.activeSleekLayout &&
-                "px-2.5 pb-2.5 pt-0 gap-2.5 bg-muted/20",
-            ),
-      )}
-    >
-      {!shellLayout && (
-      <div
-        className={cn(
-          "shrink-0",
-          sleekChrome &&
-            "rounded-b-xl rounded-t-none border border-studio-border/80 bg-background overflow-hidden shadow-sm",
-        )}
-      >
-        <GlobalHeader
-          connection={studio.connection}
-          dbType={studio.dbType}
-          selectedSchema={studio.selectedSchema}
-          selectedTable={studio.selectedTable}
-          onHistoryClick={studio.openHistoryTab}
-          onAnalyticsClick={studio.openAnalyticsTab}
-          onAdvisorClick={studio.openAdvisorTab}
-          onSearchClick={() => setIsUniversalSearchOpen(true)}
-          databases={studio.databases}
-          currentDatabase={studio.currentDatabase}
-          onDatabaseChange={studio.handleDatabaseChange}
-          onSqlEditorSheetClick={handleToggleGlobalSqlSheet}
-          isSqlEditorOpen={isGlobalSqlSheetOpen}
-          onAiAssistantClick={handleToggleAiSheet}
-          isAiAssistantOpen={isAiSheetOpen}
-          onAgentsClick={handleToggleAgentsPanel}
-          onProfileSettingsClick={studio.openProfileSettingsTab}
-          onKeybindingsClick={studio.openKeybindingsTab}
-          onToggleNavigator={() =>
-            studio.setIsSidebarVisible(!studio.isSidebarVisible)
-          }
-          isNavigatorVisible={studio.isSidebarVisible}
-          searchSettings={studio.searchSettings}
-          studio={studio}
-        />
-      </div>
-      )}
-
+    <div className="flex flex-col text-foreground overflow-hidden h-full relative">
       <CommandMenu
         dbType={studio.dbType}
         isOpen={studio.isCommandMenuOpen}
@@ -871,77 +598,10 @@ export function StudioInterface({
       />
 
       <div
-        className={cn(
-          "flex flex-1 overflow-hidden relative",
-          sleekChrome && "gap-2.5",
-        )}
+        className="flex flex-1 overflow-hidden relative"
         data-dropdown-blur-target="true"
       >
-        {!shellLayout && studio.isSidebarVisible && (
-          <div
-            className={cn(
-              "flex shrink-0 h-full",
-              sleekChrome &&
-                "rounded-lg border border-studio-border/80 bg-background overflow-hidden shadow-sm",
-            )}
-          >
-            <div
-              className={cn(
-                "relative shrink-0",
-                studio.sidebarBehavior === "open" ? "w-56" : "w-12",
-              )}
-              onMouseEnter={() => {
-                if (studio.sidebarBehavior === "expandable") {
-                  studio.setSidebarHoverOpen(true);
-                }
-              }}
-              onMouseLeave={() => {
-                if (studio.sidebarBehavior === "expandable") {
-                  studio.setSidebarHoverOpen(false);
-                }
-              }}
-            >
-              <NavigationRail
-                sidebarView={studio.sidebarView}
-                setSidebarView={studio.setSidebarView}
-                onDashboardClick={() => {
-                  studio.setSidebarView("dashboard");
-                }}
-                onTableClick={() => {
-                  studio.setSidebarView("tables");
-                }}
-                onSqlClick={() => {
-                  studio.setSidebarView("sql");
-                }}
-                onDatabaseClick={() => {
-                  studio.setSidebarView("database");
-                }}
-                onSettingsClick={studio.openSettingsTab}
-                onAgentsClick={handleToggleAgentsPanel}
-                onConnectStudioClick={studio.openConnectStudioTab}
-                dbType={studio.dbType}
-                connectionType={studio.connection?.connectionType ?? undefined}
-                sidebarBehavior={studio.sidebarBehavior}
-                setSidebarBehavior={studio.setSidebarBehavior}
-                railExpanded={studio.isNavigationRailExpanded}
-                hasAuth={studio.schemas.includes("auth")}
-                schemaExplorer={studio.schemaExplorer}
-                databaseExplorer={studio.databaseExplorer}
-                tableExpansion={studio.tableExpansion}
-              />
-            </div>
-
-            {studioExplorers}
-          </div>
-        )}
-
-        <div
-          className={cn(
-            "flex-1 min-w-0 flex flex-col h-full relative",
-            sleekChrome &&
-              "rounded-lg border border-studio-border/80 bg-background overflow-hidden shadow-sm",
-          )}
-        >
+        <div className="flex-1 min-w-0 flex flex-col h-full relative">
           <StudioMainContent
             connection={studio.connection}
             onEditDashboardWithAi={handleEditDashboardWithAi}
@@ -952,8 +612,8 @@ export function StudioInterface({
             snippetSplitDrag={studio.snippetSplitDrag}
             dashboardSplitDrag={studio.dashboardSplitDrag}
             tabSplitDrag={studio.tabSplitDrag}
-            hideTabBar={shellLayout && !splitEnabled}
-            paneTabsVariant={shellLayout ? "modern" : "classic"}
+            hideTabBar={!splitEnabled}
+            paneTabsVariant="modern"
           />
         </div>
 
@@ -988,142 +648,6 @@ export function StudioInterface({
           />
         </div>
 
-        {!modernUiLayout && (
-          <AiChatSheet {...aiChatSheetProps} floating={appShellLayout} />
-        )}
-
-        {/* Classic / non-Modern: SQL editor as a side sheet. Modern UI mounts
-            the same panel in-flow next to the content (like AI chat). */}
-        {!modernUiLayout && (
-          <SqlEditorPanel
-            isOpen={isGlobalSqlSheetOpen}
-            onOpenChange={(nextOpen) => {
-              if (nextOpen) {
-                setIsAiSheetOpen(false);
-              }
-              setIsGlobalSqlSheetOpen(nextOpen);
-            }}
-            sleek={studio.activeSleekLayout}
-            connectionId={studio.connection.id}
-            connectionString={studio.currentConnectionString}
-            dbType={
-              studio.dbType === "federated" || studio.dbType === "jdbc" || studio.dbType === "supabase-mgmt"
-                ? "postgres"
-                : studio.dbType
-            }
-            query={globalSqlQuery}
-            setQuery={setGlobalSqlQuery}
-            error={globalSqlSheetState?.error ?? null}
-            results={globalSqlSheetState?.results ?? null}
-            loading={Boolean(globalSqlSheetState?.loading)}
-            executionTime={globalSqlSheetState?.executionTime ?? 0}
-            handleRunQuery={(nextQuery) =>
-              studio.runSqlContextQuery(
-                studio.globalSqlContextId,
-                nextQuery ?? globalSqlQuery,
-              )
-            }
-            handleStopQuery={() =>
-              studio.stopSqlContextQuery(studio.globalSqlContextId)
-            }
-            canStopQuery={Boolean(
-              globalSqlSheetState?.loading && globalSqlSheetState?.activeQueryId,
-            )}
-            toggleAllSelection={studio.toggleAllSelection}
-            selectedRows={studio.selectedRows}
-            tableStructure={studio.tableStructure}
-            toggleRowSelection={studio.toggleRowSelection}
-            setSelectedCell={studio.setSelectedCell}
-            selectedCell={studio.selectedCell}
-            snippets={studio.snippets}
-            folders={studio.folders}
-            addSnippet={studio.addSnippet}
-            updateSnippet={studio.updateSnippet}
-            deleteSnippet={studio.deleteSnippet}
-            createSnippetVersion={studio.createSnippetVersion}
-            getSnippetVersions={studio.getSnippetVersions}
-            restoreSnippetVersion={studio.restoreSnippetVersion}
-            addFolder={studio.addFolder}
-            updateFolder={studio.updateFolder}
-            deleteFolder={studio.deleteFolder}
-            activeTabId={studio.activeTabId}
-            vimMode={studio.vimMode}
-            sqlEditorEngine={studio.sqlEditorEngine}
-            editorFontSize={studio.editorFontSize}
-            editorFontFamily={studio.editorFontFamily}
-            editorThemeId={studio.effectiveEditorThemeId}
-            customEditorThemes={studio.customEditorThemes}
-            appEditorTheme={studio.appEditorTheme}
-            sqlFormatTabWidth={studio.sqlFormatTabWidth}
-            sqlFormatUseTabs={studio.sqlFormatUseTabs}
-            sqlFormatKeywordCase={studio.sqlFormatKeywordCase}
-            sqlFormatDataTypeCase={studio.sqlFormatDataTypeCase}
-            sqlFormatFunctionCase={studio.sqlFormatFunctionCase}
-            sqlFormatIdentifierCase={studio.sqlFormatIdentifierCase}
-            sqlFormatLogicalOperatorNewline={
-              studio.sqlFormatLogicalOperatorNewline
-            }
-            sqlFormatExpressionWidth={studio.sqlFormatExpressionWidth}
-            sqlFormatLinesBetweenQueries={studio.sqlFormatLinesBetweenQueries}
-            sqlFormatDenseOperators={studio.sqlFormatDenseOperators}
-            sqlFormatNewlineBeforeSemicolon={
-              studio.sqlFormatNewlineBeforeSemicolon
-            }
-            onOpenAiSettings={() => studio.openSettingsTab("ai")}
-            selectedNamespace={studio.selectedSchema}
-            schemaData={studio.schemaData}
-            gridProps={{
-              pendingActions: studio.pendingActions,
-              setSelectedRows: studio.setSelectedRows,
-              toggleAllSelection: studio.toggleAllSelection,
-              toggleRowSelection: studio.toggleRowSelection,
-              getRowId: studio.getRowId,
-              pendingChanges: studio.pendingChanges,
-              setPendingChanges: studio.setPendingChanges,
-              editingCell: studio.editingCell,
-              setEditingCell: studio.setEditingCell,
-              selectedColumn: studio.selectedColumn,
-              setSelectedColumn: studio.setSelectedColumn,
-              hasChanges: studio.hasChanges,
-              getChangedValue: studio.getChangedValue,
-              handleUpdateRow: studio.handleUpdateRow,
-              handleFKSelection: studio.handleFKSelection,
-              handleFKPreview: studio.handleFKPreview,
-              fetchingStructure: studio.fetchingStructure,
-              isAddColumnSheetOpen: studio.isAddColumnSheetOpen,
-              setIsAddColumnSheetOpen: studio.setIsAddColumnSheetOpen,
-              isAddingColumn: studio.isAddingColumn,
-              handleAddColumn: studio.handleAddColumn,
-              handleDeleteColumn: studio.handleDeleteColumn,
-              columnToDelete: studio.columnToDelete,
-              setColumnToDelete: studio.setColumnToDelete,
-              selectedTable: studio.selectedTable,
-              selectedSchema: studio.selectedSchema,
-              sortConfig: studio.sortConfig ?? null,
-              setSortConfig: (
-                config: { column: string; direction: "ASC" | "DESC" } | null,
-              ) => studio.setSortConfig(config),
-              pageSize: studio.pageSize,
-              page: studio.page,
-              totalCount: studio.totalCount,
-              onPageChange: studio.handlePageChange,
-              onPageSizeChange: studio.handlePageSizeChange,
-              onDuplicateRow: studio.handleDuplicateRow,
-              onCopyRowJSON: studio.onCopyRowJSON,
-              onCopyRowCSV: studio.onCopyRowCSV,
-              onFilterByCell: handleFilterByCell,
-              onOpenInsertSheet: () => studio.setIsInsertSheetOpen(true),
-              rowSpacing: studio.rowSpacing,
-              alternatingRowColors: studio.alternatingRowColors,
-              connectionString: studio.currentConnectionString,
-              foreignKeys: studio.foreignKeys,
-              enums: studio.enums,
-              showPaginationFooter: true,
-              isKeyboardInputSuspended:
-                studio.isCommandMenuOpen || studio.isShortcutNavigatorOpen,
-            }}
-          />
-        )}
       </div>
 
       <FKSelectionSheet
@@ -1158,34 +682,6 @@ export function StudioInterface({
         loading={studio.mutationLoading}
         isFKSelectionSheetOpen={studio.isFKSelectionSheetOpen}
       />
-
-      <Sheet
-        open={isAgentsPanelOpen}
-        onOpenChange={setIsAgentsPanelOpen}
-        modal={!shellLayout}
-      >
-        <SheetContent
-          side="right"
-          contained={shellLayout}
-          showCloseButton={false}
-          className="p-0 gap-0 flex flex-col"
-          style={{ width: "min(420px, 92vw)" }}
-          minResizeWidth={320}
-          maxResizeWidth={700}
-          resizeHandleLabel="Resize agents panel"
-        >
-          <SheetTitle className="sr-only">Agents</SheetTitle>
-          <AgentsPanel
-            isOpen={isAgentsPanelOpen}
-            onOpenChange={setIsAgentsPanelOpen}
-            connectionId={studio.connection.id}
-            connectionString={studio.currentConnectionString}
-            dbType={studio.dbType}
-            selectedNamespace={studio.selectedSchema}
-            schemaContext={agentSchemaContext}
-          />
-        </SheetContent>
-      </Sheet>
 
       {studio.tabSplitDrag && (
         <div
@@ -1238,15 +734,6 @@ export function StudioInterface({
     noiseBgTranslucent: studio.noiseBgTranslucent,
   };
 
-  // Rendered as a stable sibling in every branch below (same position in the
-  // tree each time) so switching shells — Modern UI / New Layout / plain —
-  // never unmounts/remounts the dialog while it's open. It used to live
-  // inside ModernUIShell's own branch only, so flipping the layout toggle
-  // while Modern UI's dialog was open swapped it for a structurally
-  // different tree (AppShell + a sibling Dialog vs. a Dialog nested deep
-  // inside ModernUIShell) — React tore the whole thing down and remounted a
-  // fresh SettingsView, which just looked like the modal "re-rendering"
-  // without the shell underneath ever visibly changing.
   const settingsDialog = (
     <Dialog open={studio.settingsModalOpen} onOpenChange={studio.setSettingsModalOpen}>
       <DialogContent
@@ -1260,194 +747,176 @@ export function StudioInterface({
     </Dialog>
   );
 
-  if (modernUiLayout) {
-    const threadsPanel = (
-      <AiThreadsSidebar
-        connectionId={studio.connection.id}
-        activeChatId={aiActiveChatId ?? aiInitialChatId}
-        onSelectChat={(chatId) => {
-          setAiInitialChatId(chatId);
-          setAiSelectChatToken((t) => t + 1);
-          setAiDashboardTarget({ mode: "create" });
-          setIsAiSheetOpen(true);
-        }}
-        onNewChat={() => {
-          setAiInitialChatId(null);
-          setAiInitialPrompt(null);
-          setAiDashboardTarget({ mode: "create" });
-          setAiStartNewChatToken((token) => token + 1);
-          setIsAiSheetOpen(true);
-        }}
-        onClose={() => setIsThreadsOpen(false)}
-      />
-    );
-    // Cmd+E SQL sheet: same in-flow column pattern as AI chat (not the bottom panel).
-    const sqlSheetPanel = (
-      <SqlEditorPanel
-        embedded
-        isOpen={isGlobalSqlSheetOpen}
-        onOpenChange={(nextOpen) => {
-          if (nextOpen) setIsAiSheetOpen(false);
-          setIsGlobalSqlSheetOpen(nextOpen);
-        }}
-        sleek={studio.activeSleekLayout}
-        connectionId={studio.connection.id}
-        connectionString={studio.currentConnectionString}
-        dbType={
-          studio.dbType === "federated" || studio.dbType === "jdbc" || studio.dbType === "supabase-mgmt"
-            ? "postgres"
-            : studio.dbType
-        }
-        query={globalSqlQuery}
-        setQuery={setGlobalSqlQuery}
-        error={globalSqlSheetState?.error ?? null}
-        results={globalSqlSheetState?.results ?? null}
-        loading={Boolean(globalSqlSheetState?.loading)}
-        executionTime={globalSqlSheetState?.executionTime ?? 0}
-        handleRunQuery={(nextQuery) =>
-          studio.runSqlContextQuery(
-            studio.globalSqlContextId,
-            nextQuery ?? globalSqlQuery,
-          )
-        }
-        handleStopQuery={() =>
-          studio.stopSqlContextQuery(studio.globalSqlContextId)
-        }
-        canStopQuery={Boolean(
-          globalSqlSheetState?.loading && globalSqlSheetState?.activeQueryId,
-        )}
-        toggleAllSelection={studio.toggleAllSelection}
-        selectedRows={studio.selectedRows}
-        tableStructure={studio.tableStructure}
-        toggleRowSelection={studio.toggleRowSelection}
-        setSelectedCell={studio.setSelectedCell}
-        selectedCell={studio.selectedCell}
-        snippets={studio.snippets}
-        folders={studio.folders}
-        addSnippet={studio.addSnippet}
-        updateSnippet={studio.updateSnippet}
-        deleteSnippet={studio.deleteSnippet}
-        createSnippetVersion={studio.createSnippetVersion}
-        getSnippetVersions={studio.getSnippetVersions}
-        restoreSnippetVersion={studio.restoreSnippetVersion}
-        addFolder={studio.addFolder}
-        updateFolder={studio.updateFolder}
-        deleteFolder={studio.deleteFolder}
-        activeTabId={studio.activeTabId}
-        vimMode={studio.vimMode}
-        sqlEditorEngine={studio.sqlEditorEngine}
-        editorFontSize={studio.editorFontSize}
-        editorFontFamily={studio.editorFontFamily}
-        editorThemeId={studio.effectiveEditorThemeId}
-        customEditorThemes={studio.customEditorThemes}
-        appEditorTheme={studio.appEditorTheme}
-        sqlFormatTabWidth={studio.sqlFormatTabWidth}
-        sqlFormatUseTabs={studio.sqlFormatUseTabs}
-        sqlFormatKeywordCase={studio.sqlFormatKeywordCase}
-        sqlFormatDataTypeCase={studio.sqlFormatDataTypeCase}
-        sqlFormatFunctionCase={studio.sqlFormatFunctionCase}
-        sqlFormatIdentifierCase={studio.sqlFormatIdentifierCase}
-        sqlFormatLogicalOperatorNewline={studio.sqlFormatLogicalOperatorNewline}
-        sqlFormatExpressionWidth={studio.sqlFormatExpressionWidth}
-        sqlFormatLinesBetweenQueries={studio.sqlFormatLinesBetweenQueries}
-        sqlFormatDenseOperators={studio.sqlFormatDenseOperators}
-        sqlFormatNewlineBeforeSemicolon={studio.sqlFormatNewlineBeforeSemicolon}
-        onOpenAiSettings={() => studio.openSettingsTab("ai")}
-        selectedNamespace={studio.selectedSchema}
-        schemaData={studio.schemaData}
-        gridProps={{
-          pendingActions: studio.pendingActions,
-          setSelectedRows: studio.setSelectedRows,
-          toggleAllSelection: studio.toggleAllSelection,
-          toggleRowSelection: studio.toggleRowSelection,
-          getRowId: studio.getRowId,
-          pendingChanges: studio.pendingChanges,
-          setPendingChanges: studio.setPendingChanges,
-          editingCell: studio.editingCell,
-          setEditingCell: studio.setEditingCell,
-          selectedColumn: studio.selectedColumn,
-          setSelectedColumn: studio.setSelectedColumn,
-          hasChanges: studio.hasChanges,
-          getChangedValue: studio.getChangedValue,
-          handleUpdateRow: studio.handleUpdateRow,
-          handleFKSelection: studio.handleFKSelection,
-          handleFKPreview: studio.handleFKPreview,
-          fetchingStructure: studio.fetchingStructure,
-          isAddColumnSheetOpen: studio.isAddColumnSheetOpen,
-          setIsAddColumnSheetOpen: studio.setIsAddColumnSheetOpen,
-          isAddingColumn: studio.isAddingColumn,
-          handleAddColumn: studio.handleAddColumn,
-          handleDeleteColumn: studio.handleDeleteColumn,
-          columnToDelete: studio.columnToDelete,
-          setColumnToDelete: studio.setColumnToDelete,
-          selectedTable: studio.selectedTable,
-          selectedSchema: studio.selectedSchema,
-          sortConfig: studio.sortConfig ?? null,
-          setSortConfig: (
-            config: { column: string; direction: "ASC" | "DESC" } | null,
-          ) => studio.setSortConfig(config),
-          pageSize: studio.pageSize,
-          page: studio.page,
-          totalCount: studio.totalCount,
-          onPageChange: studio.handlePageChange,
-          onPageSizeChange: studio.handlePageSizeChange,
-          onDuplicateRow: studio.handleDuplicateRow,
-          onCopyRowJSON: studio.onCopyRowJSON,
-          onCopyRowCSV: studio.onCopyRowCSV,
-          onFilterByCell: handleFilterByCell,
-          onOpenInsertSheet: () => studio.setIsInsertSheetOpen(true),
-          rowSpacing: studio.rowSpacing,
-          alternatingRowColors: studio.alternatingRowColors,
-          connectionString: studio.currentConnectionString,
-          foreignKeys: studio.foreignKeys,
-          enums: studio.enums,
-          showPaginationFooter: true,
-          isKeyboardInputSuspended:
-            studio.isCommandMenuOpen || studio.isShortcutNavigatorOpen,
-        }}
-      />
-    );
-    return (
-      <>
-        <ModernUIShell
-          studio={studio}
-          {...appShellProps}
-          aiChatPanel={<AiChatSheet {...aiChatSheetProps} embedded />}
-          sqlSheetPanel={sqlSheetPanel}
-          isSqlSheetOpen={isGlobalSqlSheetOpen}
-          threadsPanel={threadsPanel}
-          threadsOpen={isThreadsOpen}
-          onToggleThreads={() => setIsThreadsOpen((open) => !open)}
-          sidebarContent={<StudioShellSidebar studio={studio} hideBack />}
-          sidebarOpen={studio.sidebarView !== null && studio.isSidebarVisible}
-          onOpenSearch={() => setIsUniversalSearchOpen(true)}
-          keybindings={studio.keybindings}
-          onSidebarOpenChange={(open) => {
-            studio.setIsSidebarVisible(open);
-            if (!open) studio.setSidebarView(null);
-            else studio.setSidebarView((current: typeof studio.sidebarView) => current ?? "tables");
-          }}
-          hideSettingsDialog
-        >
-          {layout}
-        </ModernUIShell>
-        {settingsDialog}
-      </>
-    );
-  }
-
-  if (!appShellLayout) {
-    return (
-      <>
-        {layout}
-        {settingsDialog}
-      </>
-    );
-  }
-
+  const threadsPanel = (
+    <AiThreadsSidebar
+      connectionId={studio.connection.id}
+      activeChatId={aiActiveChatId ?? aiInitialChatId}
+      onSelectChat={(chatId) => {
+        setAiInitialChatId(chatId);
+        setAiSelectChatToken((t) => t + 1);
+        setAiDashboardTarget({ mode: "create" });
+        setIsAiSheetOpen(true);
+      }}
+      onNewChat={() => {
+        setAiInitialChatId(null);
+        setAiInitialPrompt(null);
+        setAiDashboardTarget({ mode: "create" });
+        setAiStartNewChatToken((token) => token + 1);
+        setIsAiSheetOpen(true);
+      }}
+      onClose={() => setIsThreadsOpen(false)}
+    />
+  );
+  // Cmd+E SQL sheet: same in-flow column pattern as AI chat (not the bottom panel).
+  const sqlSheetPanel = (
+    <SqlEditorPanel
+      embedded
+      isOpen={isGlobalSqlSheetOpen}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) setIsAiSheetOpen(false);
+        setIsGlobalSqlSheetOpen(nextOpen);
+      }}
+      sleek={studio.activeSleekLayout}
+      connectionId={studio.connection.id}
+      connectionString={studio.currentConnectionString}
+      dbType={
+        studio.dbType === "federated" || studio.dbType === "jdbc" || studio.dbType === "supabase-mgmt"
+          ? "postgres"
+          : studio.dbType
+      }
+      query={globalSqlQuery}
+      setQuery={setGlobalSqlQuery}
+      error={globalSqlSheetState?.error ?? null}
+      results={globalSqlSheetState?.results ?? null}
+      loading={Boolean(globalSqlSheetState?.loading)}
+      executionTime={globalSqlSheetState?.executionTime ?? 0}
+      handleRunQuery={(nextQuery) =>
+        studio.runSqlContextQuery(
+          studio.globalSqlContextId,
+          nextQuery ?? globalSqlQuery,
+        )
+      }
+      handleStopQuery={() =>
+        studio.stopSqlContextQuery(studio.globalSqlContextId)
+      }
+      canStopQuery={Boolean(
+        globalSqlSheetState?.loading && globalSqlSheetState?.activeQueryId,
+      )}
+      toggleAllSelection={studio.toggleAllSelection}
+      selectedRows={studio.selectedRows}
+      tableStructure={studio.tableStructure}
+      toggleRowSelection={studio.toggleRowSelection}
+      setSelectedCell={studio.setSelectedCell}
+      selectedCell={studio.selectedCell}
+      snippets={studio.snippets}
+      folders={studio.folders}
+      addSnippet={studio.addSnippet}
+      updateSnippet={studio.updateSnippet}
+      deleteSnippet={studio.deleteSnippet}
+      createSnippetVersion={studio.createSnippetVersion}
+      getSnippetVersions={studio.getSnippetVersions}
+      restoreSnippetVersion={studio.restoreSnippetVersion}
+      addFolder={studio.addFolder}
+      updateFolder={studio.updateFolder}
+      deleteFolder={studio.deleteFolder}
+      activeTabId={studio.activeTabId}
+      vimMode={studio.vimMode}
+      sqlEditorEngine={studio.sqlEditorEngine}
+      editorFontSize={studio.editorFontSize}
+      editorFontFamily={studio.editorFontFamily}
+      editorThemeId={studio.effectiveEditorThemeId}
+      customEditorThemes={studio.customEditorThemes}
+      appEditorTheme={studio.appEditorTheme}
+      sqlFormatTabWidth={studio.sqlFormatTabWidth}
+      sqlFormatUseTabs={studio.sqlFormatUseTabs}
+      sqlFormatKeywordCase={studio.sqlFormatKeywordCase}
+      sqlFormatDataTypeCase={studio.sqlFormatDataTypeCase}
+      sqlFormatFunctionCase={studio.sqlFormatFunctionCase}
+      sqlFormatIdentifierCase={studio.sqlFormatIdentifierCase}
+      sqlFormatLogicalOperatorNewline={studio.sqlFormatLogicalOperatorNewline}
+      sqlFormatExpressionWidth={studio.sqlFormatExpressionWidth}
+      sqlFormatLinesBetweenQueries={studio.sqlFormatLinesBetweenQueries}
+      sqlFormatDenseOperators={studio.sqlFormatDenseOperators}
+      sqlFormatNewlineBeforeSemicolon={studio.sqlFormatNewlineBeforeSemicolon}
+      onOpenAiSettings={() => studio.openSettingsTab("ai")}
+      selectedNamespace={studio.selectedSchema}
+      schemaData={studio.schemaData}
+      gridProps={{
+        pendingActions: studio.pendingActions,
+        setSelectedRows: studio.setSelectedRows,
+        toggleAllSelection: studio.toggleAllSelection,
+        toggleRowSelection: studio.toggleRowSelection,
+        getRowId: studio.getRowId,
+        pendingChanges: studio.pendingChanges,
+        setPendingChanges: studio.setPendingChanges,
+        editingCell: studio.editingCell,
+        setEditingCell: studio.setEditingCell,
+        selectedColumn: studio.selectedColumn,
+        setSelectedColumn: studio.setSelectedColumn,
+        hasChanges: studio.hasChanges,
+        getChangedValue: studio.getChangedValue,
+        handleUpdateRow: studio.handleUpdateRow,
+        handleFKSelection: studio.handleFKSelection,
+        handleFKPreview: studio.handleFKPreview,
+        fetchingStructure: studio.fetchingStructure,
+        isAddColumnSheetOpen: studio.isAddColumnSheetOpen,
+        setIsAddColumnSheetOpen: studio.setIsAddColumnSheetOpen,
+        isAddingColumn: studio.isAddingColumn,
+        handleAddColumn: studio.handleAddColumn,
+        handleDeleteColumn: studio.handleDeleteColumn,
+        columnToDelete: studio.columnToDelete,
+        setColumnToDelete: studio.setColumnToDelete,
+        selectedTable: studio.selectedTable,
+        selectedSchema: studio.selectedSchema,
+        sortConfig: studio.sortConfig ?? null,
+        setSortConfig: (
+          config: { column: string; direction: "ASC" | "DESC" } | null,
+        ) => studio.setSortConfig(config),
+        pageSize: studio.pageSize,
+        page: studio.page,
+        totalCount: studio.totalCount,
+        onPageChange: studio.handlePageChange,
+        onPageSizeChange: studio.handlePageSizeChange,
+        onDuplicateRow: studio.handleDuplicateRow,
+        onCopyRowJSON: studio.onCopyRowJSON,
+        onCopyRowCSV: studio.onCopyRowCSV,
+        onFilterByCell: handleFilterByCell,
+        onOpenInsertSheet: () => studio.setIsInsertSheetOpen(true),
+        rowSpacing: studio.rowSpacing,
+        alternatingRowColors: studio.alternatingRowColors,
+        connectionString: studio.currentConnectionString,
+        foreignKeys: studio.foreignKeys,
+        enums: studio.enums,
+        showPaginationFooter: true,
+        isKeyboardInputSuspended:
+          studio.isCommandMenuOpen || studio.isShortcutNavigatorOpen,
+      }}
+    />
+  );
   return (
     <>
-      <AppShell {...appShellProps}>{layout}</AppShell>
+      <ModernUIShell
+        studio={studio}
+        {...appShellProps}
+        aiChatPanel={<AiChatSheet {...aiChatSheetProps} embedded />}
+        sqlSheetPanel={sqlSheetPanel}
+        isSqlSheetOpen={isGlobalSqlSheetOpen}
+        threadsPanel={threadsPanel}
+        threadsOpen={isThreadsOpen}
+        onToggleThreads={() => setIsThreadsOpen((open) => !open)}
+        sidebarContent={<StudioShellSidebar studio={studio} hideBack />}
+        sidebarOpen={studio.sidebarView !== null && studio.isSidebarVisible}
+        onOpenSearch={() => studio.setIsCommandMenuOpen(true)}
+        keybindings={studio.keybindings}
+        onSidebarOpenChange={(open) => {
+          studio.setIsSidebarVisible(open);
+          if (!open) studio.setSidebarView(null);
+          else studio.setSidebarView((current: typeof studio.sidebarView) => current ?? "tables");
+        }}
+        hideSettingsDialog
+      >
+        {layout}
+      </ModernUIShell>
       {settingsDialog}
     </>
   );

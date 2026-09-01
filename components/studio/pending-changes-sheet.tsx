@@ -11,7 +11,6 @@ import {
   Rows3,
   Clock4,
 } from "@/lib/icon-theme/lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -23,7 +22,6 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useTheme } from "next-themes";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { resolveEditorThemeId, getStudioDarkTheme } from "@/lib/studio/editor-themes";
 import { registerCustomMonacoThemes } from "@/lib/studio/editor-themes";
 import type { CustomEditorTheme } from "@/lib/studio/editor-themes";
@@ -146,9 +144,6 @@ export function PendingChangesSheet({
   customEditorThemes,
   appEditorTheme,
 }: PendingChangesSheetProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
-
   const [viewMode, setViewMode] = React.useState<"visual" | "sql">("visual");
   const pendingCount =
     Object.keys(pendingChanges).length + pendingActions.length;
@@ -271,7 +266,7 @@ export function PendingChangesSheet({
   if (pendingCount === 0) return null;
 
   return (
-    <Sheet open={isReviewSheetOpen} onOpenChange={setIsReviewSheetOpen} modal={!shellLayout}>
+    <Sheet open={isReviewSheetOpen} onOpenChange={setIsReviewSheetOpen} modal={false}>
       <SheetTrigger asChild>
         <Button
           variant="ghost"
@@ -286,11 +281,8 @@ export function PendingChangesSheet({
         </Button>
       </SheetTrigger>
       <SheetContent
-        className={cn(
-          "flex flex-col p-0 bg-background",
-          shellLayout ? "border-border" : "w-full sm:max-w-[500px] border-l border-border",
-        )}
-        contained={shellLayout}
+        className="flex flex-col p-0 bg-background border-border"
+        contained
       >
         <SheetHeader className="p-6 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2 text-sm">

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import FallbackAvatar from "@/components/fallback-avatar";
 import { cn } from "@/lib/utils";
 
 export type PlanTier = "free" | "pro" | "team" | "enterprise" | "otl";
@@ -203,9 +204,11 @@ export function EditProfileModal({
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-muted-foreground">
-                    {draft.fullName?.charAt(0)?.toUpperCase() || "?"}
-                  </div>
+                  <FallbackAvatar
+                    name={draft.fullName || "User"}
+                    size={96}
+                    className="h-full w-full"
+                  />
                 )}
               </button>
               <button

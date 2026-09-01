@@ -351,25 +351,6 @@ export function MonacoSqlInput({
               }
               onSelectionChange(model.getValueInRange(selection) || "");
             };
-            const handlePasteKeyDown = async (
-              editorInstance: any,
-              event: any,
-              onPaste: () => Promise<void>,
-            ) => {
-              const key = String(event.browserEvent?.key || "").toLowerCase();
-              const isPasteShortcut =
-                ((event.browserEvent?.metaKey || event.browserEvent?.ctrlKey) &&
-                  key === "v") ||
-                (event.browserEvent?.shiftKey &&
-                  event.browserEvent?.key === "Insert");
-              if (!isPasteShortcut) return;
-              if (!editorInstance.hasTextFocus?.()) return;
-              try {
-                await onPaste();
-              } catch (error) {
-                console.error("SQL Monaco editor paste failed:", error);
-              }
-            };
             syncSelection();
             editor.onKeyDown((event: any) => {
               if (!shouldEnterAiMode()) return;
@@ -434,20 +415,8 @@ export function MonacoSqlInput({
                 applyClipboardText(text);
               };
               domNode?.addEventListener("paste", handleDomPaste, true);
-              const editorKeydownDisposable = editor.onKeyDown(
-                async (event: any) => {
-                  await handlePasteKeyDown(editor, event, async () => {
-                    if (!navigator.clipboard?.readText) return;
-                    const text = await navigator.clipboard.readText();
-                    if (!text) return;
-                    event.preventDefault();
-                    applyClipboardText(text);
-                  });
-                },
-              );
               editor.onDidDispose(() => {
                 domNode?.removeEventListener("paste", handleDomPaste, true);
-                editorKeydownDisposable?.dispose?.();
               });
             }
           }}

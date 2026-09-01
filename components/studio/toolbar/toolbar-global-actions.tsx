@@ -118,6 +118,7 @@ export function ToolbarGlobalActions({
           postgresRoles={postgresRoles}
           supabaseAuthUsers={supabaseAuthUsers}
           loading={loadingPermissionOptions}
+          dbType={dbType}
         />
       )}
 

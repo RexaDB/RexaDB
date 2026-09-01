@@ -24,7 +24,7 @@ export function buildEntitlementProfileMeta(entitlement: ResolvedUserEntitlement
     return `Cloud disabled • Up to ${DEFAULT_FREE_MAX_CONNECTIONS} connections`;
   }
 
-  return `Cloud ${entitlement.cloudEnabled ? "enabled" : "disabled"} • Connections: ${entitlement.maxConnections ?? "unlimited"}`;
+  return `Cloud ${entitlement.cloudEnabled ? "enabled" : "disabled"} • Settings sync ${entitlement.cloudEnabled ? "on" : "off"} • Connections: ${entitlement.maxConnections ?? "unlimited"}`;
 }
 
 export function buildEntitlementCacheMessage(entitlement: ResolvedUserEntitlement) {

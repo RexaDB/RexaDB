@@ -9,7 +9,7 @@ import {
 
 /**
  * VS Code-style search bar for the center of the Modern UI header. Looks like
- * an input; clicking it opens the universal search.
+ * an input; clicking it opens the Cmd+K command menu.
  */
 export function ModernUISearchBar({
   onOpen,
@@ -29,7 +29,7 @@ export function ModernUISearchBar({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex h-6 w-64 select-none items-center gap-1.5 rounded-sm border border-border/70 bg-sidebar px-2.5 text-[11px] leading-none text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+      className="group flex h-[22px] w-64 select-none items-center gap-1.5 rounded-[4px] border border-border bg-sidebar px-2.5 text-[11px] leading-none text-muted-foreground transition-colors hover:border-border hover:text-foreground"
     >
       <Search className="size-3 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left select-none">Search</span>

@@ -15,7 +15,6 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { EntityIcon } from "./advisor-shared";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -146,9 +145,6 @@ export function AdvisorDetailSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
-
   if (!result) return null;
 
   const { check, sqlStatement } = result;
@@ -156,10 +152,10 @@ export function AdvisorDetailSheet({
   const issueText = displayEntity ? getIssueText(check.id, displayEntity) : check.description;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
-        contained={shellLayout}
-        className={cn("overflow-y-auto p-0", !shellLayout && "w-full sm:max-w-sm")}
+        contained
+        className="overflow-y-auto p-0"
         showCloseButton={false}
       >
         {/* Header */}

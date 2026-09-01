@@ -48,6 +48,7 @@ import {
   fetchIndexes as _fetchIndexes,
   fetchRlsPolicies as _fetchRlsPolicies,
   fetchPostgresRoles as _fetchPostgresRoles,
+  fetchSupabaseAuthUsers as _fetchSupabaseAuthUsers,
   deleteIndex as _deleteIndex,
   fetchSessions as _fetchSessions,
   killSession as _killSession,
@@ -173,6 +174,9 @@ export async function fetchRlsPolicies(
 }
 export async function fetchPostgresRoles(connectionString: string) {
   return _fetchPostgresRoles(connectionString);
+}
+export async function fetchSupabaseAuthUsers(connectionString: string) {
+  return _fetchSupabaseAuthUsers(connectionString);
 }
 export async function fetchSessions(connectionString: string) {
   return _fetchSessions(connectionString);

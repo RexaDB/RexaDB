@@ -3,6 +3,30 @@
 @import "./supabase-theme.css";
 
 /*
+ * Rubber-band/elastic-bounce scroll suppression. Glide's own
+ * `overscrollX`/`overscrollY` props (set to 0 in
+ * grid-glide/data-grid.tsx) remove Glide's *internal* notion of extra
+ * scrollable space, but the bounce-on-hard-scroll feel is a separate
+ * thing: on macOS, Tauri's WKWebView has native rubber-band scrolling at
+ * the NSScrollView level (this is a documented, still-open Tauri/wry
+ * limitation — github.com/tauri-apps/wry/issues/557 — there is no public
+ * Tauri config or WKWebView-level setting to fully disable it; the only
+ * complete fix is patching wry's native Swift/Rust code, which is outside
+ * this web layer). `overscroll-behavior` on the actual scrolling element
+ * plus the page root is the standard web-side mitigation and meaningfully
+ * reduces it, but per Tauri's own issue tracker it isn't guaranteed to
+ * eliminate it entirely on macOS.
+ */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+.dvn-scroller {
+  overscroll-behavior: contain;
+}
+
+/*
  * ── Type Scale ──────────────────────────────────────
  * Only two sizes: text-xs (12px) and text-sm (14px)
  * Hierarchy is communicated via font-weight + color,

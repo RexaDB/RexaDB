@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
-import { AppShell } from "@/components/app-shell/app-shell";
 import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
 import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
@@ -18,9 +17,9 @@ import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/
 import { ONBOARDING_COMPLETE_KEY } from "@/lib/onboarding";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { getDefaultKeybindings, buildShortcutCombo } from "@/lib/studio/keybindings";
-import { subscribeToLayoutPrefs } from "@/lib/studio/layout-prefs-cache";
 import { Database as DatabaseIcon } from "@/lib/icon-theme/solar-icons";
 import { ProviderLogo } from "@/components/shared/provider-logo";
+import { PLANETSCALE_LOGIN_ENABLED } from "@/lib/planetscale/auth";
 
 const CONNECTIONS_TAB: AppTab = {
   id: "connections",
@@ -46,6 +45,12 @@ const NEON_TAB: AppTab = {
   title: "Neon",
 };
 
+const PLANETSCALE_TAB: AppTab = {
+  id: "planetscale",
+  kind: "planetscale",
+  title: "PlanetScale",
+};
+
 export function ConnectionsPage() {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
@@ -62,16 +67,11 @@ export function ConnectionsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
   const [newConnectionTrigger, setNewConnectionTrigger] = useState(0);
-  const { modernUiLayout, appThemeId, setAppThemeId } = useAppSettings();
+  const { appThemeId, setAppThemeId } = useAppSettings();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const keybindings = useMemo(() => getDefaultKeybindings(), []);
-
-  // A layout change swaps the entire shell this modal sits next to — close it
-  // the instant that happens instead of keeping a dialog open across its
-  // parent tree being rebuilt around it.
-  useEffect(() => subscribeToLayoutPrefs(() => setSettingsModalOpen(false)), []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -261,6 +261,7 @@ export function ConnectionsPage() {
       else if (path === "supabase") openTab(SUPABASE_TAB);
       else if (path === "spacetimedb") openTab(SPACETIMEDB_TAB);
       else if (path === "neon") openTab(NEON_TAB);
+      else if (path === "planetscale" && PLANETSCALE_LOGIN_ENABLED) openTab(PLANETSCALE_TAB);
       else if (path === "settings") setSettingsModalOpen(true);
     },
     [openTab],
@@ -306,6 +307,16 @@ export function ConnectionsPage() {
         icon: <ProviderLogo type="neon" className="w-5 h-5 shrink-0" />,
         onClick: () => openTab(NEON_TAB),
       },
+      ...(PLANETSCALE_LOGIN_ENABLED
+        ? [
+            {
+              id: "planetscale",
+              label: "PlanetScale",
+              icon: <ProviderLogo type="planetscale" className="w-5 h-5 shrink-0" />,
+              onClick: () => openTab(PLANETSCALE_TAB),
+            },
+          ]
+        : []),
     ],
     [openTab],
   );
@@ -396,6 +407,7 @@ export function ConnectionsPage() {
             onOpenSupabaseAccounts={() => openTab(SUPABASE_TAB)}
             onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
             onOpenNeonAccounts={() => openTab(NEON_TAB)}
+            onOpenPlanetscaleAccounts={() => openTab(PLANETSCALE_TAB)}
           />
         </div>
       )}
@@ -426,6 +438,16 @@ export function ConnectionsPage() {
         </div>
       )}
 
+      {section === "planetscale" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ConnectionManager
+            hideHeader
+            initialScreen="planetscale-account"
+            onOpenPlanetscaleAccounts={() => openTab(PLANETSCALE_TAB)}
+          />
+        </div>
+      )}
+
       {section === "analytics" && (
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
           <ConnectionAnalyticsShell
@@ -437,20 +459,6 @@ export function ConnectionsPage() {
 
     </>
   );
-
-  // `modernUiLayout` starts from a fast localStorage cache (see
-  // hooks/use-global-studio-settings.ts), so the shell can be picked and
-  // `content` (ConnectionManager) mounted immediately — its own connections
-  // /auth fetches then run in parallel with the settings load instead of
-  // waiting for it, which is what made boot noticeably slower. This relies
-  // on ConnectionManager's own loading gate (connectionsLoading /
-  // authResolved / workspaceAuthLoaded) to keep real, populated content from
-  // appearing before it's ready; in the rare case the cached guess was
-  // wrong, the shell corrects itself once `modernUiLayout` updates, same as
-  // it always would from a normal state change. If that correction were
-  // ever slower than ConnectionManager's own load, real content could very
-  // briefly appear in the wrong shell — worth revisiting only if that
-  // actually starts happening in practice.
 
   return (
     <>
@@ -468,57 +476,41 @@ export function ConnectionsPage() {
           void loadConns();
         }}
       />
-      {modernUiLayout ? (
-        <ModernUIShell
-          {...shellProps}
-          studio={{ connection: selectedConnection }}
-          onHeaderSelectConnection={(conn) =>
-            handleSelectConnection(conn.id, conn.name, conn.connectionType)
-          }
-          activePath={section}
-          onNavigate={handleNavigate}
-          onNewConnection={() => {
-            openTab(CONNECTIONS_TAB);
-            setNewConnectionTrigger((n) => n + 1);
-          }}
-          selectedConnectionId={selectedConnectionId}
-          onSelectConnection={handleSelectConnection}
-          connections={connections}
-          keybindings={keybindings}
-          railItems={railItems}
-          railActiveId={
-            section === "connections" ||
-            section === "supabase" ||
-            section === "spacetimedb" ||
-            section === "neon"
-              ? section
-              : null
-          }
-          onSettingsClick={() => setSettingsModalOpen(true)}
-          settingsActive={settingsModalOpen}
-          hideSettingsDialog
-          railShowHome={false}
-          railShowWorkspace={false}
-          enableBottomSqlPanel={false}
-        >
-          {content}
-        </ModernUIShell>
-      ) : (
-        <AppShell
-          {...shellProps}
-          activePath={section}
-          onNavigate={handleNavigate}
-          onNewConnection={() => {
-            openTab(CONNECTIONS_TAB);
-            setNewConnectionTrigger((n) => n + 1);
-          }}
-          selectedConnectionId={selectedConnectionId}
-          onSelectConnection={handleSelectConnection}
-          connections={connections}
-        >
-          {content}
-        </AppShell>
-      )}
+      <ModernUIShell
+        {...shellProps}
+        studio={{ connection: selectedConnection }}
+        onHeaderSelectConnection={(conn) =>
+          handleSelectConnection(conn.id, conn.name, conn.connectionType)
+        }
+        activePath={section}
+        onNavigate={handleNavigate}
+        onNewConnection={() => {
+          openTab(CONNECTIONS_TAB);
+          setNewConnectionTrigger((n) => n + 1);
+        }}
+        selectedConnectionId={selectedConnectionId}
+        onSelectConnection={handleSelectConnection}
+        connections={connections}
+        keybindings={keybindings}
+        railItems={railItems}
+        railActiveId={
+          section === "connections" ||
+          section === "supabase" ||
+          section === "spacetimedb" ||
+          section === "neon" ||
+          section === "planetscale"
+            ? section
+            : null
+        }
+        onSettingsClick={() => setSettingsModalOpen(true)}
+        settingsActive={settingsModalOpen}
+        hideSettingsDialog
+        railShowHome={false}
+        railShowWorkspace={false}
+        enableBottomSqlPanel={false}
+      >
+        {content}
+      </ModernUIShell>
       <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
         <DialogContent
           hideCloseButton

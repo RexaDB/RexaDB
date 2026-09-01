@@ -9,6 +9,7 @@ import {
 import { PanelLeft, SquareTerminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ModernUISearchBar } from "@/components/app-shell/modern-ui-search";
+import { UpdateHeaderBadge } from "@/components/providers/update-header-badge";
 
 /**
  * VS Code-style title bar for the Modern UI. Floats transparently over the top
@@ -39,8 +40,9 @@ export function ModernUIHeader({
     >
       <div className="w-4" aria-hidden />
       <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto flex items-center gap-1">
           <ModernUISearchBar onOpen={onOpenSearch} />
+          <UpdateHeaderBadge />
         </div>
       </div>
       <div className="flex items-center gap-1">

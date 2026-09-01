@@ -145,7 +145,7 @@ export function ModernConnectionDropdown({
           type="button"
           aria-label="Switch connection"
           className={cn(
-            "group flex h-6 max-w-[160px] select-none items-center gap-1.5 rounded-sm border border-border/70 bg-sidebar px-2 text-[11px] leading-none text-muted-foreground transition-colors",
+            "group flex h-[22px] max-w-[160px] select-none items-center gap-1.5 rounded-[4px] border border-border bg-sidebar px-2 text-[11px] leading-none text-muted-foreground transition-colors",
             "hover:border-border hover:text-foreground",
             "outline-none",
             "data-[state=open]:border-border data-[state=open]:text-foreground",

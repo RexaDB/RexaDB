@@ -3848,8 +3848,6 @@ export function DashboardView({
   appEditorTheme = null,
   vimMode = false,
 }: DashboardViewProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
   const { resolvedTheme } = useTheme();
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
@@ -5243,11 +5241,11 @@ export function DashboardView({
         </div>
       </div>
 
-      <Sheet open={configOpen} onOpenChange={setConfigOpen} modal={!shellLayout}>
+      <Sheet open={configOpen} onOpenChange={setConfigOpen} modal={false}>
         <SheetContent
           side="right"
-          contained={shellLayout}
-          className={cn("overflow-y-auto", !shellLayout && "sm:max-w-xl")}
+          contained
+          className="overflow-y-auto"
         >
           <SheetHeader>
             <SheetTitle>Set Widget</SheetTitle>

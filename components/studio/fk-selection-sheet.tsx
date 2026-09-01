@@ -8,11 +8,8 @@ import {
   Sheet,
   SheetContent,
   SheetHeader,
-  SheetTitle,
-  SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 
 interface FKSelectionSheetProps {
   isFKSelectionSheetOpen: boolean;
@@ -58,9 +55,6 @@ export function FKSelectionSheet({
   const [columnToDelete, setColumnToDelete] = React.useState<string | null>(
     null,
   );
-
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
 
   const requestGridFocus = React.useCallback(() => {
     window.dispatchEvent(new Event("studio:grid-focus-request"));
@@ -175,10 +169,10 @@ export function FKSelectionSheet({
   );
 
   return (
-    <Sheet open={isFKSelectionSheetOpen} onOpenChange={handleOpenChange} modal={!shellLayout}>
+    <Sheet open={isFKSelectionSheetOpen} onOpenChange={handleOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         showCloseButton={false}
         data-fk-selection-sheet="true"
         onCloseAutoFocus={(e) => {
@@ -193,51 +187,25 @@ export function FKSelectionSheet({
         maxResizeWidth={1400}
         resizeHandleLabel="Resize select record sheet"
       >
-        {shellLayout ? (
-          <SheetHeader className="h-12 border-b shrink-0 flex flex-row items-center gap-2 px-4">
-            <span className="text-xs text-muted-foreground shrink-0">
-              Choose a record from{" "}
-              <span className="font-mono text-primary bg-primary/10 px-1 rounded">
-                {fkSelectionTarget?.fkInfo.foreign_table_schema}.
-                {fkSelectionTarget?.fkInfo.foreign_table_name}
-              </span>{" "}
-              to link.
-            </span>
-            <div className="relative ml-auto w-[200px] shrink-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70" />
-              <Input
-                placeholder="Search..."
-                value={fkSelectionSearch}
-                onChange={(e) => setFKSelectionSearch(e.target.value)}
-                className="pl-7 h-7 text-xs bg-background border-border"
-              />
-            </div>
-          </SheetHeader>
-        ) : (
-          <SheetHeader className="p-6 border-b shrink-0">
-            <SheetTitle className="text-sm font-semibold">
-              Select record
-            </SheetTitle>
-            <SheetDescription className="text-xs text-muted-foreground">
-              Choose a record from{" "}
-              <span className="font-mono text-primary bg-primary/10 px-1 rounded">
-                {fkSelectionTarget?.fkInfo.foreign_table_schema}.
-                {fkSelectionTarget?.fkInfo.foreign_table_name}
-              </span>{" "}
-              to link.
-            </SheetDescription>
-
-            <div className="relative mt-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search records..."
-                value={fkSelectionSearch}
-                onChange={(e) => setFKSelectionSearch(e.target.value)}
-                className="pl-9 h-9 text-xs bg-muted/50 border-none"
-              />
-            </div>
-          </SheetHeader>
-        )}
+        <SheetHeader className="h-12 border-b shrink-0 flex flex-row items-center gap-2 px-4">
+          <span className="text-xs text-muted-foreground shrink-0">
+            Choose a record from{" "}
+            <span className="font-mono text-primary bg-primary/10 px-1 rounded">
+              {fkSelectionTarget?.fkInfo.foreign_table_schema}.
+              {fkSelectionTarget?.fkInfo.foreign_table_name}
+            </span>{" "}
+            to link.
+          </span>
+          <div className="relative ml-auto w-[200px] shrink-0">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70" />
+            <Input
+              placeholder="Search..."
+              value={fkSelectionSearch}
+              onChange={(e) => setFKSelectionSearch(e.target.value)}
+              className="pl-7 h-7 text-xs bg-background border-border"
+            />
+          </div>
+        </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           {fkSelectionLoading ? (

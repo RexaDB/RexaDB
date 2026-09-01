@@ -7,7 +7,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -29,7 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Connection } from "@/lib/db/schema";
-import { ProviderLogo, SpacetimeDbBrandImage } from "@/components/shared/provider-logo";
+import { ProviderLogo } from "@/components/shared/provider-logo";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { NavigationControls } from "@/components/navigation/navigation-controls";
@@ -232,48 +231,15 @@ export function AppSidebar({
               <span>Connections</span>
             </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem className="mt-1">
-              <SidebarMenuButton
-                className={FLAT_ITEM}
-                isActive={activePath === "supabase"}
-                onClick={() => onNavigate?.("supabase")}
-              >
-                <ProviderLogo type="supabase" className="size-4" />
-                <span>Supabase</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem className="mt-1">
-              <SidebarMenuButton
-                className={FLAT_ITEM}
-                isActive={activePath === "spacetimedb"}
-                onClick={() => onNavigate?.("spacetimedb")}
-              >
-                <SpacetimeDbBrandImage className="size-4" />
-                <span>SpacetimeDB</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem className="mt-1">
-              <SidebarMenuButton
-                className={FLAT_ITEM}
-                isActive={activePath === "neon"}
-                onClick={() => onNavigate?.("neon")}
-              >
-                <ProviderLogo type="neon" className="size-4" />
-                <span>Neon</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel className="text-muted-foreground">
-            Insights
-          </SidebarGroupLabel>
           <SidebarMenu>
             <Collapsible
               asChild
               className="group/collapsible"
-              defaultOpen={activePath === "analytics"}
+              defaultOpen
             >
               <SidebarMenuItem>
                 <CollapsibleTrigger asChild>
