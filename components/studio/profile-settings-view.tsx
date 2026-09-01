@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthState } from "@/hooks/use-auth-state";
 import { useEntitlementState } from "@/hooks/use-entitlement-state";
+import { useSettingsSyncStatus } from "@/hooks/use-settings-sync-status";
 import {
   buildEntitlementCacheMessage,
   buildEntitlementProfileMeta,
@@ -47,6 +48,13 @@ export function ProfileSettingsView() {
     accessToken,
     isSessionActive,
   });
+  const {
+    status: settingsSyncStatus,
+    lastSyncedAt,
+    error: settingsSyncError,
+    enabled: settingsSyncEnabled,
+    syncNow,
+  } = useSettingsSyncStatus();
   const [profileId, setProfileId] = useState<string | null>(null);
   const [profileEmail, setProfileEmail] = useState("");
   const [profileFullName, setProfileFullName] = useState("");
@@ -252,6 +260,57 @@ export function ProfileSettingsView() {
                 <ExternalLink className="h-3.5 w-3.5" />
               </Button>
             ) : null}
+          </div>
+
+          <div className="rounded-lg border border-studio-border bg-studio-bg/40 p-4 space-y-3">
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">Settings Sync</h4>
+              <p className="text-xs text-muted-foreground">
+                Themes, studio settings, and keybindings sync across devices on
+                paid plans. Agent API keys stay on this device.
+              </p>
+            </div>
+            {settingsSyncEnabled || entitlement.cloudEnabled ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {settingsSyncStatus === "syncing"
+                    ? "Syncing…"
+                    : settingsSyncStatus === "error"
+                      ? settingsSyncError || "Sync failed"
+                      : settingsSyncStatus === "synced"
+                        ? lastSyncedAt
+                          ? `Synced ${new Date(lastSyncedAt).toLocaleString()}`
+                          : "Synced"
+                        : "Ready to sync"}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-3 text-xs"
+                  disabled={settingsSyncStatus === "syncing"}
+                  onClick={() => void syncNow()}
+                >
+                  Sync Now
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Upgrade to Pro or higher to sync preferences across devices.
+                </p>
+                {subscriptionPlanCode === "free" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 gap-1.5 px-3 text-xs"
+                    onClick={handleUpgradeClick}
+                  >
+                    Upgrade on Website
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <div className="mt-10 space-y-2">

@@ -3,6 +3,7 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { CommandSearchBar } from "@/components/ui/command-search-bar";
+import { UpdateHeaderBadge } from "@/components/providers/update-header-badge";
 import { UserAvatarDropdown } from "@/components/ui/user-avatar-dropdown";
 import { Button } from "@/components/ui/button";
 import {
@@ -231,11 +232,14 @@ export function ConnectionsHeader({
           </Button>
         )}
       </div>
-      <CommandSearchBar
-        sleekLayout={sleekLayout}
-        noDrag
-        onClick={onCommandSearchClick}
-      />
+      <div className="flex items-center gap-2 shrink-0">
+        <CommandSearchBar
+          sleekLayout={sleekLayout}
+          noDrag
+          onClick={onCommandSearchClick}
+        />
+        <UpdateHeaderBadge variant="command" sleekLayout={sleekLayout} />
+      </div>
       <div className="flex items-center justify-end gap-3 w-1/3">
         {showAnalyticsToggle && onAnalyticsToggle && (
           <HeaderIconButton

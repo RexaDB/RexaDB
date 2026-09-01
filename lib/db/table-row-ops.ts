@@ -383,7 +383,8 @@ export async function fetchTableForeignKeys(
     const { getDbTableForeignKeys } = await import("./db-engine");
     try {
       const data = await getDbTableForeignKeys(connectionString, schema, table);
-      return { success: true, data };
+      const { normalizeStudioForeignKeys } = await import("./foreign-key-utils");
+      return { success: true, data: normalizeStudioForeignKeys(data) };
     } catch (error: any) {
       console.error("Failed to fetch foreign keys:", error);
       return { success: false, error: error.message };
@@ -466,13 +467,30 @@ export async function fetchReferencedRecord(
   if (dbType === "supabase-mgmt") {
     const { executeDbQuery } = await import("./db-engine/query");
     try {
-      const whereClauses = Object.entries(keyValues)
+      if (!table || typeof table !== "string") {
+        return {
+          success: false,
+          error: "Missing referenced table for foreign key lookup.",
+        };
+      }
+      const keyEntries = Object.entries(keyValues).filter(
+        ([k]) => typeof k === "string" && k.length > 0 && k !== "undefined",
+      );
+      if (keyEntries.length === 0) {
+        return {
+          success: false,
+          error: "Missing referenced column for foreign key lookup.",
+        };
+      }
+      const whereClauses = keyEntries
         .map(([k, v]) => {
           const escaped = typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : String(v);
           return `"${k}" = ${escaped}`;
         })
         .join(" AND ");
-      const sql = `SELECT * FROM ${schema ? `"${schema}".` : ""}"${table}" WHERE ${whereClauses} LIMIT 1`;
+      const schemaPrefix =
+        schema && schema !== "undefined" ? `"${schema}".` : "";
+      const sql = `SELECT * FROM ${schemaPrefix}"${table}" WHERE ${whereClauses} LIMIT 1`;
       const result = await executeDbQuery(connectionString, sql);
       return { success: true, data: result.rows[0], fields: result.fields };
     } catch (error: any) {

@@ -33,7 +33,7 @@ echo "════════════════════════�
 bunx tauri build --bundles app,dmg 2>&1 | tee /tmp/tauri-mac-arm.log || true
 
 # Tauri's bundle_dmg.sh invocation fails intermittently; build dmg manually if missing
-ARM_DMG="src-tauri/target/release/bundle/dmg/RexaDB_1.3.4_aarch64.dmg"
+ARM_DMG="src-tauri/target/release/bundle/dmg/RexaDB_1.3.5_aarch64.dmg"
 if [ ! -f "$ARM_DMG" ]; then
   echo "--- Tauri DMG failed, building manually ---"
   bash src-tauri/target/release/bundle/dmg/bundle_dmg.sh \
@@ -72,7 +72,7 @@ echo "  BUILDING INTEL (x86_64) — app + dmg"
 echo "═══════════════════════════════════════════"
 bunx tauri build --target x86_64-apple-darwin --bundles app,dmg 2>&1 | tee /tmp/tauri-mac-intel.log || true
 
-INTEL_DMG="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/RexaDB_1.3.4_x64.dmg"
+INTEL_DMG="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/RexaDB_1.3.5_x64.dmg"
 if [ ! -f "$INTEL_DMG" ]; then
   echo "--- Tauri DMG failed, building manually ---"
   bash src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/bundle_dmg.sh \

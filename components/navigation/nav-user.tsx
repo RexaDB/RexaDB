@@ -18,6 +18,7 @@ import { UserIcon, LogOutIcon, LogInIcon } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { EditProfileModal } from "@/components/edit-profile-modal";
 import type { ProfileData, PlanTier } from "@/components/edit-profile-modal";
+import FallbackAvatar from "@/components/fallback-avatar";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
 import { supabase } from "@/lib/supabase/client";
 import { useEntitlementState } from "@/hooks/use-entitlement-state";
@@ -182,16 +183,20 @@ export function NavUser({ name, email, avatar, dropdownAlign = "end", dropdownSi
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>
 					<Avatar className="size-7 cursor-pointer">
-						<AvatarImage src={user.avatar} />
-						<AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+						{user.avatar ? <AvatarImage src={user.avatar} /> : null}
+						<AvatarFallback className="overflow-hidden bg-transparent p-0">
+							<FallbackAvatar name={user.name || "User"} size={28} />
+						</AvatarFallback>
 					</Avatar>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align={dropdownAlign} side={dropdownSide} className="w-60">
 					<DropdownMenuItem className="flex items-center justify-start gap-2">
 						<DropdownMenuLabel className="flex items-center gap-3">
 							<Avatar className="size-10">
-								<AvatarImage src={user.avatar} />
-								<AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+								{user.avatar ? <AvatarImage src={user.avatar} /> : null}
+								<AvatarFallback className="overflow-hidden bg-transparent p-0">
+									<FallbackAvatar name={user.name || "User"} size={40} />
+								</AvatarFallback>
 							</Avatar>
 							<div>
 								<span className="font-medium text-foreground">{user.name}</span>{" "}

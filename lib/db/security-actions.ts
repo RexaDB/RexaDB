@@ -281,6 +281,308 @@ export async function fetchPostgresRoles(connectionString: string) {
   });
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function mapSupabaseAuthUserOption(row: any) {
+  const rawUserMetaData = asRecord(row?.raw_user_meta_data ?? row?.rawUserMetaData);
+  const rawAppMetaData = asRecord(row?.raw_app_meta_data ?? row?.rawAppMetaData);
+  const displayName =
+    (typeof rawUserMetaData.full_name === "string" && rawUserMetaData.full_name.trim()) ||
+    (typeof rawUserMetaData.name === "string" && rawUserMetaData.name.trim()) ||
+    (typeof rawUserMetaData.display_name === "string" && rawUserMetaData.display_name.trim()) ||
+    (typeof row?.email === "string" ? row.email.split("@")[0] : "") ||
+    String(row?.id || "").trim();
+
+  const providers = String(row?.identities || row?.providers || "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return {
+    id: String(row?.id || "").trim(),
+    displayName: displayName || String(row?.id || "").trim(),
+    email: typeof row?.email === "string" ? row.email : null,
+    phone: typeof row?.phone === "string" ? row.phone : null,
+    role: String(row?.role || "authenticated").trim() || "authenticated",
+    providers,
+    createdAt: row?.created_at ? String(row.created_at) : null,
+    rawAppMetaData,
+    rawUserMetaData,
+  };
+}
+
+export async function fetchSupabaseAuthUsers(connectionString: string) {
+  return withPgClientRead(connectionString, "supabase auth users", async (executeQuery) => {
+    const dbType = detectConnectionDbType(connectionString);
+
+    // For Supabase management connections the Management API's /database/query
+    // endpoint can be strict about GROUP BY / string_agg. Use small
+    // compatible queries and merge providers client-side. This also avoids the
+    // `column must appear in GROUP BY` error that hid all users on some projects.
+    const simpleUsersSql = `
+      SELECT
+        u.id::text AS id,
+        u.email,
+        u.phone,
+        u.role,
+        u.created_at,
+        u.raw_app_meta_data,
+        u.raw_user_meta_data
+      FROM auth.users u
+      ORDER BY u.created_at DESC
+      LIMIT 500
+    `;
+
+    const simpleUsersSqlWithPwd = `
+      SELECT
+        u.id::text AS id,
+        u.email,
+        u.phone,
+        u.role,
+        u.created_at,
+        u.raw_app_meta_data,
+        u.raw_user_meta_data,
+        u.encrypted_password
+      FROM auth.users u
+      ORDER BY u.created_at DESC
+      LIMIT 500
+    `;
+
+    const tryFetchViaSql = async (): Promise<any[] | null> => {
+      let rows: any[] = [];
+      let hadEncryptedPassword = false;
+      try {
+        // Prefer the simpler column list (more compatible). Fall back to including encrypted_password
+        // if the base query fails for an unexpected reason and the pwd-including variant succeeds.
+        try {
+          const res = await executeQuery(connectionString, simpleUsersSql);
+          rows = Array.isArray(res?.rows) ? res.rows : [];
+        } catch (firstErr: any) {
+          const msg = String(firstErr?.message ?? "");
+          // If the simple query failed due to something other than column issues, also try pwd variant
+          // before bubbling up — the pwd variant may succeed on older Supabase schemas that expect it.
+          try {
+            const res2 = await executeQuery(connectionString, simpleUsersSqlWithPwd);
+            rows = Array.isArray(res2?.rows) ? res2.rows : [];
+            hadEncryptedPassword = true;
+          } catch {
+            throw firstErr;
+          }
+        }
+        // If we used the pwd-less query, also attempt to infer email provider from encrypted_password
+        // by fetching that one column separately (best-effort, ignore failures).
+        let pwdMap = new Map<string, boolean>();
+        if (!hadEncryptedPassword) {
+          try {
+            const pwdRes = await executeQuery(connectionString, `SELECT id::text AS id, (encrypted_password IS NOT NULL) AS has_pwd FROM auth.users`);
+            for (const r of (Array.isArray(pwdRes?.rows) ? pwdRes.rows : [])) {
+              const uid = String((r as any)?.id ?? "").trim();
+              if (!uid) continue;
+              pwdMap.set(uid, Boolean((r as any)?.has_pwd));
+            }
+          } catch {
+            // ignore
+          }
+        }
+        // Best-effort enrichment from auth.identities (ignore if that table is empty / permission denied)
+        let providerMap = new Map<string, string[]>();
+        try {
+          const idRes = await executeQuery(connectionString, `SELECT user_id::text AS user_id, provider FROM auth.identities`);
+          for (const r of (Array.isArray(idRes?.rows) ? idRes.rows : [])) {
+            const uid = String((r as any)?.user_id ?? "").trim();
+            const prov = String((r as any)?.provider ?? "").trim();
+            if (!uid || !prov) continue;
+            const arr = providerMap.get(uid) ?? [];
+            if (!arr.includes(prov)) arr.push(prov);
+            providerMap.set(uid, arr);
+          }
+        } catch {
+          // ignore identities fetch failure — fall back to encrypted_password / empty
+        }
+        const enriched = rows.map((row: any) => {
+          const uid = String(row.id ?? "").trim();
+          const providersFromIdentities = providerMap.get(uid) ?? [];
+          const hasPwd = hadEncryptedPassword ? Boolean(row.encrypted_password) : (pwdMap.get(uid) ?? false);
+          const derived =
+            providersFromIdentities.length > 0
+              ? providersFromIdentities.join(", ")
+              : hasPwd
+                ? "email"
+                : "";
+          return { ...row, identities: derived };
+        });
+        const mapped = enriched.map(mapSupabaseAuthUserOption).filter((u: { id: string }) => Boolean(u.id));
+        return mapped;
+      } catch (e: any) {
+        // Let caller decide fallback
+        throw e;
+      }
+    };
+
+    // Supabase management: try SQL first, then fall back to Management/GoTrue Admin APIs
+    if (dbType === "supabase-mgmt") {
+      try {
+        const viaSql = await tryFetchViaSql();
+        if (viaSql && viaSql.length > 0) return viaSql;
+        // SQL succeeded but returned 0 rows — could be RLS / empty or query was routed incorrectly.
+        // Still attempt the Admin API fallback to avoid showing "No auth.users found" when users exist.
+        const viaAdmin = await fetchSupabaseAuthUsersViaMgmtAdmin(connectionString);
+        if (viaAdmin && viaAdmin.length > 0) return viaAdmin;
+        // Return whatever SQL gave (empty) if admin also empty
+        return viaSql ?? [];
+      } catch (sqlErr: any) {
+        const viaAdmin = await fetchSupabaseAuthUsersViaMgmtAdmin(connectionString);
+        if (viaAdmin && viaAdmin.length > 0) return viaAdmin;
+        // Re-throw original SQL error so withPgClientRead surfaces it and the UI can log it
+        throw sqlErr;
+      }
+    }
+
+    // Direct Postgres: simple query is sufficient and more robust than the old string_agg
+    const viaSql = await tryFetchViaSql();
+    if (viaSql) return viaSql;
+
+    // Final fallback to the legacy grouped query (should rarely be needed)
+    const legacySql = `
+      SELECT
+        u.id::text AS id,
+        u.email,
+        u.phone,
+        u.role,
+        u.created_at,
+        u.raw_app_meta_data,
+        u.raw_user_meta_data,
+        COALESCE(
+          string_agg(DISTINCT i.provider, ', ') FILTER (WHERE i.provider IS NOT NULL),
+          CASE
+            WHEN u.encrypted_password IS NOT NULL THEN 'email'
+            ELSE NULL
+          END
+        ) AS identities
+      FROM auth.users u
+      LEFT JOIN auth.identities i ON i.user_id = u.id
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
+      LIMIT 500
+    `;
+    const res = await executeQuery(connectionString, legacySql);
+    return (res.rows || [])
+      .map(mapSupabaseAuthUserOption)
+      .filter((user: { id: string }) => Boolean(user.id));
+  });
+}
+
+async function fetchSupabaseAuthUsersViaMgmtAdmin(connectionString: string): Promise<any[] | null> {
+  try {
+    const { parseSupabaseMgmtConnectionString } = await import("./supabase-mgmt-client");
+    const parsed = parseSupabaseMgmtConnectionString(connectionString);
+    if (!parsed) return null;
+    const { token, projectRef } = parsed;
+
+    // 1) Try via GoTrue Admin API using the service_role key fetched from the Management API.
+    // GET /v1/projects/{ref}/api-keys lists the project's API keys; the service_role can then
+    // call https://<ref>.supabase.co/auth/v1/admin/users. This bypasses database/query ACLs.
+    try {
+      const apiKeysRes = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/api-keys`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (apiKeysRes.ok) {
+        const keys = await apiKeysRes.json().catch(() => null);
+        const list: any[] = Array.isArray(keys) ? keys : Array.isArray((keys as any)?.data) ? (keys as any).data : [];
+        const serviceRole = list.find((k: any) => String(k?.name ?? k?.type ?? "").toLowerCase().includes("service_role") || String(k?.api_key ?? k?.apiKey ?? "").length > 40)?.api_key ?? list.find((k: any) => typeof k?.api_key === "string" && k.api_key.startsWith("eyJ"))?.api_key ?? null;
+        const anonKey = list.find((k: any) => String(k?.name ?? "").toLowerCase().includes("anon"))?.api_key ?? null;
+        // Fallback: keys may be returned as { api_keys: [...] }
+        const fallbackKeys = (keys as any)?.api_keys ?? (keys as any)?.apiKeys ?? [];
+        let resolvedServiceRole: string | null = serviceRole;
+        if (!resolvedServiceRole && Array.isArray(fallbackKeys)) {
+          const sr = fallbackKeys.find((k: any) => String(k?.name ?? "").toLowerCase().includes("service"));
+          if (sr?.api_key) resolvedServiceRole = sr.api_key;
+        }
+
+        if (resolvedServiceRole) {
+          // Call the project's GoTrue admin API: https://<ref>.supabase.co/auth/v1/admin/users
+          // The Management API token itself is NOT valid there — only the service_role is.
+          const projectUrl = `https://${projectRef}.supabase.co`;
+          const adminRes = await fetch(`${projectUrl}/auth/v1/admin/users?page=1&per_page=100`, {
+            headers: {
+              apikey: resolvedServiceRole,
+              Authorization: `Bearer ${resolvedServiceRole}`,
+            },
+          });
+          if (adminRes.ok) {
+            const payload = await adminRes.json().catch(() => null);
+            const users: any[] = Array.isArray(payload?.users) ? payload.users : Array.isArray(payload) ? payload : [];
+            if (users.length > 0) {
+              // Map GoTrue admin shape to our SupabaseAuthUserOption shape via the same mapper:
+              // GoTrue returns { id, email, phone, role, created_at, app_metadata, user_metadata, identities: [{provider}] }
+              return users
+                .map((u: any) => ({
+                  id: String(u.id ?? "").trim(),
+                  email: u.email ?? null,
+                  phone: u.phone ?? null,
+                  role: String(u.role ?? "authenticated"),
+                  created_at: u.created_at ?? null,
+                  raw_app_meta_data: u.app_metadata ?? u.raw_app_meta_data ?? {},
+                  raw_user_meta_data: u.user_metadata ?? u.raw_user_meta_data ?? {},
+                  identities: Array.isArray(u.identities) ? u.identities.map((i: any) => i.provider).join(", ") : u.identities ?? "",
+                }))
+                .map(mapSupabaseAuthUserOption)
+                .filter((x: { id: string }) => Boolean(x.id));
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore and try DB fallback already attempted
+    }
+
+    // 2) Last resort: try a read-only database/query variant explicitly (some projects only allow read-only)
+    try {
+      const roRes = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "supabase-cli",
+        },
+        body: JSON.stringify({ query: `SELECT id::text AS id, email, phone, role, created_at, raw_app_meta_data, raw_user_meta_data FROM auth.users ORDER BY created_at DESC LIMIT 500` }),
+      });
+      if (roRes.ok) {
+        const rows = await roRes.json().catch(() => []);
+        const list: any[] = Array.isArray(rows) ? rows : (rows as any)?.rows ?? [];
+        if (list.length > 0) {
+          return list
+            .map((row: any) => ({ ...row, identities: "" }))
+            .map(mapSupabaseAuthUserOption)
+            .filter((x: { id: string }) => Boolean(x.id));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteIndex(connectionString: string, schema: string, name: string) {
   return withPgClientWrite(connectionString, "delete index", "Index management is supported only for PostgreSQL connections.", async (executeQuery) => {
     const sql = `DROP INDEX "${schema}"."${name}";`;

@@ -5,6 +5,10 @@ import { useEffect, useState } from "react";
 import { readInitialAppearance } from "@/lib/studio/general-utils";
 import { getGlobalEditorThemeSettings, saveGlobalEditorThemeSettings } from "@/lib/api/actions-client";
 import { type CustomEditorTheme } from "@/lib/studio/editor-themes";
+import {
+  emitSettingsSyncLocalChanged,
+  subscribeSettingsSyncApplied,
+} from "@/lib/studio/settings-sync-events";
 
 function readInitialEditorAppearance() {
   const parsed = readInitialAppearance();
@@ -57,10 +61,43 @@ export function useGlobalEditorTheme(persist = false) {
   }, []);
 
   useEffect(() => {
+    return subscribeSettingsSyncApplied((detail) => {
+      const remote = detail.payload.editorTheme;
+      if (!remote) return;
+      const nextThemeId =
+        typeof remote.editorThemeId === "string" && remote.editorThemeId
+          ? remote.editorThemeId
+          : "auto";
+      let nextCustomThemes: CustomEditorTheme[] = [];
+      if (typeof remote.customEditorThemes === "string") {
+        try {
+          const parsed = JSON.parse(remote.customEditorThemes);
+          if (Array.isArray(parsed)) {
+            nextCustomThemes = parsed.filter(
+              (theme) =>
+                theme &&
+                typeof theme.id === "string" &&
+                typeof theme.name === "string" &&
+                typeof theme.themeJson === "string",
+            );
+          }
+        } catch {
+          nextCustomThemes = [];
+        }
+      }
+      setEditorThemeId(nextThemeId);
+      setCustomEditorThemes(nextCustomThemes);
+      setIsLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!persist || !isLoaded) return;
     void saveGlobalEditorThemeSettings({
       editorThemeId,
       customEditorThemes: JSON.stringify(customEditorThemes),
+    }).then(() => {
+      emitSettingsSyncLocalChanged("editorTheme");
     });
   }, [editorThemeId, customEditorThemes, isLoaded, persist]);
 

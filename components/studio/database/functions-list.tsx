@@ -53,8 +53,6 @@ import type {
   MonacoThemeRef,
 } from "@/lib/studio/editor-themes";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
-import { cn } from "@/lib/utils";
 
 interface DatabaseFunction {
   schema: string;
@@ -117,8 +115,6 @@ export function FunctionsList({
   schemaData = {},
   onAskAI,
 }: FunctionsListProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
   const [search, setSearch] = useState("");
   const [selectedFunction, setSelectedFunction] =
     useState<DatabaseFunction | null>(null);
@@ -501,15 +497,12 @@ export function FunctionsList({
       <Sheet
         open={!!selectedFunction}
         onOpenChange={(open) => { if (!open) closeFunctionViewer(); }}
-        modal={!shellLayout}
+        modal={false}
       >
         <SheetContent
           side="right"
-          contained={shellLayout}
-          className={cn(
-            "bg-background text-foreground flex flex-col p-0 gap-0",
-            !shellLayout && "data-[side=right]:sm:max-w-none",
-          )}
+          contained
+          className="bg-background text-foreground flex flex-col p-0 gap-0"
           style={{ width: `min(95vw, ${RESIZED_DEFAULT_SHEET_WIDTH}px)` }}
           minResizeWidth={MIN_SHEET_WIDTH}
           maxResizeWidth={MAX_SHEET_WIDTH}

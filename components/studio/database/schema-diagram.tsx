@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
-  BackgroundVariant,
   Controls,
   MiniMap,
   Panel,
@@ -779,17 +778,12 @@ export function SchemaDiagram({
         }}
         proOptions={{ hideAttribution: true }}
         colorMode={currentTheme}
+        style={{ "--xy-background-color": "transparent" } as React.CSSProperties}
         minZoom={0.2}
         maxZoom={2}
         fitView
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1.2}
-          color={`color-mix(in srgb, var(--muted-foreground) ${currentTheme === "light" ? "18%" : "14%"}, transparent)`}
-          className="opacity-90"
-        />
+        <Background gap={16} color="var(--border)" />
         <Controls
           showInteractive={false}
           className="bg-card border-border fill-foreground/50"

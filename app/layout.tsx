@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import { Outfit, Tajawal } from "next/font/google";
 import "./globals.css";
+import "@glideapps/glide-data-grid/dist/index.css";
 
 export const metadata: Metadata = {
   description: "The Modern Postgres Database Desktop App",
@@ -13,6 +14,8 @@ import { ZoomWrapper } from "@/components/zoom-wrapper";
 import { Toaster } from "sonner";
 import { ConfirmProvider } from "@/hooks/use-confirm";
 import { UpdateNotificationProvider } from "@/components/providers/update-notification-provider";
+import { AppUpdateProvider } from "@/components/providers/app-update-context";
+import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider";
 import { ClientShim } from "@/components/client-shim";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
 import { SidecarGate } from "@/components/gates/sidecar-gate";
@@ -58,28 +61,35 @@ export default function RootLayout({
             <ZoomWrapper>
               <SidecarGate>
                 <ConfirmProvider>
-                  <UpdateNotificationProvider>
-                    {children}
-                    <Toaster
-                      position="bottom-right"
-                      theme="system"
-                      toastOptions={{
-                        unstyled: false,
-                        classNames: {
-                          toast: "rexa-toast",
-                          success: "rexa-toast-success",
-                          error: "rexa-toast-error",
-                          warning: "rexa-toast-warning",
-                          info: "rexa-toast-info",
-                        },
-                      }}
-                    />
+                  <AppUpdateProvider>
+                    <UpdateNotificationProvider>
+                    <SettingsSyncProvider>
+                      {children}
+                      <Toaster
+                        position="bottom-right"
+                        theme="system"
+                        toastOptions={{
+                          unstyled: false,
+                          classNames: {
+                            toast: "rexa-toast",
+                            success: "rexa-toast-success",
+                            error: "rexa-toast-error",
+                            warning: "rexa-toast-warning",
+                            info: "rexa-toast-info",
+                          },
+                        }}
+                      />
+                    </SettingsSyncProvider>
                   </UpdateNotificationProvider>
+                  </AppUpdateProvider>
                 </ConfirmProvider>
               </SidecarGate>
             </ZoomWrapper>
           </ThemeProvider>
         </IconThemeProvider>
+        {/* Mount point for Glide Data Grid's overlay cell editors — must be
+            the last child of <body>, see @glideapps/glide-data-grid docs. */}
+        <div id="portal" />
       </body>
     </html>
   );

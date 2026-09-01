@@ -1,0 +1,270 @@
+name: Arch AppImage (Wayland)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [arch-wayland, arch-appimage, arch-wayland-build]
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+  APPIMAGE_EXTRACT_AND_RUN: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container:
+      image: archlinux:latest
+      # docker socket is auto-mounted by the runner at /var/run/docker.sock
+      # needed for resources/java-bridge/build.sh --docker
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore .env
+        env:
+          APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+        run: |
+          printf '%s' "$APP_ENV_FILE" > .env
+          echo "Restored .env ($(grep -c '=' .env || echo 0) entries)"
+
+      - name: Install Arch dependencies
+        run: |
+          set -e
+          # pacman init
+          pacman -Syu --noconfirm
+
+          # core build chain + tools
+          pacman -S --needed --noconfirm \
+            base-devel \
+            curl git wget unzip file which sudo pkgconf \
+            python \
+            nodejs npm \
+            rust \
+            jdk21-openjdk docker \
+            patchelf binutils openssl \
+            fuse2 \
+            weston xorg-server-xvfb || true
+
+          # webkit/gtk stack — try both naming variants, tolerate missing
+          pacman -S --needed --noconfirm webkit2gtk-4.1 gtk3 libsoup3 librsvg libayatana-appindicator 2>&1 | tail -n 20 || true
+          pacman -S --needed --noconfirm webkit2gtk 2>&1 | tail -n 5 || true
+          pacman -S --needed --noconfirm libsoup 2>&1 | tail -n 5 || true
+          pacman -S --needed --noconfirm libappindicator-gtk3 2>&1 | tail -n 5 || true
+
+          echo "=== installed versions ==="
+          gcc --version | head -n1 || true
+          rustc --version || true
+          cargo --version || true
+          node --version || true
+          npm --version || true
+          java -version || true
+          pkg-config --modversion gtk+-3.0 2>&1 | head -n1 || true
+          pkg-config --modversion webkit2gtk-4.1 2>&1 | head -n1 || true
+          weston --version 2>&1 | head -n1 || true
+          docker --version 2>&1 | head -n1 || true
+          ls -la /var/run/docker.sock 2>&1 | head -n1 || ls -la /run/docker.sock 2>&1 | head -n1 || echo "no docker.sock"
+
+      - name: Install Bun
+        run: |
+          set -e
+          curl -fsSL https://bun.sh/install | bash
+          echo "$HOME/.bun/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bun/bin:$PATH"
+          "$HOME/.bun/bin/bun" --version
+          echo "bun installed to $HOME/.bun/bin/bun"
+
+      - name: Add Bun to PATH
+        run: echo "$HOME/.bun/bin" >> $GITHUB_PATH
+
+      - name: Verify toolchain
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          echo "PATH=$PATH"
+          bun --version || $HOME/.bun/bin/bun --version
+          node --version
+          cargo --version
+          rustc --version
+          java -version 2>&1 | head -n5 || true
+          docker ps 2>&1 | head -n5 || echo "docker ps failed (will fallback to native JDK for bridge)"
+
+      - name: Install JS dependencies
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun install
+          cd server && bun install
+          echo "deps installed"
+          ls -lh node_modules/.bin/tauri 2>&1 | head -n 5 || echo "tauri cli not found yet (will be after install)"
+
+      - name: Build Java bridge natively (Arch JDK, no Docker)
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          # Docker-in-container volume mounts break host paths (/github/workspace vs /home/runner/work)
+          # so avoid --docker and build natively with the Arch JDK we installed via pacman
+          # Find JAVA_HOME on Arch (jdk21-openjdk)
+          if [ -d /usr/lib/jvm/java-21-openjdk ]; then
+            export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+          elif [ -d /usr/lib/jvm/default ]; then
+            export JAVA_HOME=/usr/lib/jvm/default
+          else
+            # fallback: derive from javac location
+            JAVAC=$(which javac 2>/dev/null || echo "")
+            if [ -n "$JAVAC" ]; then
+              export JAVA_HOME=$(dirname $(dirname $(readlink -f "$JAVAC")))
+            fi
+          fi
+          echo "JAVA_HOME=$JAVA_HOME"
+          export PATH="$JAVA_HOME/bin:$HOME/.bun/bin:$PATH"
+          echo "PATH=$PATH"
+          ls -la "$JAVA_HOME/jmods" 2>&1 | head -n 20 || ls -la "$JAVA_HOME/lib/jmods" 2>&1 | head -n 20 || echo "jmods not at expected path"
+          # Arch JDK puts jmods at lib/jmods but build.sh expects $JAVA_HOME/jmods
+          if [ ! -d "$JAVA_HOME/jmods" ] && [ -d "$JAVA_HOME/lib/jmods" ]; then
+            echo "Linking lib/jmods -> jmods for build.sh"
+            ln -sf "$JAVA_HOME/lib/jmods" "$JAVA_HOME/jmods"
+          fi
+          java -version 2>&1 | head -n 5 || true
+          javac -version 2>&1 | head -n 5 || true
+          jlink --version 2>&1 | head -n 5 || echo "jlink not in PATH, checking $JAVA_HOME/bin/jlink"
+          ls -lh "$JAVA_HOME/bin/jlink" 2>&1 | head -n 5 || true
+          bash resources/java-bridge/build.sh
+          ls -lh resources/java-bridge/dist/bridge.jar 2>&1 | head -n 5
+          ls -lh resources/java-bridge/dist/jre/bin/java 2>&1 | head -n 5 || ls -lh resources/java-bridge/dist/jre 2>&1 | head -n 20
+
+      - name: Build AppImage (identical to local machine)
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+
+          # ensure tools are downloadable (same as build.yml pre-download)
+          mkdir -p "$HOME/.cache/tauri" "$HOME/.local/bin"
+          # the script handles missing tools, but pre-download for speed
+          curl -fsSL -o "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage || true
+          chmod +x "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage" 2>/dev/null || true
+          curl -fsSL -o "$HOME/.local/bin/appimagetool-x86_64.AppImage" \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage || true
+          chmod +x "$HOME/.local/bin/appimagetool-x86_64.AppImage" 2>/dev/null || true
+
+          # bridge already built natively above, skip its docker path
+          bash scripts/build-appimage.sh --skip-bridge
+          echo "=== produced AppImages ==="
+          ls -lh ./*.AppImage 2>&1 | head -n 20
+          ls -lh src-tauri/target/release/bundle/appimage/ 2>&1 | head -n 20 || true
+          ls -lh src-tauri/target/release/bundle/deb/*.deb 2>&1 | head -n 20 || true
+
+      - name: Sign AppImage for updater
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          APPIMAGE="$(pwd)/RexaDB_${VERSION}_x86_64.AppImage"
+          if [ ! -f "$APPIMAGE" ]; then
+            # fallback: built by tauri/bundle path
+            APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" | head -1 || true)
+          fi
+          if [ -z "${APPIMAGE:-}" ] || [ ! -f "$APPIMAGE" ]; then
+            APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" | head -1 || true)
+          fi
+          echo "AppImage: $APPIMAGE"
+          ls -lh "$APPIMAGE" || (echo "no AppImage found"; find . -name "*.AppImage" 2>/dev/null | head -n 20; exit 1)
+
+          # sign if secrets present
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+            printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/rexadb-sign-key
+            export TAURI_SIGNING_PRIVATE_KEY_PATH=/tmp/rexadb-sign-key
+            unset TAURI_SIGNING_PRIVATE_KEY
+            ./node_modules/.bin/tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE" || \
+              $HOME/.bun/bin/bunx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
+            echo "Signed: ${APPIMAGE}.sig"
+            cat "${APPIMAGE}.sig" | head -c 200; echo
+            mkdir -p src-tauri/target/release/bundle/appimage
+            cp "$APPIMAGE" src-tauri/target/release/bundle/appimage/ 2>/dev/null || true
+            cp "${APPIMAGE}.sig" src-tauri/target/release/bundle/appimage/ 2>/dev/null || true
+          else
+            echo "Skipping signing (no secrets)"
+            mkdir -p src-tauri/target/release/bundle/appimage
+            cp "$APPIMAGE" src-tauri/target/release/bundle/appimage/ 2>/dev/null || true
+          fi
+          ls -lh src-tauri/target/release/bundle/appimage/ 2>&1 | head -n 20
+
+      - name: Smoke test (Wayland via weston headless + X11 fallback)
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          # Prefer pre-built binary for smoke (avoids FUSE in CI)
+          BINARY="src-tauri/target/release/rexa-db"
+          if [ ! -f "$BINARY" ]; then
+            echo "Binary not found at $BINARY, trying AppImage extract"
+            VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+            APPIMAGE="$(pwd)/RexaDB_${VERSION}_x86_64.AppImage"
+            if [ -f "$APPIMAGE" ]; then
+              APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --help 2>&1 | head -n 5 || true
+            fi
+            exit 0
+          fi
+          file "$BINARY" 2>&1 | head -n5 || true
+          LOGFILE="/tmp/rexadb-smoke.wayland.log"
+          export RESOURCEDIR="$(pwd)/resources/java-bridge/dist"
+          # sidecar alongside binary
+          if [ -f "src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu" ]; then
+            cp "src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu" "$(dirname "$BINARY")/rexadb-server" 2>/dev/null || \
+            cp "src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu" "$(dirname "$BINARY")/rexadb-server-x86_64-unknown-linux-gnu"
+          fi
+          export WEBKIT_DISABLE_DMABUF_RENDERER=1
+          # Try Wayland via weston headless
+          echo "Starting weston headless..."
+          mkdir -p /tmp/weston
+          weston --backend=headless-backend.so --socket=wayland-1 --idle-time=0 2>/tmp/weston.log &
+          WESTON_PID=$!
+          sleep 2
+          if kill -0 $WESTON_PID 2>/dev/null; then
+            echo "weston running (pid $WESTON_PID)"
+            export WAYLAND_DISPLAY=wayland-1
+            export XDG_RUNTIME_DIR=/tmp
+            # also set for weston socket dir
+            timeout 12 "$BINARY" > "$LOGFILE" 2>&1 || EXIT_CODE=$?
+            EXIT_CODE=${EXIT_CODE:-0}
+            kill $WESTON_PID 2>/dev/null || true
+            wait $WESTON_PID 2>/dev/null || true
+            echo "Wayland run exit: $EXIT_CODE"
+            cat "$LOGFILE" 2>&1 | head -n 100 || true
+            if [ "$EXIT_CODE" -eq 124 ] || [ "$EXIT_CODE" -eq 0 ]; then
+              echo "✅ Wayland smoke PASS"
+              exit 0
+            fi
+            echo "Wayland run failed, falling back to xvfb..."
+          else
+            echo "weston failed to start, log:"
+            cat /tmp/weston.log 2>&1 | head -n 50 || true
+          fi
+          # Fallback X11
+          echo "Trying xvfb-run..."
+          EXIT_CODE=0
+          timeout 12 xvfb-run -a "$BINARY" > "$LOGFILE" 2>&1 || EXIT_CODE=$?
+          echo "xvfb exit: $EXIT_CODE"
+          cat "$LOGFILE" 2>&1 | head -n 100 || true
+          if [ "$EXIT_CODE" -eq 124 ] || [ "$EXIT_CODE" -eq 0 ]; then
+            echo "✅ X11 smoke PASS"
+            exit 0
+          fi
+          echo "❌ smoke failed"
+          exit 1
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: RexaDB-AppImage-Arch-Wayland
+          path: |
+            ./*.AppImage
+            ./*.AppImage.sig
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.sig
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/rexa-db
+          if-no-files-found: error

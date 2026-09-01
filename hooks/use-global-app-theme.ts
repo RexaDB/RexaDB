@@ -7,6 +7,10 @@ import { readInitialAppearance } from "@/lib/studio/general-utils";
 import { saveGlobalAppThemeSettings, getGlobalAppThemeSettings } from "@/lib/api/actions-client";
 import { applyAppThemeVariables, BUILTIN_APP_THEMES, type CustomAppTheme } from "@/lib/studio/app-themes";
 import { buildMonacoThemeFromAppTheme, type MonacoThemeRef } from "@/lib/studio/editor-themes";
+import {
+  emitSettingsSyncLocalChanged,
+  subscribeSettingsSyncApplied,
+} from "@/lib/studio/settings-sync-events";
 
 const ALL_THEME_VAR_KEYS = [
   "--background", "--shell-content-bg", "--shell-tab-active-bg", "--shell-tab-inactive-bg",
@@ -243,10 +247,44 @@ export function useGlobalAppTheme(persist = false) {
   }, [selectedAppTheme, isLoaded]);
 
   useEffect(() => {
+    return subscribeSettingsSyncApplied((detail) => {
+      const remote = detail.payload.appTheme;
+      if (!remote) return;
+      const nextAppThemeId =
+        typeof remote.appThemeId === "string" && remote.appThemeId
+          ? remote.appThemeId
+          : DEFAULT_DARK_THEME_ID;
+      let nextCustomThemes: CustomAppTheme[] = [];
+      if (typeof remote.customAppThemes === "string") {
+        try {
+          const parsed = JSON.parse(remote.customAppThemes);
+          if (Array.isArray(parsed)) {
+            nextCustomThemes = parsed.filter(
+              (theme) =>
+                theme &&
+                typeof theme.id === "string" &&
+                typeof theme.name === "string" &&
+                (theme.base === "light" || theme.base === "dark") &&
+                typeof theme.colors === "object",
+            );
+          }
+        } catch {
+          nextCustomThemes = [];
+        }
+      }
+      setAppThemeId(nextAppThemeId);
+      setCustomAppThemes(nextCustomThemes);
+      setIsLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!persist || !isLoaded) return;
     void saveGlobalAppThemeSettings({
       appThemeId,
       customAppThemes: JSON.stringify(customAppThemes),
+    }).then(() => {
+      emitSettingsSyncLocalChanged("appTheme");
     });
   }, [appThemeId, customAppThemes, isLoaded, persist]);
 

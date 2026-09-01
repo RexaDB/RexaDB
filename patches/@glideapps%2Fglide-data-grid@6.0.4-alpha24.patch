@@ -1,0 +1,743 @@
+diff --git a/node_modules/@glideapps/glide-data-grid/.bun-tag-2b129db278a79c41 b/.bun-tag-2b129db278a79c41
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@glideapps/glide-data-grid/.bun-tag-5ecbfb934209c26e b/.bun-tag-5ecbfb934209c26e
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@glideapps/glide-data-grid/.bun-tag-6cf4735d63bed235 b/.bun-tag-6cf4735d63bed235
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@glideapps/glide-data-grid/.bun-tag-7159385ffa450724 b/.bun-tag-7159385ffa450724
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@glideapps/glide-data-grid/.bun-tag-eb1fb5799ce1108 b/.bun-tag-eb1fb5799ce1108
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/cjs/internal/data-grid/data-grid.js b/dist/cjs/internal/data-grid/data-grid.js
+index 4ca9236529c4b310f71ec746011e3f37cf9518af..0bc5fb3a15191546e693edd5b3dfe9585b160ae9 100644
+--- a/dist/cjs/internal/data-grid/data-grid.js
++++ b/dist/cjs/internal/data-grid/data-grid.js
+@@ -1153,12 +1153,30 @@ const DataGrid = (p, forwardedRef) => {
+         if (!opacityX && !opacityY) {
+             return null;
+         }
++        // --- RexaDB patch (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++        // This DOM div (unlike the canvas-drawn lines this same patch
++        // already clips) is a plain `height: height` box regardless of
++        // how much real data there is — so the horizontal-scroll shadow
++        // it renders along the frozen-column boundary kept extending past
++        // the last real row as a faint residual shade even after the
++        // crisp border line itself was correctly clipped.
++        let __rexaShadowBottomY = height;
++        {
++            const __rexaGetRowHeight = typeof rowHeight === "number" ? () => rowHeight : rowHeight;
++            let rexaY = totalHeaderHeight + translateY;
++            let rexaRow = cellYOffset;
++            while (rexaRow < rows && rexaY < height) {
++                rexaY += __rexaGetRowHeight(rexaRow);
++                rexaRow++;
++            }
++            __rexaShadowBottomY = Math.min(height, rexaY);
++        }
+         const styleX = {
+             position: "absolute",
+             top: 0,
+             left: stickyX,
+             width: width - stickyX,
+-            height: height,
++            height: __rexaShadowBottomY,
+             opacity: opacityX,
+             pointerEvents: "none",
+             transition: !smoothScrollX ? "opacity 0.2s" : undefined,
+@@ -1178,7 +1196,7 @@ const DataGrid = (p, forwardedRef) => {
+         return (React.createElement(React.Fragment, null,
+             opacityX > 0 && React.createElement("div", { id: "shadow-x", style: styleX }),
+             opacityY > 0 && React.createElement("div", { id: "shadow-y", style: styleY })));
+-    }, [opacityX, opacityY, stickyX, width, smoothScrollX, totalHeaderHeight, height, smoothScrollY]);
++    }, [opacityX, opacityY, stickyX, width, smoothScrollX, totalHeaderHeight, height, smoothScrollY, rows, rowHeight, cellYOffset, translateY]);
+     const overlayStyle = React.useMemo(() => ({
+         position: "absolute",
+         top: 0,
+diff --git a/dist/cjs/internal/data-grid/render/data-grid-render.js b/dist/cjs/internal/data-grid/render/data-grid-render.js
+index 7b88fe4911adb2906ba3b46fc714e0e96ca61065..46203170907ecd8c8c4b7cedf5f3eb44df7fffb6 100644
+--- a/dist/cjs/internal/data-grid/render/data-grid-render.js
++++ b/dist/cjs/internal/data-grid/render/data-grid-render.js
+@@ -141,7 +141,7 @@ export function drawGrid(arg, lastArg) {
+     }
+     const drawHeaderTexture = () => {
+         drawGridHeaders(overlayCtx, effectiveCols, enableGroups, hoverInfo, width, translateX, headerHeight, groupHeaderHeight, dragAndDropState, isResizing, selection, theme, spriteManager, hoverValues, verticalBorder, getGroupDetails, damage, drawHeaderCallback, touchMode);
+-        drawGridLines(overlayCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, undefined, undefined, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, true);
++        drawGridLines(overlayCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, undefined, undefined, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection, true);
+         overlayCtx.beginPath();
+         overlayCtx.moveTo(0, overlayHeight - 0.5);
+         overlayCtx.lineTo(width, overlayHeight - 0.5);
+@@ -236,7 +236,7 @@ export function drawGrid(arg, lastArg) {
+         const resizedCol = canBlit;
+         drawRegions = blitResizedCol(last, cellXOffset, cellYOffset, translateX, translateY, width, height, totalHeaderHeight, effectiveCols, resizedCol);
+     }
+-    overdrawStickyBoundaries(targetCtx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme);
++    overdrawStickyBoundaries(targetCtx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme, cellYOffset, translateY, totalHeaderHeight);
+     const highlightRedraw = drawHighlightRings(targetCtx, width, height, cellXOffset, cellYOffset, translateX, translateY, mappedColumns, freezeColumns, headerHeight, groupHeaderHeight, rowHeight, freezeTrailingRows, rows, highlightRegions, theme);
+     // the overdraw may have nuked out our focus ring right edge.
+     const focusRedraw = drawFocus
+@@ -258,7 +258,7 @@ export function drawGrid(arg, lastArg) {
+     const spans = drawCells(targetCtx, effectiveCols, mappedColumns, height, totalHeaderHeight, translateX, translateY, cellYOffset, rows, getRowHeight, getCellContent, getGroupDetails, getRowThemeOverride, disabledRows, isFocused, drawFocus, freezeTrailingRows, hasAppendRow, drawRegions, damage, selection, prelightCells, highlightRegions, imageLoader, spriteManager, hoverValues, hoverInfo, drawCellCallback, hyperWrapping, theme, enqueue, renderStateProvider, getCellRenderer, overrideCursor, minimumCellWidth);
+     drawBlanks(targetCtx, effectiveCols, mappedColumns, width, height, totalHeaderHeight, translateX, translateY, cellYOffset, rows, getRowHeight, getRowThemeOverride, selection.rows, disabledRows, freezeTrailingRows, hasAppendRow, drawRegions, damage, theme);
+     drawExtraRowThemes(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme);
+-    drawGridLines(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme);
++    drawGridLines(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection);
+     highlightRedraw?.();
+     focusRedraw?.();
+     if (isResizing && resizeIndicator !== "none") {
+diff --git a/dist/cjs/internal/data-grid/render/data-grid-render.lines.js b/dist/cjs/internal/data-grid/render/data-grid-render.lines.js
+index 4b05453f8cd50304f1f342bc20311e4772a812bd..9a30a79861b5ec18166d34117cce488051f28ad6 100644
+--- a/dist/cjs/internal/data-grid/render/data-grid-render.lines.js
++++ b/dist/cjs/internal/data-grid/render/data-grid-render.lines.js
+@@ -47,7 +47,7 @@ export function drawBlanks(ctx, effectiveColumns, allColumns, width, height, tot
+         ctx.restore();
+     });
+ }
+-export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme) {
++export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme, cellYOffset, translateY, totalHeaderHeight) {
+     let drawFreezeBorder = false;
+     for (const c of effectiveCols) {
+         if (c.sticky)
+@@ -61,9 +61,25 @@ export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, free
+     let vStroke;
+     if (drawX !== 0) {
+         vStroke = blendCache(vColor, theme.bgCell);
++        // --- RexaDB patch (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++        // This function draws its own separate reinforcement line for the
++        // frozen/sticky-column boundary, full canvas height, independent
++        // of drawGridLines (which this same patch already clips to where
++        // real data ends) — without this it stayed full-height regardless
++        // of how few rows there were.
++        let __rexaStickyBottomY = height;
++        if (cellYOffset !== undefined && translateY !== undefined && totalHeaderHeight !== undefined) {
++            let rexaY = totalHeaderHeight + translateY;
++            let rexaRow = cellYOffset;
++            while (rexaRow < rows && rexaY < height) {
++                rexaY += getRowHeight(rexaRow);
++                rexaRow++;
++            }
++            __rexaStickyBottomY = Math.min(height, rexaY);
++        }
+         ctx.beginPath();
+         ctx.moveTo(drawX + 0.5, 0);
+-        ctx.lineTo(drawX + 0.5, height);
++        ctx.lineTo(drawX + 0.5, __rexaStickyBottomY);
+         ctx.strokeStyle = vStroke;
+         ctx.stroke();
+     }
+@@ -179,7 +195,7 @@ export function drawExtraRowThemes(ctx, effectiveCols, cellYOffset, translateX,
+     ctx.beginPath();
+ }
+ // lines are effectively drawn on the top left edge of a cell.
+-export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, verticalOnly = false) {
++export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection, verticalOnly = false) {
+     if (spans !== undefined) {
+         ctx.beginPath();
+         ctx.save();
+@@ -192,6 +208,156 @@ export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, trans
+     const hColor = theme.horizontalBorderColor ?? theme.borderColor;
+     const vColor = theme.borderColor;
+     const { minX, maxX, minY, maxY } = getMinMaxXY(drawRegions, width, height);
++    // --- RexaDB patch: "no cells" column (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++    // Lets one specific column (matched by id, set by our app) render with
++    // no horizontal row-separator lines — used for the "Add column"
++    // trailing column: a real GridColumn (native scroll space, exactly one
++    // boundary line like any other column) that should show no row
++    // structure beneath it. Vertical lines are untouched.
++    let __rexaNoCellsFromX = Infinity;
++    {
++        let rexaX = 0.5;
++        for (let rexaIndex = 0; rexaIndex < effectiveCols.length; rexaIndex++) {
++            const rexaCol = effectiveCols[rexaIndex];
++            if (rexaCol.width === 0)
++                continue;
++            if (rexaCol.id === "__rexa_add_column__") {
++                __rexaNoCellsFromX = rexaCol.sticky ? rexaX : rexaX + translateX;
++                break;
++            }
++            rexaX += rexaCol.width;
++        }
++    }
++    // Where real data ends, vertically, within the visible canvas — used
++    // to stop both vertical and horizontal lines from continuing into
++    // "phantom" rows past the actual row count (Glide's own line-drawing
++    // is otherwise unbounded by `rows`: the horizontal-line loop below
++    // only checks canvas height, so a grid with only a couple of rows
++    // still drew a full spreadsheet-style grid pattern all the way down
++    // the empty canvas). Bounded by canvas height, not total row count,
++    // so this stays cheap even for huge datasets — once accumulated
++    // height reaches the visible area the loop stops regardless of how
++    // many rows are left.
++    let __rexaDataBottomY = height;
++    {
++        let rexaY = totalHeaderHeight + translateY;
++        let rexaRow = cellYOffset;
++        while (rexaRow < rows && rexaY < height) {
++            rexaY += getRowHeight(rexaRow);
++            rexaRow++;
++        }
++        __rexaDataBottomY = Math.min(height, rexaY);
++    }
++    // Suppresses the normal per-column vertical gridline for whatever
++    // row-range a multi-cell selection covers, wherever the selection
++    // spans across that column boundary — our own custom cell renderer
++    // already draws ONE clean outer border around the whole selection
++    // (data-grid.tsx's isInSelectionRange/selectionRangeEdges), but
++    // Glide's own vertical lines are a completely separate draw pass that
++    // runs *after* cell content regardless, so they show through as a
++    // visible seam between selected cells that our own border-drawing has
++    // no way to paint over.
++    const __rexaSelectionRects =
++        selection?.current !== undefined ? [selection.current.range, ...selection.current.rangeStack] : [];
++    const __rexaRowYs = [totalHeaderHeight + translateY];
++    if (__rexaSelectionRects.length > 0) {
++        let rexaY2 = totalHeaderHeight + translateY;
++        let rexaRow2 = cellYOffset;
++        while (rexaRow2 < rows && rexaY2 < height) {
++            rexaY2 += getRowHeight(rexaRow2);
++            __rexaRowYs.push(rexaY2);
++            rexaRow2++;
++        }
++    }
++    const __rexaRowToY = row => {
++        if (row <= cellYOffset)
++            return __rexaRowYs[0];
++        const i = row - cellYOffset;
++        return i < __rexaRowYs.length ? __rexaRowYs[i] : __rexaRowYs[__rexaRowYs.length - 1];
++    };
++    const __rexaSuppressedRangesForBoundary = colIndex => {
++        const out = [];
++        for (const rect of __rexaSelectionRects) {
++            if (!(rect.x <= colIndex && rect.x + rect.width > colIndex + 1))
++                continue;
++            const y0 = __rexaRowToY(rect.y);
++            const y1 = __rexaRowToY(rect.y + rect.height);
++            if (y1 > y0)
++                out.push([y0, y1]);
++        }
++        out.sort((a, b) => a[0] - b[0]);
++        const merged = [];
++        for (const r of out) {
++            if (merged.length > 0 && r[0] <= merged[merged.length - 1][1]) {
++                merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
++            }
++            else {
++                merged.push([r[0], r[1]]);
++            }
++        }
++        return merged;
++    };
++    // Mirror of the above, for horizontal lines: suppresses the normal
++    // per-row horizontal gridline for whatever column-range a multi-cell
++    // selection covers, wherever the selection spans across that row
++    // boundary.
++    const __rexaColXs = [0.5];
++    if (__rexaSelectionRects.length > 0) {
++        let cx = 0.5;
++        for (let i = 0; i < effectiveCols.length; i++) {
++            const c = effectiveCols[i];
++            cx += c.width;
++            const tx = c.sticky ? cx : cx + translateX;
++            __rexaColXs.push(tx);
++        }
++    }
++    const __rexaColToX = col => {
++        if (col <= 0)
++            return __rexaColXs[0];
++        return col < __rexaColXs.length ? __rexaColXs[col] : __rexaColXs[__rexaColXs.length - 1];
++    };
++    const __rexaSuppressedRangesForRow = rowIndex => {
++        const out = [];
++        for (const rect of __rexaSelectionRects) {
++            if (!(rect.y <= rowIndex - 1 && rect.y + rect.height > rowIndex))
++                continue;
++            const x0 = __rexaColToX(rect.x);
++            const x1 = __rexaColToX(rect.x + rect.width);
++            if (x1 > x0)
++                out.push([x0, x1]);
++        }
++        out.sort((a, b) => a[0] - b[0]);
++        const merged = [];
++        for (const r of out) {
++            if (merged.length > 0 && r[0] <= merged[merged.length - 1][1]) {
++                merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
++            }
++            else {
++                merged.push([r[0], r[1]]);
++            }
++        }
++        return merged;
++    };
++    const __rexaPushHLineSegments = (rowIndex, y, xStart, xEnd, color) => {
++        const suppressed = __rexaSelectionRects.length > 0 ? __rexaSuppressedRangesForRow(rowIndex) : [];
++        if (suppressed.length === 0) {
++            toDraw.push({ x1: xStart, y1: y, x2: xEnd, y2: y, color });
++            return;
++        }
++        let segStart = xStart;
++        for (const [s0, s1] of suppressed) {
++            if (s0 > segStart) {
++                toDraw.push({ x1: segStart, y1: y, x2: Math.min(s0, xEnd), y2: y, color });
++            }
++            segStart = Math.max(segStart, s1);
++            if (segStart >= xEnd)
++                break;
++        }
++        if (segStart < xEnd) {
++            toDraw.push({ x1: segStart, y1: y, x2: xEnd, y2: y, color });
++        }
++    };
++    // --- end RexaDB patch setup ---
+     const toDraw = [];
+     ctx.beginPath();
+     // vertical lines
+@@ -203,37 +369,64 @@ export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, trans
+         x += c.width;
+         const tx = c.sticky ? x : x + translateX;
+         if (tx >= minX && tx <= maxX && verticalBorder(index + 1)) {
+-            toDraw.push({
+-                x1: tx,
+-                y1: Math.max(groupHeaderHeight, minY),
+-                x2: tx,
+-                y2: Math.min(height, maxY),
+-                color: vColor,
+-            });
++            const segTop = Math.max(groupHeaderHeight, minY);
++            const segBottom = Math.min(height, maxY, __rexaDataBottomY);
++            const suppressed =
++                __rexaSelectionRects.length > 0 ? __rexaSuppressedRangesForBoundary(index) : [];
++            if (suppressed.length === 0) {
++                toDraw.push({ x1: tx, y1: segTop, x2: tx, y2: segBottom, color: vColor });
++            }
++            else {
++                let segStart = segTop;
++                for (const [s0, s1] of suppressed) {
++                    if (s0 > segStart) {
++                        toDraw.push({ x1: tx, y1: segStart, x2: tx, y2: Math.min(s0, segBottom), color: vColor });
++                    }
++                    segStart = Math.max(segStart, s1);
++                    if (segStart >= segBottom)
++                        break;
++                }
++                if (segStart < segBottom) {
++                    toDraw.push({ x1: tx, y1: segStart, x2: tx, y2: segBottom, color: vColor });
++                }
++            }
+         }
+     }
+     let freezeY = height + 0.5;
+     for (let i = rows - freezeTrailingRows; i < rows; i++) {
+         const rh = getRowHeight(i);
+         freezeY -= rh;
+-        toDraw.push({ x1: minX, y1: freezeY, x2: maxX, y2: freezeY, color: hColor });
++        if (minX < __rexaNoCellsFromX) {
++            toDraw.push({ x1: minX, y1: freezeY, x2: Math.min(maxX, __rexaNoCellsFromX), y2: freezeY, color: hColor });
++        }
+     }
+     if (verticalOnly !== true) {
+         // horizontal lines
+         let y = totalHeaderHeight + 0.5;
+         let row = cellYOffset;
+         const target = freezeY;
+-        while (y + translateY < target) {
++        while (y + translateY < target && row <= rows) {
+             const ty = y + translateY;
+-            if (ty >= minY && ty <= maxY - 1) {
++            // row === rows here draws the bottom border of the last real
++            // row (the boundary *above* phantom row `rows`) — needed, so
++            // this isn't `row < rows`, but nothing past that: bail before
++            // calling getRowHeight/getRowThemeOverride with an
++            // out-of-range row index.
++            if (row === rows) {
++                if (ty >= minY && ty <= maxY - 1 && minX < __rexaNoCellsFromX) {
++                    __rexaPushHLineSegments(row, ty, minX, Math.min(maxX, __rexaNoCellsFromX), hColor);
++                }
++                break;
++            }
++            if (ty >= minY && ty <= maxY - 1 && minX < __rexaNoCellsFromX) {
+                 const rowTheme = getRowThemeOverride?.(row);
+-                toDraw.push({
+-                    x1: minX,
+-                    y1: ty,
+-                    x2: maxX,
+-                    y2: ty,
+-                    color: rowTheme?.horizontalBorderColor ?? rowTheme?.borderColor ?? hColor,
+-                });
++                __rexaPushHLineSegments(
++                    row,
++                    ty,
++                    minX,
++                    Math.min(maxX, __rexaNoCellsFromX),
++                    rowTheme?.horizontalBorderColor ?? rowTheme?.borderColor ?? hColor,
++                );
+             }
+             y += getRowHeight(row);
+             row++;
+diff --git a/dist/esm/internal/data-grid/data-grid.js b/dist/esm/internal/data-grid/data-grid.js
+index 26c81003d15ffb5014ff716e3dc3eeebf24b7cf6..0893af7c10fa3f125583809179651fecedac812a 100644
+--- a/dist/esm/internal/data-grid/data-grid.js
++++ b/dist/esm/internal/data-grid/data-grid.js
+@@ -1154,12 +1154,30 @@ const DataGrid = (p, forwardedRef) => {
+         if (!opacityX && !opacityY) {
+             return null;
+         }
++        // --- RexaDB patch (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++        // This DOM div (unlike the canvas-drawn lines this same patch
++        // already clips) is a plain `height: height` box regardless of
++        // how much real data there is — so the horizontal-scroll shadow
++        // it renders along the frozen-column boundary kept extending past
++        // the last real row as a faint residual shade even after the
++        // crisp border line itself was correctly clipped.
++        let __rexaShadowBottomY = height;
++        {
++            const __rexaGetRowHeight = typeof rowHeight === "number" ? () => rowHeight : rowHeight;
++            let rexaY = totalHeaderHeight + translateY;
++            let rexaRow = cellYOffset;
++            while (rexaRow < rows && rexaY < height) {
++                rexaY += __rexaGetRowHeight(rexaRow);
++                rexaRow++;
++            }
++            __rexaShadowBottomY = Math.min(height, rexaY);
++        }
+         const styleX = {
+             position: "absolute",
+             top: 0,
+             left: stickyX,
+             width: width - stickyX,
+-            height: height,
++            height: __rexaShadowBottomY,
+             opacity: opacityX,
+             pointerEvents: "none",
+             transition: !smoothScrollX ? "opacity 0.2s" : undefined,
+@@ -1179,7 +1197,7 @@ const DataGrid = (p, forwardedRef) => {
+         return (React.createElement(React.Fragment, null,
+             opacityX > 0 && React.createElement("div", { id: "shadow-x", style: styleX }),
+             opacityY > 0 && React.createElement("div", { id: "shadow-y", style: styleY })));
+-    }, [opacityX, opacityY, stickyX, width, smoothScrollX, totalHeaderHeight, height, smoothScrollY]);
++    }, [opacityX, opacityY, stickyX, width, smoothScrollX, totalHeaderHeight, height, smoothScrollY, rows, rowHeight, cellYOffset, translateY]);
+     const overlayStyle = React.useMemo(() => ({
+         position: "absolute",
+         top: 0,
+diff --git a/dist/esm/internal/data-grid/render/data-grid-render.js b/dist/esm/internal/data-grid/render/data-grid-render.js
+index abef757880d13b3c2f13c43e90b2c73d54e8482c..b45ed7b6f3950e6c0e26ff49e037608113c417f0 100644
+--- a/dist/esm/internal/data-grid/render/data-grid-render.js
++++ b/dist/esm/internal/data-grid/render/data-grid-render.js
+@@ -145,7 +145,7 @@ export function drawGrid(arg, lastArg) {
+     }
+     const drawHeaderTexture = () => {
+         drawGridHeaders(overlayCtx, effectiveCols, enableGroups, hoverInfo, width, translateX, headerHeight, groupHeaderHeight, dragAndDropState, isResizing, selection, theme, spriteManager, hoverValues, verticalBorder, getGroupDetails, damage, drawHeaderCallback, touchMode);
+-        drawGridLines(overlayCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, undefined, undefined, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, true);
++        drawGridLines(overlayCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, undefined, undefined, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection, true);
+         overlayCtx.beginPath();
+         overlayCtx.moveTo(0, overlayHeight - 0.5);
+         overlayCtx.lineTo(width, overlayHeight - 0.5);
+@@ -240,7 +240,7 @@ export function drawGrid(arg, lastArg) {
+         const resizedCol = canBlit;
+         drawRegions = blitResizedCol(last, cellXOffset, cellYOffset, translateX, translateY, width, height, totalHeaderHeight, effectiveCols, resizedCol);
+     }
+-    overdrawStickyBoundaries(targetCtx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme);
++    overdrawStickyBoundaries(targetCtx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme, cellYOffset, translateY, totalHeaderHeight);
+     const highlightRedraw = drawHighlightRings(targetCtx, width, height, cellXOffset, cellYOffset, translateX, translateY, mappedColumns, freezeColumns, headerHeight, groupHeaderHeight, rowHeight, freezeTrailingRows, rows, highlightRegions, theme);
+     // the overdraw may have nuked out our focus ring right edge.
+     const focusRedraw = drawFocus
+@@ -262,7 +262,7 @@ export function drawGrid(arg, lastArg) {
+     const spans = drawCells(targetCtx, effectiveCols, mappedColumns, height, totalHeaderHeight, translateX, translateY, cellYOffset, rows, getRowHeight, getCellContent, getGroupDetails, getRowThemeOverride, disabledRows, isFocused, drawFocus, freezeTrailingRows, hasAppendRow, drawRegions, damage, selection, prelightCells, highlightRegions, imageLoader, spriteManager, hoverValues, hoverInfo, drawCellCallback, hyperWrapping, theme, enqueue, renderStateProvider, getCellRenderer, overrideCursor, minimumCellWidth);
+     drawBlanks(targetCtx, effectiveCols, mappedColumns, width, height, totalHeaderHeight, translateX, translateY, cellYOffset, rows, getRowHeight, getRowThemeOverride, selection.rows, disabledRows, freezeTrailingRows, hasAppendRow, drawRegions, damage, theme);
+     drawExtraRowThemes(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme);
+-    drawGridLines(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme);
++    drawGridLines(targetCtx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection);
+     highlightRedraw?.();
+     focusRedraw?.();
+     if (isResizing && resizeIndicator !== "none") {
+diff --git a/dist/esm/internal/data-grid/render/data-grid-render.lines.js b/dist/esm/internal/data-grid/render/data-grid-render.lines.js
+index 8837a7066e529e8b8919ced6777ab980c64c5333..04de235cbefd6cad8c73232d00483fc04bc5bd43 100644
+--- a/dist/esm/internal/data-grid/render/data-grid-render.lines.js
++++ b/dist/esm/internal/data-grid/render/data-grid-render.lines.js
+@@ -52,7 +52,7 @@ export function drawBlanks(ctx, effectiveColumns, allColumns, width, height, tot
+         ctx.restore();
+     });
+ }
+-export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme) {
++export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, freezeTrailingRows, rows, verticalBorder, getRowHeight, theme, cellYOffset, translateY, totalHeaderHeight) {
+     let drawFreezeBorder = false;
+     for (const c of effectiveCols) {
+         if (c.sticky)
+@@ -66,9 +66,25 @@ export function overdrawStickyBoundaries(ctx, effectiveCols, width, height, free
+     let vStroke;
+     if (drawX !== 0) {
+         vStroke = blendCache(vColor, theme.bgCell);
++        // --- RexaDB patch (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++        // This function draws its own separate reinforcement line for the
++        // frozen/sticky-column boundary, full canvas height, independent
++        // of drawGridLines (which this same patch already clips to where
++        // real data ends) — without this it stayed full-height regardless
++        // of how few rows there were.
++        let __rexaStickyBottomY = height;
++        if (cellYOffset !== undefined && translateY !== undefined && totalHeaderHeight !== undefined) {
++            let rexaY = totalHeaderHeight + translateY;
++            let rexaRow = cellYOffset;
++            while (rexaRow < rows && rexaY < height) {
++                rexaY += getRowHeight(rexaRow);
++                rexaRow++;
++            }
++            __rexaStickyBottomY = Math.min(height, rexaY);
++        }
+         ctx.beginPath();
+         ctx.moveTo(drawX + 0.5, 0);
+-        ctx.lineTo(drawX + 0.5, height);
++        ctx.lineTo(drawX + 0.5, __rexaStickyBottomY);
+         ctx.strokeStyle = vStroke;
+         ctx.stroke();
+     }
+@@ -184,7 +200,7 @@ export function drawExtraRowThemes(ctx, effectiveCols, cellYOffset, translateX,
+     ctx.beginPath();
+ }
+ // lines are effectively drawn on the top left edge of a cell.
+-export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, verticalOnly = false) {
++export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, translateY, width, height, drawRegions, spans, groupHeaderHeight, totalHeaderHeight, getRowHeight, getRowThemeOverride, verticalBorder, freezeTrailingRows, rows, theme, selection, verticalOnly = false) {
+     if (spans !== undefined) {
+         ctx.beginPath();
+         ctx.save();
+@@ -197,6 +213,156 @@ export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, trans
+     const hColor = theme.horizontalBorderColor ?? theme.borderColor;
+     const vColor = theme.borderColor;
+     const { minX, maxX, minY, maxY } = getMinMaxXY(drawRegions, width, height);
++    // --- RexaDB patch: "no cells" column (patches/@glideapps+glide-data-grid+6.0.4-alpha24.patch) ---
++    // Lets one specific column (matched by id, set by our app) render with
++    // no horizontal row-separator lines — used for the "Add column"
++    // trailing column: a real GridColumn (native scroll space, exactly one
++    // boundary line like any other column) that should show no row
++    // structure beneath it. Vertical lines are untouched.
++    let __rexaNoCellsFromX = Infinity;
++    {
++        let rexaX = 0.5;
++        for (let rexaIndex = 0; rexaIndex < effectiveCols.length; rexaIndex++) {
++            const rexaCol = effectiveCols[rexaIndex];
++            if (rexaCol.width === 0)
++                continue;
++            if (rexaCol.id === "__rexa_add_column__") {
++                __rexaNoCellsFromX = rexaCol.sticky ? rexaX : rexaX + translateX;
++                break;
++            }
++            rexaX += rexaCol.width;
++        }
++    }
++    // Where real data ends, vertically, within the visible canvas — used
++    // to stop both vertical and horizontal lines from continuing into
++    // "phantom" rows past the actual row count (Glide's own line-drawing
++    // is otherwise unbounded by `rows`: the horizontal-line loop below
++    // only checks canvas height, so a grid with only a couple of rows
++    // still drew a full spreadsheet-style grid pattern all the way down
++    // the empty canvas). Bounded by canvas height, not total row count,
++    // so this stays cheap even for huge datasets — once accumulated
++    // height reaches the visible area the loop stops regardless of how
++    // many rows are left.
++    let __rexaDataBottomY = height;
++    {
++        let rexaY = totalHeaderHeight + translateY;
++        let rexaRow = cellYOffset;
++        while (rexaRow < rows && rexaY < height) {
++            rexaY += getRowHeight(rexaRow);
++            rexaRow++;
++        }
++        __rexaDataBottomY = Math.min(height, rexaY);
++    }
++    // Suppresses the normal per-column vertical gridline for whatever
++    // row-range a multi-cell selection covers, wherever the selection
++    // spans across that column boundary — our own custom cell renderer
++    // already draws ONE clean outer border around the whole selection
++    // (data-grid.tsx's isInSelectionRange/selectionRangeEdges), but
++    // Glide's own vertical lines are a completely separate draw pass that
++    // runs *after* cell content regardless, so they show through as a
++    // visible seam between selected cells that our own border-drawing has
++    // no way to paint over.
++    const __rexaSelectionRects =
++        selection?.current !== undefined ? [selection.current.range, ...selection.current.rangeStack] : [];
++    const __rexaRowYs = [totalHeaderHeight + translateY];
++    if (__rexaSelectionRects.length > 0) {
++        let rexaY2 = totalHeaderHeight + translateY;
++        let rexaRow2 = cellYOffset;
++        while (rexaRow2 < rows && rexaY2 < height) {
++            rexaY2 += getRowHeight(rexaRow2);
++            __rexaRowYs.push(rexaY2);
++            rexaRow2++;
++        }
++    }
++    const __rexaRowToY = row => {
++        if (row <= cellYOffset)
++            return __rexaRowYs[0];
++        const i = row - cellYOffset;
++        return i < __rexaRowYs.length ? __rexaRowYs[i] : __rexaRowYs[__rexaRowYs.length - 1];
++    };
++    const __rexaSuppressedRangesForBoundary = colIndex => {
++        const out = [];
++        for (const rect of __rexaSelectionRects) {
++            if (!(rect.x <= colIndex && rect.x + rect.width > colIndex + 1))
++                continue;
++            const y0 = __rexaRowToY(rect.y);
++            const y1 = __rexaRowToY(rect.y + rect.height);
++            if (y1 > y0)
++                out.push([y0, y1]);
++        }
++        out.sort((a, b) => a[0] - b[0]);
++        const merged = [];
++        for (const r of out) {
++            if (merged.length > 0 && r[0] <= merged[merged.length - 1][1]) {
++                merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
++            }
++            else {
++                merged.push([r[0], r[1]]);
++            }
++        }
++        return merged;
++    };
++    // Mirror of the above, for horizontal lines: suppresses the normal
++    // per-row horizontal gridline for whatever column-range a multi-cell
++    // selection covers, wherever the selection spans across that row
++    // boundary.
++    const __rexaColXs = [0.5];
++    if (__rexaSelectionRects.length > 0) {
++        let cx = 0.5;
++        for (let i = 0; i < effectiveCols.length; i++) {
++            const c = effectiveCols[i];
++            cx += c.width;
++            const tx = c.sticky ? cx : cx + translateX;
++            __rexaColXs.push(tx);
++        }
++    }
++    const __rexaColToX = col => {
++        if (col <= 0)
++            return __rexaColXs[0];
++        return col < __rexaColXs.length ? __rexaColXs[col] : __rexaColXs[__rexaColXs.length - 1];
++    };
++    const __rexaSuppressedRangesForRow = rowIndex => {
++        const out = [];
++        for (const rect of __rexaSelectionRects) {
++            if (!(rect.y <= rowIndex - 1 && rect.y + rect.height > rowIndex))
++                continue;
++            const x0 = __rexaColToX(rect.x);
++            const x1 = __rexaColToX(rect.x + rect.width);
++            if (x1 > x0)
++                out.push([x0, x1]);
++        }
++        out.sort((a, b) => a[0] - b[0]);
++        const merged = [];
++        for (const r of out) {
++            if (merged.length > 0 && r[0] <= merged[merged.length - 1][1]) {
++                merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], r[1]);
++            }
++            else {
++                merged.push([r[0], r[1]]);
++            }
++        }
++        return merged;
++    };
++    const __rexaPushHLineSegments = (rowIndex, y, xStart, xEnd, color) => {
++        const suppressed = __rexaSelectionRects.length > 0 ? __rexaSuppressedRangesForRow(rowIndex) : [];
++        if (suppressed.length === 0) {
++            toDraw.push({ x1: xStart, y1: y, x2: xEnd, y2: y, color });
++            return;
++        }
++        let segStart = xStart;
++        for (const [s0, s1] of suppressed) {
++            if (s0 > segStart) {
++                toDraw.push({ x1: segStart, y1: y, x2: Math.min(s0, xEnd), y2: y, color });
++            }
++            segStart = Math.max(segStart, s1);
++            if (segStart >= xEnd)
++                break;
++        }
++        if (segStart < xEnd) {
++            toDraw.push({ x1: segStart, y1: y, x2: xEnd, y2: y, color });
++        }
++    };
++    // --- end RexaDB patch setup ---
+     const toDraw = [];
+     ctx.beginPath();
+     // vertical lines
+@@ -208,37 +374,64 @@ export function drawGridLines(ctx, effectiveCols, cellYOffset, translateX, trans
+         x += c.width;
+         const tx = c.sticky ? x : x + translateX;
+         if (tx >= minX && tx <= maxX && verticalBorder(index + 1)) {
+-            toDraw.push({
+-                x1: tx,
+-                y1: Math.max(groupHeaderHeight, minY),
+-                x2: tx,
+-                y2: Math.min(height, maxY),
+-                color: vColor,
+-            });
++            const segTop = Math.max(groupHeaderHeight, minY);
++            const segBottom = Math.min(height, maxY, __rexaDataBottomY);
++            const suppressed =
++                __rexaSelectionRects.length > 0 ? __rexaSuppressedRangesForBoundary(index) : [];
++            if (suppressed.length === 0) {
++                toDraw.push({ x1: tx, y1: segTop, x2: tx, y2: segBottom, color: vColor });
++            }
++            else {
++                let segStart = segTop;
++                for (const [s0, s1] of suppressed) {
++                    if (s0 > segStart) {
++                        toDraw.push({ x1: tx, y1: segStart, x2: tx, y2: Math.min(s0, segBottom), color: vColor });
++                    }
++                    segStart = Math.max(segStart, s1);
++                    if (segStart >= segBottom)
++                        break;
++                }
++                if (segStart < segBottom) {
++                    toDraw.push({ x1: tx, y1: segStart, x2: tx, y2: segBottom, color: vColor });
++                }
++            }
+         }
+     }
+     let freezeY = height + 0.5;
+     for (let i = rows - freezeTrailingRows; i < rows; i++) {
+         const rh = getRowHeight(i);
+         freezeY -= rh;
+-        toDraw.push({ x1: minX, y1: freezeY, x2: maxX, y2: freezeY, color: hColor });
++        if (minX < __rexaNoCellsFromX) {
++            toDraw.push({ x1: minX, y1: freezeY, x2: Math.min(maxX, __rexaNoCellsFromX), y2: freezeY, color: hColor });
++        }
+     }
+     if (verticalOnly !== true) {
+         // horizontal lines
+         let y = totalHeaderHeight + 0.5;
+         let row = cellYOffset;
+         const target = freezeY;
+-        while (y + translateY < target) {
++        while (y + translateY < target && row <= rows) {
+             const ty = y + translateY;
+-            if (ty >= minY && ty <= maxY - 1) {
++            // row === rows here draws the bottom border of the last real
++            // row (the boundary *above* phantom row `rows`) — needed, so
++            // this isn't `row < rows`, but nothing past that: bail before
++            // calling getRowHeight/getRowThemeOverride with an
++            // out-of-range row index.
++            if (row === rows) {
++                if (ty >= minY && ty <= maxY - 1 && minX < __rexaNoCellsFromX) {
++                    __rexaPushHLineSegments(row, ty, minX, Math.min(maxX, __rexaNoCellsFromX), hColor);
++                }
++                break;
++            }
++            if (ty >= minY && ty <= maxY - 1 && minX < __rexaNoCellsFromX) {
+                 const rowTheme = getRowThemeOverride?.(row);
+-                toDraw.push({
+-                    x1: minX,
+-                    y1: ty,
+-                    x2: maxX,
+-                    y2: ty,
+-                    color: rowTheme?.horizontalBorderColor ?? rowTheme?.borderColor ?? hColor,
+-                });
++                __rexaPushHLineSegments(
++                    row,
++                    ty,
++                    minX,
++                    Math.min(maxX, __rexaNoCellsFromX),
++                    rowTheme?.horizontalBorderColor ?? rowTheme?.borderColor ?? hColor,
++                );
+             }
+             y += getRowHeight(row);
+             row++;

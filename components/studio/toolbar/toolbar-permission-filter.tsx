@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, Shield, User, Users } from "@/lib/icon-theme/lucide-react";
 import {
   Select,
@@ -18,30 +18,34 @@ import {
   type TablePermissionContext,
 } from "@/lib/studio/table-permissions";
 
+/** Supabase-style access roles shown in the table toolbar Access control. */
+const ACCESS_ROLES = ["postgres", "anon", "authenticated"] as const;
+
 interface ToolbarPermissionFilterProps {
   value: TablePermissionContext;
   onValueChange: (value: TablePermissionContext) => void;
   postgresRoles: string[];
   supabaseAuthUsers: SupabaseAuthUserOption[];
   loading?: boolean;
+  dbType?: string;
 }
 
 export function ToolbarPermissionFilter({
   value,
   onValueChange,
-  postgresRoles,
+  postgresRoles: _postgresRoles,
   supabaseAuthUsers,
   loading = false,
+  dbType,
 }: ToolbarPermissionFilterProps) {
   const [open, setOpen] = useState(false);
   const selectedValue = getTablePermissionContextKey(value);
   const triggerLabel = value ? `As ${value.label}` : "Default access";
-  const uniqueRoles = Array.from(
-    new Set(
-      postgresRoles
-        .map((role) => String(role || "").trim())
-        .filter(Boolean),
-    ),
+
+  // Always offer the three Supabase-style roles (not the full pg_roles dump).
+  const roleOptions = useMemo(
+    () => ACCESS_ROLES.map((role) => ({ role })),
+    [],
   );
 
   return (
@@ -90,75 +94,89 @@ export function ToolbarPermissionFilter({
       >
         <SelectGroup>
           <SelectLabel className="text-xs tracking-wider text-muted-foreground/70">
-            Permission Preview
+            Access
           </SelectLabel>
           <SelectItem value={DEFAULT_TABLE_PERMISSION_OPTION_VALUE} className="text-xs py-2">
             <span className="flex flex-col items-start">
               <span>Default access</span>
-              <span className="text-xs text-muted-foreground">Use the connection role with no impersonation.</span>
+              <span className="text-xs text-muted-foreground">
+                Use the connection role with no impersonation.
+              </span>
             </span>
           </SelectItem>
         </SelectGroup>
 
-        {uniqueRoles.length > 0 ? (
-          <>
-            <SelectSeparator />
-            <SelectGroup>
-              <SelectLabel className="text-xs tracking-wider text-muted-foreground/70">
-                Postgres Roles
-              </SelectLabel>
-              {uniqueRoles.map((role) => (
-                <SelectItem key={role} value={`role:${role}`} className="text-xs py-2">
-                  <span className="flex items-center gap-2">
-                    <Shield className="w-3.5 h-3.5 text-muted-foreground/70" />
-                    <span>{role}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </>
-        ) : null}
+        <SelectSeparator />
+        <SelectGroup>
+          <SelectLabel className="text-xs tracking-wider text-muted-foreground/70">
+            Role
+          </SelectLabel>
+          {roleOptions.map(({ role }) => (
+            <SelectItem key={role} value={`role:${role}`} className="text-xs py-2">
+              <span className="flex flex-col items-start">
+                <span className="flex items-center gap-2">
+                  <Shield className="w-3.5 h-3.5 text-muted-foreground/70" />
+                  <span>{role}</span>
+                </span>
+                <span className="text-xs text-muted-foreground pl-5">
+                  {role === "postgres"
+                    ? "Bypass RLS as the database owner."
+                    : role === "anon"
+                      ? "Anonymous Data API role."
+                      : "Pick a signed-in auth user below."}
+                </span>
+              </span>
+            </SelectItem>
+          ))}
+        </SelectGroup>
 
-        {loading ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Loading Supabase auth users...
-          </div>
-        ) : null}
-
-        {supabaseAuthUsers.length > 0 ? (
-          <>
-            <SelectSeparator />
-            <SelectGroup>
-              <SelectLabel className="text-xs tracking-wider text-muted-foreground/70">
-                Supabase Auth Users
-              </SelectLabel>
-              {supabaseAuthUsers.map((user) => {
-                const primaryLabel = user.email || user.phone || user.displayName || user.id;
-                const secondaryLabel = user.displayName && user.displayName !== primaryLabel
+        <SelectSeparator />
+        <SelectGroup>
+          <SelectLabel className="text-xs tracking-wider text-muted-foreground/70">
+            Authenticated users
+          </SelectLabel>
+          {loading ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Loading auth users...
+            </div>
+          ) : supabaseAuthUsers.length > 0 ? (
+            supabaseAuthUsers.map((user) => {
+              const primaryLabel = user.email || user.phone || user.displayName || user.id;
+              const secondaryLabel =
+                user.displayName && user.displayName !== primaryLabel
                   ? `${user.role || "authenticated"} • ${user.displayName}`
-                  : (user.role || "authenticated");
+                  : user.role || "authenticated";
 
-                return (
-                  <SelectItem key={user.id} value={`user:${user.id}`} className="text-xs py-2">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Users className="w-3.5 h-3.5 text-muted-foreground/70" />
-                      <span className="flex min-w-0 flex-col items-start">
-                        <span className="truncate max-w-[220px]">{primaryLabel}</span>
-                        <span className="text-xs text-muted-foreground truncate max-w-[220px]">
-                          {secondaryLabel}
-                        </span>
+              return (
+                <SelectItem key={user.id} value={`user:${user.id}`} className="text-xs py-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Users className="w-3.5 h-3.5 text-muted-foreground/70" />
+                    <span className="flex min-w-0 flex-col items-start">
+                      <span className="truncate max-w-[220px]">{primaryLabel}</span>
+                      <span className="text-xs text-muted-foreground truncate max-w-[220px]">
+                        {secondaryLabel}
                       </span>
                     </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectGroup>
-          </>
-        ) : null}
+                  </span>
+                </SelectItem>
+              );
+            })
+          ) : (
+            <div className="px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              No auth.users found.
+              {dbType === "supabase-mgmt" ? (
+                <span className="block mt-1">For Supabase Management connections, ensure the project has auth users and the access token was granted database scope. If this persists, connect with a direct `postgres://` string — it lists auth users reliably.</span>
+              ) : (
+                <span className="block mt-1">Ensure the `auth` schema exists on this database.</span>
+              )}
+            </div>
+          )}
+        </SelectGroup>
 
         <div className="border-t border-studio-border px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-          Preview mode applies the selected role or Supabase JWT claims to table reads only.
+          Choose postgres or anon for a role preview, or an authenticated user to
+          apply their JWT claims to table reads.
         </div>
       </SelectContent>
     </Select>

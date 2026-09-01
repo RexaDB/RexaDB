@@ -11,6 +11,13 @@ import "nearley";
 import { extractIndexColumns } from "../lib/db/pg-utils";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
+import { ensureEnrichedPath } from "../lib/system/shell-path";
+
+// Packaged/prod desktop builds are launched by the OS, not a terminal, so
+// process.env.PATH is missing Homebrew/nvm/npm-global dirs — enrich it
+// before any CLI-detection (Neon, agent CLIs, etc.) runs below.
+ensureEnrichedPath();
+
 function log(...args: any[]) {
   let i = 0;
   const parts: string[] = [];
@@ -145,6 +152,46 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
     }
     const upstream = await fetch(targetUrl, fetchInit);
     const text = await upstream.text();
+    res.status(upstream.status);
+    try {
+      res.json(JSON.parse(text));
+    } catch {
+      res.send(text);
+    }
+  } catch (e: any) {
+    res.status(502).json({ success: false, error: e.message });
+  }
+});
+
+// PlanetScale API proxy (avoids CORS in the browser). Used for browsing
+// orgs/databases/branches and minting branch passwords — never for query
+// execution, which talks to the resulting mysql/postgres connection directly.
+app.all("/api/planetscale/proxy/*", async (req, res) => {
+  try {
+    const targetPath = (req.params as any)[0];
+    const qs = Object.keys(req.query).length
+      ? "?" + new URLSearchParams(req.query as Record<string, string>).toString()
+      : "";
+    const targetUrl = `https://api.planetscale.com/${targetPath}${qs}`;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      headers["Content-Type"] = req.headers["content-type"] || "application/json";
+    }
+    const fetchInit: RequestInit = {
+      method: req.method,
+      headers,
+    };
+    if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
+      fetchInit.body = JSON.stringify(req.body);
+    }
+    const authHeader = headers.Authorization || "";
+    log("[planetscale/proxy] ->", req.method, targetUrl, "auth:", authHeader ? `${authHeader.slice(0, 13)}...${authHeader.slice(-4)}(${authHeader.length})` : "(none)");
+    const upstream = await fetch(targetUrl, fetchInit);
+    const text = await upstream.text();
+    log("[planetscale/proxy] <-", upstream.status, text.slice(0, 500));
     res.status(upstream.status);
     try {
       res.json(JSON.parse(text));
@@ -578,7 +625,9 @@ app.post("/api/table-security-info", proxyTwoArgRoute(mod.fetchTableSecurityInfo
 app.post("/api/supabase-auth-users", async (req, res) => {
   try {
     if (await tryProxyDbOp(req, res)) return;
-    res.json({ success: true, data: [] });
+    const { connectionString } = req.body || {};
+    const result = await mod.fetchSupabaseAuthUsers(connectionString);
+    res.json(result);
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }
@@ -1274,19 +1323,41 @@ async function proxyDbOp(apiPath: string, body: any): Promise<any> {
       }
 
       case "supabase-auth-users": {
-        const sql = `
-          SELECT u.id::text AS id, u.email, u.phone, u.role, u.created_at,
-            u.raw_app_meta_data, u.raw_user_meta_data,
-            COALESCE(string_agg(DISTINCT i.provider, ', ') FILTER (WHERE i.provider IS NOT NULL),
-              CASE WHEN u.encrypted_password IS NOT NULL THEN 'email' ELSE NULL END) AS identities
-          FROM auth.users u
-          LEFT JOIN auth.identities i ON i.user_id = u.id
-          GROUP BY u.id
-          ORDER BY u.created_at DESC
-        `;
-        const qr = await apiQuery(wsId, sql);
+        // Use simple queries for maximum compatibility (workspace proxy may also be strict about GROUP BY)
+        const usersSql = `SELECT u.id::text AS id, u.email, u.phone, u.role, u.created_at, u.raw_app_meta_data, u.raw_user_meta_data FROM auth.users u ORDER BY u.created_at DESC LIMIT 500`;
+        const qr = await apiQuery(wsId, usersSql);
         if (qr.error) return { success: false, error: qr.error };
-        return { success: true, data: qr.rows || [] };
+        const mapped = (qr.rows || []).map((row: any) => {
+          const rawUserMetaData =
+            row?.raw_user_meta_data && typeof row.raw_user_meta_data === "object"
+              ? row.raw_user_meta_data
+              : {};
+          const rawAppMetaData =
+            row?.raw_app_meta_data && typeof row.raw_app_meta_data === "object"
+              ? row.raw_app_meta_data
+              : {};
+          const displayName =
+            (typeof rawUserMetaData.full_name === "string" && rawUserMetaData.full_name.trim()) ||
+            (typeof rawUserMetaData.name === "string" && rawUserMetaData.name.trim()) ||
+            (typeof rawUserMetaData.display_name === "string" && rawUserMetaData.display_name.trim()) ||
+            (typeof row?.email === "string" ? row.email.split("@")[0] : "") ||
+            String(row?.id || "");
+          return {
+            id: String(row?.id || ""),
+            displayName,
+            email: row?.email ?? null,
+            phone: row?.phone ?? null,
+            role: String(row?.role || "authenticated"),
+            providers: String(row?.identities || "")
+              .split(",")
+              .map((p: string) => p.trim())
+              .filter(Boolean),
+            createdAt: row?.created_at ? String(row.created_at) : null,
+            rawAppMetaData,
+            rawUserMetaData,
+          };
+        }).filter((u: { id: string }) => Boolean(u.id));
+        return { success: true, data: mapped };
       }
 
       default:

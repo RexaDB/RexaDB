@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,7 +12,6 @@ import {
   SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import {
   Select,
   SelectContent,
@@ -59,8 +57,6 @@ export function AddColumnSheet({
   onAddColumn,
   isAdding,
 }: AddColumnSheetProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
     [connectionString],
@@ -226,12 +222,12 @@ export function AddColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         onInteractOutside={handleInteractOutside}
-        className={cn("bg-background text-foreground flex flex-col p-0 gap-0", !shellLayout && "h-full w-[min(540px,88vw)] border-border data-[side=right]:sm:max-w-[540px]")}
+        className="bg-background text-foreground flex flex-col p-0 gap-0"
       >
         {ConfirmDialog}
         <div className="flex flex-col h-full">

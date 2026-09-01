@@ -11,6 +11,7 @@ import type { CustomAppTheme } from "@/lib/studio/app-themes";
 import type { SidebarBehavior } from "@/lib/studio/sidebar-behavior";
 import { mergeById } from "@/lib/studio/general-utils";
 import { normalizeCloudFolders, normalizeCloudSnippets, mapStudioSnippet } from "@/lib/studio/cloud-sync-utils";
+import { subscribeSettingsSyncApplied } from "@/lib/studio/settings-sync-events";
 
 interface UseInitialStudioDataProps {
   connection: Connection;
@@ -69,6 +70,19 @@ export function useInitialStudioData({
     setIsHistoryLoaded(false);
     setIsDataLoaded(false);
   }, [connection.id]);
+
+  // Paid-plan settings sync can update keybindings while studio is open.
+  useEffect(() => {
+    return subscribeSettingsSyncApplied((detail) => {
+      const remote = detail.payload.keybindings;
+      if (!remote || typeof remote !== "object") return;
+      setKeybindings(
+        normalizeKeybindingsForPlatform(
+          withMissingDefaultKeybindings(remote as Record<string, any>),
+        ),
+      );
+    });
+  }, [setKeybindings]);
 
   useEffect(() => {
     let cancelled = false;

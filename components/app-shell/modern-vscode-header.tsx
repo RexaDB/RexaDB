@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ModernUISearchBar } from "@/components/app-shell/modern-ui-search";
 import { ModernConnectionDropdown } from "@/components/app-shell/modern-connection-dropdown";
+import { UpdateHeaderBadge } from "@/components/providers/update-header-badge";
 import { Bell } from "@/lib/icon-theme/lucide-react";
 import { AltArrowLeft, AltArrowRight } from "@/lib/icon-theme/solar-icons";
 import {
@@ -69,7 +70,7 @@ export function ModernVscodeHeader({
   height?: number;
   /** Left inset for the macOS traffic lights so the layout controls don't collide. */
   macTrafficLightInset?: number;
-  /** Opens the app-wide universal search from the search bar. */
+  /** Opens the Cmd+K command menu from the search bar. */
   onOpenSearch?: () => void;
   /** User keybindings so the customization dialog shows real, custom combos. */
   keybindings?: KeybindingsMap;
@@ -104,7 +105,7 @@ export function ModernVscodeHeader({
   // Compact title-bar controls so the cluster sits cleanly inside the ~36px
   // strip above the content cards (mt-9 / pt-9).
   const navButtonClass =
-    "size-6 select-none rounded-sm text-muted-foreground transition-colors hover:bg-sidebar hover:text-foreground [&_svg]:size-3.5";
+    "size-[22px] select-none rounded-[4px] text-muted-foreground transition-colors hover:bg-sidebar hover:text-foreground [&_svg]:size-3.5";
   const layoutButtonClass = navButtonClass;
   const sidebarShortcut = shortcutLabel(keybindings, "TOGGLE_SIDEBAR");
   const panelShortcut = shortcutLabel(keybindings, "TOGGLE_BOTTOM_PANEL");
@@ -113,7 +114,7 @@ export function ModernVscodeHeader({
 
   return (
     <header
-      className="absolute inset-x-0 top-0 z-40 flex h-9 shrink-0 select-none items-center gap-2 px-2"
+      className="absolute inset-x-0 top-0 z-40 flex h-8 shrink-0 select-none items-center gap-2 px-2"
       data-tauri-drag-region="deep"
       style={{
         // Prefer the measured strip height when available so the bar always
@@ -152,6 +153,7 @@ export function ModernVscodeHeader({
             onSelectConnection={onSelectConnection}
           />
           <ModernUISearchBar onOpen={onOpenSearch} keybindings={keybindings} />
+          <UpdateHeaderBadge />
         </div>
       </div>
 

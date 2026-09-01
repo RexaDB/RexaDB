@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getGlobalStudioSettings,
   saveGlobalStudioSettings,
@@ -17,22 +17,11 @@ import type {
 } from "@/lib/studio/types";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import {
-  DEFAULT_LAYOUT_PREFS,
-  getLayoutPrefsSnapshot,
-  subscribeToLayoutPrefs,
-  setLayoutPrefs,
-  hydrateLayoutPrefsFromDb,
-} from "@/lib/studio/layout-prefs-cache";
+  emitSettingsSyncLocalChanged,
+  subscribeSettingsSyncApplied,
+} from "@/lib/studio/settings-sync-events";
 
 export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
-
-// Layout settings load asynchronously (disk/DB round trip via
-// getGlobalStudioSettings), so the very first render always uses the
-// hardcoded defaults below — briefly flashing the wrong shell (e.g. New
-// Layout before Modern UI) until the async load resolves. Caching the last
-// known value in localStorage lets the initial render start correct, the
-// same trick app/layout.tsx already uses for the theme. See
-// lib/studio/layout-prefs-cache.ts for why both flags share one cache entry.
 
 interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   appZoom: number;
@@ -57,8 +46,6 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   dataBars: boolean;
   skeletonLoaders: boolean;
   sleekLayout: boolean;
-  appShellLayout: boolean;
-  modernUiLayout: boolean;
   showTabIndicator: boolean;
   iconThemeId: string;
   customIconThemes: CustomIconTheme[];
@@ -121,29 +108,6 @@ export function useGlobalStudioSettings(persist = false) {
   const [skeletonLoaders, setSkeletonLoaders] = useState<boolean>(false);
   const [sleekLayout, setSleekLayout] = useState<boolean>(false);
   const [activeSleekLayout, setActiveSleekLayout] = useState<boolean>(false);
-  // A page can mount many instances of this hook at once (this component's
-  // own, the zoom wrapper, assorted sheets each pulling one unrelated
-  // field), so these two flags live in a single shared external store
-  // (lib/studio/layout-prefs-cache.ts) instead of per-instance useState —
-  // every instance reads and writes the exact same canonical value, with no
-  // events to rebroadcast and no risk of one instance's stale write
-  // reverting another's fresh one.
-  const layoutPrefs = useSyncExternalStore(
-    subscribeToLayoutPrefs,
-    getLayoutPrefsSnapshot,
-    () => DEFAULT_LAYOUT_PREFS,
-  );
-  const appShellLayout = layoutPrefs.appShellLayout;
-  const modernUiLayout = layoutPrefs.modernUiLayout;
-  // "New Layout" and "Modern UI" are mutually exclusive shells — turning one
-  // on turns the other off. Turning one off doesn't force the other on (the
-  // user can still land on the plain/legacy layout with neither set).
-  const setAppShellLayout = useCallback((value: boolean) => {
-    setLayoutPrefs({ appShellLayout: value, modernUiLayout: value ? false : getLayoutPrefsSnapshot().modernUiLayout });
-  }, []);
-  const setModernUiLayout = useCallback((value: boolean) => {
-    setLayoutPrefs({ appShellLayout: value ? false : getLayoutPrefsSnapshot().appShellLayout, modernUiLayout: value });
-  }, []);
   const [showTabIndicator, setShowTabIndicator] = useState<boolean>(true);
   const [iconThemeId, setIconThemeId] = useState<string>(DEFAULT_ICON_THEME_ID);
   const [customIconThemes, setCustomIconThemes] = useState<CustomIconTheme[]>(
@@ -197,6 +161,146 @@ export function useGlobalStudioSettings(persist = false) {
     useState<boolean>(false);
 
   const [isLoaded, setIsLoaded] = useState(false);
+  const agentApiKeyRef = useRef(agentApiKey);
+  agentApiKeyRef.current = agentApiKey;
+
+  const applyFromRecord = (d: Record<string, any>) => {
+    if (d.appZoom !== undefined) setAppZoom(d.appZoom);
+    if (d.executionMode) setExecutionMode(d.executionMode);
+    if (d.rowSpacing) setRowSpacing(d.rowSpacing);
+    if (d.alternatingRowColors !== undefined)
+      setAlternatingRowColors(d.alternatingRowColors);
+    if (d.editorFontSize) setEditorFontSize(d.editorFontSize);
+    if (d.editorFontFamily) setEditorFontFamily(d.editorFontFamily);
+    if (d.sqlEditorEngine) setSqlEditorEngine(d.sqlEditorEngine);
+    if (d.tuiMode !== undefined) setTuiMode(d.tuiMode);
+    if (d.tuiTheme) setTuiTheme(d.tuiTheme);
+    if (Array.isArray(d.commandMenuSections))
+      setCommandMenuSections(d.commandMenuSections);
+    if (d.agentProvider) setAgentProvider(d.agentProvider);
+    if (d.agentModel) setAgentModel(d.agentModel);
+    // Keep device-local API keys: only apply when present in the record.
+    if (d.agentApiKey !== undefined) setAgentApiKey(d.agentApiKey);
+
+    if (d.glassmorphicHeaders !== undefined)
+      setGlassmorphicHeaders(d.glassmorphicHeaders);
+    if (d.gridAnimations !== undefined) setGridAnimations(d.gridAnimations);
+    if (d.sleekSelection !== undefined) setSleekSelection(d.sleekSelection);
+    if (d.colorizedPills !== undefined) setColorizedPills(d.colorizedPills);
+    if (d.relativeDates !== undefined) setRelativeDates(d.relativeDates);
+    if (d.richJsonInspector !== undefined)
+      setRichJsonInspector(d.richJsonInspector);
+    if (d.dataBars !== undefined) setDataBars(d.dataBars);
+    if (d.skeletonLoaders !== undefined)
+      setSkeletonLoaders(d.skeletonLoaders);
+    if (d.showTabIndicator !== undefined)
+      setShowTabIndicator(d.showTabIndicator);
+    if (typeof d.iconThemeId === "string" && d.iconThemeId.trim())
+      setIconThemeId(d.iconThemeId);
+    if ("customIconThemes" in d) {
+      setCustomIconThemes(normalizeCustomIconThemes(d.customIconThemes));
+    }
+    if (d.sleekLayout !== undefined) {
+      setSleekLayout(d.sleekLayout);
+      setActiveSleekLayout(d.sleekLayout);
+    }
+    if (d.restoreAppState !== undefined) {
+      setRestoreAppState(d.restoreAppState);
+    }
+    if (d.schemaExplorer !== undefined) {
+      setSchemaExplorer(d.schemaExplorer);
+    }
+    if (d.databaseExplorer !== undefined) {
+      setDatabaseExplorer(d.databaseExplorer);
+    }
+    if (d.tableExpansion !== undefined) {
+      setTableExpansion(d.tableExpansion);
+    }
+    if (d.hideWindowActions !== undefined) {
+      setHideWindowActions(d.hideWindowActions);
+    }
+    if (d.rlsPolicyTabEditor !== undefined) {
+      setRlsPolicyTabEditor(d.rlsPolicyTabEditor);
+    }
+    if (d.autoClosePane !== undefined) {
+      setAutoClosePane(d.autoClosePane);
+    }
+    if (d.confirmSheetClose !== undefined) {
+      setConfirmSheetClose(d.confirmSheetClose);
+    }
+    if (d.sidebarToggleBeforeConnection !== undefined) {
+      setSidebarToggleBeforeConnection(d.sidebarToggleBeforeConnection);
+    }
+    if (d.autoSaveQueries !== undefined) {
+      setAutoSaveQueries(d.autoSaveQueries);
+    }
+    if (d.vimMode !== undefined) {
+      setVimMode(d.vimMode);
+    }
+    if (d.slashAiTrigger !== undefined) {
+      setSlashAiTrigger(d.slashAiTrigger);
+    }
+    if (d.sqlFormatTabWidth !== undefined) {
+      setSqlFormatTabWidth(d.sqlFormatTabWidth);
+    }
+    if (d.sqlFormatUseTabs !== undefined) {
+      setSqlFormatUseTabs(d.sqlFormatUseTabs);
+    }
+    if (d.sqlFormatKeywordCase !== undefined) {
+      setSqlFormatKeywordCase(d.sqlFormatKeywordCase);
+    }
+    if (d.sqlFormatDataTypeCase !== undefined) {
+      setSqlFormatDataTypeCase(d.sqlFormatDataTypeCase);
+    }
+    if (d.sqlFormatFunctionCase !== undefined) {
+      setSqlFormatFunctionCase(d.sqlFormatFunctionCase);
+    }
+    if (d.sqlFormatIdentifierCase !== undefined) {
+      setSqlFormatIdentifierCase(d.sqlFormatIdentifierCase);
+    }
+    if (d.sqlFormatLogicalOperatorNewline !== undefined) {
+      setSqlFormatLogicalOperatorNewline(d.sqlFormatLogicalOperatorNewline);
+    }
+    if (d.sqlFormatExpressionWidth !== undefined) {
+      setSqlFormatExpressionWidth(d.sqlFormatExpressionWidth);
+    }
+    if (d.sqlFormatLinesBetweenQueries !== undefined) {
+      setSqlFormatLinesBetweenQueries(d.sqlFormatLinesBetweenQueries);
+    }
+    if (d.sqlFormatDenseOperators !== undefined) {
+      setSqlFormatDenseOperators(d.sqlFormatDenseOperators);
+    }
+    if (d.sqlFormatNewlineBeforeSemicolon !== undefined) {
+      setSqlFormatNewlineBeforeSemicolon(d.sqlFormatNewlineBeforeSemicolon);
+    }
+    if (d.showPendingChangesBanner !== undefined) {
+      setShowPendingChangesBanner(d.showPendingChangesBanner);
+    }
+    if (d.previewTabs !== undefined) {
+      setPreviewTabs(d.previewTabs);
+    }
+    if (d.resultTabsEnabled !== undefined) {
+      setResultTabsEnabled(d.resultTabsEnabled);
+    }
+    if (d.noiseBgEnabled !== undefined) {
+      setNoiseBgEnabled(d.noiseBgEnabled);
+    }
+    if (d.noiseBgOpacity !== undefined) {
+      setNoiseBgOpacity(d.noiseBgOpacity);
+    }
+    if (d.noiseBgSize !== undefined) {
+      setNoiseBgSize(d.noiseBgSize);
+    }
+    if (d.noiseBgBlendMode) {
+      setNoiseBgBlendMode(d.noiseBgBlendMode);
+    }
+    if (d.noiseBgColor) {
+      setNoiseBgColor(d.noiseBgColor);
+    }
+    if (d.noiseBgTranslucent !== undefined) {
+      setNoiseBgTranslucent(d.noiseBgTranslucent);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -204,143 +308,7 @@ export function useGlobalStudioSettings(persist = false) {
       const result = await getGlobalStudioSettings();
       if (cancelled) return;
       if (result.success && result.data) {
-        const d = result.data;
-        if (d.appZoom !== undefined) setAppZoom(d.appZoom);
-        if (d.executionMode) setExecutionMode(d.executionMode);
-        if (d.rowSpacing) setRowSpacing(d.rowSpacing);
-        if (d.alternatingRowColors !== undefined)
-          setAlternatingRowColors(d.alternatingRowColors);
-        if (d.editorFontSize) setEditorFontSize(d.editorFontSize);
-        if (d.editorFontFamily) setEditorFontFamily(d.editorFontFamily);
-        if (d.sqlEditorEngine) setSqlEditorEngine(d.sqlEditorEngine);
-        if (d.tuiMode !== undefined) setTuiMode(d.tuiMode);
-        if (d.tuiTheme) setTuiTheme(d.tuiTheme);
-        if (Array.isArray(d.commandMenuSections))
-          setCommandMenuSections(d.commandMenuSections);
-        if (d.agentProvider) setAgentProvider(d.agentProvider);
-        if (d.agentModel) setAgentModel(d.agentModel);
-        if (d.agentApiKey) setAgentApiKey(d.agentApiKey);
-
-        if (d.glassmorphicHeaders !== undefined)
-          setGlassmorphicHeaders(d.glassmorphicHeaders);
-        if (d.gridAnimations !== undefined) setGridAnimations(d.gridAnimations);
-        if (d.sleekSelection !== undefined) setSleekSelection(d.sleekSelection);
-        if (d.colorizedPills !== undefined) setColorizedPills(d.colorizedPills);
-        if (d.relativeDates !== undefined) setRelativeDates(d.relativeDates);
-        if (d.richJsonInspector !== undefined)
-          setRichJsonInspector(d.richJsonInspector);
-        if (d.dataBars !== undefined) setDataBars(d.dataBars);
-        if (d.skeletonLoaders !== undefined)
-          setSkeletonLoaders(d.skeletonLoaders);
-        if (d.showTabIndicator !== undefined)
-          setShowTabIndicator(d.showTabIndicator);
-        if (typeof d.iconThemeId === "string" && d.iconThemeId.trim())
-          setIconThemeId(d.iconThemeId);
-        setCustomIconThemes(normalizeCustomIconThemes(d.customIconThemes));
-        if (d.sleekLayout !== undefined) {
-          setSleekLayout(d.sleekLayout);
-          setActiveSleekLayout(d.sleekLayout);
-        }
-        hydrateLayoutPrefsFromDb({
-          appShellLayout: d.appShellLayout,
-          modernUiLayout: d.modernUiLayout,
-        });
-        if (d.restoreAppState !== undefined) {
-          setRestoreAppState(d.restoreAppState);
-        }
-        if (d.schemaExplorer !== undefined) {
-          setSchemaExplorer(d.schemaExplorer);
-        }
-        if (d.databaseExplorer !== undefined) {
-          setDatabaseExplorer(d.databaseExplorer);
-        }
-        if (d.tableExpansion !== undefined) {
-          setTableExpansion(d.tableExpansion);
-        }
-        if (d.hideWindowActions !== undefined) {
-          setHideWindowActions(d.hideWindowActions);
-        }
-        if (d.rlsPolicyTabEditor !== undefined) {
-          setRlsPolicyTabEditor(d.rlsPolicyTabEditor);
-        }
-        if (d.autoClosePane !== undefined) {
-          setAutoClosePane(d.autoClosePane);
-        }
-        if (d.confirmSheetClose !== undefined) {
-          setConfirmSheetClose(d.confirmSheetClose);
-        }
-        if (d.sidebarToggleBeforeConnection !== undefined) {
-          setSidebarToggleBeforeConnection(d.sidebarToggleBeforeConnection);
-        }
-        if (d.autoSaveQueries !== undefined) {
-          setAutoSaveQueries(d.autoSaveQueries);
-        }
-        if (d.vimMode !== undefined) {
-          setVimMode(d.vimMode);
-        }
-        if (d.slashAiTrigger !== undefined) {
-          setSlashAiTrigger(d.slashAiTrigger);
-        }
-        if (d.sqlFormatTabWidth !== undefined) {
-          setSqlFormatTabWidth(d.sqlFormatTabWidth);
-        }
-        if (d.sqlFormatUseTabs !== undefined) {
-          setSqlFormatUseTabs(d.sqlFormatUseTabs);
-        }
-        if (d.sqlFormatKeywordCase !== undefined) {
-          setSqlFormatKeywordCase(d.sqlFormatKeywordCase);
-        }
-        if (d.sqlFormatDataTypeCase !== undefined) {
-          setSqlFormatDataTypeCase(d.sqlFormatDataTypeCase);
-        }
-        if (d.sqlFormatFunctionCase !== undefined) {
-          setSqlFormatFunctionCase(d.sqlFormatFunctionCase);
-        }
-        if (d.sqlFormatIdentifierCase !== undefined) {
-          setSqlFormatIdentifierCase(d.sqlFormatIdentifierCase);
-        }
-        if (d.sqlFormatLogicalOperatorNewline !== undefined) {
-          setSqlFormatLogicalOperatorNewline(d.sqlFormatLogicalOperatorNewline);
-        }
-        if (d.sqlFormatExpressionWidth !== undefined) {
-          setSqlFormatExpressionWidth(d.sqlFormatExpressionWidth);
-        }
-        if (d.sqlFormatLinesBetweenQueries !== undefined) {
-          setSqlFormatLinesBetweenQueries(d.sqlFormatLinesBetweenQueries);
-        }
-        if (d.sqlFormatDenseOperators !== undefined) {
-          setSqlFormatDenseOperators(d.sqlFormatDenseOperators);
-        }
-        if (d.sqlFormatNewlineBeforeSemicolon !== undefined) {
-          setSqlFormatNewlineBeforeSemicolon(d.sqlFormatNewlineBeforeSemicolon);
-        }
-        if (d.showPendingChangesBanner !== undefined) {
-          setShowPendingChangesBanner(d.showPendingChangesBanner);
-        }
-        if (d.previewTabs !== undefined) {
-          setPreviewTabs(d.previewTabs);
-        }
-        if (d.resultTabsEnabled !== undefined) {
-          setResultTabsEnabled(d.resultTabsEnabled);
-        }
-        if (d.noiseBgEnabled !== undefined) {
-          setNoiseBgEnabled(d.noiseBgEnabled);
-        }
-        if (d.noiseBgOpacity !== undefined) {
-          setNoiseBgOpacity(d.noiseBgOpacity);
-        }
-        if (d.noiseBgSize !== undefined) {
-          setNoiseBgSize(d.noiseBgSize);
-        }
-        if (d.noiseBgBlendMode) {
-          setNoiseBgBlendMode(d.noiseBgBlendMode);
-        }
-        if (d.noiseBgColor) {
-          setNoiseBgColor(d.noiseBgColor);
-        }
-        if (d.noiseBgTranslucent !== undefined) {
-          setNoiseBgTranslucent(d.noiseBgTranslucent);
-        }
+        applyFromRecord(result.data as Record<string, any>);
       }
       setIsLoaded(true);
     };
@@ -348,6 +316,19 @@ export function useGlobalStudioSettings(persist = false) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeSettingsSyncApplied((detail) => {
+      const remote = detail.payload.studioSettings;
+      if (!remote || typeof remote !== "object") return;
+      // Preserve the device-local API key — cloud payload never includes it.
+      applyFromRecord({
+        ...remote,
+        agentApiKey: agentApiKeyRef.current,
+      });
+      setIsLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -375,8 +356,6 @@ export function useGlobalStudioSettings(persist = false) {
       dataBars,
       skeletonLoaders,
       sleekLayout,
-      appShellLayout,
-      modernUiLayout,
       showTabIndicator,
       iconThemeId,
       customIconThemes,
@@ -412,6 +391,8 @@ export function useGlobalStudioSettings(persist = false) {
       sqlFormatLinesBetweenQueries,
       sqlFormatDenseOperators,
       sqlFormatNewlineBeforeSemicolon,
+    }).then(() => {
+      emitSettingsSyncLocalChanged("studioSettings");
     });
   }, [
     persist,
@@ -438,8 +419,6 @@ export function useGlobalStudioSettings(persist = false) {
     dataBars,
     skeletonLoaders,
     sleekLayout,
-    appShellLayout,
-    modernUiLayout,
     showTabIndicator,
     iconThemeId,
     customIconThemes,
@@ -546,10 +525,6 @@ export function useGlobalStudioSettings(persist = false) {
     sleekLayout,
     setSleekLayout,
     activeSleekLayout,
-    appShellLayout,
-    setAppShellLayout,
-    modernUiLayout,
-    setModernUiLayout,
     showTabIndicator,
     setShowTabIndicator,
     iconThemeId,

@@ -232,8 +232,7 @@ export function AddRlsPolicySheet({
   initialTable,
   onSave,
 }: AddRlsPolicySheetProps) {
-  const { appShellLayout, confirmSheetClose, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
+  const { confirmSheetClose } = useGlobalStudioSettings();
   const [form, setForm] = useState<PolicyValues>({ ...DEFAULTS });
   const [templateSearch, setTemplateSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -324,16 +323,13 @@ export function AddRlsPolicySheet({
   ) => setForm((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         onInteractOutside={handleInteractOutside}
         showCloseButton={false}
-        className={cn(
-          "bg-background border-border text-foreground p-0 gap-0 flex flex-col",
-          shellLayout ? "data-[side=right]:sm:max-w-[1020px]" : "data-[side=right]:sm:max-w-[1020px] w-full",
-        )}
+        className="bg-background border-border text-foreground p-0 gap-0 flex flex-col data-[side=right]:sm:max-w-[1020px]"
       >
         {ConfirmDialog}
         {/* Header */}

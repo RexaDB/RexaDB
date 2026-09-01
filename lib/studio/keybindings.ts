@@ -86,8 +86,8 @@ const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   "Cmd+Alt+P": { type: "NAVIGATE_SCHEMA", schema: "public" },
   "Cmd+Alt+0": { type: "NAVIGATE_DATABASE", database: "postgres" },
   "Cmd+1": { type: "GO_TO_TAB_INDEX", index: 0 },
-  "Ctrl+Tab": { type: "GO_TO_NEXT_TAB" },
-  "Ctrl+Shift+Tab": { type: "GO_TO_PREVIOUS_TAB" },
+  "Cmd+Tab": { type: "GO_TO_NEXT_TAB" },
+  "Cmd+Shift+Tab": { type: "GO_TO_PREVIOUS_TAB" },
   "Cmd+W": { type: "CLOSE_ACTIVE_TAB" },
   "Cmd+N": { type: "OPEN_SQL_EDITOR" },
   "Cmd+Enter": { type: "RUN_ACTIVE_QUERY" },
@@ -153,14 +153,34 @@ export function getKeybindingCombo(
   return null;
 }
 
-export function getDefaultKeybindings(): Record<string, Keybinding> {
-  return { ...DEFAULT_KEYBINDINGS };
+export function getDefaultKeybindings(platform?: ShortcutPlatform): Record<string, Keybinding> {
+  const raw = { ...DEFAULT_KEYBINDINGS };
+  // Return platform-normalized defaults so callers that don't manually
+  // normalize (e.g., isDefault checks in UI) still see the correct
+  // per-platform combo (⌘ on macOS, Ctrl on Windows/Linux).
+  return normalizeKeybindingsForPlatform(raw, platform);
 }
 
 export function withMissingDefaultKeybindings(
-  source: Record<string, Keybinding>
+  source: Record<string, Keybinding>,
+  platform?: ShortcutPlatform
 ): Record<string, Keybinding> {
   const result: Record<string, Keybinding> = { ...source };
+
+  // Migrate legacy defaults: on macOS the tab-nav shortcuts were
+  // previously stored as Ctrl+Tab / Ctrl+Shift+Tab; they should now
+  // be Cmd+Tab / Cmd+Shift+Tab so the default commands use Cmd on Mac.
+  const resolvedForLegacy = resolvePlatform(platform);
+  if (resolvedForLegacy === "mac") {
+    if (result["Ctrl+Tab"] && !result["Cmd+Tab"]) {
+      result["Cmd+Tab"] = result["Ctrl+Tab"];
+      delete result["Ctrl+Tab"];
+    }
+    if (result["Ctrl+Shift+Tab"] && !result["Cmd+Shift+Tab"]) {
+      result["Cmd+Shift+Tab"] = result["Ctrl+Shift+Tab"];
+      delete result["Ctrl+Shift+Tab"];
+    }
+  }
 
   // Migrate legacy defaults: Cmd+J used to toggle the sidebar; it now toggles
   // the Modern UI bottom panel, and the sidebar is Cmd+B (when free).
@@ -280,7 +300,14 @@ export function formatShortcutForPlatform(combo: string, platform?: ShortcutPlat
 
 function normalizeComboForPlatform(combo: string, platform?: ShortcutPlatform): string {
   const resolved = resolvePlatform(platform);
-  const tokens = combo
+  // Handle legacy stored values where tab-nav was Ctrl on macOS — map them
+  // to Cmd so the normalized map exposes the new Cmd default on Mac.
+  let normalizedInput = combo;
+  if (resolved === "mac") {
+    if (combo === "Ctrl+Tab") normalizedInput = "Cmd+Tab";
+    else if (combo === "Ctrl+Shift+Tab") normalizedInput = "Cmd+Shift+Tab";
+  }
+  const tokens = normalizedInput
     .split("+")
     .map((token) => token.trim())
     .filter(Boolean)

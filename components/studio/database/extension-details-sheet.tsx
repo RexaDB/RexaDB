@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { Box, Check, ExternalLink, RefreshCw } from "@/lib/icon-theme/lucide-react";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import type { DatabaseExtension } from "./extensions-types";
 
 interface ExtensionDetailsSheetProps {
@@ -43,9 +42,6 @@ export function ExtensionDetailsSheet({
   onToggleExtension,
   isLoading = false,
 }: ExtensionDetailsSheetProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
-
   if (!extension) return null;
 
   const isInstalled = !!extension.installed_version;
@@ -58,10 +54,10 @@ export function ExtensionDetailsSheet({
   ].filter(Boolean) as string[];
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         className="w-[min(520px,95vw)] bg-studio-bg border-studio-border text-foreground p-0"
       >
         <SheetHeader className="border-b border-studio-border/80 px-4 sm:px-5 py-3 sm:py-4">

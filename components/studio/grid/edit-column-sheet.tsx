@@ -28,7 +28,6 @@ import {
   useFkColumnSheetState,
 } from "./column-sheet-common";
 import { Loader2, PencilLine } from "@/lib/icon-theme/lucide-react";
-import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { POSTGRES_EDIT_COLUMN_TYPES } from "@/lib/db/column-types";
 import type { EditColumnPayload } from "./types";
 
@@ -68,9 +67,6 @@ export function EditColumnSheet({
   onEditColumn,
   isEditing,
 }: EditColumnSheetProps) {
-  const { appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
-
   const dbType = useMemo(
     () => detectConnectionDbType(connectionString),
     [connectionString],
@@ -307,10 +303,10 @@ export function EditColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         onInteractOutside={handleInteractOutside}
         className="bg-studio-bg border-studio-border text-foreground w-[min(540px,88vw)] data-[side=right]:sm:max-w-[540px] flex flex-col h-full p-0"
       >

@@ -21,7 +21,7 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
-import { DataGrid } from "@/components/studio/data-grid";
+import { DataGridAg as DataGrid } from "@/components/studio/data-grid-ag";
 import { MonacoSqlInput } from "@/components/studio/monaco-sql-input";
 import { SqlQueryInput } from "@/components/studio/sql-query-input";
 import {
@@ -99,10 +99,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { StudioTooltip } from "./studio-tooltip";
-import {
-  preventTextSelection,
-  allowTextSelection,
-} from "@/lib/prevent-text-selection";
+import { HorizontalSplitView } from "./horizontal-split-view";
 import type { ExplainResult, PlanNode } from "./database/explain-plan-view";
 import { PlanNodeCard, getPlanNode, extractExplainPlan } from "./database/explain-plan-view";
 
@@ -295,9 +292,7 @@ export function SqlEditor({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
   const [selectedQuery, setSelectedQuery] = useState("");
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.55);
-  const isResizingRef = useRef(false);
 
   // When results first appear (or error), AG Grid may have mounted with 0px height
   // because flex percentage heights aren't always resolved on the first render pass.
@@ -701,30 +696,12 @@ export function SqlEditor({
     canStopQueryRef.current = canStopQuery;
   }, [canStopQuery]);
 
-  useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
-      if (!isResizingRef.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const y = event.clientY - rect.top;
-      const ratio = y / rect.height;
-      const clamped = Math.min(0.8, Math.max(0.2, ratio));
-      setSplitRatio(clamped);
-    };
-
-    const handleMouseUp = () => {
-      if (isResizingRef.current) {
-        isResizingRef.current = false;
-        document.body.style.cursor = "";
-        allowTextSelection();
-      }
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
+  const handleSplitRatioChange = useCallback((ratio: number) => {
+    setSplitRatio(ratio);
+    // Remeasure Monaco / AG Grid after the pane sizes settle.
+    window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
   }, []);
 
   const registerSqlCompletionProvider = useCallback(() => {
@@ -1125,6 +1102,52 @@ export function SqlEditor({
     />
   );
 
+  const sharedEditorProps = {
+    dbType,
+    fontSize: normalizedFontSize,
+    fontFamily: editorFontFamily,
+    aiMode,
+    onChange: handleEditorChange,
+    onRequestAiMode: handleRequestAiMode,
+    onExitAiMode: handleExitAiMode,
+    placeholder: editorPlaceholder,
+    onRun: aiMode ? handleGenerateAiSnippet : handleRun,
+    onRunSelected: aiMode ? handleGenerateAiSnippet : handleRunSelected,
+    onSaveSnippet: () => setIsSaveDialogOpen(true),
+    onCopyQuery: handleCopyQuery,
+    onFormat: handleFormat,
+    onSelectionChange: (selectedText: string) => {
+      const next = selectedText.trim();
+      setHasSelection(Boolean(next));
+      setSelectedQuery(next);
+    },
+    query,
+    schemaData,
+    slashAiTrigger,
+    aiModeKeybinding,
+  };
+
+  const editorPane = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-studio-bg">
+      <div className="relative flex flex-1 overflow-hidden">
+        <div className="relative flex-1">
+          {sqlEditorEngine === "monaco" ? (
+            <MonacoSqlInput
+              {...sharedEditorProps}
+              appEditorTheme={appEditorTheme}
+              customEditorThemes={customEditorThemes}
+              layoutVersion={layoutVersion}
+              themeId={resolvedEditorThemeId}
+              vimMode={vimMode}
+            />
+          ) : (
+            <SqlQueryInput {...sharedEditorProps} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-studio-bg relative">
       {/* Editor Toolbar */}
@@ -1190,7 +1213,7 @@ export function SqlEditor({
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-foreground"
               onClick={handleExplain}
-              title="Explain Plan (Ctrl+E)"
+              title={`Explain Plan (${formatShortcutForPlatform("Cmd+E")})`}
               disabled={loading || !query.trim()}
             >
               <Brain className="w-4 h-4" />
@@ -1307,82 +1330,18 @@ export function SqlEditor({
         </div>
       </div>
 
-      {/* Editor Content */}
-      <div ref={containerRef} className="flex-1 flex flex-col min-h-0 relative">
-        <div className="absolute inset-0 flex flex-col">
-          {/* Editor Area - Absolute Positioning to force stability */}
-          <div
-            className={`flex flex-col relative overflow-hidden bg-studio-bg shrink-0 ${hideResults ? "" : "border-b border-studio-border"}`}
-            style={{ height: hideResults ? "100%" : `${splitRatio * 100}%` }}
-          >
-            <div className="flex-1 flex overflow-hidden relative">
-              <div className="flex-1 relative">
-                {(() => {
-                  const sharedEditorProps = {
-                    dbType,
-                    fontSize: normalizedFontSize,
-                    fontFamily: editorFontFamily,
-                    aiMode,
-                    onChange: handleEditorChange,
-                    onRequestAiMode: handleRequestAiMode,
-                    onExitAiMode: handleExitAiMode,
-                    placeholder: editorPlaceholder,
-                    onRun: aiMode ? handleGenerateAiSnippet : handleRun,
-                    onRunSelected: aiMode ? handleGenerateAiSnippet : handleRunSelected,
-                    onSaveSnippet: () => setIsSaveDialogOpen(true),
-                    onCopyQuery: handleCopyQuery,
-                    onFormat: handleFormat,
-                    onSelectionChange: (selectedText: string) => {
-                      const next = selectedText.trim();
-                      setHasSelection(Boolean(next));
-                      setSelectedQuery(next);
-                    },
-                    query,
-                    schemaData,
-                    slashAiTrigger,
-                    aiModeKeybinding,
-                  };
-                  return sqlEditorEngine === "monaco" ? (
-                    <MonacoSqlInput
-                      {...sharedEditorProps}
-                      appEditorTheme={appEditorTheme}
-                      customEditorThemes={customEditorThemes}
-                      layoutVersion={layoutVersion}
-                      themeId={resolvedEditorThemeId}
-                      vimMode={vimMode}
-                    />
-                  ) : (
-                    <SqlQueryInput
-                      {...sharedEditorProps}
-                    />
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-
-          {!hideResults && (
-          <div
-            className="h-[2px] bg-studio-border cursor-row-resize shrink-0 hover:bg-blue-500/40 transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              isResizingRef.current = true;
-              document.body.style.cursor = "row-resize";
-              preventTextSelection();
-            }}
-          />
-          )}
-
-          {!hideResults && (
-          <div
-            className="flex flex-col bg-studio-bg overflow-hidden relative"
-            style={{
-              height: `${(1 - splitRatio) * 100}%`,
-              flexShrink: 0,
-              minHeight: 0,
-              willChange: "transform",
-            }}
-          >
+      {/* Editor Content — HorizontalSplitView owns the editor/results sash
+          (1px shell border + wide hit target), matching other studio splits. */}
+      <div className="flex-1 flex flex-col min-h-0 relative">
+        {hideResults ? (
+          <div className="absolute inset-0">{editorPane}</div>
+        ) : (
+          <HorizontalSplitView
+            ratio={splitRatio}
+            onRatioChange={handleSplitRatioChange}
+            primary={editorPane}
+            secondary={
+          <div className="flex h-full min-h-0 flex-col bg-studio-bg overflow-hidden relative">
             {/* Loading Beam for Query Results */}
             <div className="h-[1px] w-full bg-transparent overflow-hidden shrink-0 relative z-30">
               {loading && (
@@ -1691,8 +1650,9 @@ export function SqlEditor({
               )
             )}
           </div>
+            }
+          />
         )}
-        </div>
       </div>
 
       {/* Save Snippet Dialog */}

@@ -43,8 +43,7 @@ export function InsertRowSheet({
     if (isInsertSheetOpen) setInsertData({});
   }, [isInsertSheetOpen]);
 
-  const { confirmSheetClose, appShellLayout, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
+  const { confirmSheetClose } = useGlobalStudioSettings();
   const isDirty = useMemo(() => Object.values(insertData).some(v => v !== ''), [insertData]);
   const { handleInteractOutside, ConfirmDialog } = useSheetCloseConfirm(isDirty, confirmSheetClose, () => setIsInsertSheetOpen(false));
 
@@ -64,8 +63,8 @@ export function InsertRowSheet({
   };
 
   return (
-    <Sheet open={isInsertSheetOpen} onOpenChange={(open) => { setIsInsertSheetOpen(open); if (!open) setInsertData({}); }} modal={!shellLayout}>
-      <SheetContent side="right" contained={shellLayout} onInteractOutside={handleSheetInteractOutside} className="bg-background text-foreground flex flex-col p-0 gap-0">
+    <Sheet open={isInsertSheetOpen} onOpenChange={(open) => { setIsInsertSheetOpen(open); if (!open) setInsertData({}); }} modal={false}>
+      <SheetContent side="right" contained onInteractOutside={handleSheetInteractOutside} className="bg-background text-foreground flex flex-col p-0 gap-0">
         {ConfirmDialog}
         <div className="flex flex-col h-full">
           <SheetHeader className="h-12 border-b shrink-0 flex items-center px-4">

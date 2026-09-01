@@ -19,6 +19,7 @@ import { API_BASE } from "@/lib/api-base";
 import { getProviderLogoUrl } from "@/components/shared/provider-logo";
 import { buildPaddedDays } from "@/lib/studio/date-utils";
 
+/** @deprecated No longer rendered anywhere; the connections list activity sidebar was removed. Kept only until callers/data are confirmed unused. */
 export function ActivityOverview({
   connectionId,
   connectionName,

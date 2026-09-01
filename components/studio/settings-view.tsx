@@ -343,10 +343,6 @@ interface StudioSettingsModel {
   sleekLayout: boolean;
   setSleekLayout: (value: boolean) => void;
   activeSleekLayout: boolean;
-  appShellLayout: boolean;
-  setAppShellLayout: (value: boolean) => void;
-  modernUiLayout: boolean;
-  setModernUiLayout: (value: boolean) => void;
   showTabIndicator: boolean;
   setShowTabIndicator: (value: boolean) => void;
   restoreAppState: boolean;
@@ -692,10 +688,6 @@ export function SettingsView({
     sleekLayout,
     setSleekLayout,
     activeSleekLayout,
-    appShellLayout,
-    setAppShellLayout,
-    modernUiLayout,
-    setModernUiLayout,
     showTabIndicator,
     setShowTabIndicator,
     restoreAppState,
@@ -770,9 +762,9 @@ export function SettingsView({
     installing: installingUpdate,
     setInstalling: setInstallingUpdate,
     handleRenewOtl,
+    checkForUpdates,
     handleDownload,
     handleInstall,
-    handleOpenRelease,
   } = useAppUpdate();
   const [isEditorThemeDialogOpen, setIsEditorThemeDialogOpen] = useState(false);
   const [themeNameInput, setThemeNameInput] = useState("");
@@ -1181,7 +1173,7 @@ export function SettingsView({
 
   const handleCheckUpdates = async () => {
     toast.success("Checking for updates...");
-    await handleDownload();
+    await checkForUpdates();
   };
 
   const handleDownloadUpdate = async () => {
@@ -1209,13 +1201,6 @@ export function SettingsView({
     toast.success("Installing update and restarting...");
   };
 
-  const handleOpenReleaseUpdate = async () => {
-    if (!handleOpenRelease) {
-      toast.error("Open release is only available in the desktop app.");
-      return;
-    }
-    await handleOpenRelease();
-  };
 
   const updatesUntil = entitlement.updatesUntil;
   const updatesExpired = entitlement.updatesExpired;
@@ -1457,22 +1442,6 @@ export function SettingsView({
                     </button>
                   </div>
                 </SettingRow>
-
-                {/* New Layout (App Shell) */}
-                <ToggleSetting
-                  title="New Layout"
-                  description="Use the new app-shell chrome: a bordered content panel on a darker surrounding surface."
-                  value={appShellLayout}
-                  onChange={setAppShellLayout}
-                />
-
-                {/* Modern UI (copy of the New Layout with a navigation rail) */}
-                <ToggleSetting
-                  title="Modern UI"
-                  description="A copy of the New Layout with an always-visible navigation rail. Turning this on turns off New Layout, and vice versa."
-                  value={modernUiLayout}
-                  onChange={setModernUiLayout}
-                />
 
                 {/* Translucent Background */}
                 <ToggleSetting
@@ -2477,32 +2446,22 @@ export function SettingsView({
                         ? "Checking..."
                         : "Check for Updates"}
                     </button>
-                    {updateState.manualUpdate ? (
-                      <button
-                        onClick={handleOpenReleaseUpdate}
-                        className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
-                      >
-                        <ExternalLink className="mr-1 inline h-3 w-3" />
-                        Download from GitHub
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleDownloadUpdate}
-                        disabled={
-                          !updateState.updateAvailable ||
-                          updateState.downloading ||
-                          updateState.updateDownloaded ||
-                          installingUpdate
-                        }
-                        className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {updateState.downloading
-                          ? `Downloading${typeof updateState.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "..."}`
-                          : updateState.updateDownloaded
-                            ? "Downloaded"
-                            : "Download Update"}
-                      </button>
-                    )}
+                    <button
+                      onClick={handleDownloadUpdate}
+                      disabled={
+                        !updateState.updateAvailable ||
+                        updateState.downloading ||
+                        updateState.updateDownloaded ||
+                        installingUpdate
+                      }
+                      className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {updateState.downloading
+                        ? `Downloading${typeof updateState.progressPercent === "number" ? ` ${Math.round(updateState.progressPercent)}%` : "..."}`
+                        : updateState.updateDownloaded
+                          ? "Downloaded"
+                          : "Download Update"}
+                    </button>
                     <button
                       onClick={handleInstallUpdate}
                       disabled={

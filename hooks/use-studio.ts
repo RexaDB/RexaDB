@@ -29,7 +29,6 @@ import type { RedisCreateKeyInput, RedisKeyInfo } from "@/types/redis";
 import { getRedisKeyCommand, updateRedisConnectionStringDatabase } from "@/lib/db/redis-utils";
 import { buildRedisCreateCommands } from "@/lib/db/redis-create-commands";
 import { buildShortcutCombo, getDefaultKeybindings, withMissingDefaultKeybindings } from "@/lib/studio/keybindings";
-import { subscribeToLayoutPrefs } from "@/lib/studio/layout-prefs-cache";
 import { generateActionId, executeSqlWithHistory } from "@/lib/studio/execute-with-review";
 import type { SettingsSectionId } from "@/components/studio/settings/settings-sidebar";
 import type { EditColumnPayload, AddColumnPayload } from "@/components/studio/grid/types";
@@ -1916,7 +1915,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   }, [currentConnectionString]);
 
   const loadSupabaseAuthUsers = useCallback(async () => {
-    if ((dbType !== "postgres" && dbType !== "supabase-mgmt") || !schemas.includes("auth")) {
+    if (dbType !== "postgres" && dbType !== "supabase-mgmt") {
       setSupabaseAuthUsers([]);
       return;
     }
@@ -1928,17 +1927,32 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       if (requestId !== tablePermissionOptionsRequestIdRef.current) {
         return;
       }
-      if (res.success && res.data) {
+      if (res.success && Array.isArray(res.data)) {
         setSupabaseAuthUsers(res.data);
+        if (res.data.length === 0) {
+          console.warn("[Access] auth users query returned 0 rows for", dbType, currentConnectionString.slice(0, 32));
+        }
       } else {
-        setError(res.error || "Unknown error");
+        // Keep Access usable for postgres/anon even when auth query fails.
+        setSupabaseAuthUsers([]);
+        const msg = String(res.error || "");
+        // Only swallow the "auth schema/table doesn't exist" case; surface permission / other errors
+        const isMissingAuthSchema = /relation\s+"?auth\.users"?\s+does not exist|schema\s+"?auth"?\s+does not exist|42P01/i.test(msg);
+        // Back-compat: old query surfaced "... auth.users ..." on missing schema — keep swallowing that shape
+        const isLegacyMissingAuth = /auth\.users/i.test(msg) && /does not exist/i.test(msg);
+        if (msg && !isMissingAuthSchema && !isLegacyMissingAuth) {
+          console.error("[Access] fetchSupabaseAuthUsers failed:", msg);
+          setError(msg);
+        } else if (msg) {
+          console.warn("[Access] auth.users not available (likely no auth schema):", msg);
+        }
       }
     } finally {
       if (requestId === tablePermissionOptionsRequestIdRef.current) {
         setFetchingTablePermissionOptions(false);
       }
     }
-  }, [currentConnectionString, dbType, schemas]);
+  }, [currentConnectionString, dbType]);
 
   useEffect(() => {
     if (dbType !== "postgres" && dbType !== "supabase-mgmt") {
@@ -1948,14 +1962,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       setTablePermissionContextState(null);
       return;
     }
-    if (!schemas.includes("auth")) {
-      tablePermissionOptionsRequestIdRef.current += 1;
-      setSupabaseAuthUsers([]);
-      setFetchingTablePermissionOptions(false);
-      return;
-    }
     void loadSupabaseAuthUsers();
-  }, [dbType, schemas, loadSupabaseAuthUsers]);
+  }, [dbType, currentConnectionString, loadSupabaseAuthUsers]);
 
   const addReviewAction = useCallback((actionOrActions: {
     type: string;
@@ -4093,8 +4101,20 @@ END $$;`.trim();
   }, [selectedTable, selectedSchema, executionMode, currentConnectionString, addHistoryEntry, refreshCurrentTab, dbType, quoteIdentifier, quoteTableRef, tableStructure, foreignKeys]);
 
   const handleFKPreview = useCallback(async (columnName: string, value: any) => {
-    const fk = foreignKeys.find(f => f.column_name === columnName);
-    if (!fk || value === null) return;
+    if (value === null) return;
+    const { findStudioForeignKey } = await import("@/lib/db/foreign-key-utils");
+    let fk = findStudioForeignKey(foreignKeys, columnName);
+    if ((!fk || !fk.foreign_table_name || !fk.foreign_column_name) && selectedTable && selectedSchema) {
+      const fkRes = await fetchTableForeignKeys(currentConnectionString, selectedSchema, selectedTable);
+      if (fkRes.success && fkRes.data) {
+        setForeignKeys(fkRes.data);
+        fk = findStudioForeignKey(fkRes.data, columnName);
+      }
+    }
+    if (!fk || !fk.foreign_table_name || !fk.foreign_column_name) {
+      setError("Foreign key metadata is incomplete for this column.");
+      return;
+    }
     setFKPreviewRecord({
       data: null,
       fields: [],
@@ -4129,24 +4149,22 @@ END $$;`.trim();
       setError("An error occurred while fetching the referenced record.");
       setFKPreviewRecord(null);
     }
-  }, [foreignKeys, currentConnectionString]);
+  }, [foreignKeys, currentConnectionString, selectedTable, selectedSchema, setForeignKeys]);
 
   const openFKSelection = useCallback(async (columnName: string, rowIndex: number | null = null) => {
-    let fk = foreignKeys.find(f => f.column_name === columnName);
-    if (!fk && selectedTable && selectedSchema) {
+    const { findStudioForeignKey } = await import("@/lib/db/foreign-key-utils");
+    let fk = findStudioForeignKey(foreignKeys, columnName);
+    if ((!fk || !fk.foreign_table_name || !fk.foreign_column_name) && selectedTable && selectedSchema) {
       const fkRes = await fetchTableForeignKeys(currentConnectionString, selectedSchema, selectedTable);
       if (fkRes.success && fkRes.data) {
-        const refreshedForeignKeys = fkRes.data as Array<{
-          column_name: string;
-          foreign_table_schema: string;
-          foreign_table_name: string;
-          foreign_column_name: string;
-        }>;
-        setForeignKeys(refreshedForeignKeys);
-        fk = refreshedForeignKeys.find((f) => f.column_name === columnName);
+        setForeignKeys(fkRes.data);
+        fk = findStudioForeignKey(fkRes.data, columnName);
       }
     }
-    if (!fk) return false;
+    if (!fk || !fk.foreign_table_name || !fk.foreign_column_name) {
+      setError("Foreign key metadata is incomplete for this column.");
+      return false;
+    }
     setFKSelectionTarget({ rowIndex, columnName, fkInfo: fk });
     setIsFKSelectionSheetOpen(true);
     setFKSelectionLoading(true);
@@ -8206,11 +8224,6 @@ END $$;`.trim();
     setSettingsModalOpen(true);
   }, []);
 
-  // A layout change (New Layout <-> Modern UI <-> plain) swaps the entire
-  // shell this modal is rendered next to. Close it the instant that happens
-  // rather than trying to keep a dialog open across its parent tree being
-  // torn down and rebuilt around it.
-  useEffect(() => subscribeToLayoutPrefs(() => setSettingsModalOpen(false)), []);
 
   const openProfileSettingsTab = useCallback(() => {
     openSimpleTab('profile-settings', 'profile-settings', 'Profile Settings');

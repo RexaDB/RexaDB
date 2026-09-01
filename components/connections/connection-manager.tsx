@@ -64,11 +64,9 @@ import {
   Folder,
   ChevronsUpDown,
   User as UserIcon,
-  Activity,
   Square,
   Check,
   List,
-  PanelRightClose,
 } from "@/lib/icon-theme/lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -76,6 +74,7 @@ import {
   SpacetimeDbLogo,
   SupabaseLogo,
   NeonLogo,
+  ProviderLogo,
   getProviderLogoUrl,
 } from "@/components/shared/provider-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -141,7 +140,6 @@ import {
   type CustomAppTheme,
 } from "@/lib/studio/app-themes";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
-import { ActivityOverview } from "@/components/analytics/activity-overview";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import { openExternalUrl } from "@/lib/desktop";
@@ -196,6 +194,15 @@ import {
 } from "@/lib/neon-cli/profile-store";
 import { canAddNeonAccount } from "@/lib/neon-cli/limits";
 import { detectNeonCli } from "@/lib/neon-cli/detect";
+import { PlanetscaleLoginDialog } from "@/components/planetscale/planetscale-login-dialog";
+import { PlanetscaleAccountsScreen } from "@/components/planetscale/planetscale-account-screen";
+import {
+  getPlanetscaleAccounts,
+  removePlanetscaleAccount,
+  type PlanetscaleAccount,
+} from "@/lib/planetscale/token-store";
+import { canAddPlanetscaleAccount } from "@/lib/planetscale/limits";
+import { PLANETSCALE_LOGIN_ENABLED } from "@/lib/planetscale/auth";
 
 // Removed Pattern import
 
@@ -219,7 +226,8 @@ type ConnectionScreen =
   | "supabase"
   | "spacetimedb"
   | "spacetimedb-account"
-  | "neon-cli";
+  | "neon-cli"
+  | "planetscale-account";
 
 type PlanCode = "free" | "pro" | "team" | "enterprise" | "otl";
 type PlanEntitlements = {
@@ -247,6 +255,7 @@ export function ConnectionManager({
   onOpenSupabaseAccounts,
   onOpenSpacetimedbAccounts,
   onOpenNeonAccounts,
+  onOpenPlanetscaleAccounts,
 }: {
   hideHeader?: boolean;
   isAnalyticsEnabled?: boolean;
@@ -258,11 +267,13 @@ export function ConnectionManager({
   onOpenSupabaseAccounts?: () => void;
   onOpenSpacetimedbAccounts?: () => void;
   onOpenNeonAccounts?: () => void;
+  onOpenPlanetscaleAccounts?: () => void;
 }) {
   useGlobalAppFontFamily();
   const isSupabaseMode = initialScreen === "supabase";
   const isSpacetimeDbMode = initialScreen === "spacetimedb-account";
   const isNeonCliMode = initialScreen === "neon-cli";
+  const isPlanetscaleMode = initialScreen === "planetscale-account";
   const appTheme = useGlobalAppTheme(false);
   const {
     sleekLayout,
@@ -990,6 +1001,16 @@ export function ConnectionManager({
   const [neonCliChecking, setNeonCliChecking] = useState(false);
   const [neonReconnectProfile, setNeonReconnectProfile] = useState<string | null>(null);
   const [neonReloadSignal, setNeonReloadSignal] = useState(0);
+  const [planetscaleLoginOpen, setPlanetscaleLoginOpen] = useState(false);
+  const [planetscaleAccounts, setPlanetscaleAccounts] = useState<PlanetscaleAccount[]>(
+    () => (typeof window === "undefined" ? [] : getPlanetscaleAccounts()),
+  );
+  const [activePlanetscaleAccountId, setActivePlanetscaleAccountId] = useState<
+    string | null
+  >(
+    () =>
+      typeof window === "undefined" ? null : (getPlanetscaleAccounts()[0]?.id ?? null),
+  );
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -1046,13 +1067,6 @@ export function ConnectionManager({
   const cloudSyncTimerRef = useRef<number | null>(null);
   const supabaseImportReloadTimerRef = useRef<number | null>(null);
   const cloudSyncInFlightRef = useRef(false);
-  const [showActivityOverview, setShowActivityOverview] = useState(false);
-  const [sidebarConnectionId, setSidebarConnectionId] = useState<number | null>(
-    null,
-  );
-  const [sidebarConnectionName, setSidebarConnectionName] = useState<
-    string | null
-  >(null);
   const [isThemeCreatorOpen, setIsThemeCreatorOpen] = useState(false);
 
   const selectedAppTheme = useMemo(() => {
@@ -2356,6 +2370,66 @@ export function ConnectionManager({
     return res;
   };
 
+  const handleAddPlanetscaleAccount = useCallback(() => {
+    const check = canAddPlanetscaleAccount(
+      entitlement.premiumActive,
+      planetscaleAccounts.length,
+    );
+    if (!check.allowed) {
+      toast.error(
+        "Free plan allows 1 linked PlanetScale account. Upgrade to Pro to link more.",
+      );
+      openExternalUrl(REXADB_UPGRADE_URL);
+      return;
+    }
+    setPlanetscaleLoginOpen(true);
+  }, [entitlement.premiumActive, planetscaleAccounts.length]);
+
+  const handleRemovePlanetscaleAccount = useCallback((id: string) => {
+    removePlanetscaleAccount(id);
+    const next = getPlanetscaleAccounts();
+    setPlanetscaleAccounts(next);
+    setActivePlanetscaleAccountId((cur) => {
+      if (cur !== id) return cur;
+      return next[0]?.id ?? null;
+    });
+    if (next.length === 0) {
+      if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
+      else setConnectionScreen("planetscale-account");
+    }
+  }, [onOpenPlanetscaleAccounts]);
+
+  const handlePlanetscaleConnectDatabase = async (
+    payload: { name: string; connectionString: string; connectionType: string },
+    opts?: { silent?: boolean },
+  ) => {
+    const res = await createConnection({
+      name: payload.name,
+      connectionString: payload.connectionString,
+      connectionType: payload.connectionType,
+    });
+    if (res.success) {
+      if (opts?.silent) {
+        if (supabaseImportReloadTimerRef.current) {
+          window.clearTimeout(supabaseImportReloadTimerRef.current);
+        }
+        supabaseImportReloadTimerRef.current = window.setTimeout(() => {
+          supabaseImportReloadTimerRef.current = null;
+          void loadConnections();
+        }, 300);
+      } else {
+        await loadConnections();
+        if (!isPlanetscaleMode) {
+          setConnectionScreen("list");
+        }
+        toast.success(`Connected to ${payload.name}`);
+      }
+    } else if (!opts?.silent) {
+      toast.error((res as any).error ?? "Failed to create connection.");
+    }
+    return res;
+  };
+
   function terminalLog(
     type: "log" | "group" | "groupEnd" | "warn" | "error",
     ...args: any[]
@@ -3558,9 +3632,6 @@ export function ConnectionManager({
             showAnalyticsToggle={!!onAnalyticsToggle}
             isAnalyticsEnabled={isAnalyticsEnabled}
             onAnalyticsToggle={onAnalyticsToggle}
-            showActivityButton={connectionScreen === "list"}
-            activityActive={showActivityOverview}
-            onActivityClick={() => setShowActivityOverview((prev) => !prev)}
             settingsActive={connectionScreen === "settings"}
             onSettingsClick={() =>
               setConnectionScreen(
@@ -3982,26 +4053,7 @@ export function ConnectionManager({
         >
           {connectionScreen === "list" ? (
             <div className="flex h-full w-full">
-              {showActivityOverview && (
-                <div className="w-[46%] shrink-0 border-r border-studio-border bg-studio-bg/60 overflow-hidden">
-                  <ActivityOverview
-                    connectionId={sidebarConnectionId}
-                    connectionName={sidebarConnectionName}
-                    onBackToAll={() => {
-                      setSidebarConnectionId(null);
-                      setSidebarConnectionName(null);
-                    }}
-                  />
-                </div>
-              )}
-              <div
-                className={cn(
-                  "flex flex-col h-full transition-all duration-300",
-                  showActivityOverview
-                    ? "flex-1 min-w-0 px-8 py-4"
-                    : "flex-1 max-w-5xl mx-auto px-6 py-8",
-                )}
-              >
+              <div className="flex flex-col h-full transition-all duration-300 flex-1 max-w-5xl mx-auto px-6 py-8">
                 <SectionHeader
                   title="Connections"
                   subtitle={
@@ -4028,14 +4080,7 @@ export function ConnectionManager({
                     </>
                   }
                   className={cn("mb-8", sleekLayout ? "mb-4" : "")}
-                >
-                  {showActivityOverview && (
-                    <>
-                      {!workspaceMode && renderManageDropdown()}
-                      {can("connections.create") && renderNewConnectionButton()}
-                    </>
-                  )}
-                </SectionHeader>
+                />
 
                 <div className="flex flex-col gap-3 mb-4">
                   <div className="flex items-center gap-2">
@@ -4087,14 +4132,12 @@ export function ConnectionManager({
                         Clear
                       </button>
                     )}
-                    {!showActivityOverview && (
-                      <div className="ml-auto flex items-center gap-2">
-                        {!workspaceMode && renderManageDropdown()}
+                    <div className="ml-auto flex items-center gap-2">
+                      {!workspaceMode && renderManageDropdown()}
 
-                        {can("connections.create") &&
-                          renderNewConnectionButton()}
-                      </div>
-                    )}
+                      {can("connections.create") &&
+                        renderNewConnectionButton()}
+                    </div>
                   </div>
                 </div>
 
@@ -4176,9 +4219,7 @@ export function ConnectionManager({
                           <div
                             className={cn(
                               "grid gap-4",
-                              showActivityOverview
-                                ? "grid-cols-1"
-                                : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3",
+                              "grid-cols-1 md:grid-cols-2 lg:grid-cols-3",
                             )}
                             onDragOver={(event) => {
                               if (!dragReorderEnabled || !draggingConnectionId)
@@ -4448,19 +4489,6 @@ export function ConnectionManager({
                                         {getConnectionTarget(conn)}
                                       </span>
                                     </div>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSidebarConnectionId(conn.id);
-                                      setSidebarConnectionName(conn.name);
-                                      setShowActivityOverview(true);
-                                    }}
-                                    className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
-                                  >
-                                    <Activity className="w-2.5 h-2.5" />
-                                    Activity
                                   </button>
                                   {openingConnectionId === conn.id && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-lg backdrop-blur-sm z-10">
@@ -4942,6 +4970,23 @@ export function ConnectionManager({
                 />
               </div>
             </div>
+          ) : connectionScreen === "planetscale-account" ? (
+            <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
+              <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                <PlanetscaleAccountsScreen
+                  accounts={planetscaleAccounts}
+                  activeAccountId={activePlanetscaleAccountId}
+                  onSwitchAccount={setActivePlanetscaleAccountId}
+                  onRemoveAccount={handleRemovePlanetscaleAccount}
+                  onAddAccount={handleAddPlanetscaleAccount}
+                  canAddAccount={canAddPlanetscaleAccount(
+                    entitlement.premiumActive,
+                    planetscaleAccounts.length,
+                  ).allowed}
+                  onConnectDatabase={handlePlanetscaleConnectDatabase}
+                />
+              </div>
+            </div>
           ) : connectionScreen === "new-select" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="flex min-h-full w-full flex-col items-center px-6 py-6">
@@ -5092,6 +5137,41 @@ export function ConnectionManager({
                       </div>
                     </div>
                   </button>
+
+                  {PLANETSCALE_LOGIN_ENABLED && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (planetscaleAccounts.length > 0) {
+                          if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
+                          else setConnectionScreen("planetscale-account");
+                        } else {
+                          handleAddPlanetscaleAccount();
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                    >
+                      <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                        <ProviderLogo type="planetscale" className="h-7 w-7" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">
+                          PlanetScale Account
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {planetscaleAccounts.length === 0
+                            ? "Log in to browse and connect your databases"
+                            : planetscaleAccounts.length === 1
+                              ? `Logged in as ${
+                                  planetscaleAccounts[0]?.email ||
+                                  planetscaleAccounts[0]?.name ||
+                                  "PlanetScale account"
+                                }`
+                              : `${planetscaleAccounts.length} accounts linked`}
+                        </div>
+                      </div>
+                    </button>
+                  )}
 
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     {providerCards.map((card) => (
@@ -6164,6 +6244,20 @@ export function ConnectionManager({
           else setConnectionScreen("neon-cli");
         }}
       />
+
+      <PlanetscaleLoginDialog
+        open={planetscaleLoginOpen}
+        onOpenChange={setPlanetscaleLoginOpen}
+        onLoginComplete={(account) => {
+          setPlanetscaleAccounts((prev) => {
+            const exists = prev.some((a) => a.id === account.id);
+            return exists ? prev : [...prev, account];
+          });
+          setActivePlanetscaleAccountId(account.id);
+          if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
+          else setConnectionScreen("planetscale-account");
+        }}
+      />
     </div>
   );
 
@@ -6276,17 +6370,6 @@ export function ConnectionManager({
             className="gap-2 focus:bg-muted/50"
           >
             <Plus className="w-4 h-4" /> Import Connections
-          </DropdownMenuItem>
-          <DropdownMenuSeparator className="bg-border/60" />
-          <DropdownMenuItem
-            onClick={() => {
-              setShowActivityOverview(false);
-              setManageMenuOpen(false);
-            }}
-            className="gap-2 focus:bg-muted/50"
-          >
-            <PanelRightClose className="w-4 h-4" />
-            Close Sidebar
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

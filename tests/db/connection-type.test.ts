@@ -11,6 +11,17 @@ test("detectConnectionDbType identifies dbs", () => {
   assert.equal(detectConnectionDbType("federated://test"), "federated");
 });
 
+test("detectConnectionDbType routes planetscale by connection string scheme", () => {
+  assert.equal(
+    detectConnectionDbType("mysql://user:pass@aws.connect.psdb.cloud:3306/db?ssl=true", "planetscale"),
+    "mysql",
+  );
+  assert.equal(
+    detectConnectionDbType("postgresql://user:pass@aws.connect.psdb.cloud:5432/db?sslmode=require", "planetscale"),
+    "postgres",
+  );
+});
+
 test("getMongoDatabaseFromConnectionString extracts db", () => {
   assert.equal(getMongoDatabaseFromConnectionString("mongodb://localhost:27017/mydb"), "mydb");
   assert.equal(getMongoDatabaseFromConnectionString("not-a-url"), "admin");

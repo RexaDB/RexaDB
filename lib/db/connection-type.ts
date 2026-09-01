@@ -68,7 +68,13 @@ export function detectConnectionDbType(connectionString: string, savedType?: str
     if (normalized === "mariadb") return "mysql";
     if (normalized === "turso") return "sqlite";
     if (["supabase", "neon", "timescale", "cockroachdb", "yugabytedb", "redshift"].includes(normalized)) return "postgres";
-    if (normalized === "planetscale") return "mysql";
+    if (normalized === "planetscale") {
+      // PlanetScale ships both MySQL- and Postgres-flavored databases behind
+      // the same "planetscale" label — the connection string's own scheme
+      // (always a genuine mysql:// or postgresql:// URI once built) is the
+      // only reliable signal for which engine to use.
+      return raw.startsWith("postgres://") || raw.startsWith("postgresql://") ? "postgres" : "mysql";
+    }
     if (normalized === "jdbc") return "jdbc";
     return normalized as ConnectionDbType;
   }

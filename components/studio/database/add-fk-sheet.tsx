@@ -73,8 +73,7 @@ export function AddFKSheet({
   const [onUpdate, setOnUpdate] = useState("NO ACTION");
   const [onDelete, setOnDelete] = useState("NO ACTION");
 
-  const { appShellLayout, confirmSheetClose, modernUiLayout } = useGlobalStudioSettings();
-  const shellLayout = appShellLayout || modernUiLayout;
+  const { confirmSheetClose } = useGlobalStudioSettings();
 
   useEffect(() => {
     if (data && isOpen) {
@@ -110,10 +109,10 @@ export function AddFKSheet({
   if (!data) return null;
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={!shellLayout}>
+    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
       <SheetContent
         side="right"
-        contained={shellLayout}
+        contained
         onInteractOutside={handleInteractOutside}
         className="bg-background border-border text-foreground sm:max-w-md flex flex-col p-0 gap-0"
       >
