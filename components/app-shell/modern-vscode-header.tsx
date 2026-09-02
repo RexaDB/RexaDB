@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { NavUser } from "@/components/navigation/nav-user";
 import {
   Tooltip,
   TooltipContent,
@@ -9,7 +10,7 @@ import {
 import { ModernUISearchBar } from "@/components/app-shell/modern-ui-search";
 import { ModernConnectionDropdown } from "@/components/app-shell/modern-connection-dropdown";
 import { UpdateHeaderBadge } from "@/components/providers/update-header-badge";
-import { Bell } from "@/lib/icon-theme/lucide-react";
+import { Settings, Bell } from "@/lib/icon-theme/lucide-react";
 import { AltArrowLeft, AltArrowRight } from "@/lib/icon-theme/solar-icons";
 import {
   formatShortcutForPlatform,
@@ -65,6 +66,9 @@ export function ModernVscodeHeader({
   onForward,
   connection,
   onSelectConnection,
+  user,
+  onOpenSettings,
+  settingsActive,
 }: {
   /** Height of the strip between the window top and the content container. */
   height?: number;
@@ -101,6 +105,11 @@ export function ModernVscodeHeader({
    * dropdown does not navigate the main studio (used by the Agents window).
    */
   onSelectConnection?: (conn: Connection) => void | Promise<void>;
+  /** Optional account info for the same NavUser popover used in the navigation rail. */
+  user?: { name?: string; email?: string; avatar?: string; user_metadata?: Record<string, unknown> } | null;
+  /** Optional settings button action for the title bar. */
+  onOpenSettings?: () => void;
+  settingsActive?: boolean;
 }) {
   // Compact title-bar controls so the cluster sits cleanly inside the ~36px
   // strip above the content cards (mt-9 / pt-9).
@@ -111,6 +120,16 @@ export function ModernVscodeHeader({
   const panelShortcut = shortcutLabel(keybindings, "TOGGLE_BOTTOM_PANEL");
   const aiShortcut = shortcutLabel(keybindings, "TOGGLE_AI_PANEL");
   const { isMaximized, sendWindowAction, canUseDesktop, isMac, isLinuxCloseOnly } = useDesktopWindow();
+
+  const userName =
+    user?.name ||
+    (typeof user?.user_metadata?.name === "string" && user.user_metadata.name) ||
+    (typeof user?.user_metadata?.full_name === "string" &&
+      user.user_metadata.full_name) ||
+    (typeof user?.user_metadata?.display_name === "string" &&
+      user.user_metadata.display_name) ||
+    user?.email?.split("@")[0] ||
+    undefined;
 
   return (
     <header
@@ -247,6 +266,58 @@ export function ModernVscodeHeader({
             </TooltipTrigger>
             <TooltipContent side="bottom">Notifications</TooltipContent>
           </Tooltip>
+        )}
+        {/* Same avatar popover trigger as the navigation rail (NavUser) and same settings
+            button as the studio shell. On macOS the avatar sits top-right with settings
+            behind it; elsewhere settings sit top-right with the avatar behind. */}
+        {isMac ? (
+          <>
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                title={settingsActive ? "Close settings" : "Settings"}
+                aria-label="Settings"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 transition-colors no-drag"
+              >
+                <Settings
+                  className={`w-3.5 h-3.5 ${settingsActive ? "text-foreground" : "text-muted-foreground/60"}`}
+                />
+              </button>
+            )}
+            {user && (
+              <NavUser
+                name={userName}
+                email={user?.email}
+                avatar={user?.avatar}
+                dropdownAlign="end"
+                dropdownSide="bottom"
+              />
+            )}
+          </>
+        ) : (
+          <>
+            {user && (
+              <NavUser
+                name={userName}
+                email={user?.email}
+                avatar={user?.avatar}
+                dropdownAlign="end"
+                dropdownSide="bottom"
+              />
+            )}
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                title={settingsActive ? "Close settings" : "Settings"}
+                aria-label="Settings"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 transition-colors no-drag"
+              >
+                <Settings
+                  className={`w-3.5 h-3.5 ${settingsActive ? "text-foreground" : "text-muted-foreground/60"}`}
+                />
+              </button>
+            )}
+          </>
         )}
         {canUseDesktop && !isMac && (
           <WindowControls

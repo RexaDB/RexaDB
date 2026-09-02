@@ -160,6 +160,13 @@ export async function ensureCoreTables() {
         { column: "group", statement: "ALTER TABLE connections ADD COLUMN \"group\" TEXT" },
         { column: "is_favorite", statement: "ALTER TABLE connections ADD COLUMN is_favorite INTEGER DEFAULT 0" },
         { column: "last_active", statement: "ALTER TABLE connections ADD COLUMN last_active INTEGER" },
+        { column: "host", statement: "ALTER TABLE connections ADD COLUMN host TEXT" },
+        { column: "port", statement: "ALTER TABLE connections ADD COLUMN port TEXT" },
+        { column: "database", statement: "ALTER TABLE connections ADD COLUMN database TEXT" },
+        { column: "username", statement: "ALTER TABLE connections ADD COLUMN username TEXT" },
+        { column: "password", statement: "ALTER TABLE connections ADD COLUMN password TEXT" },
+        { column: "ssl_mode", statement: "ALTER TABLE connections ADD COLUMN ssl_mode TEXT" },
+        { column: "auth_token", statement: "ALTER TABLE connections ADD COLUMN auth_token TEXT" },
       ]).then(() => db.run(sql`UPDATE connections SET sort_order = created_at WHERE sort_order IS NULL`)),
       ...coreMigrationPromises(),
     ]);

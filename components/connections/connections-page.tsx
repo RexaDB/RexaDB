@@ -4,11 +4,14 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
+import { ConnectionAnalytics } from "@/components/connections/connection-analytics";
 import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
 import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
+import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
 import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
@@ -51,7 +54,7 @@ const PLANETSCALE_TAB: AppTab = {
   title: "PlanetScale",
 };
 
-export function ConnectionsPage() {
+export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
 
@@ -71,12 +74,26 @@ export function ConnectionsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // Used only in standalone (non-embedded) mode to show a connection's
+  // analytics full-page, since there is no tab system / shell around it.
+  const [standaloneAnalytics, setStandaloneAnalytics] = useState<Connection | null>(null);
   const keybindings = useMemo(() => getDefaultKeybindings(), []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = loadStoredDisplayName();
     if (stored) setDisplayName(stored);
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      (window as any).__rexa_open_onboarding = () => {
+        try {
+          window.localStorage.removeItem(ONBOARDING_COMPLETE_KEY);
+        } catch {}
+        setOnboardingOpen(true);
+      };
+    }
   }, []);
 
   useEffect(() => {
@@ -460,6 +477,55 @@ export function ConnectionsPage() {
     </>
   );
 
+  const standalone = (() => {
+    if (standaloneAnalytics) {
+      return (
+        <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg text-foreground">
+          <div className="flex shrink-0 items-center gap-2 border-b border-studio-border bg-studio-header-bg/90 px-4 z-20">
+            <div className="flex h-12 items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1 text-muted-foreground hover:text-foreground"
+                onClick={() => setStandaloneAnalytics(null)}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </Button>
+              <span className="text-sm font-medium truncate">
+                Analytics — {standaloneAnalytics.name}
+              </span>
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1">
+            <ConnectionAnalytics
+              connectionId={standaloneAnalytics.id}
+              connection={standaloneAnalytics}
+            />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg p-2 text-foreground">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[var(--shell-content-bg)]">
+          <ConnectionManager
+            hideHeader
+            embedded
+            editConnectionId={editConnectionId}
+            newConnectionTrigger={newConnectionTrigger}
+            isAnalyticsEnabled={false}
+            onAnalyticsToggle={() => {}}
+            onViewAnalytics={(id) => {
+              const conn = connections.find((c) => c.id === id);
+              if (conn) setStandaloneAnalytics(conn);
+            }}
+          />
+        </div>
+      </div>
+    );
+  })();
+
   return (
     <>
       <OnboardingFlow
@@ -476,45 +542,49 @@ export function ConnectionsPage() {
           void loadConns();
         }}
       />
-      <ModernUIShell
-        {...shellProps}
-        studio={{ connection: selectedConnection }}
-        onHeaderSelectConnection={(conn) =>
-          handleSelectConnection(conn.id, conn.name, conn.connectionType)
-        }
-        activePath={section}
-        onNavigate={handleNavigate}
-        onNewConnection={() => {
-          openTab(CONNECTIONS_TAB);
-          setNewConnectionTrigger((n) => n + 1);
-        }}
-        selectedConnectionId={selectedConnectionId}
-        onSelectConnection={handleSelectConnection}
-        connections={connections}
-        keybindings={keybindings}
-        railItems={railItems}
-        railActiveId={
-          section === "connections" ||
-          section === "supabase" ||
-          section === "spacetimedb" ||
-          section === "neon" ||
-          section === "planetscale"
-            ? section
-            : null
-        }
-        onSettingsClick={() => setSettingsModalOpen(true)}
-        settingsActive={settingsModalOpen}
-        hideSettingsDialog
-        railShowHome={false}
-        railShowWorkspace={false}
-        enableBottomSqlPanel={false}
-      >
-        {content}
-      </ModernUIShell>
+      {embedded ? (
+        <ModernUIShell
+          {...shellProps}
+          studio={{ connection: selectedConnection }}
+          onHeaderSelectConnection={(conn) =>
+            handleSelectConnection(conn.id, conn.name, conn.connectionType)
+          }
+          activePath={section}
+          onNavigate={handleNavigate}
+          onNewConnection={() => {
+            openTab(CONNECTIONS_TAB);
+            setNewConnectionTrigger((n) => n + 1);
+          }}
+          selectedConnectionId={selectedConnectionId}
+          onSelectConnection={handleSelectConnection}
+          connections={connections}
+          keybindings={keybindings}
+          railItems={railItems}
+          railActiveId={
+            section === "connections" ||
+            section === "supabase" ||
+            section === "spacetimedb" ||
+            section === "neon" ||
+            section === "planetscale"
+              ? section
+              : null
+          }
+          onSettingsClick={() => setSettingsModalOpen(true)}
+          settingsActive={settingsModalOpen}
+          hideSettingsDialog
+          railShowHome={false}
+          railShowWorkspace={false}
+          enableBottomSqlPanel={false}
+        >
+          {content}
+        </ModernUIShell>
+      ) : (
+        standalone
+      )}
       <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
         <DialogContent
           hideCloseButton
-          className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0"
           overlayClassName="bg-black/40"
         >
           <DialogTitle className="sr-only">Settings</DialogTitle>

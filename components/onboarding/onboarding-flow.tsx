@@ -28,28 +28,8 @@ const DARK_THEME_ID = DARK_THEME?.id ?? "dark";
 const TIPS: string[] = [
   "RexaDB connects to Postgres, Supabase, SpacetimeDB, Neon, SQLite and more — all from one unified workspace.",
   "Turn on Schema Explorer in Settings to browse tables, functions, triggers and indexes without leaving the sidebar.",
-  "Press ⌘K anywhere to jump straight to a table, run a query, or fire off a command.",
-];
-
-// Classic 4x4 Bayer ordered-dither matrix, 1px cells (4px tile) for a fine grain.
-// Cell opacity = matrix value / 15.
-const DITHER_CELLS: { x: number; y: number; o: number }[] = [
-  { x: 0, y: 0, o: 0 },
-  { x: 1, y: 0, o: 0.533 },
-  { x: 2, y: 0, o: 0.133 },
-  { x: 3, y: 0, o: 0.667 },
-  { x: 0, y: 1, o: 0.8 },
-  { x: 1, y: 1, o: 0.267 },
-  { x: 2, y: 1, o: 0.933 },
-  { x: 3, y: 1, o: 0.4 },
-  { x: 0, y: 2, o: 0.2 },
-  { x: 1, y: 2, o: 0.733 },
-  { x: 2, y: 2, o: 0.067 },
-  { x: 3, y: 2, o: 0.6 },
-  { x: 0, y: 3, o: 1 },
-  { x: 1, y: 3, o: 0.467 },
-  { x: 2, y: 3, o: 0.867 },
-  { x: 3, y: 3, o: 0.333 },
+  "You can pin favorite tables and queries for quick access from the sidebar.",
+  "Export query results as CSV or JSON with a single click from the results grid.",
 ];
 
 const APPEARANCE_OPTIONS: { id: string; label: string }[] = [
@@ -231,38 +211,17 @@ export function OnboardingFlow({
         <div className="flex h-full">
           {/* Visual panel */}
           <div className="relative m-3 hidden w-[42%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-sidebar via-studio-bg to-muted md:flex">
-            {/* Ordered (Bayer 4x4) dither texture. Uses currentColor (tied to
-                text-foreground) so it stays visible against both light and
-                dark bases instead of a fixed white overlay disappearing on
-                light themes. */}
-            <svg
-              className="pointer-events-none absolute inset-0 h-full w-full text-foreground"
-              preserveAspectRatio="none"
-              aria-hidden
-            >
-              <defs>
-                <pattern id="onboarding-dither" width="4" height="4" patternUnits="userSpaceOnUse">
-                  {DITHER_CELLS.map((c) => (
-                    <rect
-                      key={`${c.x}-${c.y}`}
-                      x={c.x}
-                      y={c.y}
-                      width={1}
-                      height={1}
-                      fill="currentColor"
-                      fillOpacity={c.o * 0.12}
-                    />
-                  ))}
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill="url(#onboarding-dither)" />
-            </svg>
-
-            <div className="relative z-10 max-w-xs px-8 text-center">
-              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <img
+              src="/onboarding.png"
+              alt="RexaDB onboarding"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="absolute top-14 left-0 right-0 z-10 max-w-xs mx-auto px-8 text-center">
+              <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-white/70">
                 Tip
               </p>
-              <p className="text-lg leading-relaxed text-foreground/80">
+              <p className="text-lg leading-relaxed text-white/90">
                 {TIPS[stepIndex % TIPS.length]}
               </p>
             </div>

@@ -412,10 +412,11 @@ app.get("/api/connections/:id", async (req, res) => {
 
 app.post("/api/connections", async (req, res) => {
   try {
-    const { name, connectionString, connectionType, environment, color, groups, group, isFavorite } = req.body;
+    const { name, connectionString, connectionType, environment, color, groups, group, isFavorite, host, port, database, username, password, sslMode, authToken } = req.body;
     const resolvedGroups = Array.isArray(groups) ? groups : (group ? [group] : []);
     const result = await mod.addConnection(name, connectionString, connectionType, {
-      environment, color, groups: resolvedGroups, group: resolvedGroups[0] || null, isFavorite
+      environment, color, groups: resolvedGroups, group: resolvedGroups[0] || null, isFavorite,
+      host, port, database, username, password, sslMode, authToken
     });
     res.json(result);
   } catch (e: any) {
