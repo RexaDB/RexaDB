@@ -27,6 +27,11 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  getDefaultKeybindings,
+  getKeybindingCombo,
+  formatShortcutForPlatform,
+} from "@/lib/studio/keybindings";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -39,6 +44,16 @@ import {
 import { Connection } from "@/lib/db/schema";
 
 import { detectConnectionDbType } from "@/lib/db/connection-type";
+import {
+  buildConnectionStringFromFields,
+  parseFieldsFromConnectionString,
+  emptyFieldValues,
+  isFieldBasedProvider,
+  sslModeOptionsForProvider,
+  type FieldProviderId,
+  type ConnectionFieldValues,
+  type PlanetScaleProtocol,
+} from "@/lib/db/connection-fields";
 import {
   Trash2,
   Plus,
@@ -67,6 +82,9 @@ import {
   Square,
   Check,
   List,
+  ArrowUpDown,
+  SlidersHorizontal,
+  Settings,
 } from "@/lib/icon-theme/lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -78,6 +96,7 @@ import {
   getProviderLogoUrl,
 } from "@/components/shared/provider-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NavUser } from "@/components/navigation/nav-user";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -246,6 +265,7 @@ const REXADB_UPGRADE_URL =
 
 export function ConnectionManager({
   hideHeader = false,
+  embedded = false,
   isAnalyticsEnabled,
   onAnalyticsToggle,
   onViewAnalytics,
@@ -258,6 +278,11 @@ export function ConnectionManager({
   onOpenPlanetscaleAccounts,
 }: {
   hideHeader?: boolean;
+  /** When `true`, renders as a content pane nested inside an external shell
+   *  (ModernUIShell) that owns the header/sidebar/rail. When `false` (the
+   *  default), renders as a standalone, full-viewport connection manager
+   *  with no ModernUIShell chrome around it. */
+  embedded?: boolean;
   isAnalyticsEnabled?: boolean;
   onAnalyticsToggle?: (enabled: boolean) => void;
   onViewAnalytics?: (connectionId: number) => void;
@@ -270,6 +295,7 @@ export function ConnectionManager({
   onOpenPlanetscaleAccounts?: () => void;
 }) {
   useGlobalAppFontFamily();
+  const isStandalone = !embedded;
   const isSupabaseMode = initialScreen === "supabase";
   const isSpacetimeDbMode = initialScreen === "spacetimedb-account";
   const isNeonCliMode = initialScreen === "neon-cli";
@@ -920,6 +946,9 @@ export function ConnectionManager({
   const [federatedSources, setFederatedSources] = useState<
     Array<{ alias: string; connectionId: number; namespace: string }>
   >([]);
+  const [fieldValues, setFieldValues] = useState<ConnectionFieldValues | null>(
+    null,
+  );
 
   const [jdbcUrl, setJdbcUrl] = useState("");
   const [jdbcDriverClass, setJdbcDriverClass] = useState("");
@@ -933,8 +962,13 @@ export function ConnectionManager({
 
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
   const [searchQuery, setSearchQuery] = useState("");
-  const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string[]>([]);
   const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "recent">("name");
+  const commandShortcut = useMemo(() => {
+    const combo = getKeybindingCombo(getDefaultKeybindings(), "TOGGLE_COMMAND_MENU");
+    return combo ? formatShortcutForPlatform(combo) : "⌘K";
+  }, []);
   const [connectionScreen, setConnectionScreen] = useState<ConnectionScreen>(
     initialScreen ?? "list",
   );
@@ -1358,6 +1392,13 @@ export function ConnectionManager({
     groups?: string[];
     isFavorite?: boolean;
     lastActive?: number | null;
+    host?: string;
+    port?: string;
+    database?: string;
+    username?: string;
+    password?: string;
+    sslMode?: string;
+    authToken?: string;
   }) => {
     if (workspaceMode) {
       try {
@@ -1414,6 +1455,13 @@ export function ConnectionManager({
       groups?: string[];
       isFavorite?: boolean;
       lastActive?: number | null;
+      host?: string;
+      port?: string;
+      database?: string;
+      username?: string;
+      password?: string;
+      sslMode?: string;
+      authToken?: string;
     }>,
   ) => {
     if (workspaceMode) {
@@ -1538,6 +1586,17 @@ export function ConnectionManager({
     return `${base}?${searchParams.toString()}`;
   }, [tursoAuthToken, tursoEndpoint]);
 
+  const buildGenericConnectionString = useCallback(() => {
+    if (!selectedProvider || !isFieldBasedProvider(selectedProvider)) {
+      return "";
+    }
+    if (!fieldValues) return "";
+    return buildConnectionStringFromFields(
+      selectedProvider as FieldProviderId,
+      fieldValues,
+    );
+  }, [fieldValues, selectedProvider]);
+
   const getCandidateConnectionString = useCallback(() => {
     if (selectedProvider === "postgresql") {
       return buildPostgresConnectionString().trim();
@@ -1555,9 +1614,6 @@ export function ConnectionManager({
         return "";
       }
     }
-    if (selectedProvider === "mysql" || selectedProvider === "mariadb") {
-      return normalizeMysqlConnectionString(connectionString, selectedProvider);
-    }
     if (selectedProvider === "jdbc") {
       if (!jdbcUrl) return "";
       const raw = jdbcUrl.trim();
@@ -1573,6 +1629,10 @@ export function ConnectionManager({
         params.set("jarPaths", jdbcJarPaths.join(","));
       return `jdbc://?${params.toString()}`;
     }
+    if (selectedProvider && isFieldBasedProvider(selectedProvider)) {
+      const built = buildGenericConnectionString().trim();
+      return built || connectionString.trim();
+    }
     return connectionString.trim();
   }, [
     buildPostgresConnectionString,
@@ -1585,6 +1645,7 @@ export function ConnectionManager({
     jdbcUsername,
     jdbcPassword,
     jdbcJarPaths,
+    buildGenericConnectionString,
   ]);
 
   const resetConnectionDraft = () => {
@@ -1617,6 +1678,7 @@ export function ConnectionManager({
     setTursoEndpoint("");
     setTursoAuthToken("");
     setFederatedSources([]);
+    setFieldValues(null);
     setJdbcUrl("");
     setJdbcDriverClass("");
     setJdbcUsername("");
@@ -2543,6 +2605,39 @@ export function ConnectionManager({
       terminalLog("log", "Editing connection:", editingConnection?.id ?? null);
       terminalLog("groupEnd");
 
+      const connectionFields: {
+        host?: string;
+        port?: string;
+        database?: string;
+        username?: string;
+        password?: string;
+        sslMode?: string;
+        authToken?: string;
+      } = {};
+      if (selectedProvider && isFieldBasedProvider(selectedProvider) && fieldValues) {
+        connectionFields.host = fieldValues.host;
+        connectionFields.port = fieldValues.port;
+        connectionFields.database = fieldValues.database;
+        connectionFields.username = fieldValues.username;
+        connectionFields.password = fieldValues.password;
+        connectionFields.sslMode = fieldValues.sslMode;
+        connectionFields.authToken = fieldValues.authToken;
+      } else if (selectedProvider === "postgresql") {
+        connectionFields.host = pgHost;
+        connectionFields.port = pgPort;
+        connectionFields.database = pgDatabase;
+        connectionFields.username = pgUsername;
+        connectionFields.password = pgPassword;
+        connectionFields.sslMode = pgSslMode;
+      } else if (selectedProvider === "turso") {
+        connectionFields.host = tursoEndpoint.trim().replace(/^libsql:\/\//i, "").replace(/^https?:\/\//i, "");
+        connectionFields.database = "";
+        connectionFields.username = "";
+        connectionFields.password = "";
+        connectionFields.sslMode = "require";
+        connectionFields.authToken = tursoAuthToken;
+      }
+
       if (editingConnection) {
         terminalLog(
           "log",
@@ -2558,6 +2653,7 @@ export function ConnectionManager({
           groups,
           isFavorite,
           lastActive,
+          ...connectionFields,
         });
         terminalLog("log", "[handleAdd] updateConnection response:", res);
         if (res.success) {
@@ -2581,6 +2677,7 @@ export function ConnectionManager({
           groups,
           isFavorite,
           lastActive,
+          ...connectionFields,
         });
         terminalLog("log", "[handleAdd] createConnection response:", res);
         if (res.success) {
@@ -2634,6 +2731,13 @@ export function ConnectionManager({
     if (detected === "postgresql") {
       const parsed = parsePostgresConnectionString(conn.connectionString);
       if (parsed) fillPgForm(parsed);
+    }
+    if (isFieldBasedProvider(detected)) {
+      const parsed = parseFieldsFromConnectionString(
+        detected as FieldProviderId,
+        conn.connectionString,
+      );
+      setFieldValues(parsed);
     }
     if (detected === "turso") {
       const parsed = parseTursoConnectionString(conn.connectionString);
@@ -3147,24 +3251,36 @@ export function ConnectionManager({
     }
   };
 
-  const filteredConnections = connections.filter((conn) => {
-    const matchesSearch =
-      !searchQuery ||
-      conn.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conn.connectionString.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFavorites = !showOnlyFavorites || !!(conn as any).isFavorite;
-    const matchesProvider =
-      !providerFilter || (conn as any).connectionType === providerFilter;
-    const matchesFolder =
-      !folderFilter ||
-      (
-        (conn as any).groups ||
-        ((conn as any).group ? [(conn as any).group] : [])
-      ).includes(folderFilter);
-    return (
-      matchesSearch && matchesFavorites && matchesProvider && matchesFolder
-    );
-  });
+  const filteredConnections = (() => {
+    const filtered = connections.filter((conn) => {
+      const matchesSearch =
+        !searchQuery ||
+        conn.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        conn.connectionString.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesFavorites = !showOnlyFavorites || !!(conn as any).isFavorite;
+      const matchesProvider =
+        providerFilter.length === 0 || providerFilter.includes((conn as any).connectionType);
+      const matchesFolder =
+        !folderFilter ||
+        (
+          (conn as any).groups ||
+          ((conn as any).group ? [(conn as any).group] : [])
+        ).includes(folderFilter);
+      return (
+        matchesSearch && matchesFavorites && matchesProvider && matchesFolder
+      );
+    });
+    if (sortBy === "name") {
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === "recent") {
+      filtered.sort((a, b) => {
+        const at = (a as any).lastActive ?? 0;
+        const bt = (b as any).lastActive ?? 0;
+        return bt - at;
+      });
+    }
+    return filtered;
+  })();
 
   const commandMenuConnections = connections.filter(
     (conn) =>
@@ -3527,22 +3643,22 @@ export function ConnectionManager({
     return raw;
   }, []);
 
+  const updateGenericField = useCallback(
+    (key: keyof ConnectionFieldValues) => (value: string) => {
+      setFieldValues((prev) => (prev ? { ...prev, [key]: value } : prev));
+    },
+    [],
+  );
+
   if (connectionsLoading || !authResolved || !workspaceAuthLoaded) {
-    // The surrounding shell (sidebar/rail/header) is already real and
-    // already visible via AppShell/ModernUIShell — this is just the content
-    // pane, which fills in a moment later. `h-full` (not `h-screen`) keeps it
-    // inside that pane instead of breaking out to the viewport, and it's
-    // filled with the same bg the real content uses so there's no color pop
-    // on the transition. A small contained spinner (not full-viewport) makes
-    // it read as "loading" instead of a blank/broken void.
     return (
       <div
         className={cn(
           "flex items-center justify-center bg-studio-bg",
-          hideHeader ? "h-full" : "h-screen",
+          isStandalone ? "h-screen" : "h-full",
         )}
       >
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
   }
@@ -3607,11 +3723,204 @@ export function ConnectionManager({
     </div>
   );
 
+  const renderGenericFieldForm = () => {
+    if (
+      !selectedProvider ||
+      !fieldValues ||
+      !isFieldBasedProvider(selectedProvider)
+    ) {
+      return null;
+    }
+    const provider = selectedProvider as FieldProviderId;
+    const isRedis = provider === "redis";
+    const isMongo = provider === "mongodb";
+    const isPlanetScale = provider === "planetscale";
+    const providerCard = providerCards.find(
+      (card) => card.id === selectedProvider,
+    );
+    const switchPlanetScaleProtocol = (protocol: PlanetScaleProtocol) => {
+      setFieldValues((prev) =>
+        prev
+          ? {
+              ...prev,
+              protocol,
+              port: protocol === "mysql" ? "3306" : "5432",
+              sslMode: "require",
+            }
+          : prev,
+      );
+    };
+
+    return (
+      <div className="space-y-4">
+        {isPlanetScale && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Protocol</Label>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+              <button
+                type="button"
+                onClick={() => switchPlanetScaleProtocol("mysql")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  fieldValues.protocol === "mysql"
+                    ? "bg-background shadow-sm text-foreground border border-border/60"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Vitess (MySQL)
+              </button>
+              <button
+                type="button"
+                onClick={() => switchPlanetScaleProtocol("postgresql")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  fieldValues.protocol !== "mysql"
+                    ? "bg-background shadow-sm text-foreground border border-border/60"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                PostgreSQL
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {fieldValues.protocol === "mysql"
+                ? "Vitess (MySQL) is PlanetScale's original protocol."
+                : "PlanetScale also supports the PostgreSQL wire protocol."}
+            </p>
+          </div>
+        )}
+        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
+          <Label
+            htmlFor="conn-uri-generic"
+            className="text-sm font-medium flex items-center gap-2"
+          >
+            Connection String{" "}
+            <span className="text-xs font-normal text-muted-foreground">
+              (Optional fast-fill)
+            </span>
+          </Label>
+          <Input
+            id="conn-uri-generic"
+            placeholder={
+              providerCard?.placeholder ??
+              "protocol://user:password@host:port/database"
+            }
+            className="font-mono text-sm bg-background border-border/60"
+            value={connectionString}
+            onChange={(e) => {
+              const next = e.target.value;
+              setConnectionString(next);
+              const looksLikeUri = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(
+                next.trim(),
+              );
+              if (looksLikeUri) {
+                setFieldValues(
+                  parseFieldsFromConnectionString(provider, next),
+                );
+              }
+            }}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="f-host" className="text-sm font-medium">
+              Host
+            </Label>
+            <Input
+              id="f-host"
+              value={fieldValues.host}
+              onChange={(e) => updateGenericField("host")(e.target.value)}
+              className="bg-background border-border/60 h-9"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="f-port" className="text-sm font-medium">
+              Port
+            </Label>
+            <Input
+              id="f-port"
+              value={fieldValues.port}
+              onChange={(e) =>
+                updateGenericField("port")(
+                  e.target.value.replace(/[^\d]/g, ""),
+                )
+              }
+              className="bg-background border-border/60 h-9"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="f-db" className="text-sm font-medium">
+            {isRedis ? "Database Index" : "Database"}
+          </Label>
+          <Input
+            id="f-db"
+            value={fieldValues.database}
+            onChange={(e) => updateGenericField("database")(e.target.value)}
+            className="bg-background border-border/60 h-9"
+          />
+          {isRedis && (
+            <p className="text-xs text-muted-foreground">
+              Logical database number (e.g. 0, 1, 2).
+            </p>
+          )}
+          {isMongo && (
+            <p className="text-xs text-muted-foreground">
+              Default database / auth source.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="f-user" className="text-sm font-medium">
+              Username
+            </Label>
+            <Input
+              id="f-user"
+              value={fieldValues.username}
+              onChange={(e) => updateGenericField("username")(e.target.value)}
+              className="bg-background border-border/60 h-9"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="f-password" className="text-sm font-medium">
+              Password
+            </Label>
+            <PasswordInput
+              id="f-password"
+              value={fieldValues.password}
+              onChange={updateGenericField("password")}
+              show={showPassword}
+              onToggleShow={() => setShowPassword((prev) => !prev)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="f-ssl" className="text-sm font-medium">
+            SSL Mode
+          </Label>
+          <SearchableSelect
+            value={fieldValues.sslMode}
+            onValueChange={updateGenericField("sslMode")}
+            placeholder="Select SSL mode"
+            searchThreshold={0}
+            className="h-8 w-full border-border/60 bg-background text-xs"
+            options={sslModeOptionsForProvider(provider, fieldValues.protocol)}
+          />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       className={cn(
         "flex",
-        hideHeader ? "h-full" : "h-screen",
+        isStandalone ? "h-screen" : "h-full",
         "bg-studio-bg text-foreground overflow-hidden relative",
       )}
     >
@@ -3821,7 +4130,7 @@ export function ConnectionManager({
             </DialogHeader>
             {credentialsDialog.loading ? (
               <div className="flex items-center justify-center py-8">
-                <div className="h-5 w-5 animate-spin rounded-lg border-2 border-primary border-t-transparent" />
+                <div className="h-5 w-5 rounded-lg border-2 border-primary border-t-transparent" />
               </div>
             ) : credentialsDialog.data ? (
               <div className="space-y-3 py-2">
@@ -3903,7 +4212,7 @@ export function ConnectionManager({
             <div className="py-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <div
-                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deleteOption === "with-connections" ? "bg-destructive/5 border-destructive/30" : "bg-muted/30 border-border/40 hover:bg-muted/50"}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${deleteOption === "with-connections" ? "bg-destructive/5 border-destructive/30" : "bg-muted/30 border-border/40 hover:bg-muted/50"}`}
                   onClick={() => setDeleteOption("with-connections")}
                 >
                   <div
@@ -3923,7 +4232,7 @@ export function ConnectionManager({
                   </div>
                 </div>
                 <div
-                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deleteOption === "keep-connections" ? "bg-primary/5 border-primary/30" : "bg-muted/30 border-border/40 hover:bg-muted/50"}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${deleteOption === "keep-connections" ? "bg-primary/5 border-primary/30" : "bg-muted/30 border-border/40 hover:bg-muted/50"}`}
                   onClick={() => setDeleteOption("keep-connections")}
                 >
                   <div
@@ -4047,160 +4356,160 @@ export function ConnectionManager({
         {/* Main Content */}
         <main
           className={cn(
-            "flex-1 overflow-hidden no-drag flex flex-col transition-all duration-300",
+            "flex-1 overflow-hidden no-drag flex flex-col",
             "border-t-0",
           )}
         >
           {connectionScreen === "list" ? (
             <div className="flex h-full w-full">
-              <div className="flex flex-col h-full transition-all duration-300 flex-1 max-w-5xl mx-auto px-6 py-8">
-                <SectionHeader
-                  title="Connections"
-                  subtitle={
-                    <>
-                      {connections.length} database
-                      {connections.length !== 1 ? "s" : ""} configured
-                      {workspaceMode && (
-                        <>
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary border border-primary/20 ml-2">
-                            Workspace
-                          </span>
-                          <button
-                            className="text-xs text-destructive hover:text-destructive/80 underline underline-offset-2 ml-2"
-                            onClick={async () => {
-                              setWorkspaceMode(false);
-                              disconnectStudioWorkspace();
-                              toast.success("Switched to local connections");
-                            }}
-                          >
-                            Disconnect
-                          </button>
-                        </>
-                      )}
-                    </>
-                  }
-                  className={cn("mb-8", sleekLayout ? "mb-4" : "")}
-                />
-
-                <div className="flex flex-col gap-3 mb-4">
+              <div className="flex flex-col h-full flex-1 max-w-5xl mx-auto px-6 py-8">
+                {/* Top row — matches reference image: large title with avatar + settings on the right */}
+                <div className="flex items-center justify-between mb-6">
+                  <h1 className="text-[28px] font-semibold tracking-tight text-foreground">
+                    Connections
+                  </h1>
                   <div className="flex items-center gap-2">
-                    <div className="relative flex-1 max-w-xs">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
-                      <Input
-                        placeholder="Search connections..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="h-9 pl-8 text-sm bg-background/40 border-border/50"
-                      />
-                    </div>
-                    <SearchableSelect
-                      value={providerFilter ?? ""}
-                      onValueChange={(v) => setProviderFilter(v || null)}
-                      placeholder="All providers"
-                      searchThreshold={10}
-                      className="h-9 w-[130px] border-border/50 bg-background/40 text-xs"
-                      options={providerCards.map((c) => ({
-                        value: c.id,
-                        label: c.label,
-                        icon: c.logoSrc,
-                      }))}
+                    <button
+                      onClick={() => setConnectionScreen("settings")}
+                      title="Settings"
+                      aria-label="Settings"
+                      className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-muted-foreground/60" />
+                    </button>
+                    <NavUser
+                      name={displayName}
+                      email={user?.email ?? undefined}
+                      dropdownAlign="end"
+                      dropdownSide="bottom"
                     />
-                    {!workspaceMode && (
-                      <SearchableSelect
-                        value={folderFilter ?? ""}
-                        onValueChange={(v) => setFolderFilter(v || null)}
-                        placeholder="All folders"
-                        searchThreshold={10}
-                        className="h-9 w-[120px] border-border/50 bg-background/40 text-xs"
-                        options={[
-                          ...connectionGroups.map((g) => ({
-                            value: g.name,
-                            label: g.name,
-                          })),
-                        ]}
-                      />
-                    )}
-                    {(searchQuery || providerFilter || folderFilter) && (
-                      <button
-                        onClick={() => {
-                          setSearchQuery("");
-                          setProviderFilter(null);
-                          setFolderFilter(null);
-                        }}
-                        className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <div className="ml-auto flex items-center gap-2">
-                      {!workspaceMode && renderManageDropdown()}
-
-                      {can("connections.create") &&
-                        renderNewConnectionButton()}
-                    </div>
                   </div>
                 </div>
 
-                <div className="relative mb-4 -mx-6 py-1">
-                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide mask-fade-x px-6">
-                    {providerCards.map((card) => {
-                      const isActive = providerFilter === card.id;
-                      return (
-                        <button
-                          key={card.id}
-                          onClick={() =>
-                            setProviderFilter(isActive ? null : card.id)
-                          }
-                          className={cn(
-                            "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center border transition-all",
-                            isActive
-                              ? "border-primary ring-1 ring-primary bg-primary/10"
-                              : "border-border/60 hover:border-foreground/30 bg-background/40",
-                          )}
-                          title={card.label}
-                        >
-                          {card.id === "spacetimedb" ? (
-                            <SpacetimeDbLogo className="h-[14px] w-[14px] text-foreground" />
-                          ) : card.id === "supabase" ? (
-                            <SupabaseLogo className="h-[14px] w-[14px]" />
-                          ) : card.id === "neon" ? (
-                            <NeonLogo className="h-[14px] w-[14px]" />
-                          ) : (
-                            <Image
-                              src={card.logoSrc}
-                              alt={card.label}
-                              width={14}
-                              height={14}
-                              className="rounded-lg"
-                            />
-                          )}
-                        </button>
-                      );
-                    })}
-                    {!workspaceMode && connectionGroups.length > 0 && (
-                      <div className="w-px h-5 bg-border/40 shrink-0" />
-                    )}
-                    {!workspaceMode &&
-                      connectionGroups.map((g) => {
-                        const isActive = folderFilter === g.name;
-                        return (
-                          <button
-                            key={g.name}
-                            onClick={() =>
-                              setFolderFilter(isActive ? null : g.name)
-                            }
-                            className={cn(
-                              "shrink-0 h-7 rounded-lg flex items-center gap-1.5 px-2.5 border text-xs font-medium transition-all",
-                              isActive
-                                ? "border-primary ring-1 ring-primary bg-primary/10 text-foreground"
-                                : "border-border/60 hover:border-foreground/30 bg-background/40 text-muted-foreground",
+                {/* Second row — search (opens CMD+K) + Providers (dashed) + Sorted by name + New Connection — no select/animate effects */}
+                <div className="flex items-center gap-2 mb-6">
+                  <button
+                    type="button"
+                    onClick={() => setCommandMenuOpen(true)}
+                    className="flex h-9 flex-1 max-w-sm items-center justify-between rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus-visible:outline-none"
+                  >
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <Search className="w-4 h-4 text-muted-foreground/60" />
+                      Search connections...
+                    </span>
+                    <span className="ml-2 flex items-center gap-1">
+                      <Kbd className="h-5 px-1.5 text-xs">{commandShortcut}</Kbd>
+                    </span>
+                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="h-9 px-3 rounded-lg border border-dashed border-border bg-background text-sm flex items-center gap-2 focus:outline-none">
+                        <span className="text-foreground">Providers</span>
+                        {providerFilter.length > 0 && (
+                          <span className="flex -space-x-1.5">
+                            {providerFilter.slice(0, 3).map((id) => {
+                              const card = providerCards.find((x) => x.id === id);
+                              if (!card) return null;
+                              return (
+                                <span
+                                  key={id}
+                                  className="h-5 w-5 rounded-full border border-background bg-background flex items-center justify-center overflow-hidden"
+                                >
+                                  {card.id === "spacetimedb" ? (
+                                    <SpacetimeDbLogo className="h-3 w-3" />
+                                  ) : card.id === "supabase" ? (
+                                    <SupabaseLogo className="h-3 w-3" />
+                                  ) : card.id === "neon" ? (
+                                    <NeonLogo className="h-3 w-3" />
+                                  ) : (
+                                    <Image src={card.logoSrc} alt="" width={14} height={14} className="rounded-full object-contain" />
+                                  )}
+                                </span>
+                              );
+                            })}
+                            {providerFilter.length > 3 && (
+                              <span className="h-5 w-5 rounded-full border border-background bg-muted flex items-center justify-center text-[10px] font-medium">
+                                +{providerFilter.length - 3}
+                              </span>
                             )}
+                          </span>
+                        )}
+                        <ChevronDown className="w-4 h-4 text-muted-foreground/60" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="bg-popover border-border min-w-[180px]">
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setProviderFilter([]);
+                        }}
+                        className="text-xs focus:bg-muted/50"
+                      >
+                        All providers
+                        {providerFilter.length === 0 && <Check className="w-3 h-3 ml-auto" />}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {providerCards.map((c) => {
+                        const checked = providerFilter.includes(c.id);
+                        return (
+                          <DropdownMenuItem
+                            key={c.id}
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              setProviderFilter((prev) =>
+                                prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id],
+                              );
+                            }}
+                            className="gap-2 text-xs focus:bg-muted/50"
                           >
-                            <Folder className="w-3 h-3" />
-                            {g.name}
-                          </button>
+                            {c.id === "spacetimedb" ? (
+                              <SpacetimeDbLogo className="h-4 w-4" />
+                            ) : c.id === "supabase" ? (
+                              <SupabaseLogo className="h-4 w-4" />
+                            ) : c.id === "neon" ? (
+                              <NeonLogo className="h-4 w-4" />
+                            ) : (
+                              <Image src={c.logoSrc} alt="" width={16} height={16} className="rounded-full" />
+                            )}
+                            {c.label}
+                            {checked && <Check className="w-3 h-3 ml-auto" />}
+                          </DropdownMenuItem>
                         );
                       })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="h-9 px-3 rounded-lg border border-border bg-background text-sm flex items-center gap-2 focus:outline-none">
+                        <SlidersHorizontal className="w-4 h-4 text-muted-foreground/70" />
+                        Sorted by {sortBy === "name" ? "name" : "recent"}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="bg-popover border-border">
+                      <DropdownMenuItem onClick={() => setSortBy("name")} className="text-xs gap-2 focus:bg-muted/50">
+                        <ArrowUpDown className="w-3.5 h-3.5" /> Sorted by name
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSortBy("recent")} className="text-xs gap-2 focus:bg-muted/50">
+                        <ArrowUpDown className="w-3.5 h-3.5" /> Sorted by recent
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <div className="ml-auto">
+                    {can("connections.create") && (
+                      <button
+                        onClick={() => {
+                          resetConnectionDraft();
+                          setConnectionScreen("new-select");
+                        }}
+                        className="h-9 px-3 rounded-lg border border-border bg-background text-sm flex items-center gap-2 focus:outline-none"
+                      >
+                        <Plus className="w-4 h-4 text-muted-foreground/70" />
+                        New Connection
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -4276,7 +4585,7 @@ export function ConnectionManager({
                                     dragReorderActiveRef.current = false;
                                   }}
                                   className={cn(
-                                    "group relative rounded-lg border border-studio-border/60 bg-card hover:bg-studio-row-hover hover:border-studio-border p-4 transition-all duration-200 cursor-pointer",
+                                    "group relative rounded-lg border border-studio-border/60 bg-card hover:bg-studio-row-hover hover:border-studio-border p-4 cursor-pointer",
                                     openingConnectionId === conn.id &&
                                       "opacity-50 pointer-events-none",
                                     draggingConnectionId === conn.id &&
@@ -4364,7 +4673,7 @@ export function ConnectionManager({
                                           onClick={(event) =>
                                             event.stopPropagation()
                                           }
-                                          className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-grab active:cursor-grabbing opacity-70 hover:opacity-100 transition-opacity inline-flex items-center justify-center leading-none"
+                                          className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-grab active:cursor-grabbing opacity-70 hover:opacity-100 inline-flex items-center justify-center leading-none"
                                           title="Drag to reorder"
                                           aria-label="Drag to reorder"
                                         >
@@ -4484,7 +4793,7 @@ export function ConnectionManager({
                                     onClick={() => void openConnection(conn)}
                                     className="w-full text-left group/button"
                                   >
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground group-hover/button:text-foreground/70 transition-colors">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground group-hover/button:text-foreground/70">
                                       <span className="font-mono truncate">
                                         {getConnectionTarget(conn)}
                                       </span>
@@ -4493,7 +4802,7 @@ export function ConnectionManager({
                                   {openingConnectionId === conn.id && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-lg backdrop-blur-sm z-10">
                                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-muted-foreground/80 rounded-lg animate-spin" />
+                                        <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-muted-foreground/80 rounded-lg" />
                                         Connecting...
                                       </div>
                                     </div>
@@ -4536,7 +4845,7 @@ export function ConnectionManager({
                                     <tr
                                       key={conn.id}
                                       onClick={() => void openConnection(conn)}
-                                      className="border-b border-studio-border/30 hover:bg-studio-row-hover/60 cursor-pointer transition-colors last:border-b-0"
+                                      className="border-b border-studio-border/30 hover:bg-studio-row-hover/60 cursor-pointer last:border-b-0"
                                     >
                                       <td className="px-3 py-2.5">
                                         <div className="flex items-center gap-2.5">
@@ -4865,44 +5174,52 @@ export function ConnectionManager({
               onBack={() => setConnectionScreen("list")}
             />
           ) : connectionScreen === "settings" ? (
-            <div className="flex h-full min-h-0">
-              <div className="flex-1 min-w-0">
-                <AppSettingsView
-                  planCode={plan.code}
-                  onOpenThemeCreator={handleOpenThemeCreator}
-                  onOpenIconThemeCreator={handleOpenIconThemeCreator}
-                />
-              </div>
-              <div
-                className={cn(
-                  "shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out",
-                  isThemeCreatorOpen ? "w-[340px]" : "w-0",
-                )}
+            <Dialog
+              open={true}
+              onOpenChange={(open) => {
+                if (!open) setConnectionScreen("list");
+              }}
+            >
+              <DialogContent
+                hideCloseButton
+                className="h-[80vh] w-[80vw] !max-w-[80vw] flex flex-col overflow-hidden p-0"
+                overlayClassName="bg-black/40"
               >
-                <ThemeCreatorPanel
-                  isOpen={isThemeCreatorOpen}
-                  onClose={handleCloseThemeCreator}
-                  activeTheme={selectedAppTheme}
-                  customAppThemes={appTheme.customAppThemes}
-                  builtInAppThemes={BUILTIN_APP_THEMES}
-                  onSaveTheme={handleSaveTheme}
-                />
-              </div>
-              <div
-                className={cn(
-                  "shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out",
-                  isIconThemeCreatorOpen ? "w-[340px]" : "w-0",
-                )}
-              >
-                <IconThemeCreatorPanel
-                  isOpen={isIconThemeCreatorOpen}
-                  onClose={handleCloseIconThemeCreator}
-                  iconThemeId={iconThemeId}
-                  customIconThemes={customIconThemes}
-                  onSaveIconTheme={handleSaveIconTheme}
-                />
-              </div>
-            </div>
+                <DialogTitle className="sr-only">Settings</DialogTitle>
+                <div className="flex h-full min-h-0">
+                  <div className="flex-1 min-w-0">
+                    <AppSettingsView
+                      planCode={plan.code}
+                      onOpenThemeCreator={handleOpenThemeCreator}
+                      onOpenIconThemeCreator={handleOpenIconThemeCreator}
+                    />
+                  </div>
+                  {isThemeCreatorOpen && (
+                    <div className="w-[340px] shrink-0 overflow-hidden border-l border-studio-border">
+                      <ThemeCreatorPanel
+                        isOpen={isThemeCreatorOpen}
+                        onClose={handleCloseThemeCreator}
+                        activeTheme={selectedAppTheme}
+                        customAppThemes={appTheme.customAppThemes}
+                        builtInAppThemes={BUILTIN_APP_THEMES}
+                        onSaveTheme={handleSaveTheme}
+                      />
+                    </div>
+                  )}
+                  {isIconThemeCreatorOpen && (
+                    <div className="w-[340px] shrink-0 overflow-hidden border-l border-studio-border">
+                      <IconThemeCreatorPanel
+                        isOpen={isIconThemeCreatorOpen}
+                        onClose={handleCloseIconThemeCreator}
+                        iconThemeId={iconThemeId}
+                        customIconThemes={customIconThemes}
+                        onSaveIconTheme={handleSaveIconTheme}
+                      />
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           ) : connectionScreen === "supabase" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="mx-auto w-full max-w-5xl px-6 py-6">
@@ -5051,7 +5368,7 @@ export function ConnectionManager({
                         handleAddSupabaseAccount();
                       }
                     }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
                   >
                     <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
                       <SupabaseLogo className="h-7 w-7" />
@@ -5084,7 +5401,7 @@ export function ConnectionManager({
                         handleAddSpacetimeDbAccount();
                       }
                     }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
                   >
                     <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
                       <SpacetimeDbLogo className="h-[26px] w-[26px] text-foreground/80" />
@@ -5117,7 +5434,7 @@ export function ConnectionManager({
                         void handleAddNeonAccount();
                       }
                     }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
                   >
                     <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
                       <NeonLogo className="h-7 w-7" />
@@ -5149,7 +5466,7 @@ export function ConnectionManager({
                           handleAddPlanetscaleAccount();
                         }
                       }}
-                      className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                      className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
                     >
                       <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
                         <ProviderLogo type="planetscale" className="h-7 w-7" />
@@ -5183,27 +5500,34 @@ export function ConnectionManager({
                             setConnectionScreen("jdbc-picker");
                           } else {
                             setSelectedProvider(card.id);
+                            if (isFieldBasedProvider(card.id)) {
+                              setFieldValues(
+                                emptyFieldValues(card.id as FieldProviderId),
+                              );
+                            } else {
+                              setFieldValues(null);
+                            }
                             setConnectionScreen("new-form");
                           }
                         }}
-                        className="group flex flex-col items-center justify-center rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3.5 transition-all hover:border-studio-border hover:bg-studio-row-hover/80"
+                        className="group flex flex-col items-center justify-center rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3.5 hover:border-studio-border hover:bg-studio-row-hover/80"
                       >
                         {card.id === "spacetimedb" ? (
-                          <SpacetimeDbLogo className="mb-2 h-[26px] w-[26px] text-foreground opacity-80 transition-opacity group-hover:opacity-100" />
+                          <SpacetimeDbLogo className="mb-2 h-[26px] w-[26px] text-foreground opacity-80 group-hover:opacity-100" />
                         ) : card.id === "supabase" ? (
-                          <SupabaseLogo className="mb-2 h-[26px] w-[26px] opacity-80 transition-opacity group-hover:opacity-100" />
+                          <SupabaseLogo className="mb-2 h-[26px] w-[26px] opacity-80 group-hover:opacity-100" />
                         ) : card.id === "neon" ? (
-                          <NeonLogo className="mb-2 h-[26px] w-[26px] opacity-80 transition-opacity group-hover:opacity-100" />
+                          <NeonLogo className="mb-2 h-[26px] w-[26px] opacity-80 group-hover:opacity-100" />
                         ) : (
                           <Image
                             src={card.logoSrc}
                             alt={card.label}
                             width={26}
                             height={26}
-                            className="mb-2 rounded-lg object-contain opacity-80 transition-opacity group-hover:opacity-100"
+                            className="mb-2 rounded-lg object-contain opacity-80 group-hover:opacity-100"
                           />
                         )}
-                        <span className="text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+                        <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground">
                           {card.label}
                         </span>
                       </button>
@@ -5255,7 +5579,7 @@ export function ConnectionManager({
           ) : (
             // Form Screen
             <div className="h-full w-full overflow-y-auto scrollbar-hide py-6">
-              <div className="mx-auto max-w-xl space-y-4 px-5">
+              <div className="mx-auto max-w-6xl space-y-4 px-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Button
@@ -5290,7 +5614,7 @@ export function ConnectionManager({
                       alt={selectedProvider}
                       width={22}
                       height={22}
-                      className="opacity-60"
+                      className="opacity-60 rounded-full"
                     />
                   ) : null}
                 </div>
@@ -5300,8 +5624,219 @@ export function ConnectionManager({
                   onSubmit={handleAdd}
                   className="space-y-4"
                 >
-                  <Card className="space-y-5 border-studio-border/60 bg-studio-bg/80 p-5 [&_input]:text-sm [&_textarea]:text-sm">
-                    <div className="space-y-5">
+                  <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
+                    <Card className="space-y-5 border-studio-border/60 bg-studio-bg/80 p-5 [&_input]:text-sm [&_textarea]:text-sm">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-semibold">Details</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Name, environment, folder and favorite.
+                        </p>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="name-screen"
+                            className="text-sm font-medium"
+                          >
+                            Connection Name
+                          </Label>
+                          <Input
+                            id="name-screen"
+                            placeholder={buildConnectionName(
+                              getCandidateConnectionString(),
+                              selectedProvider,
+                            )}
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="h-10 border-border/60 bg-background"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">
+                              Environment
+                            </Label>
+                            <SearchableSelect
+                              value={environment || ""}
+                              onValueChange={(value) =>
+                                setEnvironment((value as any) || null)
+                              }
+                              placeholder="Select environment"
+                              searchThreshold={0}
+                              className="h-10 w-full border-border/60 bg-background"
+                              options={[
+                                { value: "", label: "None" },
+                                { value: "production", label: "Production" },
+                                { value: "staging", label: "Staging" },
+                                { value: "local", label: "Local" },
+                              ]}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">
+                              Group / Folder
+                            </Label>
+                            <Popover
+                              open={folderPopoverOpen}
+                              onOpenChange={setFolderPopoverOpen}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  className="h-10 w-full justify-between border-border/60 bg-background text-sm font-normal"
+                                >
+                                  {groups.length === 0 ? (
+                                    <span className="text-muted-foreground">
+                                      Select folders
+                                    </span>
+                                  ) : (
+                                    <span className="truncate">
+                                      {groups.join(", ")}
+                                    </span>
+                                  )}
+                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                className="w-[var(--radix-popover-trigger-width)] p-1 bg-popover"
+                                align="start"
+                              >
+                                {connectionGroups.length === 0 ? (
+                                  <div className="px-2 py-4 text-sm text-center text-muted-foreground">
+                                    No folders found.
+                                  </div>
+                                ) : (
+                                  <div className="max-h-60 overflow-y-auto space-y-0.5">
+                                    {connectionGroups.map((g) => {
+                                      const isSelected = groups.includes(
+                                        g.name,
+                                      );
+                                      return (
+                                        <div
+                                          key={g.name}
+                                          role="option"
+                                          aria-selected={isSelected}
+                                          className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer rounded hover:bg-accent aria-selected:bg-accent"
+                                          onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setGroups((prev) =>
+                                              isSelected
+                                                ? prev.filter(
+                                                    (n) => n !== g.name,
+                                                  )
+                                                : [...prev, g.name],
+                                            );
+                                          }}
+                                        >
+                                          <div
+                                            className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                          >
+                                            {isSelected && (
+                                              <Check className="h-3 w-3 text-primary-foreground" />
+                                            )}
+                                          </div>
+                                          <span className="truncate">
+                                            {g.name}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between py-2 border-t border-border/40">
+                          <div className="space-y-0.5">
+                            <Label className="text-sm font-medium">
+                              Favorite
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              Pin to top of list
+                            </p>
+                          </div>
+                          <Switch
+                            checked={isFavorite}
+                            onCheckedChange={setIsFavorite}
+                          />
+                        </div>
+
+                        {workspaceMode &&
+                          roles.length > 0 &&
+                          can("connections.manage_access") && (
+                            <div className="border-t border-border/40 pt-3 space-y-3">
+                              <Label className="text-sm font-medium">
+                                Role Access
+                              </Label>
+                              <p className="text-xs text-muted-foreground -mt-1">
+                                Control which roles can access this connection
+                              </p>
+                              <div className="space-y-2">
+                                {roles.map((role) => (
+                                  <div
+                                    key={role.id}
+                                    className="flex items-center gap-3"
+                                  >
+                                    <span className="text-xs truncate w-24 shrink-0">
+                                      {role.name}
+                                    </span>
+                                    <div className="relative flex-1">
+                                      <SearchableSelect
+                                        value={formAccess[role.id] || ""}
+                                        onValueChange={(val) => {
+                                          setFormAccess((prev) => {
+                                            const next = { ...prev };
+                                            if (val) {
+                                              next[role.id] = val as AccessType;
+                                            } else {
+                                              delete next[role.id];
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        placeholder="No access"
+                                        searchThreshold={0}
+                                        className="h-10 w-full text-sm font-normal border-border/60"
+                                        options={[
+                                          { value: "", label: "No access" },
+                                          {
+                                            value: "READ_ONLY",
+                                            label: "Read only",
+                                          },
+                                          {
+                                            value: "READ_AND_REQUEST",
+                                            label: "Read & request",
+                                          },
+                                          {
+                                            value: "FULL_ACCESS",
+                                            label: "Full access",
+                                          },
+                                        ]}
+                                      />
+                                      <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 opacity-50 pointer-events-none" />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                    </Card>
+
+                    <Card className="space-y-5 border-studio-border/60 bg-studio-bg/80 p-5 [&_input]:text-sm [&_textarea]:text-sm">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-semibold">
+                          Database Connection
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          Connection string, host, port, credentials and SSL.
+                        </p>
+                      </div>
+                      <div className="space-y-5">
                       {selectedProvider === "postgresql" ? (
                         <div className="space-y-4">
                           <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
@@ -5866,6 +6401,8 @@ export function ConnectionManager({
                             </>
                           ),
                         })
+                      ) : isFieldBasedProvider(selectedProvider) ? (
+                        renderGenericFieldForm()
                       ) : (
                         <div className="space-y-2">
                           <Label
@@ -5891,203 +6428,9 @@ export function ConnectionManager({
                           />
                         </div>
                       )}
-
-                      <div className="border-t border-border/60 pt-4 space-y-4">
-                        <div className="space-y-2">
-                          <Label
-                            htmlFor="name-screen"
-                            className="text-sm font-medium"
-                          >
-                            Connection Name
-                          </Label>
-                          <Input
-                            id="name-screen"
-                            placeholder={buildConnectionName(
-                              getCandidateConnectionString(),
-                              selectedProvider,
-                            )}
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="h-10 border-border/60 bg-background"
-                          />
                         </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">
-                              Environment
-                            </Label>
-                            <SearchableSelect
-                              value={environment || ""}
-                              onValueChange={(value) =>
-                                setEnvironment((value as any) || null)
-                              }
-                              placeholder="Select environment"
-                              searchThreshold={0}
-                              className="h-10 w-full border-border/60 bg-background"
-                              options={[
-                                { value: "", label: "None" },
-                                { value: "production", label: "Production" },
-                                { value: "staging", label: "Staging" },
-                                { value: "local", label: "Local" },
-                              ]}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-sm font-medium">
-                              Group / Folder
-                            </Label>
-                            <Popover
-                              open={folderPopoverOpen}
-                              onOpenChange={setFolderPopoverOpen}
-                            >
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  className="h-10 w-full justify-between border-border/60 bg-background text-sm font-normal"
-                                >
-                                  {groups.length === 0 ? (
-                                    <span className="text-muted-foreground">
-                                      Select folders
-                                    </span>
-                                  ) : (
-                                    <span className="truncate">
-                                      {groups.join(", ")}
-                                    </span>
-                                  )}
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent
-                                className="w-[var(--radix-popover-trigger-width)] p-1 bg-popover"
-                                align="start"
-                              >
-                                {connectionGroups.length === 0 ? (
-                                  <div className="px-2 py-4 text-sm text-center text-muted-foreground">
-                                    No folders found.
-                                  </div>
-                                ) : (
-                                  <div className="max-h-60 overflow-y-auto space-y-0.5">
-                                    {connectionGroups.map((g) => {
-                                      const isSelected = groups.includes(
-                                        g.name,
-                                      );
-                                      return (
-                                        <div
-                                          key={g.name}
-                                          role="option"
-                                          aria-selected={isSelected}
-                                          className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer rounded hover:bg-accent aria-selected:bg-accent"
-                                          onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setGroups((prev) =>
-                                              isSelected
-                                                ? prev.filter(
-                                                    (n) => n !== g.name,
-                                                  )
-                                                : [...prev, g.name],
-                                            );
-                                          }}
-                                        >
-                                          <div
-                                            className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-primary border-primary" : "border-border"}`}
-                                          >
-                                            {isSelected && (
-                                              <Check className="h-3 w-3 text-primary-foreground" />
-                                            )}
-                                          </div>
-                                          <span className="truncate">
-                                            {g.name}
-                                          </span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between py-2 border-t border-border/40">
-                          <div className="space-y-0.5">
-                            <Label className="text-sm font-medium">
-                              Favorite
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              Pin to top of list
-                            </p>
-                          </div>
-                          <Switch
-                            checked={isFavorite}
-                            onCheckedChange={setIsFavorite}
-                          />
-                        </div>
-
-                        {workspaceMode &&
-                          roles.length > 0 &&
-                          can("connections.manage_access") && (
-                            <div className="border-t border-border/40 pt-3 space-y-3">
-                              <Label className="text-sm font-medium">
-                                Role Access
-                              </Label>
-                              <p className="text-xs text-muted-foreground -mt-1">
-                                Control which roles can access this connection
-                              </p>
-                              <div className="space-y-2">
-                                {roles.map((role) => (
-                                  <div
-                                    key={role.id}
-                                    className="flex items-center gap-3"
-                                  >
-                                    <span className="text-xs truncate w-24 shrink-0">
-                                      {role.name}
-                                    </span>
-                                    <div className="relative flex-1">
-                                      <SearchableSelect
-                                        value={formAccess[role.id] || ""}
-                                        onValueChange={(val) => {
-                                          setFormAccess((prev) => {
-                                            const next = { ...prev };
-                                            if (val) {
-                                              next[role.id] = val as AccessType;
-                                            } else {
-                                              delete next[role.id];
-                                            }
-                                            return next;
-                                          });
-                                        }}
-                                        placeholder="No access"
-                                        searchThreshold={0}
-                                        className="h-10 w-full text-sm font-normal border-border/60"
-                                        options={[
-                                          { value: "", label: "No access" },
-                                          {
-                                            value: "READ_ONLY",
-                                            label: "Read only",
-                                          },
-                                          {
-                                            value: "READ_AND_REQUEST",
-                                            label: "Read & request",
-                                          },
-                                          {
-                                            value: "FULL_ACCESS",
-                                            label: "Full access",
-                                          },
-                                        ]}
-                                      />
-                                      <ChevronsUpDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 opacity-50 pointer-events-none" />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                  </Card>
-
+                    </Card>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <Button
                       type="button"
@@ -6268,14 +6611,14 @@ export function ConnectionManager({
           <Button
             size="sm"
             className={cn(
-              "gap-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300",
+              "gap-2 bg-primary text-primary-foreground hover:bg-primary/90",
               sleekLayout ? "h-8 text-xs" : "h-9",
             )}
           >
             Manage
             <ChevronDown
               className={cn(
-                "w-4 ml-2 opacity-50 transition-all duration-300",
+                "w-4 ml-2 opacity-50",
                 sleekLayout ? "w-3" : "w-4",
               )}
             />

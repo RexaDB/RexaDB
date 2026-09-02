@@ -1249,6 +1249,13 @@ export async function addConnection(
     group?: string;
     groups?: string[];
     isFavorite?: boolean;
+    host?: string;
+    port?: string;
+    database?: string;
+    username?: string;
+    password?: string;
+    sslMode?: string;
+    authToken?: string;
   },
 ) {
   const { db } = await import("./index");
@@ -1262,6 +1269,13 @@ export async function addConnection(
       name,
       connectionString,
       connectionType,
+      host: options?.host,
+      port: options?.port,
+      database: options?.database,
+      username: options?.username,
+      password: options?.password,
+      sslMode: options?.sslMode,
+      authToken: options?.authToken,
       environment: options?.environment,
       color: options?.color,
       group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
@@ -1393,6 +1407,13 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         connectionString: data.connectionString,
         connectionType: data.connectionType,
         sortOrder: data.sortOrder,
+        host: data.host,
+        port: data.port,
+        database: data.database,
+        username: data.username,
+        password: data.password,
+        sslMode: data.sslMode,
+        authToken: data.authToken,
         environment: data.environment,
         color: data.color,
         group: Array.isArray(data.groups) ? data.groups[0] || null : (data.group || null),

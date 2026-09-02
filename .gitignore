@@ -103,3 +103,6 @@ skills-lock.json
 /resources/java-bridge/dist/
 /resources/java-bridge/out/
 /resources/java-bridge/*.jar
+
+# Supabase local config & credentials
+/supabase/

@@ -3,7 +3,7 @@ name: Arch AppImage (Wayland)
 on:
   workflow_dispatch:
   push:
-    branches: [arch-wayland, arch-appimage, arch-wayland-build]
+    tags: ["v*"]
 
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
