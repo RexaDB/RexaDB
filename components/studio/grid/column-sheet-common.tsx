@@ -148,16 +148,6 @@ export function useForeignKeyFetchEffects({
   ]);
 }
 
-export function getRowIndicesFromCellKeys(cellKeys: Set<string>): Set<number> {
-  const rows = new Set<number>();
-  for (const key of cellKeys) {
-    const separatorIndex = key.indexOf(":");
-    const rowIndex = Number(key.slice(0, separatorIndex));
-    if (Number.isFinite(rowIndex)) rows.add(rowIndex);
-  }
-  return rows;
-}
-
 export function useFkColumnSheetState(selectedSchema?: string | null) {
   const [addForeignKey, setAddForeignKey] = useState(false);
   const [fkSchema, setFkSchema] = useState(selectedSchema || "");
