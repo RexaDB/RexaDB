@@ -373,6 +373,7 @@ jobs:
       - name: Generate updater platform snippet
         shell: bash
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           TAG="v${VERSION}"
           if [ "${{ runner.os }}" = "Linux" ]; then
@@ -382,10 +383,24 @@ jobs:
             ARCH=$(uname -m)
             if [ "$ARCH" = "arm64" ]; then
               TARGET="darwin-aarch64"
+              MAC_ARCH="aarch64"
             else
               TARGET="darwin-x86_64"
+              MAC_ARCH="x64"
             fi
-            BUNDLE=$(find src-tauri/target/release/bundle/macos -name "*.app.tar.gz" | head -1)
+            # Tauri names the updater bundle generically (RexaDB.app.tar.gz).
+            # Rename it to the 1.3.5 convention so release + latest.json use
+            # versioned, arch-specific filenames and the two macOS arches don't collide.
+            ORIG_BUNDLE=$(find src-tauri/target/release/bundle/macos -name "*.app.tar.gz" | head -1)
+            if [ -n "$ORIG_BUNDLE" ] && [ -f "${ORIG_BUNDLE}.sig" ]; then
+              BUNDLE_DIR="$(dirname "$ORIG_BUNDLE")"
+              BUNDLE="${BUNDLE_DIR}/RexaDB_${VERSION}_${MAC_ARCH}.app.tar.gz"
+              mv "$ORIG_BUNDLE" "$BUNDLE"
+              mv "${ORIG_BUNDLE}.sig" "${BUNDLE}.sig"
+              echo "Renamed updater bundle to ${BUNDLE}"
+            else
+              BUNDLE=""
+            fi
           else
             TARGET="windows-x86_64"
             BUNDLE=$(find src-tauri/target/release/bundle/nsis -name "*.exe" | head -1)
@@ -555,3 +570,90 @@ jobs:
             --title "RexaDB ${TAG}" --draft --generate-notes 2>&1 || true
 
           gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1
+
+  merge:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assemble latest.json and SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v${VERSION}"
+          REPO="${{ github.repository }}"
+          ART_DIR="artifacts"
+
+          # Merge the per-platform updater snippets into a single latest.json
+          SNIPPETS=( "$ART_DIR"/platform.*.json )
+          if [ ${#SNIPPETS[@]} -eq 0 ] || [ ! -f "${SNIPPETS[0]}" ]; then
+            echo "No platform snippets found"
+            exit 1
+          fi
+
+          TMP_JSON=$(mktemp)
+          node -e "
+            const fs=require('fs');
+            const j={version:'$VERSION',notes:'RexaDB $VERSION',pub_date:'$(date -u +'%Y-%m-%dT%H:%M:%SZ')',platforms:{}};
+            fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
+          "
+
+          for snip in "${SNIPPETS[@]}"; do
+            target=$(node -e "const s=require('$snip');process.stdout.write(Object.keys(s.platforms)[0])")
+            url=$(node -e "const s=require('$snip');process.stdout.write(s.platforms['$target'].url)")
+            sig=$(node -e "const s=require('$snip');process.stdout.write(s.platforms['$target'].signature)")
+            node -e "
+              const fs=require('fs');
+              const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
+              j.platforms['$target']={url:'$url',signature:'$sig'};
+              fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
+            "
+            echo "Merged $target"
+          done
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
+            j.platforms=Object.fromEntries(Object.entries(j.platforms).sort());
+            fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
+          "
+          cp "$TMP_JSON" latest.json
+          echo "latest.json written ($(node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync('latest.json','utf8')).platforms).length)") platforms)"
+
+          # Generate SHA256SUMS.txt over all binary artifacts (incl. AppImage/deb
+          # uploaded by the Arch workflow if already on the release)
+          find "$ART_DIR" -type f \
+            \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.exe" \
+               -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" \) \
+            -print0 2>/dev/null | while IFS= read -r -d '' f; do
+              base=$(basename "$f")
+              printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$base"
+            done > SHA256SUMS.txt
+          # Also include Linux files already on the release (AppImage/deb from Arch workflow)
+          while IFS= read -r name; do
+            case "$name" in
+              *.AppImage|*.deb)
+                if ! grep -q "  ${name}$" SHA256SUMS.txt; then
+                  gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir /tmp/dl --clobber >/dev/null 2>&1 || continue
+                  printf '%s  %s\n' "$(sha256sum "/tmp/dl/$name" | cut -d' ' -f1)" "$name" >> SHA256SUMS.txt
+                fi
+                ;;
+            esac
+          done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -E '\.AppImage$|\.deb$' || true)
+          sort -k2 -o SHA256SUMS.txt SHA256SUMS.txt
+          echo "SHA256SUMS.txt lines: $(wc -l < SHA256SUMS.txt)"
+
+          echo "Uploading latest.json + SHA256SUMS.txt to $REPO $TAG..."
+          gh release upload "$TAG" --repo "$REPO" --clobber latest.json SHA256SUMS.txt 2>&1
