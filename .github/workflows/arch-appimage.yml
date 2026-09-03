@@ -288,16 +288,30 @@ jobs:
             find src-tauri/target/release/bundle \
               \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.sig" \) -type f 2>/dev/null
           )
-          while IFS= read -r f; do FILES+=("$f"); done < <(find . -maxdepth 1 -name "*.AppImage" -o -maxdepth 1 -name "*.AppImage.sig" 2>/dev/null)
+          while IFS= read -r f; do FILES+=("$f"); done < <(find . -maxdepth 1 \( -name "*.AppImage" -o -name "*.AppImage.sig" \) 2>/dev/null)
           while IFS= read -r f; do FILES+=("$f"); done < <(find src-tauri/target/release -maxdepth 1 -name "platform.*.json" -type f 2>/dev/null)
-          if [ ${#FILES[@]} -eq 0 ]; then
+          # Deduplicate by basename (AppImage/sig may exist both at repo root and in bundle/)
+          declare -A SEEN
+          UNIQ=()
+          for f in "${FILES[@]}"; do
+            base="$(basename "$f")"
+            if [ -z "${SEEN[$base]:-}" ]; then
+              SEEN[$base]=1
+              UNIQ+=("$f")
+            fi
+          done
+          if [ ${#UNIQ[@]} -eq 0 ]; then
             echo "No Linux artifacts found to upload"
             exit 1
           fi
-          echo "Found ${#FILES[@]} artifact(s):"
-          printf '  %s\n' "${FILES[@]}"
-          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1 && exit 0
-          echo "Release doesn't exist yet, creating draft..."
-          gh release create "$TAG" --repo "$REPO" \
-            --title "RexaDB ${TAG}" --draft --generate-notes 2>&1 || true
-          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1
+          echo "Found ${#UNIQ[@]} artifact(s):"
+          printf '  %s\n' "${UNIQ[@]}"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading to it..."
+            gh release upload "$TAG" --repo "$REPO" --clobber "${UNIQ[@]}" 2>&1
+          else
+            echo "Release doesn't exist yet, creating draft..."
+            gh release create "$TAG" --repo "$REPO" \
+              --title "RexaDB ${TAG}" --draft --generate-notes 2>&1
+            gh release upload "$TAG" --repo "$REPO" --clobber "${UNIQ[@]}" 2>&1
+          fi
