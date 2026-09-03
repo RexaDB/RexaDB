@@ -27,7 +27,7 @@ jobs:
           - os: macos-14
             bundles: dmg
             artifact-name: RexaDB-macOS-arm64
-          - os: macos-13
+          - os: macos-15-intel
             bundles: dmg
             artifact-name: RexaDB-macOS-Intel
 
@@ -220,9 +220,42 @@ jobs:
           echo ""
           echo "===== Java bridge check PASSED ====="
 
+      - name: Import Apple code signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "Creating keychain..."
+          KEYCHAIN_RUNNER="$RUNNER_TEMP/AppSigning.keychain-db"
+          KEYCHAIN_PASS="runner-keychain-password"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_RUNNER"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_RUNNER"
+          
+          echo "Decoding certificate..."
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          
+          echo "Importing certificate..."
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_RUNNER"
+          
+          echo "Configuring keychain..."
+          security list-keychains -d user -s "$KEYCHAIN_RUNNER" login.keychain-db
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s \
+            -k "$KEYCHAIN_PASS" "$KEYCHAIN_RUNNER" 2>/dev/null || true
+          
+          echo "Verifying identity...\n\n"
+          security find-identity -v -p codesigning "$KEYCHAIN_RUNNER"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           args: --bundles ${{ matrix.bundles }}
 

@@ -234,6 +234,37 @@ export const DataGrid = React.memo(function DataGrid({
   const hoverColors = useGlideHoverColors();
   const gridRef = useRef<DataEditorRef>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Glide measures its host element on mount / via its own ResizeObserver.
+  // In the SQL editor the grid lives inside a percentage-height split pane,
+  // so `height: 100%` can resolve against a not-yet-settled or zeroed size
+  // (leaving the grid unable to size/scroll for large result sets). We
+  // measure the wrapper ourselves and hand Glide explicit pixel dimensions,
+  // which both gives it a definite size and re-triggers its layout whenever
+  // the pane is laid out / resized (e.g. when a big query's results mount).
+  const [gridSize, setGridSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) {
+        setGridSize((prev) =>
+          prev && prev.width === rect.width && prev.height === rect.height
+            ? prev
+            : { width: rect.width, height: rect.height },
+        );
+      }
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const [manualColumnWidths, setManualColumnWidths] = useState<
     Record<string, number>
   >({});
@@ -1592,8 +1623,8 @@ export const DataGrid = React.memo(function DataGrid({
           getCellsForSelection={true}
           smoothScrollX
           smoothScrollY
-          width="100%"
-          height="100%"
+          width={gridSize ? gridSize.width : "100%"}
+          height={gridSize ? gridSize.height : "100%"}
         />
         {showAddColumn && connectionString && selectedTable && setIsAddColumnSheetOpen ? (
           <AddColumnSheet

@@ -13,6 +13,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     container:
       image: archlinux:latest
       # docker socket is auto-mounted by the runner at /var/run/docker.sock
@@ -268,3 +270,34 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/rexa-db
           if-no-files-found: error
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pacman -Sy --noconfirm >/dev/null 2>&1
+          pacman -S --noconfirm --needed github-cli >/dev/null 2>&1 || true
+          command -v gh >/dev/null 2>&1 || { echo "gh not available, aborting upload"; exit 1; }
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${{ github.repository }}"
+          echo "Uploading Linux artifacts for ${TAG} to ${REPO}..."
+          FILES=()
+          while IFS= read -r f; do FILES+=("$f"); done < <(
+            find src-tauri/target/release/bundle \
+              \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.sig" \) -type f 2>/dev/null
+          )
+          while IFS= read -r f; do FILES+=("$f"); done < <(find . -maxdepth 1 -name "*.AppImage" -o -maxdepth 1 -name "*.AppImage.sig" 2>/dev/null)
+          while IFS= read -r f; do FILES+=("$f"); done < <(find src-tauri/target/release -maxdepth 1 -name "platform.*.json" -type f 2>/dev/null)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No Linux artifacts found to upload"
+            exit 1
+          fi
+          echo "Found ${#FILES[@]} artifact(s):"
+          printf '  %s\n' "${FILES[@]}"
+          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1 && exit 0
+          echo "Release doesn't exist yet, creating draft..."
+          gh release create "$TAG" --repo "$REPO" \
+            --title "RexaDB ${TAG}" --draft --generate-notes 2>&1 || true
+          gh release upload "$TAG" --repo "$REPO" --clobber "${FILES[@]}" 2>&1

@@ -23,6 +23,8 @@ import { getDefaultKeybindings, buildShortcutCombo } from "@/lib/studio/keybindi
 import { Database as DatabaseIcon } from "@/lib/icon-theme/solar-icons";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import { PLANETSCALE_LOGIN_ENABLED } from "@/lib/planetscale/auth";
+import { useDesktopWindow } from "@/hooks/use-desktop-window";
+import { WindowControls } from "@/components/shared/window-controls";
 
 const CONNECTIONS_TAB: AppTab = {
   id: "connections",
@@ -57,6 +59,7 @@ const PLANETSCALE_TAB: AppTab = {
 export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
+  const { isMaximized, sendWindowAction, canUseDesktop, isMac } = useDesktopWindow();
 
   const [tabs, setTabs] = useState<AppTab[]>([CONNECTIONS_TAB]);
   // History of activated tab ids for the back/forward arrows.
@@ -507,20 +510,38 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       );
     }
     return (
-      <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg p-2 text-foreground">
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[var(--shell-content-bg)]">
-          <ConnectionManager
-            hideHeader
-            embedded
-            editConnectionId={editConnectionId}
-            newConnectionTrigger={newConnectionTrigger}
-            isAnalyticsEnabled={false}
-            onAnalyticsToggle={() => {}}
-            onViewAnalytics={(id) => {
-              const conn = connections.find((c) => c.id === id);
-              if (conn) setStandaloneAnalytics(conn);
-            }}
-          />
+      <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg text-foreground">
+        {canUseDesktop && (
+          <header
+            className="app-drag-region flex h-9 shrink-0 items-center justify-end px-3 select-none"
+            data-tauri-drag-region="deep"
+          >
+            {isMac && <div className="w-[72px]" />}
+            {canUseDesktop && !isMac && (
+              <WindowControls
+                isMaximized={isMaximized}
+                onMinimize={() => sendWindowAction("minimize")}
+                onMaximizeToggle={() => sendWindowAction("maximize-toggle")}
+                onClose={() => sendWindowAction("close")}
+              />
+            )}
+          </header>
+        )}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-[var(--shell-content-bg)]">
+            <ConnectionManager
+              hideHeader
+              embedded
+              editConnectionId={editConnectionId}
+              newConnectionTrigger={newConnectionTrigger}
+              isAnalyticsEnabled={false}
+              onAnalyticsToggle={() => {}}
+              onViewAnalytics={(id) => {
+                const conn = connections.find((c) => c.id === id);
+                if (conn) setStandaloneAnalytics(conn);
+              }}
+            />
+          </div>
         </div>
       </div>
     );

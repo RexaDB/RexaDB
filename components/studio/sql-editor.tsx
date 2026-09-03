@@ -34,7 +34,6 @@ import {
 import { cn } from "@/lib/utils";
 import React, {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -293,22 +292,6 @@ export function SqlEditor({
   const [hasSelection, setHasSelection] = useState(false);
   const [selectedQuery, setSelectedQuery] = useState("");
   const [splitRatio, setSplitRatio] = useState(0.55);
-
-  // When results first appear (or error), AG Grid may have mounted with 0px height
-  // because flex percentage heights aren't always resolved on the first render pass.
-  // Dispatching a resize event tells AG Grid to remeasure — the same thing that
-  // happens naturally when you switch tabs and come back.
-  const hadResultsRef = useRef(false);
-  useLayoutEffect(() => {
-    const hasContent = !!(error || results);
-    if (hasContent && !hadResultsRef.current) {
-      hadResultsRef.current = true;
-      window.dispatchEvent(new Event("resize"));
-    }
-    if (!hasContent) {
-      hadResultsRef.current = false;
-    }
-  }, [error, results]);
 
   const resultRows = React.useMemo(
     () => (Array.isArray(results?.rows) ? results.rows : []),
