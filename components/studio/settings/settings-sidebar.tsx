@@ -10,12 +10,14 @@ import {
   SlidersHorizontal,
   Keyboard,
   Users,
+  Server as ServerIcon,
 } from "@/lib/icon-theme/lucide-react";
 
 export type SettingsSectionId =
   | "general"
   | "editor"
   | "ai"
+  | "mcp"
   | "security"
   | "advanced"
   | "themes"
@@ -31,6 +33,7 @@ const items: Array<{
   { id: "editor", label: "Editor", Icon: Code2 },
   { id: "themes", label: "Themes", Icon: Palette },
   { id: "ai", label: "AI", Icon: Bot },
+  { id: "mcp", label: "MCP Server", Icon: ServerIcon },
   { id: "security", label: "Security", Icon: Shield },
   { id: "keybindings", label: "Keybindings", Icon: Keyboard },
   { id: "advanced", label: "Advanced", Icon: SlidersHorizontal },

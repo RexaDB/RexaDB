@@ -72,3 +72,47 @@ export function buildClaudeMcpConfigJson(config: RexaMcpServerConfig): string {
     },
   });
 }
+
+// ─── External (user-facing) server client configs ───────────────────────────
+// The external server needs no per-connection env — it reads the allow-list +
+// mode from the sidecar DB/file. `cwd` should be the app root (repo checkout,
+// or the packaged resources dir) so the relative entry resolves.
+
+export function getExternalMcpEntryPath(cwd = process.cwd()): string {
+  return join(cwd, "lib/agents/mcp/external-stdio.ts");
+}
+
+export function buildExternalStdioDescriptor(cwd = process.cwd()): {
+  command: string;
+  args: string[];
+} {
+  return {
+    command: process.execPath.includes("bun") ? process.execPath : "bun",
+    args: ["run", getExternalMcpEntryPath(cwd)],
+  };
+}
+
+/** Claude Desktop / Claude Code `mcpServers` JSON for the external server. */
+export function buildExternalClaudeConfigJson(cwd = process.cwd()): string {
+  const { command, args } = buildExternalStdioDescriptor(cwd);
+  return JSON.stringify(
+    { mcpServers: { rexadb: { command, args } } },
+    null,
+    2,
+  );
+}
+
+/** Cursor / generic MCP JSON (stdio entry). */
+export function buildExternalCursorConfigJson(cwd = process.cwd()): string {
+  const { command, args } = buildExternalStdioDescriptor(cwd);
+  return JSON.stringify(
+    { mcpServers: { rexadb: { command, args } } },
+    null,
+    2,
+  );
+}
+
+/** Streamable-HTTP URL for the external server — it lives on the sidecar itself. */
+export function externalMcpHttpUrl(apiBase: string): string {
+  return `${String(apiBase || "http://127.0.0.1:3867").replace(/\/+$/, "")}/mcp`;
+}

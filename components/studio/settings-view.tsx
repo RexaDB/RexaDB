@@ -102,6 +102,7 @@ import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
+import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
 
 function AddThemeMenu({
   onBrowseThemes,
@@ -475,7 +476,7 @@ function ToggleSetting({
   );
 }
 
-function SwitchSetting({
+export function SwitchSetting({
   title,
   description,
   value,
@@ -493,7 +494,7 @@ function SwitchSetting({
   );
 }
 
-function SelectSetting<T extends string>({
+export function SelectSetting<T extends string>({
   title,
   description,
   value,
@@ -1804,6 +1805,8 @@ export function SettingsView({
               />
             </section>
           ) : null}
+
+          {activeSection === "mcp" ? <McpSettingsSection /> : null}
 
           {activeSection === "workspace" ? (
             <section className="space-y-4">

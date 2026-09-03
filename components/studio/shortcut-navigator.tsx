@@ -62,7 +62,7 @@ export function ShortcutNavigator({
       KEYBINDING_ACTIONS.map((action) => [action.id, action.name]),
     );
 
-    const dynamicItems = Object.entries(keybindings)
+    const dynamicItems = Object.entries(keybindings ?? {})
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([combo, binding]) => {
         const formattedCombo = formatShortcutForPlatform(combo);

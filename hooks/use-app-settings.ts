@@ -1,15 +1,58 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { useGlobalEditorTheme } from "@/hooks/use-global-editor-theme";
 import { useGlobalAppTheme } from "@/hooks/use-global-app-theme";
 import { useGlobalAppFontFamily } from "@/hooks/use-global-app-font-family";
+import {
+  getDefaultKeybindings,
+  normalizeKeybindingsForPlatform,
+  withMissingDefaultKeybindings,
+} from "@/lib/studio/keybindings";
+import {
+  getKeybindingsFile,
+  saveKeybindingsFile,
+} from "@/lib/api/actions-client";
 
 export function useAppSettings(planCode = "free") {
   const settings = useGlobalStudioSettings(true);
   const editor = useGlobalEditorTheme(true);
   const appTheme = useGlobalAppTheme(true);
   const font = useGlobalAppFontFamily(true);
+
+  // Keybindings are a global preference (keybindings.json), not per-connection.
+  // The connections-page settings shell has no studio instance to provide them,
+  // so load them here — otherwise KeybindingsPanel crashes on undefined.
+  const [keybindings, setKeybindings] = useState<Record<string, any>>(() =>
+    normalizeKeybindingsForPlatform(getDefaultKeybindings()),
+  );
+  const keybindingsDidMountRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    getKeybindingsFile()
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.success && res.data) {
+          setKeybindings(
+            normalizeKeybindingsForPlatform(
+              withMissingDefaultKeybindings(res.data),
+            ),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (!keybindingsDidMountRef.current) {
+      keybindingsDidMountRef.current = true;
+      return;
+    }
+    void saveKeybindingsFile(keybindings).catch(() => {});
+  }, [keybindings]);
 
   return {
     appZoom: settings.appZoom,
@@ -84,6 +127,8 @@ export function useAppSettings(planCode = "free") {
     setSidebarToggleBeforeConnection: settings.setSidebarToggleBeforeConnection,
     autoSaveQueries: settings.autoSaveQueries,
     setAutoSaveQueries: settings.setAutoSaveQueries,
+    keybindings,
+    setKeybindings,
     vimMode: settings.vimMode,
     setVimMode: settings.setVimMode,
     sqlFormatTabWidth: settings.sqlFormatTabWidth,

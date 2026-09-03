@@ -693,14 +693,31 @@ jobs:
 
           # Download the Linux artifacts produced by the separate Arch AppImage
           # workflow (AppImage, its sig, and .deb) so they can be hashed too.
+          # That workflow runs concurrently, so poll the release until all three
+          # appear (up to ~8 min). NOTE: the case must include *.AppImage.sig —
+          # v1.3.6 shipped a 13-line SHA256SUMS.txt because the old
+          # '*.AppImage|*.deb' pattern silently skipped the .sig.
           mkdir -p /tmp/dl
-          while IFS= read -r name; do
-            case "$name" in
-              *.AppImage|*.deb)
-                gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir /tmp/dl --clobber >/dev/null 2>&1 || true
-                ;;
-            esac
-          done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -E '\.AppImage$|\.AppImage\.sig$|\.deb$' || true)
+          for attempt in $(seq 1 48); do
+            while IFS= read -r name; do
+              case "$name" in
+                *.AppImage|*.AppImage.sig|*.deb)
+                  if [ ! -s "/tmp/dl/$name" ]; then
+                    gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir /tmp/dl --clobber >/dev/null 2>&1 || true
+                  fi
+                  ;;
+              esac
+            done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -E '\.AppImage$|\.AppImage\.sig$|\.deb$' || true)
+            if [ -s "/tmp/dl/RexaDB_${VERSION}_x86_64.AppImage" ] && \
+               [ -s "/tmp/dl/RexaDB_${VERSION}_x86_64.AppImage.sig" ] && \
+               [ -s "/tmp/dl/RexaDB_${VERSION}_amd64.deb" ]; then
+              echo "All 3 Linux assets present (attempt ${attempt})"
+              break
+            fi
+            sleep 10
+          done
+          echo "Linux assets in /tmp/dl:"
+          ls -la /tmp/dl/ 2>/dev/null || true
 
           # Generate SHA256SUMS.txt over every release asset (1.3.5 format):
           # all binaries + their .sig files + latest.json, sorted by filename.

@@ -31,6 +31,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   EllipsisVertical,
@@ -51,6 +61,7 @@ import {
   describeBinding,
   formatShortcutForPlatform,
   getDefaultKeybindings,
+  normalizeKeybindingsForPlatform,
 } from "@/lib/studio/keybindings";
 import { getKeybindingsFile } from "@/lib/api/actions-client";
 import { openExternalUrl } from "@/lib/desktop";
@@ -111,12 +122,13 @@ interface KeybindingRow {
   isDefault: boolean;
 }
 
-function buildRows(
-  keybindings: KeybindingMap,
+/** Build a flat row object from the keybinding map for table rendering. Exported for tests. */
+export function buildRows(
+  keybindings: KeybindingMap | null | undefined,
   query: string,
 ): KeybindingRow[] {
   const defaults = getDefaultKeybindings();
-  const entries = Object.entries(keybindings).sort(([a], [b]) =>
+  const entries = Object.entries(keybindings ?? {}).sort(([a], [b]) =>
     a.localeCompare(b),
   );
 
@@ -692,6 +704,7 @@ export function KeybindingsPanel({
   const [isAddingBinding, setIsAddingBinding] = useState(false);
   const [savingCombo, setSavingCombo] = useState<string | null>(null);
   const [openingJsonFile, setOpeningJsonFile] = useState(false);
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
 
   const openJsonFile = async () => {
     setOpeningJsonFile(true);
@@ -764,6 +777,13 @@ export function KeybindingsPanel({
     });
   };
 
+  const resetAllKeybindings = () => {
+    setKeybindings(normalizeKeybindingsForPlatform(getDefaultKeybindings()));
+    setIsAddingBinding(false);
+    setIsResetDialogOpen(false);
+    toast.success("Keybindings reset to defaults.");
+  };
+
   const resetKeybinding = (row: KeybindingRow) => {
     const defaults = getDefaultKeybindings();
     const defaultBinding = defaults[row.combo];
@@ -833,8 +853,43 @@ export function KeybindingsPanel({
             </TooltipTrigger>
             <TooltipContent side="top">Open keybindings.json</TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Reset all keybindings"
+                onClick={() => setIsResetDialogOpen(true)}
+              >
+                <RotateCcw className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Reset all keybindings</TooltipContent>
+          </Tooltip>
         </div>
       </div>
+
+      <AlertDialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset all keybindings?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This discards every custom keybinding and restores the built-in
+              defaults. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={resetAllKeybindings}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Reset all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="rounded-lg border border-border bg-card/60">
         <ScrollArea className="w-full max-w-full rounded-none">

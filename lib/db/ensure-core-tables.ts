@@ -112,6 +112,11 @@ export async function ensureCoreTables() {
       { name: "settings_json", type: "TEXT", constraints: "NOT NULL" },
       { name: "updated_at", type: "INTEGER", constraints: "NOT NULL" },
     ]),
+    createTableIfNotExists("mcp_server_config", [
+      { name: "id", type: "INTEGER", constraints: "PRIMARY KEY NOT NULL" },
+      { name: "config_json", type: "TEXT", constraints: "NOT NULL" },
+      { name: "updated_at", type: "INTEGER", constraints: "NOT NULL" },
+    ]),
     createTableIfNotExists("dashboard_state", [
       { name: "connection_id", type: "INTEGER", constraints: "PRIMARY KEY NOT NULL REFERENCES connections(id) ON DELETE CASCADE" },
       { name: "dashboards_json", type: "TEXT", constraints: "NOT NULL" },

@@ -144,6 +144,15 @@ export const userAiSettings = sqliteTable("user_ai_settings", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+// External MCP server config (single row, id always 1). Stores the
+// user-facing MCP server settings: enabled flag, transports, auth token,
+// selected permission mode, exposed connection ids, and custom modes.
+export const mcpServerConfig = sqliteTable("mcp_server_config", {
+  id: integer("id").primaryKey(),
+  configJson: text("config_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 
 export const schemaCacheMeta = sqliteTable("schema_cache_meta", {
   connectionString: text("connection_string").primaryKey(),
@@ -245,6 +254,7 @@ export type UserEntitlement = typeof userEntitlements.$inferSelect;
 export type AiChat = typeof aiChats.$inferSelect;
 export type AiChatMessageRow = typeof aiChatMessages.$inferSelect;
 export type UserAiSettingsRow = typeof userAiSettings.$inferSelect;
+export type McpServerConfigRow = typeof mcpServerConfig.$inferSelect;
 
 export const workflows = sqliteTable("workflows", {
   id: text("id").primaryKey(),
