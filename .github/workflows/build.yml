@@ -25,10 +25,10 @@ jobs:
             bundles: nsis
             artifact-name: RexaDB-Windows-x64
           - os: macos-14
-            bundles: dmg
+            bundles: dmg,app
             artifact-name: RexaDB-macOS-arm64
           - os: macos-15-intel
-            bundles: dmg
+            bundles: dmg,app
             artifact-name: RexaDB-macOS-Intel
 
     runs-on: ${{ matrix.os }}
