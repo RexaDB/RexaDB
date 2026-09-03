@@ -611,18 +611,36 @@ jobs:
             fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
           "
 
-          for snip in "${SNIPPETS[@]}"; do
-            SNIP_PATH="./${snip#./}"
-            target=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(Object.keys(s.platforms)[0])")
-            url=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(s.platforms['$target'].url)")
-            sig=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(s.platforms['$target'].signature)")
+          # merge_one() reads a snippet file (any path) and folds its platform
+          # entry into $TMP_JSON. Parsing uses fs.readFileSync+JSON.parse so it
+          # works regardless of file extension or absolute/relative path.
+          merge_one() {
+            local SNIP_FILE="$1"
+            local TMP="$2"
+            local target url sig
+            target=$(node -e "
+              const s=JSON.parse(require('fs').readFileSync('$SNIP_FILE','utf8'));
+              process.stdout.write(Object.keys(s.platforms)[0]);
+            ")
+            url=$(node -e "
+              const s=JSON.parse(require('fs').readFileSync('$SNIP_FILE','utf8'));
+              process.stdout.write(s.platforms['$target'].url);
+            ")
+            sig=$(node -e "
+              const s=JSON.parse(require('fs').readFileSync('$SNIP_FILE','utf8'));
+              process.stdout.write(s.platforms['$target'].signature);
+            ")
             node -e "
               const fs=require('fs');
-              const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
+              const j=JSON.parse(fs.readFileSync('$TMP','utf8'));
               j.platforms['$target']={url:'$url',signature:'$sig'};
-              fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
+              fs.writeFileSync('$TMP',JSON.stringify(j,null,2)+'\n');
             "
             echo "Merged $target"
+          }
+
+          for snip in "${SNIPPETS[@]}"; do
+            merge_one "$snip" "$TMP_JSON"
           done
 
           # Fetch the Linux snippet produced by the separate Arch AppImage workflow.
@@ -639,16 +657,8 @@ jobs:
             sleep 10
           done
           if [ -s "$LINUX_SNIP" ]; then
-            target=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(Object.keys(s.platforms)[0])")
-            url=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(s.platforms['$target'].url)")
-            sig=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(s.platforms['$target'].signature)")
-            node -e "
-              const fs=require('fs');
-              const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
-              j.platforms['$target']={url:'$url',signature:'$sig'};
-              fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
-            "
-            echo "Merged $target (from release)"
+            merge_one "$LINUX_SNIP" "$TMP_JSON"
+            echo "linux-x86_64 merged from release"
           else
             echo "WARNING: Linux updater snippet not found on release; latest.json will lack linux-x86_64"
           fi
