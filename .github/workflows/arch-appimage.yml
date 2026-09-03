@@ -195,6 +195,34 @@ jobs:
           fi
           ls -lh src-tauri/target/release/bundle/appimage/ 2>&1 | head -n 20
 
+      - name: Generate Linux updater snippet
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.bun/bin:$PATH"
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v${VERSION}"
+          APPIMAGE="$(pwd)/RexaDB_${VERSION}_x86_64.AppImage"
+          if [ ! -f "$APPIMAGE" ]; then
+            APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -1 || true)
+          fi
+          if [ -z "${APPIMAGE:-}" ] || [ ! -f "$APPIMAGE" ]; then
+            APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" | head -1 || true)
+          fi
+          echo "AppImage for snippet: ${APPIMAGE:-none}"
+          SIG="${APPIMAGE}.sig"
+          if [ -z "${APPIMAGE:-}" ] || [ ! -f "$SIG" ]; then
+            echo "No updater AppImage/sig found for linux snippet"
+            exit 1
+          fi
+          SIGNATURE=$(cat "$SIG")
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SNIPPET="src-tauri/target/release/platform.linux-x86_64.json"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$APPIMAGE")"
+          printf '{\n  "version": "%s",\n  "pub_date": "%s",\n  "platforms": {\n    "linux-x86_64": {\n      "url": "%s",\n      "signature": "%s"\n    }\n  }\n}\n' \
+            "$VERSION" "$PUB_DATE" "$URL" "$SIGNATURE" > "$SNIPPET"
+          echo "Generated Linux updater snippet"
+          echo "  URL: ${URL}"
+
       - name: Smoke test (Wayland via weston headless + X11 fallback)
         run: |
           set -euo pipefail

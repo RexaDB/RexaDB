@@ -624,6 +624,35 @@ jobs:
             "
             echo "Merged $target"
           done
+
+          # Fetch the Linux snippet produced by the separate Arch AppImage workflow.
+          # That workflow runs concurrently, so poll the release until it appears
+          # (up to ~8 min) before giving up on the linux-x86_64 updater entry.
+          LINUX_SNIP=$(mktemp)
+          for attempt in $(seq 1 48); do
+            if gh release download "$TAG" --repo "$REPO" --pattern "platform.linux-x86_64.json" --dir /tmp/linux-snip --clobber >/dev/null 2>&1 && \
+               [ -s /tmp/linux-snip/platform.linux-x86_64.json ]; then
+              cp /tmp/linux-snip/platform.linux-x86_64.json "$LINUX_SNIP"
+              echo "Found Linux snippet (attempt ${attempt})"
+              break
+            fi
+            sleep 10
+          done
+          if [ -s "$LINUX_SNIP" ]; then
+            target=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(Object.keys(s.platforms)[0])")
+            url=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(s.platforms['$target'].url)")
+            sig=$(node -e "const s=require('./$LINUX_SNIP');process.stdout.write(s.platforms['$target'].signature)")
+            node -e "
+              const fs=require('fs');
+              const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
+              j.platforms['$target']={url:'$url',signature:'$sig'};
+              fs.writeFileSync('$TMP_JSON',JSON.stringify(j,null,2)+'\n');
+            "
+            echo "Merged $target (from release)"
+          else
+            echo "WARNING: Linux updater snippet not found on release; latest.json will lack linux-x86_64"
+          fi
+
           node -e "
             const fs=require('fs');
             const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
