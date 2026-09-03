@@ -419,6 +419,27 @@ jobs:
             echo "No updater bundle/sig found, skipping platform snippet"
           fi
 
+      - name: Sign DMG for release (macOS only)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 1.3.5 ships a Tauri updater signature for each .dmg; produce one to match.
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/rexadb-dmg-sign-key
+          export TAURI_SIGNING_PRIVATE_KEY_PATH=/tmp/rexadb-dmg-sign-key
+          DMG_DIR="src-tauri/target/release/bundle/dmg"
+          for dmg in "$DMG_DIR"/*.dmg; do
+            [ -e "$dmg" ] || { echo "no dmg found in $DMG_DIR"; exit 1; }
+            if [ -f "${dmg}.sig" ]; then
+              echo "already signed: ${dmg}.sig"
+              continue
+            fi
+            echo "Signing ${dmg} for updater..."
+            "$GITHUB_WORKSPACE/node_modules/.bin/tauri" signer sign \
+              -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$dmg"
+            echo "Signed: ${dmg}.sig"
+          done
+
       - name: Smoke test
         shell: bash
         run: |
@@ -550,9 +571,6 @@ jobs:
                  -o -name "*.app.tar.gz" -o -name "*.sig" \) -type f \
               ! -name "control.tar.gz" ! -name "data.tar.gz" 2>/dev/null
           )
-          while IFS= read -r f; do FILES+=("$f"); done < <(
-            find src-tauri/target/release -maxdepth 1 -name "platform.*.json" -type f 2>/dev/null
-          )
 
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "No artifacts found to upload"
@@ -672,28 +690,47 @@ jobs:
           cp "$TMP_JSON" latest.json
           echo "latest.json written ($(node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync('latest.json','utf8')).platforms).length)") platforms)"
 
-          # Generate SHA256SUMS.txt over all binary artifacts (incl. AppImage/deb
-          # uploaded by the Arch workflow if already on the release)
-          find "$ART_DIR" -type f \
-            \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.exe" \
-               -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" \) \
-            -print0 2>/dev/null | while IFS= read -r -d '' f; do
-              base=$(basename "$f")
-              printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$base"
-            done > SHA256SUMS.txt
-          # Also include Linux files already on the release (AppImage/deb from Arch workflow)
+          # Download the Linux artifacts produced by the separate Arch AppImage
+          # workflow (AppImage, its sig, and .deb) so they can be hashed too.
+          mkdir -p /tmp/dl
           while IFS= read -r name; do
             case "$name" in
               *.AppImage|*.deb)
-                if ! grep -q "  ${name}$" SHA256SUMS.txt; then
-                  gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir /tmp/dl --clobber >/dev/null 2>&1 || continue
-                  printf '%s  %s\n' "$(sha256sum "/tmp/dl/$name" | cut -d' ' -f1)" "$name" >> SHA256SUMS.txt
-                fi
+                gh release download "$TAG" --repo "$REPO" --pattern "$name" --dir /tmp/dl --clobber >/dev/null 2>&1 || true
                 ;;
             esac
-          done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -E '\.AppImage$|\.deb$' || true)
+          done < <(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep -E '\.AppImage$|\.AppImage\.sig$|\.deb$' || true)
+
+          # Generate SHA256SUMS.txt over every release asset (1.3.5 format):
+          # all binaries + their .sig files + latest.json, sorted by filename.
+          # Excludes platform.*.json (not shipped) and SHA256SUMS.txt itself.
+          : > SHA256SUMS.txt
+          add_hashes() {
+            local dir="$1"
+            find "$dir" -type f \
+              ! -name "platform.*.json" \
+              ! -name "SHA256SUMS.txt" \
+              ! -name "control.tar.gz" ! -name "data.tar.gz" 2>/dev/null | while IFS= read -r f; do
+                case "$f" in
+                  *.dmg|*.dmg.sig|*.app.tar.gz|*.app.tar.gz.sig|*.exe|*.exe.sig|*.AppImage|*.AppImage.sig|*.deb)
+                    base=$(basename "$f")
+                    printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$base" >> SHA256SUMS.txt
+                    ;;
+                esac
+              done
+          }
+          add_hashes "$ART_DIR"
+          add_hashes /tmp/dl
+          # Hash the just-assembled latest.json (matches 1.3.5 which lists it)
+          printf '%s  %s\n' "$(sha256sum latest.json | cut -d' ' -f1)" "latest.json" >> SHA256SUMS.txt
           sort -k2 -o SHA256SUMS.txt SHA256SUMS.txt
           echo "SHA256SUMS.txt lines: $(wc -l < SHA256SUMS.txt)"
 
           echo "Uploading latest.json + SHA256SUMS.txt to $REPO $TAG..."
           gh release upload "$TAG" --repo "$REPO" --clobber latest.json SHA256SUMS.txt 2>&1
+
+          # Delete the temporary per-platform snippet carriers so the final
+          # release contains exactly the 1.3.5 artifact set (no platform.*.json).
+          for name in $(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | grep '^platform\.' || true); do
+            gh release delete-asset "$TAG" --repo "$REPO" "$name" 2>&1 || true
+          done

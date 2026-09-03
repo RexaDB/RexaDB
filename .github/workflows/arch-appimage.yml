@@ -314,10 +314,12 @@ jobs:
           FILES=()
           while IFS= read -r f; do FILES+=("$f"); done < <(
             find src-tauri/target/release/bundle \
-              \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.sig" \) -type f 2>/dev/null
+              \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.sig" \) -type f \
+              ! -name "*.deb.sig" 2>/dev/null
           )
           while IFS= read -r f; do FILES+=("$f"); done < <(find . -maxdepth 1 \( -name "*.AppImage" -o -name "*.AppImage.sig" \) 2>/dev/null)
-          while IFS= read -r f; do FILES+=("$f"); done < <(find src-tauri/target/release -maxdepth 1 -name "platform.*.json" -type f 2>/dev/null)
+          # Temp carrier for the merge job (cross-workflow channel); merge job deletes it.
+          while IFS= read -r f; do FILES+=("$f"); done < <(find src-tauri/target/release -maxdepth 1 -name "platform.linux-x86_64.json" -type f 2>/dev/null)
           # Deduplicate by basename (AppImage/sig may exist both at repo root and in bundle/)
           declare -A SEEN
           UNIQ=()
