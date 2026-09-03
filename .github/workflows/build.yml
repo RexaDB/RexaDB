@@ -612,9 +612,10 @@ jobs:
           "
 
           for snip in "${SNIPPETS[@]}"; do
-            target=$(node -e "const s=require('$snip');process.stdout.write(Object.keys(s.platforms)[0])")
-            url=$(node -e "const s=require('$snip');process.stdout.write(s.platforms['$target'].url)")
-            sig=$(node -e "const s=require('$snip');process.stdout.write(s.platforms['$target'].signature)")
+            SNIP_PATH="./${snip#./}"
+            target=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(Object.keys(s.platforms)[0])")
+            url=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(s.platforms['$target'].url)")
+            sig=$(node -e "const s=require('$SNIP_PATH');process.stdout.write(s.platforms['$target'].signature)")
             node -e "
               const fs=require('fs');
               const j=JSON.parse(fs.readFileSync('$TMP_JSON','utf8'));
