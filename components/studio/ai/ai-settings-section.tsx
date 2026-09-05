@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ApiKeyField, ModelListEditor } from "@/components/studio/ai/ai-provider-shared";
 import {
   Select,
   SelectContent,
@@ -162,76 +163,25 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
 
               <AccordionContent className="border-t border-border px-4 pb-4 pt-3">
                 <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">
-                      API Key
-                    </Label>
-                    <Input
-                      type="password"
-                      placeholder="sk-..."
-                      className="h-8 font-mono text-xs"
-                      value={config.apiKey}
-                      onChange={(event) => updateProvider(provider, { apiKey: event.target.value })}
-                    />
-                  </div>
+                  <ApiKeyField
+                    value={config.apiKey}
+                    onChange={(apiKey) => updateProvider(provider, { apiKey })}
+                  />
 
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">
-                      Models
-                    </Label>
-                    <div className="space-y-1.5">
-                      {config.models.map((model) => (
-                        <div
-                          key={model}
-                          className="flex items-center justify-between rounded-lg border border-border px-2.5 py-1.5"
-                        >
-                          <span className="text-xs text-foreground">
-                            {model}
-                          </span>
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            onClick={() =>
-                              updateProvider(provider, {
-                                models: config.models.filter((item) => item !== model),
-                              })
-                            }
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Add model id"
-                        className="h-8 text-xs"
-                        value={modelDrafts[provider] || ""}
-                        onChange={(event) =>
-                          setModelDrafts((prev) => ({
-                            ...prev,
-                            [provider]: event.target.value,
-                          }))
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addModel();
-                          }
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 px-2.5 text-xs"
-                        onClick={addModel}
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add Model
-                      </Button>
-                    </div>
-                  </div>
+                  <ModelListEditor
+                    models={config.models}
+                    draft={modelDrafts[provider] || ""}
+                    onDraftChange={(value) =>
+                      setModelDrafts((prev) => ({ ...prev, [provider]: value }))
+                    }
+                    onAdd={addModel}
+                    onRemove={(model) =>
+                      updateProvider(provider, {
+                        models: config.models.filter((item) => item !== model),
+                      })
+                    }
+                    addLabel="Add Model"
+                  />
 
                   {(provider === "openrouter" || provider === "ollama") && (
                     <div className="space-y-1.5">

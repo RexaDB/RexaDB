@@ -30,6 +30,7 @@ import {
 import { Connection } from "@/lib/db/schema";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
+import { useResizeDrag } from "@/hooks/use-resize-drag";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { NavigationControls } from "@/components/navigation/navigation-controls";
 import {
@@ -126,29 +127,13 @@ export function AppSidebar({
 
   const isExpanded = sidebarState === "expanded";
 
-  const handleResizeStart = (e: React.MouseEvent) => {
-    if (!onSidebarWidthChange) return;
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = sidebarWidth ?? 256;
-
-    const onMouseMove = (ev: MouseEvent) => {
-      const newWidth = Math.min(500, Math.max(150, startWidth + ev.clientX - startX));
-      onSidebarWidthChange(newWidth);
-    };
-
-    const onMouseUp = () => {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
+  const handleResizeStart = useResizeDrag({
+    startWidth: sidebarWidth ?? 256,
+    minWidth: 150,
+    maxWidth: 500,
+    onWidthChange: (newWidth) => onSidebarWidthChange?.(newWidth),
+    disabled: !onSidebarWidthChange,
+  });
 
   return (
       <Sidebar

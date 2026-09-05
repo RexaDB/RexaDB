@@ -9,6 +9,8 @@ type ResizeHandleProps = {
   onMouseDown: (e: React.MouseEvent) => void;
   className?: string;
   style?: React.CSSProperties;
+  /** Accessible name for the separator (defaults to "Resize panel"). */
+  "aria-label"?: string;
 };
 
 /**
@@ -21,6 +23,7 @@ export const ResizeHandle = forwardRef<HTMLDivElement, ResizeHandleProps>(functi
   onMouseDown,
   className,
   style,
+  "aria-label": ariaLabel = "Resize panel",
 }, ref) {
   const isVertical = orientation === "vertical";
   const [dragging, setDragging] = useState(false);
@@ -45,6 +48,7 @@ export const ResizeHandle = forwardRef<HTMLDivElement, ResizeHandleProps>(functi
     <div
       ref={ref}
       role="separator"
+      aria-label={ariaLabel}
       aria-orientation={isVertical ? "vertical" : "horizontal"}
       data-dragging={dragging ? "" : undefined}
       className={cn(

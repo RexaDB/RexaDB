@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState } from "react";
+import { useOrgScopedLoader } from "@/components/shared/provider-accounts/use-org-scoped-loader";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import {
@@ -42,6 +43,7 @@ interface PlanetscaleAccountsScreenProps {
   onRemoveAccount: (id: string) => void;
   onAddAccount: () => void;
   canAddAccount: boolean;
+  onBack?: () => void;
   onConnectDatabase: (
     payload: { name: string; connectionString: string; connectionType: string },
     opts?: { silent?: boolean },
@@ -55,95 +57,34 @@ export function PlanetscaleAccountsScreen({
   onRemoveAccount,
   onAddAccount,
   canAddAccount,
+  onBack,
   onConnectDatabase,
 }: PlanetscaleAccountsScreenProps) {
-  const [loading, setLoading] = useState(false);
-  const [databases, setDatabases] = useState<PlanetscaleDatabase[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [orgs, setOrgs] = useState<{ name: string }[]>([]);
-  const [orgsLoading, setOrgsLoading] = useState(false);
-  const [orgsError, setOrgsError] = useState<string | null>(null);
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
   const [expandedDb, setExpandedDb] = useState<string | null>(null);
   const [branchesByDb, setBranchesByDb] = useState<Record<string, PlanetscaleBranch[]>>({});
   const [branchesLoading, setBranchesLoading] = useState<string | null>(null);
   const [connectingBranch, setConnectingBranch] = useState<string | null>(null);
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
-  const requestIdRef = useRef(0);
-
-  const loadDatabasesForOrg = useCallback(
-    async (account: PlanetscaleAccount, org: string, requestId: number) => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const dbs = await listDatabases(account.id, org);
-        if (requestIdRef.current !== requestId) return;
-        setDatabases(dbs);
-      } catch (err) {
-        if (requestIdRef.current !== requestId) return;
-        setDatabases([]);
-        setLoadError(err instanceof Error ? err.message : "Failed to load databases for this account.");
-      } finally {
-        if (requestIdRef.current === requestId) setLoading(false);
-      }
-    },
-    [],
-  );
-
-  const loadDatabases = useCallback(() => {
-    if (!activeAccount || !selectedOrg) return;
-    const requestId = ++requestIdRef.current;
-    void loadDatabasesForOrg(activeAccount, selectedOrg, requestId);
-  }, [activeAccount, selectedOrg, loadDatabasesForOrg]);
-
-  useEffect(() => {
-    const requestId = ++requestIdRef.current;
-
-    if (!activeAccount) {
-      setOrgs([]);
-      setSelectedOrg(null);
-      setOrgsError(null);
-      setDatabases([]);
-      setLoadError(null);
-      return;
-    }
-
-    setOrgs([]);
-    setSelectedOrg(null);
-    setOrgsError(null);
-
-    (async () => {
-      setOrgsLoading(true);
-      let org: string | null = null;
-      try {
-        const list = await listOrganizations(activeAccount.id);
-        if (requestIdRef.current !== requestId) return;
-        setOrgs(list);
-        org = list[0]?.name ?? null;
-        setSelectedOrg(org);
-      } catch (err) {
-        if (requestIdRef.current !== requestId) return;
-        setOrgsError(err instanceof Error ? err.message : "Failed to load organizations for this account.");
-      } finally {
-        if (requestIdRef.current === requestId) setOrgsLoading(false);
-      }
-      if (requestIdRef.current !== requestId || !org) return;
-      await loadDatabasesForOrg(activeAccount, org, requestId);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccount?.id]);
-
-  const handleOrgChange = useCallback(
-    (org: string) => {
-      setSelectedOrg(org);
-      if (!activeAccount) return;
-      const requestId = ++requestIdRef.current;
-      void loadDatabasesForOrg(activeAccount, org, requestId);
-    },
-    [activeAccount, loadDatabasesForOrg],
-  );
+  const {
+    orgs,
+    selectedOrg,
+    orgsLoading,
+    orgsError,
+    resources: databases,
+    loading,
+    loadError,
+    reload: loadDatabases,
+    handleOrgChange,
+  } = useOrgScopedLoader<PlanetscaleAccount, { name: string }, PlanetscaleDatabase>({
+    activeAccount,
+    accountKey: activeAccount?.id,
+    listOrgs: (account) => listOrganizations(account.id),
+    pickInitialOrgKey: (list) => list[0]?.name ?? null,
+    loadResources: (account, org) => listDatabases(account.id, org ?? ""),
+    requireOrgForResources: true,
+  });
 
   const filteredDatabases = databases.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase()),

@@ -39,6 +39,7 @@ interface SupabaseAccountsScreenProps {
   canAddAccount: boolean;
   existingConnectionStrings: string[];
   maxConnections: number | null;
+  onBack?: () => void;
   onConnectProject: (
     payload: {
       name: string;
@@ -58,6 +59,7 @@ export function SupabaseAccountsScreen({
   canAddAccount,
   existingConnectionStrings,
   maxConnections,
+  onBack,
   onConnectProject,
 }: SupabaseAccountsScreenProps) {
   const [loading, setLoading] = useState(false);
@@ -247,6 +249,7 @@ export function SupabaseAccountsScreen({
         logo={logo}
         title="Supabase"
         description="Browse, connect, and import your Supabase projects."
+        onBack={onBack}
       />
 
       {accounts.length === 0 ? (

@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet,
-  SheetContent,
   SheetDescription,
   SheetFooter,
   SheetHeader,
@@ -27,6 +25,7 @@ import {
   FkActionSelectItems,
   useFkColumnSheetState,
 } from "./column-sheet-common";
+import { ColumnSheetShell } from "./column-sheet-shell";
 import { Loader2, PencilLine } from "@/lib/icon-theme/lucide-react";
 import { POSTGRES_EDIT_COLUMN_TYPES } from "@/lib/db/column-types";
 import type { EditColumnPayload } from "./types";
@@ -303,15 +302,13 @@ export function EditColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
-      <SheetContent
-        side="right"
-        contained
-        onInteractOutside={handleInteractOutside}
-        className="bg-studio-bg border-studio-border text-foreground w-[min(540px,88vw)] data-[side=right]:sm:max-w-[540px] flex flex-col h-full p-0"
-      >
-        {ConfirmDialog}
-        <div className="flex flex-col h-full">
+    <ColumnSheetShell
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      handleInteractOutside={handleInteractOutside}
+      confirmDialog={ConfirmDialog}
+      className="bg-studio-bg border-studio-border text-foreground w-[min(540px,88vw)] data-[side=right]:sm:max-w-[540px] flex flex-col h-full p-0"
+    >
           <SheetHeader className="px-4 py-3 border-b border-studio-border/80">
             <SheetTitle className="text-sm font-semibold leading-none tracking-tight text-foreground flex items-center gap-1.5">
               <PencilLine className="w-3.5 h-3.5" />
@@ -585,8 +582,6 @@ export function EditColumnSheet({
               </Button>
             </div>
           </SheetFooter>
-        </div>
-      </SheetContent>
-    </Sheet>
+    </ColumnSheetShell>
   );
 }

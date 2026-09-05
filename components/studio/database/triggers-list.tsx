@@ -23,13 +23,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { SchemaDropdown } from "./schema-dropdown";
 import { SelectFilter } from "./select-filter";
 import { EmptyStatePresentational } from "./empty-state-presentational";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
+import {
+  DbCardTable,
+  DbListHeader,
+  DbListPage,
+  DbListToolbar,
+  DbNoResultsRow,
+  DbSchemaFilter,
+  DbSearchInput,
+  DbToolbarFilters,
+} from "./db-list-layout";
 
 interface Trigger {
   id: string;
@@ -152,33 +160,16 @@ export function TriggersList({
 
   return (
     <>
-      <div className="flex-1 flex flex-col bg-studio-bg overflow-hidden">
-        <div className="p-8 pb-4">
-          <h1 className="text-sm font-semibold text-foreground tracking-tight">
-            Database Triggers
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Make your database reactive. Send updates in realtime, call edge functions, or validate data as it comes in.
-          </p>
-        </div>
+      <DbListPage>
+        <DbListHeader
+          title="Database Triggers"
+          description="Make your database reactive. Send updates in realtime, call edge functions, or validate data as it comes in."
+        />
 
-        <div className="px-8 pb-4 flex flex-col lg:flex-row lg:items-center justify-between gap-2 flex-wrap">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-2 flex-wrap">
-            <SchemaDropdown
-              schemas={schemas}
-              selectedSchema={selectedSchema}
-              onSchemaChange={onSchemaChange}
-              showAllOption={false}
-            />
-            <div className="relative w-full lg:w-52">
-              <Input
-                placeholder="Search for a trigger"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 bg-background border-border text-xs pr-9"
-              />
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40 pointer-events-none" />
-            </div>
+        <DbListToolbar>
+          <DbToolbarFilters>
+            <DbSchemaFilter schemas={schemas} selectedSchema={selectedSchema} onSchemaChange={onSchemaChange} />
+            <DbSearchInput value={search} onChange={setSearch} placeholder="Search for a trigger" icon="right" />
             {tables.length > 0 && (
               <SelectFilter
                 label="Table"
@@ -188,7 +179,7 @@ export function TriggersList({
                 showSearch
               />
             )}
-          </div>
+          </DbToolbarFilters>
           <div className="flex items-center gap-2">
 
             {onOpenCreateTriggerTab && (
@@ -214,7 +205,7 @@ export function TriggersList({
               </Button>
               </>)}
           </div>
-        </div>
+        </DbListToolbar>
 
         <div className="px-8 flex-1 overflow-hidden flex flex-col">
           {schemaTriggers.length === 0 ? (
@@ -246,7 +237,7 @@ export function TriggersList({
               </EmptyStatePresentational>
             </div>
           ) : (
-            <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex-1 flex flex-col supabase-theme">
+            <DbCardTable>
               <DatabaseTable>
                 <DatabaseTableHeader>
                   <DatabaseTableRow>
@@ -261,14 +252,7 @@ export function TriggersList({
                 </DatabaseTableHeader>
                 <DatabaseTableBody>
                   {filteredTriggers.length === 0 && search.length > 0 && (
-                    <DatabaseTableRow>
-                      <DatabaseTableCell colSpan={7}>
-                        <p className="text-sm text-foreground">No results found</p>
-                        <p className="text-sm text-muted-foreground">
-                          Your search for &ldquo;{search}&rdquo; did not return any results
-                        </p>
-                      </DatabaseTableCell>
-                    </DatabaseTableRow>
+                    <DbNoResultsRow colSpan={7} search={search} />
                   )}
                 {filteredTriggers.map((t, i) => (
                   <DatabaseTableRow key={t.id || `${t.schema}.${t.name}-${i}`}>
@@ -367,11 +351,11 @@ export function TriggersList({
                   ))}
                 </DatabaseTableBody>
               </DatabaseTable>
-            </div>
+            </DbCardTable>
           )}
           <div className="h-8" />
         </div>
-      </div>
+      </DbListPage>
     </>
   );
 }

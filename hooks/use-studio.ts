@@ -1013,7 +1013,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1024,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "themes" | "workflows" | "agents"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -5623,6 +5623,35 @@ END $$;`.trim();
     openSimpleTab('auth-providers', 'auth-providers', 'Providers', authTabOptions);
   }, [openSimpleTab, setSidebarView]);
 
+  const paymentsTabOptions = {
+    afterCreated: () => setSidebarView('payments'),
+    afterExisting: () => setSidebarView('payments'),
+  };
+
+  const openPaymentsPlansTab = useCallback(() => {
+    openSimpleTab('payments-plans', 'payments-plans', 'Plans', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openPaymentsCustomersTab = useCallback(() => {
+    openSimpleTab('payments-customers', 'payments-customers', 'Customers', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openPaymentsSubscriptionsTab = useCallback(() => {
+    openSimpleTab('payments-subscriptions', 'payments-subscriptions', 'Subscriptions', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openPaymentsRevenueTab = useCallback(() => {
+    openSimpleTab('payments-revenue', 'payments-revenue', 'Revenue', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openPaymentsWebhooksTab = useCallback(() => {
+    openSimpleTab('payments-webhooks', 'payments-webhooks', 'Webhooks', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openPaymentsSetupTab = useCallback(() => {
+    openSimpleTab('payments-setup', 'payments-setup', 'Setup', paymentsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
   const openCreateTriggerTab = useCallback(() => {
     openSimpleTab('create-trigger', 'create-trigger', 'New Trigger', {
       guard: { condition: !!createSupport.trigger, errorMsg: 'Create Trigger is supported only for PostgreSQL connections.' },
@@ -8435,6 +8464,12 @@ END $$;`.trim();
     openAuthUsersTab,
     openAuthSessionsTab,
     openAuthProvidersTab,
+    openPaymentsPlansTab,
+    openPaymentsCustomersTab,
+    openPaymentsSubscriptionsTab,
+    openPaymentsRevenueTab,
+    openPaymentsWebhooksTab,
+    openPaymentsSetupTab,
     closeTabById,
     openCreateTableTab,
     openCreateKeyTab,
@@ -8712,6 +8747,12 @@ END $$;`.trim();
     openAuthUsersTab,
     openAuthSessionsTab,
     openAuthProvidersTab,
+    openPaymentsPlansTab,
+    openPaymentsCustomersTab,
+    openPaymentsSubscriptionsTab,
+    openPaymentsRevenueTab,
+    openPaymentsWebhooksTab,
+    openPaymentsSetupTab,
     closeTabById,
     closeTabsByIds,
     closeOtherTabsInPane,

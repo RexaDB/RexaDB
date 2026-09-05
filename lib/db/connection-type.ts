@@ -1,5 +1,14 @@
 export type ConnectionDbType = "postgres" | "mongodb" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "redis" | "trino" | "duckdb" | "federated" | "spacetimedb" | "jdbc" | "supabase-mgmt";
 
+/**
+ * Connections whose system catalogs speak Postgres (pg_catalog / information_schema
+ * with pg semantics). Functions / triggers / enums / indexes loaders and the
+ * schema-explorer sections only work against these — keep sidebar gating in sync.
+ */
+export function isPostgresCatalogDbType(dbType: string | null | undefined): boolean {
+  return dbType === "postgres" || dbType === "supabase-mgmt";
+}
+
 function isLikelyTrinoHttpUrl(connectionString: string) {
   try {
     const parsed = new URL(String(connectionString || "").trim());

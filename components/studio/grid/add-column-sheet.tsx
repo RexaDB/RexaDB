@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Sheet,
-  SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
@@ -27,6 +25,7 @@ import {
   FkActionSelectItems,
   useFkColumnSheetState,
 } from "./column-sheet-common";
+import { ColumnSheetShell } from "./column-sheet-shell";
 import type { AddColumnPayload } from "./types";
 import { Plus, Loader2, Link as LinkIcon } from "@/lib/icon-theme/lucide-react";
 import {
@@ -222,15 +221,13 @@ export function AddColumnSheet({
     });
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
-      <SheetContent
-        side="right"
-        contained
-        onInteractOutside={handleInteractOutside}
-        className="bg-background text-foreground flex flex-col p-0 gap-0"
-      >
-        {ConfirmDialog}
-        <div className="flex flex-col h-full">
+    <ColumnSheetShell
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      handleInteractOutside={handleInteractOutside}
+      confirmDialog={ConfirmDialog}
+      className="bg-background text-foreground flex flex-col p-0 gap-0"
+    >
           <SheetHeader className="p-4">
             <SheetTitle className="text-sm font-semibold leading-none tracking-tight text-foreground flex items-center gap-1.5">
               {isMongo ? "Add new field" : "Add new column"}
@@ -623,8 +620,6 @@ export function AddColumnSheet({
               </div>
             </div>
           </SheetFooter>
-        </div>
-      </SheetContent>
-    </Sheet>
+    </ColumnSheetShell>
   );
 }

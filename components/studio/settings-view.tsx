@@ -25,6 +25,8 @@ import {
   XCircle,
   Shield,
   Trash2,
+  Search,
+  SearchX,
 } from "@/lib/icon-theme/lucide-react";
 
 import {
@@ -39,6 +41,7 @@ import {
   useRef,
   useEffect,
   useCallback,
+  useMemo,
   type Dispatch,
   type SetStateAction,
   type ReactNode,
@@ -97,6 +100,11 @@ import {
   SettingsSidebar,
   type SettingsSectionId,
 } from "@/components/studio/settings/settings-sidebar";
+import {
+  SETTINGS_SECTION_LABELS,
+  filterSettingsSearch,
+  type SettingsSearchEntry,
+} from "@/components/studio/settings/settings-search";
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
@@ -427,13 +435,19 @@ export function SettingRow({
   title,
   description,
   children,
+  settingId,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  settingId?: string;
 }) {
   return (
-    <div className="flex items-center justify-between border-t border-border py-3">
+    <div
+      className="flex items-center justify-between border-t border-border py-3"
+      data-setting-id={settingId}
+      id={settingId ? `setting-${settingId}` : undefined}
+    >
       <div className="flex flex-col">
         <span className="font-medium text-xs">{title}</span>
         <span className="text-xs text-muted-foreground">{description}</span>
@@ -448,14 +462,16 @@ function ToggleSetting({
   description,
   value,
   onChange,
+  settingId,
 }: {
   title: string;
   description: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  settingId?: string;
 }) {
   return (
-    <SettingRow title={title} description={description}>
+    <SettingRow title={title} description={description} settingId={settingId}>
       <button
         onClick={() => onChange(!value)}
         className={cn(
@@ -481,14 +497,16 @@ export function SwitchSetting({
   description,
   value,
   onChange,
+  settingId,
 }: {
   title: string;
   description: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  settingId?: string;
 }) {
   return (
-    <SettingRow title={title} description={description}>
+    <SettingRow title={title} description={description} settingId={settingId}>
       <Switch checked={value} onCheckedChange={onChange} />
     </SettingRow>
   );
@@ -502,6 +520,7 @@ export function SelectSetting<T extends string>({
   options,
   width = "w-32",
   disabled,
+  settingId,
 }: {
   title: string;
   description: string;
@@ -510,9 +529,10 @@ export function SelectSetting<T extends string>({
   options: { value: T; label: string }[];
   width?: string;
   disabled?: boolean;
+  settingId?: string;
 }) {
   return (
-    <SettingRow title={title} description={description}>
+    <SettingRow title={title} description={description} settingId={settingId}>
       <Select
         value={value}
         onValueChange={onValueChange as (v: string) => void}
@@ -612,6 +632,118 @@ function generateThemeId(
   const existingIds = new Set(customThemes.map((t) => t.id));
   builtInThemes.forEach((t) => existingIds.add(t.id));
   return createThemeId(name, existingIds);
+}
+
+const SETTINGS_SEARCH_SECTION_ORDER: SettingsSectionId[] = [
+  "general",
+  "editor",
+  "themes",
+  "ai",
+  "mcp",
+  "security",
+  "keybindings",
+  "advanced",
+  "workspace",
+];
+
+function SettingsSearchResults({
+  query,
+  results,
+  onNavigate,
+  onClear,
+}: {
+  query: string;
+  results: SettingsSearchEntry[];
+  onNavigate: (entry: SettingsSearchEntry) => void;
+  onClear: () => void;
+}) {
+  const grouped = useMemo(() => {
+    const map = new Map<SettingsSectionId, SettingsSearchEntry[]>();
+    for (const entry of results) {
+      const list = map.get(entry.section);
+      if (list) list.push(entry);
+      else map.set(entry.section, [entry]);
+    }
+    return SETTINGS_SEARCH_SECTION_ORDER.filter((section) =>
+      map.has(section),
+    ).map((section) => ({
+      section,
+      entries: map.get(section) ?? [],
+    }));
+  }, [results]);
+
+  if (results.length === 0) {
+    return (
+      <section className="flex flex-col items-center gap-2 py-16 text-center">
+        <SearchX className="h-8 w-8 text-muted-foreground/50" />
+        <p className="text-sm font-medium">
+          No settings match &ldquo;{query.trim()}&rdquo;
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Try a different keyword, or browse sections in the sidebar.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-2 h-7 text-xs"
+          onClick={onClear}
+        >
+          Clear search
+        </Button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm">
+          <Search className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-semibold">
+            {results.length} {results.length === 1 ? "result" : "results"}
+          </span>
+          <span className="text-muted-foreground">
+            for &ldquo;{query.trim()}&rdquo;
+          </span>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={onClear}
+        >
+          Clear
+        </Button>
+      </div>
+      {grouped.map(({ section, entries }) => (
+        <div key={section} className="space-y-1">
+          <h3 className="text-xs font-semiboldtracking-wider text-muted-foreground">
+            {SETTINGS_SECTION_LABELS[section]}
+          </h3>
+          <div className="overflow-hidden rounded-lg border border-border">
+            {entries.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => onNavigate(entry)}
+                className="group flex w-full items-center justify-between gap-3 border-b border-border bg-card px-3.5 py-2.5 text-left transition-colors last:border-b-0 hover:bg-muted/50"
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs font-medium">{entry.title}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {entry.description}
+                  </span>
+                </span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
 }
 
 export function SettingsView({
@@ -796,6 +928,34 @@ export function SettingsView({
     studio.settingsInitialSection ?? "general",
   );
   const [showProviders, setShowProviders] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const searchResults = useMemo(
+    () => filterSettingsSearch(searchQuery),
+    [searchQuery],
+  );
+  const isSearching = searchQuery.trim().length > 0;
+
+  const handleSearchNavigate = useCallback((entry: SettingsSearchEntry) => {
+    setActiveSection(entry.section);
+    setSearchQuery("");
+    // Wait a tick for the section to render, then deep-scroll to the setting.
+    setTimeout(() => {
+      const el = document.querySelector(`[data-setting-id="${entry.id}"]`);
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Tailwind picks these classes up from these literals at build time.
+        el.classList.add("rounded-lg", "ring-2", "ring-primary/50");
+        setTimeout(
+          () => el.classList.remove("rounded-lg", "ring-2", "ring-primary/50"),
+          2200,
+        );
+      } else {
+        contentRef.current?.scrollTo({ top: 0 });
+      }
+    }, 80);
+  }, []);
   useEffect(() => {
     if (activeSection !== "ai") setShowProviders(false);
   }, [activeSection]);
@@ -1213,16 +1373,36 @@ export function SettingsView({
         <SettingsSidebar
           activeSection={activeSection}
           onSelect={setActiveSection}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
         />
 
-        <div className="min-w-0 flex-1 space-y-8 overflow-auto px-8 py-6">
-          {activeSection === "ai" ? (
+        <div
+          ref={contentRef}
+          className="min-w-0 flex-1 space-y-8 overflow-auto px-8 py-6"
+        >
+          {isSearching ? (
+            <SettingsSearchResults
+              query={searchQuery}
+              results={searchResults}
+              onNavigate={handleSearchNavigate}
+              onClear={() => setSearchQuery("")}
+            />
+          ) : null}
+          {!isSearching && activeSection === "ai" ? (
             showProviders ? (
               <AiProvidersPage onBack={() => setShowProviders(false)} />
             ) : (
               <section className="space-y-4">
-                <AiSettingsSection onOpenProviders={() => setShowProviders(true)} />
-                <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
+                <div data-setting-id="ai-models">
+                  <AiSettingsSection
+                    onOpenProviders={() => setShowProviders(true)}
+                  />
+                </div>
+                <div
+                  data-setting-id="slash-ai-trigger"
+                  className="flex items-center justify-between rounded-lg border border-border bg-card p-4"
+                >
                   <div className="flex flex-col">
                     <span className="font-medium text-xs">Slash AI Trigger</span>
                     <span className="text-xs text-muted-foreground">
@@ -1238,13 +1418,13 @@ export function SettingsView({
             )
           ) : null}
 
-          {activeSection === "general" ? (
+          {!isSearching && activeSection === "general" ? (
             <section className="space-y-5">
               <h2 className="text-sm font-semibold">General</h2>
 
               <div className="space-y-4">
                 {/* Appearance */}
-                <div className="flex flex-col space-y-3">
+                <div data-setting-id="appearance" className="flex flex-col space-y-3">
                   <div className="flex flex-col">
                     <span className="font-medium text-xs">Appearance</span>
                     <span className="text-xs text-muted-foreground">
@@ -1314,7 +1494,10 @@ export function SettingsView({
                 </div>
 
                 {/* App Theme */}
-                <div className="flex items-start justify-between gap-3 border-t border-border py-3">
+                <div
+                  data-setting-id="app-theme"
+                  className="flex items-start justify-between gap-3 border-t border-border py-3"
+                >
                   <div className="flex flex-col">
                     <span className="font-medium text-xs">App Theme</span>
                     <span className="text-xs text-muted-foreground max-w-md">
@@ -1366,21 +1549,28 @@ export function SettingsView({
                   </div>
                 ) : null}
 
-                <CustomFontSetting
-                  value={customFontFamily}
-                  onChange={setCustomFontFamily}
-                />
-                <IconThemeSetting
-                  iconThemeId={iconThemeId}
-                  setIconThemeId={setIconThemeId}
-                  customIconThemes={customIconThemes}
-                  setCustomIconThemes={setCustomIconThemes}
-                />
+                <div data-setting-id="app-font">
+                  <CustomFontSetting
+                    value={customFontFamily}
+                    onChange={setCustomFontFamily}
+                  />
+                </div>
+                <div data-setting-id="icon-theme">
+                  <IconThemeSetting
+                    iconThemeId={iconThemeId}
+                    setIconThemeId={setIconThemeId}
+                    customIconThemes={customIconThemes}
+                    setCustomIconThemes={setCustomIconThemes}
+                  />
+                </div>
 
-                <ZoomSetting value={appZoom} onChange={setAppZoom} />
+                <div data-setting-id="zoom">
+                  <ZoomSetting value={appZoom} onChange={setAppZoom} />
+                </div>
 
                 {/* Row Spacing */}
                 <SelectSetting
+                  settingId="row-spacing"
                   title="Row Spacing"
                   description="Adjust the vertical spacing between rows in data tables."
                   value={rowSpacing}
@@ -1394,6 +1584,7 @@ export function SettingsView({
 
                 {/* Terminal UI */}
                 <ToggleSetting
+                  settingId="tui-mode"
                   title="Terminal UI (Experimental)"
                   description="Switch the app to a blocky terminal-style UI with mono typography."
                   value={tuiMode}
@@ -1402,6 +1593,7 @@ export function SettingsView({
 
                 {/* Terminal Theme */}
                 <SelectSetting
+                  settingId="tui-theme"
                   title="Terminal Theme"
                   description="Choose light, dark, or follow system while in terminal UI."
                   value={tuiTheme}
@@ -1416,6 +1608,7 @@ export function SettingsView({
 
                 {/* Sleek Layout */}
                 <SettingRow
+                  settingId="sleek-layout"
                   title="Sleek Layout"
                   description="Add padding and rounded corners to main interface panels."
                 >
@@ -1446,6 +1639,7 @@ export function SettingsView({
 
                 {/* Translucent Background */}
                 <ToggleSetting
+                  settingId="translucent-bg"
                   title="Translucent Background"
                   description="Make the outer chrome translucent with a blur effect, showing the desktop behind the window."
                   value={noiseBgTranslucent}
@@ -1454,6 +1648,7 @@ export function SettingsView({
 
                 {/* Background Noise */}
                 <ToggleSetting
+                  settingId="bg-noise"
                   title="Background Noise"
                   description="Add a subtle grain texture to the sidebar and outer surface."
                   value={noiseBgEnabled}
@@ -1462,6 +1657,7 @@ export function SettingsView({
                 {noiseBgEnabled && (
                   <div className="flex flex-col space-y-3 border-t border-border pt-3">
                     <SettingRow
+                      settingId="noise-size"
                       title="Noise Size"
                       description="Scale of the noise pattern (smaller = finer grain)."
                     >
@@ -1476,6 +1672,7 @@ export function SettingsView({
                       />
                     </SettingRow>
                     <SelectSetting
+                      settingId="noise-blend"
                       title="Blend Mode"
                       description="How the noise blends with the background."
                       value={noiseBgBlendMode}
@@ -1488,6 +1685,7 @@ export function SettingsView({
                       ]}
                     />
                     <SettingRow
+                      settingId="noise-color"
                       title="Color"
                       description="Tint color for the noise texture."
                     >
@@ -1499,6 +1697,7 @@ export function SettingsView({
                       />
                     </SettingRow>
                     <SettingRow
+                      settingId="noise-opacity"
                       title="Opacity"
                       description="Strength of the noise effect."
                     >
@@ -1517,6 +1716,7 @@ export function SettingsView({
 
                 {/* Alternating Row Colors */}
                 <ToggleSetting
+                  settingId="alternating-rows"
                   title="Alternating Row Colors"
                   description="Apply alternating background colors to rows in data tables for easier reading."
                   value={alternatingRowColors}
@@ -1525,6 +1725,7 @@ export function SettingsView({
 
                 {/* Pending Changes Banner */}
                 <ToggleSetting
+                  settingId="pending-banner"
                   title="Show Pending Changes Banner"
                   description="Display a banner above the data grid when there are unsaved changes."
                   value={showPendingChangesBanner}
@@ -1533,6 +1734,7 @@ export function SettingsView({
 
                 {/* Restore App State */}
                 <ToggleSetting
+                  settingId="restore-state"
                   title="Restore App State"
                   description="When enabled, reopens tabs and restores your previous session when you return to a connection."
                   value={restoreAppState}
@@ -1541,6 +1743,7 @@ export function SettingsView({
 
                 {/* Auto-Save Executed Queries */}
                 <ToggleSetting
+                  settingId="autosave-queries"
                   title="Auto-Save Executed Queries"
                   description="Automatically save every executed query as a snippet with a query number and timestamp."
                   value={autoSaveQueries}
@@ -1549,6 +1752,7 @@ export function SettingsView({
 
                 {/* Local Search Index */}
                 <ToggleSetting
+                  settingId="local-search-index"
                   title="Local Search Index"
                   description="Cache universal search results in a local SQLite database for instant repeat searches. Indexed data is stored separately from your connection database."
                   value={searchSettings?.localIndexEnabled ?? false}
@@ -1563,12 +1767,13 @@ export function SettingsView({
             </section>
           ) : null}
 
-          {activeSection === "editor" ? (
+          {!isSearching && activeSection === "editor" ? (
             <section className="space-y-5">
               <h2 className="text-sm font-semibold">Editor</h2>
 
               <div className="space-y-4">
                 <SelectSetting
+                  settingId="editor-font-size"
                   title="Editor Font Size"
                   description="Adjust the font size for query editors."
                   value={editorFontSize}
@@ -1581,27 +1786,34 @@ export function SettingsView({
                   ]}
                 />
 
-                <CustomFontSetting
-                  value={editorFontFamily}
-                  onChange={setEditorFontFamily}
-                  title="Editor Font Family"
-                  description="Use a specific font for the SQL editor. If empty, it will follow the app font."
-                />
+                <div data-setting-id="editor-font-family">
+                  <CustomFontSetting
+                    value={editorFontFamily}
+                    onChange={setEditorFontFamily}
+                    title="Editor Font Family"
+                    description="Use a specific font for the SQL editor. If empty, it will follow the app font."
+                  />
+                </div>
 
                 <SwitchSetting
+                  settingId="vim-mode"
                   title="Vim Mode"
                   description="Enable Vim keybindings for the SQL editor."
                   value={vimMode}
                   onChange={setVimMode}
                 />
                 <SwitchSetting
+                  settingId="result-tabs"
                   title="Result Tabs"
                   description="Show query results in individual tabs for multi-statement queries."
                   value={resultTabsEnabled}
                   onChange={setResultTabsEnabled}
                 />
 
-                <div className="flex items-start justify-between gap-3 border-t border-border py-3">
+                <div
+                  data-setting-id="editor-theme"
+                  className="flex items-start justify-between gap-3 border-t border-border py-3"
+                >
                   <div className="flex flex-col">
                     <span className="font-medium text-xs">Editor Theme</span>
                     <span className="text-xs text-muted-foreground max-w-md">
@@ -1628,6 +1840,7 @@ export function SettingsView({
                 </h3>
 
                 <SelectSetting
+                  settingId="sql-keyword-case"
                   title="Keyword Case"
                   description="Casing for SQL keywords (SELECT, FROM, WHERE...)."
                   value={sqlFormatKeywordCase}
@@ -1641,6 +1854,7 @@ export function SettingsView({
                   ]}
                 />
                 <SelectSetting
+                  settingId="sql-datatype-case"
                   title="Data Type Case"
                   description="Casing for data types (INT, VARCHAR...)."
                   value={sqlFormatDataTypeCase}
@@ -1656,6 +1870,7 @@ export function SettingsView({
                   ]}
                 />
                 <SelectSetting
+                  settingId="sql-function-case"
                   title="Function Case"
                   description="Casing for function names (COUNT, SUM...)."
                   value={sqlFormatFunctionCase}
@@ -1671,6 +1886,7 @@ export function SettingsView({
                   ]}
                 />
                 <SelectSetting
+                  settingId="sql-identifier-case"
                   title="Identifier Case"
                   description="Casing for identifiers (experimental)."
                   value={sqlFormatIdentifierCase}
@@ -1687,6 +1903,7 @@ export function SettingsView({
                 />
 
                 <SelectSetting
+                  settingId="sql-tab-width"
                   title="Tab Width"
                   description="Number of spaces per indentation level."
                   value={String(sqlFormatTabWidth)}
@@ -1699,6 +1916,7 @@ export function SettingsView({
                 />
 
                 <SwitchSetting
+                  settingId="sql-use-tabs"
                   title="Use Tabs"
                   description="Use tab characters instead of spaces for indentation."
                   value={sqlFormatUseTabs}
@@ -1706,6 +1924,7 @@ export function SettingsView({
                 />
 
                 <SelectSetting
+                  settingId="sql-logical-newline"
                   title="Logical Operator Newline"
                   description="Place AND/OR before or after the newline."
                   value={sqlFormatLogicalOperatorNewline}
@@ -1720,6 +1939,7 @@ export function SettingsView({
                 />
 
                 <SelectSetting
+                  settingId="sql-expression-width"
                   title="Expression Width"
                   description="Max chars in parentheses before wrapping."
                   value={String(sqlFormatExpressionWidth)}
@@ -1731,6 +1951,7 @@ export function SettingsView({
                   }))}
                 />
                 <SelectSetting
+                  settingId="sql-lines-between"
                   title="Lines Between Queries"
                   description="Number of blank lines between separate queries."
                   value={String(sqlFormatLinesBetweenQueries)}
@@ -1745,12 +1966,14 @@ export function SettingsView({
                 />
 
                 <SwitchSetting
+                  settingId="sql-dense-operators"
                   title="Dense Operators"
                   description="Remove spaces around operators (e.g. a=b instead of a = b)."
                   value={sqlFormatDenseOperators}
                   onChange={setSqlFormatDenseOperators}
                 />
                 <SwitchSetting
+                  settingId="sql-newline-semicolon"
                   title="Newline Before Semicolon"
                   description="Place semicolons on their own line."
                   value={sqlFormatNewlineBeforeSemicolon}
@@ -1760,8 +1983,9 @@ export function SettingsView({
             </section>
           ) : null}
 
-          {activeSection === "themes" ? (
-            <ThemesSection
+          {!isSearching && activeSection === "themes" ? (
+            <div data-setting-id="themes-browse">
+              <ThemesSection
               customAppThemes={customAppThemes}
               setCustomAppThemes={setCustomAppThemes}
               appThemeId={appThemeId}
@@ -1773,15 +1997,17 @@ export function SettingsView({
               onOpenEditorThemeDialog={() => setIsEditorThemeDialogOpen(true)}
               onOpenThemeCreator={onOpenThemeCreator}
               onOpenIconThemeCreator={onOpenIconThemeCreator}
-            />
+              />
+            </div>
           ) : null}
 
-          {activeSection === "security" ? (
+          {!isSearching && activeSection === "security" ? (
             <section className="space-y-5">
               <h2 className="text-sm font-semibold">Security</h2>
 
               <div className="space-y-4">
                 <SelectSetting
+                  settingId="execution-mode"
                   title="Execution Mode"
                   description={
                     'When set to "Review", queries are sent to a review panel instead of executing directly.'
@@ -1797,20 +2023,26 @@ export function SettingsView({
             </section>
           ) : null}
 
-          {activeSection === "keybindings" ? (
+          {!isSearching && activeSection === "keybindings" ? (
             <section className="space-y-4">
-              <KeybindingsPanel
-                keybindings={keybindings}
-                setKeybindings={setKeybindings}
-              />
+              <div data-setting-id="keybindings-list">
+                <KeybindingsPanel
+                  keybindings={keybindings}
+                  setKeybindings={setKeybindings}
+                />
+              </div>
             </section>
           ) : null}
 
-          {activeSection === "mcp" ? <McpSettingsSection /> : null}
+          {!isSearching && activeSection === "mcp" ? (
+            <div data-setting-id="mcp-enable">
+              <McpSettingsSection />
+            </div>
+          ) : null}
 
-          {activeSection === "workspace" ? (
+          {!isSearching && activeSection === "workspace" ? (
             <section className="space-y-4">
-              <div className="space-y-1">
+              <div data-setting-id="workspace-connect" className="space-y-1">
                 <h2 className="text-sm font-semibold">Workspace</h2>
                 <p className="text-xs text-muted-foreground">
                   Connect to a rexadb-studio workspace to manage shared
@@ -2137,7 +2369,10 @@ export function SettingsView({
                 </Card>
               )}
 
-              <div className="pt-4 border-t border-studio-border">
+              <div
+                data-setting-id="workspace-saved"
+                className="pt-4 border-t border-studio-border"
+              >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-muted-foreground">
                     Saved Workspaces
@@ -2232,7 +2467,7 @@ export function SettingsView({
             </section>
           ) : null}
 
-          {activeSection === "advanced" ? (
+          {!isSearching && activeSection === "advanced" ? (
             <section className="space-y-4">
               <div className="space-y-1">
                 <h2 className="text-sm font-semibold">Advanced</h2>
@@ -2246,18 +2481,21 @@ export function SettingsView({
                   <h3 className="text-sm font-medium">Interface Polish</h3>
 
                   <SwitchSetting
+                    settingId="tab-indicator"
                     title="Show Tab Indicator"
                     description="Display the primary color line above the active editor tab."
                     value={showTabIndicator}
                     onChange={setShowTabIndicator}
                   />
                   <SwitchSetting
+                    settingId="window-actions"
                     title="Window Action Buttons"
                     description="Show custom minimize, maximize, and close buttons in the header. Disable if your window manager provides these natively."
                     value={!hideWindowActions}
                     onChange={(v) => setHideWindowActions(!v)}
                   />
                   <SwitchSetting
+                    settingId="sidebar-toggle-pos"
                     title="Sidebar Toggle Before Connection"
                     description="Move the sidebar toggle button before the connection selector in the header."
                     value={sidebarToggleBeforeConnection}
@@ -2271,18 +2509,21 @@ export function SettingsView({
                   </h3>
 
                   <SwitchSetting
+                    settingId="glass-headers"
                     title="Glassmorphic Sticky Headers"
                     description="Translucent, blurred backdrop for grid headers."
                     value={glassmorphicHeaders}
                     onChange={setGlassmorphicHeaders}
                   />
                   <SwitchSetting
+                    settingId="grid-animations"
                     title="Micro-Animations"
                     description="Subtle transition effects on row hover."
                     value={gridAnimations}
                     onChange={setGridAnimations}
                   />
                   <SwitchSetting
+                    settingId="sleek-selection"
                     title="Sleek Selection States"
                     description="Subtle box-shadow glow for selected cells and rows."
                     value={sleekSelection}
@@ -2296,24 +2537,28 @@ export function SettingsView({
                   </h3>
 
                   <SwitchSetting
+                    settingId="colorized-pills"
                     title="Colorized Pills"
                     description="Render Booleans and Enums as elegant, colored pills."
                     value={colorizedPills}
                     onChange={setColorizedPills}
                   />
                   <SwitchSetting
+                    settingId="relative-dates"
                     title="Relative Dates"
                     description="Format dates into a more readable relative format."
                     value={relativeDates}
                     onChange={setRelativeDates}
                   />
                   <SwitchSetting
+                    settingId="json-inspector"
                     title="Rich JSON Inspector"
                     description="Formatted mini-pill for JSON objects with tooltip."
                     value={richJsonInspector}
                     onChange={setRichJsonInspector}
                   />
                   <SwitchSetting
+                    settingId="data-bars"
                     title="Data Bars"
                     description="Inline background progress bar for numeric columns."
                     value={dataBars}
@@ -2327,6 +2572,7 @@ export function SettingsView({
                   </h3>
 
                   <SwitchSetting
+                    settingId="skeleton-loaders"
                     title="Skeleton Loaders"
                     description="Animated skeleton rows during data loading."
                     value={skeletonLoaders}
@@ -2338,6 +2584,7 @@ export function SettingsView({
                   <h3 className="text-sm font-medium">Schema Explorer</h3>
 
                   <SwitchSetting
+                    settingId="schema-explorer"
                     title="Enable Schema Explorer"
                     description="Show tables, functions, triggers, and indexes in a unified explorer with schema icon."
                     value={schemaExplorer}
@@ -2349,6 +2596,7 @@ export function SettingsView({
                   <h3 className="text-sm font-medium">Database Explorer</h3>
 
                   <SwitchSetting
+                    settingId="database-explorer"
                     title="Enable Database Explorer"
                     description="Browse all schemas and object types (tables, functions, triggers, indexes, enums) in a hierarchical tree view."
                     value={databaseExplorer}
@@ -2356,6 +2604,7 @@ export function SettingsView({
                   />
 
                   <SwitchSetting
+                    settingId="table-expansion"
                     title="Enable Table Expansion"
                     description="Show expand/collapse arrows next to table names to view columns inline in the sidebar."
                     value={tableExpansion}
@@ -2367,6 +2616,7 @@ export function SettingsView({
                   <h3 className="text-sm font-medium">Tab Behavior</h3>
 
                   <SwitchSetting
+                    settingId="preview-tabs"
                     title="Preview Tabs"
                     description="VS Code-style preview mode. Opening a table, snippet, or dashboard shows it in a temporary tab (italicized) that gets replaced when you open another item. Double-click a tab or pin it to keep it permanently."
                     value={previewTabs}
@@ -2378,12 +2628,14 @@ export function SettingsView({
                   <h3 className="text-sm font-medium">Pane Behavior</h3>
 
                   <SwitchSetting
+                    settingId="autoclose-pane"
                     title="Auto-close Empty Panes"
                     description="Automatically close a split pane when its last tab is closed."
                     value={autoClosePane}
                     onChange={setAutoClosePane}
                   />
                   <SwitchSetting
+                    settingId="confirm-sheet-close"
                     title="Confirm Unsaved Sheet Close"
                     description="Show a confirmation dialog when clicking outside a form sheet with unsaved changes."
                     value={confirmSheetClose}
@@ -2396,7 +2648,10 @@ export function SettingsView({
                 <h3 className="text-sm font-medium">System Configuration</h3>
               </div>
 
-              <div className="space-y-2.5 border-t border-border py-3">
+              <div
+                data-setting-id="sql-engine"
+                className="space-y-2.5 border-t border-border py-3"
+              >
                 <SqlEditorEngineSetting
                   onChange={setSqlEditorEngine}
                   value={sqlEditorEngine}
@@ -2404,13 +2659,14 @@ export function SettingsView({
               </div>
 
               <SwitchSetting
+                settingId="rls-tab-editor"
                 title="Open RLS Policies in Tab"
                 description="Edit and create Row-Level Security policies in an editor tab instead of a side sheet."
                 value={rlsPolicyTabEditor}
                 onChange={setRlsPolicyTabEditor}
               />
 
-              <div className="space-y-2.5">
+              <div data-setting-id="app-updates" className="space-y-2.5">
                 <div className="flex flex-col">
                   <span className="font-medium text-xs">App Updates</span>
                   <span className="text-xs text-muted-foreground">
@@ -2493,7 +2749,7 @@ export function SettingsView({
                 ) : null}
               </div>
 
-              <div className="space-y-1 mt-8">
+              <div data-setting-id="command-menu" className="space-y-1 mt-8">
                 <h3 className="text-sm font-medium">
                   Command Menu Customization
                 </h3>

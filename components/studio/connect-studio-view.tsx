@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { ResizeHandle } from "@/components/app-shell/resize-handle";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -1073,12 +1074,12 @@ export function ConnectStudioView() {
             </div>
           </UserPopover>
         )}
-        <div
-          className="absolute top-0 -right-1.5 w-3 h-full cursor-col-resize group z-10"
+        <ResizeHandle
+          orientation="vertical"
           onMouseDown={handleMouseDown}
-        >
-          <div className="w-px h-full mx-auto group-hover:bg-blue-500/50 group-active:bg-blue-500/70 transition-colors" />
-        </div>
+          aria-label="Resize sidebar"
+          className="absolute top-0 -right-1.5 h-full"
+        />
       </aside>
       <div className="flex-1 min-w-0 flex flex-col">
         {isRoleEditor ? (

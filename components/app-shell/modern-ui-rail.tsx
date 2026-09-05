@@ -11,9 +11,11 @@ import {
   SquareTerminal,
   TableEditorIcon,
   Users,
+  WalletMoney,
   Workflow,
 } from "@/lib/icon-theme/solar-icons";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
+import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
 import { NavUser } from "@/components/navigation/nav-user";
 
@@ -67,6 +69,13 @@ export function ModernUIRail({
   const tableLabels = getTableLabels(studio.dbType);
   const isSupabase = studio.connection?.connectionType === "supabase";
   const showAuth = studio.schemas?.includes?.("auth") && isSupabase;
+  // Billing scaffolding for Supabase projects: supabase-mgmt connections plus
+  // direct Postgres connections to db.<ref>.supabase.co. Other engines have
+  // no Edge Functions target, so the item stays hidden there.
+  const showPayments = shouldShowPayments(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.connection?.connectionString,
+  );
   const navigation = items ? activeId : studio.sidebarView;
 
   // Selecting the already-active view deselects it (closes the sidebar).
@@ -134,6 +143,16 @@ export function ModernUIRail({
         icon: <Workflow className="w-5 h-5 shrink-0" />,
         onClick: () => selectView("workflows"),
       },
+      ...(showPayments
+        ? [
+            {
+              id: "payments",
+              label: "Payments",
+              icon: <WalletMoney className="w-5 h-5 shrink-0" />,
+              onClick: () => selectView("payments"),
+            },
+          ]
+        : []),
     ];
 
   const bottomItems: Array<{

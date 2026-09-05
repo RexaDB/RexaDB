@@ -33,6 +33,16 @@ import { SpacetimeDbLogViewer } from "./spacetimedb/log-viewer";
 import { SpacetimeDbSchemaViewer } from "./spacetimedb/schema-viewer";
 import { AuthUsersView } from "./auth/auth-users-view";
 import { AuthSessionsView } from "./auth/auth-sessions-view";
+import { PaymentsPlansView } from "./payments/views/plans-view";
+import {
+  PaymentsCustomersView,
+  PaymentsSubscriptionsView,
+} from "./payments/views/customers-view";
+import {
+  PaymentsRevenueView,
+  PaymentsWebhooksView,
+} from "./payments/views/revenue-view";
+import { PaymentsSetupView } from "./payments/views/setup-view";
 import { AuthProvidersView } from "./auth/auth-providers-view";
 import { SplitView } from "./split-view";
 import { HorizontalSplitView } from "./horizontal-split-view";
@@ -1457,6 +1467,20 @@ export function StudioMainContent({
                     connectionString={currentConnectionString}
                     enabled={authEnabled}
                   />
+                )
+              ) : paneViewMode === "payments" ? (
+                tab?.type === "payments-customers" ? (
+                  <PaymentsCustomersView studio={studio} />
+                ) : tab?.type === "payments-subscriptions" ? (
+                  <PaymentsSubscriptionsView studio={studio} />
+                ) : tab?.type === "payments-revenue" ? (
+                  <PaymentsRevenueView studio={studio} />
+                ) : tab?.type === "payments-webhooks" ? (
+                  <PaymentsWebhooksView studio={studio} />
+                ) : tab?.type === "payments-setup" ? (
+                  <PaymentsSetupView studio={studio} />
+                ) : (
+                  <PaymentsPlansView studio={studio} />
                 )
               ) : paneViewMode === "create-table" ? (
                 dbType === "spacetimedb" ? (

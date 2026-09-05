@@ -13,10 +13,10 @@ interface UseStudioDataPersistenceProps {
   queueSharedSave?: (key: string, data: any, description: string) => void;
   snippets: Snippet[];
   folders: Folder[];
-  openTabs: Array<{ id: string; type: 'table' | 'key' | 'sql' | 'create-table' | 'create-key' | 'create-enum' | 'create-index' | 'create-trigger' | 'create-schema' | 'create-database' | 'dashboard' | 'import-export' | 'history' | 'analytics' | 'advisor' | 'workflow' | 'database-schema' | 'database-tables' | 'database-functions' | 'database-extensions' | 'database-triggers' | 'database-enums' | 'database-indexes' | 'database-rls-policies' | 'database-sessions' | 'database-locks' | 'database-explain-plan' | 'database-backup-restore' | 'database-spacetimedb-reducers' | 'database-spacetimedb-logs' | 'database-spacetimedb-schema' | 'rls-policy-edit' | 'auth-users' | 'auth-sessions' | 'auth-providers' | 'settings' | 'agent-settings' | 'profile-settings' | 'keybindings' | 'connect-studio' | 'manage-workspaces' | 'snapshots' | 'snapshot-table' | 'diff-table'; name: string; schema?: string; query?: string }>;
+  openTabs: Array<{ id: string; type: 'table' | 'key' | 'sql' | 'create-table' | 'create-key' | 'create-enum' | 'create-index' | 'create-trigger' | 'create-schema' | 'create-database' | 'dashboard' | 'import-export' | 'history' | 'analytics' | 'advisor' | 'workflow' | 'database-schema' | 'database-tables' | 'database-functions' | 'database-extensions' | 'database-triggers' | 'database-enums' | 'database-indexes' | 'database-rls-policies' | 'database-sessions' | 'database-locks' | 'database-explain-plan' | 'database-backup-restore' | 'database-spacetimedb-reducers' | 'database-spacetimedb-logs' | 'database-spacetimedb-schema' | 'rls-policy-edit' | 'auth-users' | 'auth-sessions' | 'auth-providers' | 'payments-plans' | 'payments-customers' | 'payments-subscriptions' | 'payments-revenue' | 'payments-webhooks' | 'payments-setup' | 'settings' | 'agent-settings' | 'profile-settings' | 'keybindings' | 'connect-studio' | 'manage-workspaces' | 'snapshots' | 'snapshot-table' | 'diff-table'; name: string; schema?: string; query?: string }>;
   activeTabId: string | null;
   sidebarSortMode: 'alphabetical' | 'tags';
-  sidebarView: 'dashboard' | 'tables' | 'sql' | 'database' | 'import-export' | 'auth' | 'themes' | 'workflows' | 'agents';
+  sidebarView: 'dashboard' | 'tables' | 'sql' | 'database' | 'import-export' | 'auth' | 'payments' | 'themes' | 'workflows' | 'agents';
   sidebarBehavior: SidebarBehavior;
   keybindings: Record<string, any>;
   searchSettings: any;

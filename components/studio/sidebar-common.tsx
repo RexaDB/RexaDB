@@ -128,21 +128,6 @@ export function DragGhost({
   );
 }
 
-export function ResizeHandle({
-  onPointerDown,
-}: {
-  onPointerDown: (e: React.PointerEvent) => void;
-}) {
-  return (
-    <div
-      className="absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize select-none bg-transparent group"
-      onPointerDown={onPointerDown}
-    >
-      <div className="h-full w-px mx-auto bg-studio-border/50 group-hover:bg-blue-500/60 transition-colors" />
-    </div>
-  );
-}
-
 // --- Shared Create Folder Dialog ---
 
 interface CreateFolderDialogProps {

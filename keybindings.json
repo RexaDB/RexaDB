@@ -1,0 +1,123 @@
+{
+  "Cmd+Alt+G": {
+    "type": "NAVIGATE_TABLE",
+    "schema": "public",
+    "table": "users"
+  },
+  "Cmd+Alt+P": {
+    "type": "NAVIGATE_SCHEMA",
+    "schema": "public"
+  },
+  "Cmd+Alt+0": {
+    "type": "NAVIGATE_DATABASE",
+    "database": "postgres"
+  },
+  "Cmd+1": {
+    "type": "GO_TO_TAB_INDEX",
+    "index": 0
+  },
+  "Cmd+Tab": {
+    "type": "GO_TO_NEXT_TAB"
+  },
+  "Cmd+Shift+Tab": {
+    "type": "GO_TO_PREVIOUS_TAB"
+  },
+  "Cmd+W": {
+    "type": "CLOSE_ACTIVE_TAB"
+  },
+  "Cmd+N": {
+    "type": "OPEN_SQL_EDITOR"
+  },
+  "Cmd+Enter": {
+    "type": "RUN_ACTIVE_QUERY"
+  },
+  "Cmd+.": {
+    "type": "STOP_ACTIVE_QUERY"
+  },
+  "Cmd+R": {
+    "type": "REFRESH_CURRENT_TAB"
+  },
+  "Cmd+Shift+Enter": {
+    "type": "COMMIT_PENDING_CHANGES"
+  },
+  "Cmd+Shift+D": {
+    "type": "OPEN_DATABASE_VIEW",
+    "view": "schema"
+  },
+  "Cmd+Shift+H": {
+    "type": "OPEN_HISTORY"
+  },
+  "Cmd+Shift+E": {
+    "type": "OPEN_IMPORT_EXPORT"
+  },
+  "Cmd+Shift+M": {
+    "type": "OPEN_DASHBOARD_HOME"
+  },
+  "Cmd+,": {
+    "type": "OPEN_SETTINGS"
+  },
+  "Cmd+Shift+,": {
+    "type": "OPEN_PROFILE_SETTINGS"
+  },
+  "Cmd+Alt+K": {
+    "type": "OPEN_KEYBINDINGS"
+  },
+  "Cmd+Alt+T": {
+    "type": "OPEN_CREATE_TABLE"
+  },
+  "Cmd+Alt+E": {
+    "type": "OPEN_CREATE_ENUM"
+  },
+  "Cmd+Alt+I": {
+    "type": "OPEN_CREATE_INDEX"
+  },
+  "Cmd+Alt+R": {
+    "type": "OPEN_CREATE_TRIGGER"
+  },
+  "Cmd+Alt+S": {
+    "type": "OPEN_CREATE_SCHEMA"
+  },
+  "Cmd+Alt+B": {
+    "type": "OPEN_CREATE_DATABASE"
+  },
+  "Cmd+B": {
+    "type": "TOGGLE_SIDEBAR"
+  },
+  "Cmd+J": {
+    "type": "TOGGLE_BOTTOM_PANEL"
+  },
+  "Cmd+Alt+1": {
+    "type": "SET_SIDEBAR_VIEW",
+    "sidebar": "tables"
+  },
+  "Cmd+K": {
+    "type": "TOGGLE_COMMAND_MENU"
+  },
+  "Cmd+Shift+F": {
+    "type": "OPEN_UNIVERSAL_SEARCH"
+  },
+  "Cmd+E": {
+    "type": "TOGGLE_GLOBAL_SQL_PANEL"
+  },
+  "Cmd+I": {
+    "type": "TOGGLE_AI_PANEL"
+  },
+  "Cmd+U": {
+    "type": "TOGGLE_PENDING_CHANGES_PANEL"
+  },
+  "Shift+Alt+F": {
+    "type": "FORMAT_QUERY"
+  },
+  "Cmd+Shift+C": {
+    "type": "COPY_QUERY"
+  },
+  "Cmd+T": {
+    "type": "OPEN_SHORTCUT_NAVIGATOR"
+  },
+  "Cmd+Shift+I": {
+    "type": "OPEN_INSERT_SHEET"
+  },
+  "/": {
+    "type": "ACTIVATE_AI_MODE"
+  }
+}

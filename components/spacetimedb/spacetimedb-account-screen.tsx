@@ -32,6 +32,7 @@ interface SpacetimeDbAccountsScreenProps {
   canAddAccount: boolean;
   existingConnectionStrings: string[];
   maxConnections: number | null;
+  onBack?: () => void;
   onConnectDatabase: (
     payload: {
       name: string;
@@ -56,6 +57,7 @@ export function SpacetimeDbAccountsScreen({
   canAddAccount,
   existingConnectionStrings,
   maxConnections,
+  onBack,
   onConnectDatabase,
 }: SpacetimeDbAccountsScreenProps) {
   const [loading, setLoading] = useState(false);
@@ -187,6 +189,7 @@ export function SpacetimeDbAccountsScreen({
         logo={logo}
         title="SpacetimeDB"
         description="Browse, connect, and import your SpacetimeDB databases."
+        onBack={onBack}
       />
 
       {accounts.length === 0 ? (

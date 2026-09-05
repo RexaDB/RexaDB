@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState } from "react";
+import { useOrgScopedLoader } from "@/components/shared/provider-accounts/use-org-scoped-loader";
 import { Button } from "@/components/ui/button";
 import { NeonLogo } from "@/components/shared/provider-logo";
 import {
@@ -53,6 +54,7 @@ interface NeonAccountsScreenProps {
   cliInstalled: boolean | null;
   checkingCli: boolean;
   onRecheckCli: () => void;
+  onBack?: () => void;
   onConnectDatabase: (
     payload: { name: string; connectionString: string; connectionType: string },
     opts?: { silent?: boolean },
@@ -74,18 +76,12 @@ export function NeonAccountsScreen({
   cliInstalled,
   checkingCli,
   onRecheckCli,
+  onBack,
   onConnectDatabase,
   onReconnectAccount,
   reloadSignal,
 }: NeonAccountsScreenProps) {
-  const [loading, setLoading] = useState(false);
-  const [projects, setProjects] = useState<NeonProject[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [orgs, setOrgs] = useState<NeonOrg[]>([]);
-  const [orgsLoading, setOrgsLoading] = useState(false);
-  const [orgsError, setOrgsError] = useState<string | null>(null);
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [branchesByProject, setBranchesByProject] = useState<Record<string, NeonBranch[]>>({});
   const [branchesLoading, setBranchesLoading] = useState<string | null>(null);
@@ -100,89 +96,24 @@ export function NeonAccountsScreen({
       .map((p) => `${p.profile}/${p.projectId}/${p.branchId}`),
   );
 
-  // Some Neon accounts require an org_id for project listing — omitting it
-  // makes the CLI fall back to an interactive picker that hangs since stdin
-  // is closed, so orgs are always resolved and passed explicitly first.
-  //
-  // Org resolution and the project fetch that depends on it run as one
-  // sequential flow (never as two effects racing on derived state) — a
-  // request token guards against a slow, now-stale fetch (e.g. one that hit
-  // the CLI's hung interactive fallback) clobbering a newer, correct result.
-  const requestIdRef = useRef(0);
-
-  const loadProjectsForOrg = useCallback(
-    async (account: NeonCliAccount, orgId: string | null, requestId: number) => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const projs = await listProjects(account.profileName, orgId ?? undefined);
-        if (requestIdRef.current !== requestId) return;
-        setProjects(projs);
-      } catch (err) {
-        if (requestIdRef.current !== requestId) return;
-        setProjects([]);
-        setLoadError(err instanceof Error ? err.message : "Failed to load projects for this account.");
-      } finally {
-        if (requestIdRef.current === requestId) setLoading(false);
-      }
-    },
-    [],
-  );
-
-  const loadProjects = useCallback(() => {
-    if (!activeAccount) return;
-    const requestId = ++requestIdRef.current;
-    void loadProjectsForOrg(activeAccount, selectedOrgId, requestId);
-  }, [activeAccount, selectedOrgId, loadProjectsForOrg]);
-
-  useEffect(() => {
-    const requestId = ++requestIdRef.current;
-
-    if (!activeAccount) {
-      setOrgs([]);
-      setSelectedOrgId(null);
-      setOrgsError(null);
-      setProjects([]);
-      setLoadError(null);
-      return;
-    }
-
-    setOrgs([]);
-    setSelectedOrgId(null);
-    setOrgsError(null);
-
-    (async () => {
-      setOrgsLoading(true);
-      let orgId: string | null = null;
-      try {
-        const list = await listOrgs(activeAccount.profileName);
-        if (requestIdRef.current !== requestId) return;
-        setOrgs(list);
-        orgId = list[0]?.id ?? null;
-        setSelectedOrgId(orgId);
-      } catch (err) {
-        if (requestIdRef.current !== requestId) return;
-        setOrgsError(err instanceof Error ? err.message : "Failed to load organizations for this account.");
-      } finally {
-        if (requestIdRef.current === requestId) setOrgsLoading(false);
-      }
-      if (requestIdRef.current !== requestId) return;
-      await loadProjectsForOrg(activeAccount, orgId, requestId);
-    })();
-    // reloadSignal is intentionally in this list: a reconnect keeps the same
-    // activeAccount.id, so it's the only thing that retriggers the reload.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccount?.id, reloadSignal]);
-
-  const handleOrgChange = useCallback(
-    (orgId: string) => {
-      setSelectedOrgId(orgId);
-      if (!activeAccount) return;
-      const requestId = ++requestIdRef.current;
-      void loadProjectsForOrg(activeAccount, orgId, requestId);
-    },
-    [activeAccount, loadProjectsForOrg],
-  );
+  const {
+    orgs,
+    selectedOrg: selectedOrgId,
+    orgsLoading,
+    orgsError,
+    resources: projects,
+    loading,
+    loadError,
+    reload: loadProjects,
+    handleOrgChange,
+  } = useOrgScopedLoader<NeonCliAccount, NeonOrg, NeonProject>({
+    activeAccount,
+    accountKey: activeAccount?.id,
+    listOrgs: (account) => listOrgs(account.profileName),
+    pickInitialOrgKey: (list) => list[0]?.id ?? null,
+    loadResources: (account, orgId) => listProjects(account.profileName, orgId ?? undefined),
+    reloadSignal,
+  });
 
   const filteredProjects = projects.filter(
     (p) =>
@@ -268,6 +199,7 @@ export function NeonAccountsScreen({
         logo={logo}
         title="Neon"
         description="Browse and connect your Neon projects — via the real Neon CLI."
+        onBack={onBack}
       />
 
       {accounts.length === 0 ? (

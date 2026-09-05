@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Theme as GlideTheme } from "@glideapps/glide-data-grid";
 import { useTheme as useAppTheme } from "@/components/providers/theme-provider";
 import { useGlobalAppTheme } from "@/hooks/use-global-app-theme";
@@ -23,9 +23,65 @@ function readCssVar(name: string, fallback: string): string {
   return parsed || fallback;
 }
 
+/**
+ * Theme CSS variables are applied to `document.documentElement` from a
+ * `useEffect` (see `useGlobalAppTheme`, plus next-themes' own class
+ * application) — i.e. *after* the render triggered by a theme change. A
+ * `useMemo` that reads `getComputedStyle` during that render therefore sees
+ * the *previous* theme's values and caches them; with no further state
+ * change nothing ever recomputes, so an open grid keeps the old colors
+ * until it remounts (tab close/reopen).
+ *
+ * This hook returns a counter that bumps once the new variables have
+ * actually landed in the DOM: it schedules a post-paint re-read whenever
+ * the theme identity changes, and also observes `<html>` for any
+ * style/class/theme-attribute mutation (covers settings sync, OS
+ * light/dark switches, and any other applier). Feed it into the memo deps
+ * alongside the theme identity so canvas colors are re-derived live.
+ */
+function useAppliedThemeTick(): number {
+  const { resolvedTheme } = useAppTheme();
+  const { appThemeId, customAppThemes } = useGlobalAppTheme();
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+    let raf = 0;
+    let disposed = false;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      // requestAnimationFrame fires after paint, guaranteeing the theme
+      // applier effects have committed and computed styles are current.
+      raf = requestAnimationFrame(() => {
+        if (!disposed) setTick((t) => t + 1);
+      });
+    };
+    // Catch the in-flight change whose render ran before appliers committed.
+    schedule();
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["style", "class", "data-app-theme"],
+    });
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+    // Re-arm (and re-read) whenever the theme identity changes. The palette
+    // contents matter, not just the id — editing a custom theme in place
+    // must also repaint.
+  }, [resolvedTheme, appThemeId, customAppThemes]);
+
+  return tick;
+}
+
 export function useGlideGridTheme(): Partial<GlideTheme> {
   const { resolvedTheme } = useAppTheme();
   const { appThemeId, customAppThemes } = useGlobalAppTheme();
+  const appliedTick = useAppliedThemeTick();
 
   return useMemo<Partial<GlideTheme>>(() => {
     const bgCell = readCssVar("--studio-bg", "#ffffff");
@@ -78,9 +134,13 @@ export function useGlideGridTheme(): Partial<GlideTheme> {
       bgIconHeader: bgHeader,
     };
     // Re-derive whenever the resolved light/dark theme or the active
-    // custom app theme (id or palette contents) changes.
+    // custom app theme (id or palette contents) changes, plus whenever the
+    // applied CSS variables actually land in the DOM (see
+    // useAppliedThemeTick — the applier effects run after render, so the
+    // first recompute after a theme switch would otherwise cache stale
+    // values and never update an already-mounted grid).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedTheme, appThemeId, customAppThemes]);
+  }, [resolvedTheme, appThemeId, customAppThemes, appliedTick]);
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -104,6 +164,7 @@ export interface GridHoverColors {
 export function useGlideHoverColors(): GridHoverColors {
   const { resolvedTheme } = useAppTheme();
   const { appThemeId, customAppThemes } = useGlobalAppTheme();
+  const appliedTick = useAppliedThemeTick();
 
   return useMemo<GridHoverColors>(() => {
     const isDark = resolvedTheme === "dark";
@@ -115,6 +176,7 @@ export function useGlideHoverColors(): GridHoverColors {
       rowHoverColor: hexToRgba(accentPurple, 0.05),
       columnHoverColor: rowHover,
     };
+    // See useGlideGridTheme for why appliedTick is a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedTheme, appThemeId, customAppThemes]);
+  }, [resolvedTheme, appThemeId, customAppThemes, appliedTick]);
 }

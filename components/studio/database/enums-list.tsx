@@ -1,6 +1,6 @@
 "use client";
 
-import { List, Plus, Edit2, Trash2, Search, MoreVertical } from "@/lib/icon-theme/lucide-react";
+import { List, Edit2, Trash2, MoreVertical } from "@/lib/icon-theme/lucide-react";
 import { useState } from "react";
 import {
   DropdownMenu,
@@ -22,11 +22,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { EmptyStatePresentational } from "./empty-state-presentational";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SchemaDropdown } from "./schema-dropdown";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  DbCardTable,
+  DbCreateButton,
+  DbListEmptyState,
+  DbListHeader,
+  DbListPage,
+  DbListToolbar,
+  DbNoResultsRow,
+  DbSchemaFilter,
+  DbSearchInput,
+  DbToolbarFilters,
+} from "./db-list-layout";
 
 interface EnumType {
   id: string;
@@ -104,63 +113,31 @@ export function EnumsList({
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-studio-bg overflow-hidden">
-      <div className="p-8 pb-4">
-        <h1 className="text-sm font-semibold text-foreground tracking-tight">
-          Database Enumerated Types
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Custom data types that you can use in your database tables or functions
-        </p>
-      </div>
+    <DbListPage>
+      <DbListHeader
+        title="Database Enumerated Types"
+        description="Custom data types that you can use in your database tables or functions"
+      />
 
-      <div className="px-8 pb-4 flex flex-col lg:flex-row lg:items-center justify-between gap-2 flex-wrap">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-2 flex-wrap">
-          <SchemaDropdown
-            schemas={schemas}
-            selectedSchema={selectedSchema}
-            onSchemaChange={onSchemaChange}
-            showAllOption={false}
-          />
-          <div className="relative w-full lg:w-52">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40" />
-            <Input
-              placeholder="Search for a type"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-8 bg-background border-border text-xs"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-
-          <Button
-            onClick={onOpenCreateEnumTab}
-            variant="default"
-            className="ml-auto grow"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Create type
-          </Button>
-        </div>
-      </div>
+      <DbListToolbar>
+        <DbToolbarFilters>
+          <DbSchemaFilter schemas={schemas} selectedSchema={selectedSchema} onSchemaChange={onSchemaChange} />
+          <DbSearchInput value={search} onChange={setSearch} placeholder="Search for a type" />
+        </DbToolbarFilters>
+        <DbCreateButton onClick={onOpenCreateEnumTab}>Create type</DbCreateButton>
+      </DbListToolbar>
 
       <div className="px-8 flex-1 overflow-hidden flex flex-col">
         {filteredEnums.length === 0 && search.length === 0 ? (
-          <div className="flex-1 flex flex-col justify-start supabase-theme">
-            <EmptyStatePresentational
-              icon={List}
-              title="No enumerated types created yet"
-              description={`There are no enumerated types found in the schema "${selectedSchema}"`}
-            >
-              <Button onClick={onOpenCreateEnumTab} variant="default">
-                <Plus className="w-3.5 h-3.5" />
-                Create type
-              </Button>
-            </EmptyStatePresentational>
-          </div>
+          <DbListEmptyState
+            icon={List}
+            title="No enumerated types created yet"
+            description={`There are no enumerated types found in the schema "${selectedSchema}"`}
+            actionLabel="Create type"
+            onAction={onOpenCreateEnumTab}
+          />
         ) : (
-          <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex-1 flex flex-col supabase-theme">
+          <DbCardTable>
             <DatabaseTable>
               <DatabaseTableHeader>
                 <DatabaseTableRow>
@@ -172,14 +149,7 @@ export function EnumsList({
               </DatabaseTableHeader>
               <DatabaseTableBody>
                 {filteredEnums.length === 0 && search.length > 0 && (
-                  <DatabaseTableRow>
-                    <DatabaseTableCell colSpan={4}>
-                      <p className="text-sm text-foreground">No results found</p>
-                      <p className="text-sm text-muted-foreground">
-                        Your search for &ldquo;{search}&rdquo; did not return any results
-                      </p>
-                    </DatabaseTableCell>
-                  </DatabaseTableRow>
+                  <DbNoResultsRow colSpan={4} search={search} />
                 )}
                 {filteredEnums.map((enumType) => (
                   <DatabaseTableRow key={`${enumType.schema}.${enumType.name}`}>
@@ -236,10 +206,10 @@ export function EnumsList({
                 ))}
               </DatabaseTableBody>
             </DatabaseTable>
-          </div>
+          </DbCardTable>
         )}
         <div className="h-8" />
       </div>
-    </div>
+    </DbListPage>
   );
 }

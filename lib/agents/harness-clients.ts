@@ -5,6 +5,7 @@ import { getAgentSandboxCwd, sandboxProcessEnv } from "./sandbox-cwd";
 import type { RexaMcpServerConfig } from "./mcp/config";
 import { buildClaudeMcpConfigJson } from "./mcp/config";
 import type { AgentProviderId, AgentStreamEvent } from "./provider-types";
+import { JsonlHarnessClient } from "./harness-helpers";
 
 export interface HarnessSpawnOptions {
   prompt: string;
@@ -107,7 +108,7 @@ class RexaDbClient implements HarnessClient {
 // Mirrors t3code's ClaudeAdapter SDK message handling: assistant content blocks
 // (text + every tool_use with id/input), user tool_result blocks
 // (tool_use_id + is_error + content), result subtypes → turn terminal state.
-class ClaudeCodeClient implements HarnessClient {
+class ClaudeCodeClient extends JsonlHarnessClient implements HarnessClient {
   providerId = "claude-code" as const;
 
   spawn(options: HarnessSpawnOptions): ChildProcess {
@@ -119,11 +120,6 @@ class ClaudeCodeClient implements HarnessClient {
     }
     args.push("-p", options.prompt);
     return spawnCli("claude", args, { cwd, env: options.env });
-  }
-
-  parseLine(line: string): AgentStreamEvent | null {
-    const events = this.parseLineAll(line);
-    return events.length > 0 ? events[0] : null;
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -198,9 +194,7 @@ class ClaudeCodeClient implements HarnessClient {
       // System events (init, hooks, api_retry) — ignore
       if (msg.type === "system") return events;
     } catch {
-      if (line.trim().length > 0) {
-        return [{ type: "text_delta", content: line }];
-      }
+      return this.fallback(line);
     }
     return [];
   }
@@ -215,7 +209,7 @@ class ClaudeCodeClient implements HarnessClient {
 //   {"type":"step_finish","part":{"reason":"tool-calls"|"stop"}}
 // CRITICAL: step_finish reason "tool-calls" is an INTERMEDIATE step boundary —
 // treating it as done kills the stream mid-turn (tools never render).
-class OpenCodeClient implements HarnessClient {
+class OpenCodeClient extends JsonlHarnessClient implements HarnessClient {
   providerId = "opencode" as const;
 
   spawn(options: HarnessSpawnOptions): ChildProcess {
@@ -255,11 +249,6 @@ class OpenCodeClient implements HarnessClient {
     }
     args.push(options.prompt);
     return spawnCli("opencode", args, { cwd, env });
-  }
-
-  parseLine(line: string): AgentStreamEvent | null {
-    const events = this.parseLineAll(line);
-    return events.length > 0 ? events[0] : null;
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -307,9 +296,7 @@ class OpenCodeClient implements HarnessClient {
       }
       return events;
     } catch {
-      if (line.trim().length > 0) {
-        return [{ type: "text_delta", content: line }];
-      }
+      return this.fallback(line);
     }
     return [];
   }
@@ -324,7 +311,7 @@ class OpenCodeClient implements HarnessClient {
 //   {"type":"turn.completed"} | {"type":"turn.failed","error":{"message"}} | {"type":"error","message"}
 // Item types: agent_message, reasoning, command_execution, file_change,
 // mcp_tool_call, web_search, todo_list, error.
-class CodexClient implements HarnessClient {
+class CodexClient extends JsonlHarnessClient implements HarnessClient {
   providerId = "codex" as const;
 
   spawn(options: HarnessSpawnOptions): ChildProcess {
@@ -333,11 +320,6 @@ class CodexClient implements HarnessClient {
     if (options.mode) args.push("--sandbox", options.mode);
     args.push(options.prompt);
     return spawnCli("codex", args, { cwd, env: options.env });
-  }
-
-  parseLine(line: string): AgentStreamEvent | null {
-    const events = this.parseLineAll(line);
-    return events.length > 0 ? events[0] : null;
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -456,9 +438,7 @@ class CodexClient implements HarnessClient {
       }
       return events;
     } catch {
-      if (line.trim().length > 0) {
-        return [{ type: "text_delta", content: line }];
-      }
+      return this.fallback(line);
     }
     return [];
   }
@@ -693,7 +673,7 @@ class CursorClient extends AcpInteractiveClient {
 
 // ─── fx ──────────────────────────────────────────────────────────────────────
 // Output: ask --json, JSONL events
-class FxClient implements HarnessClient {
+class FxClient extends JsonlHarnessClient implements HarnessClient {
   providerId = "fx" as const;
 
   spawn(options: HarnessSpawnOptions): ChildProcess {
@@ -703,11 +683,6 @@ class FxClient implements HarnessClient {
     if (options.mode === "yolo") args.push("--yolo");
     args.push(options.prompt);
     return spawnCli("fx", args, { cwd, env: options.env });
-  }
-
-  parseLine(line: string): AgentStreamEvent | null {
-    const events = this.parseLineAll(line);
-    return events.length > 0 ? events[0] : null;
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -739,9 +714,7 @@ class FxClient implements HarnessClient {
       }
       return events;
     } catch {
-      if (line.trim().length > 0) {
-        return [{ type: "text_delta", content: line }];
-      }
+      return this.fallback(line);
     }
     return [];
   }
@@ -765,7 +738,7 @@ class FxClient implements HarnessClient {
 // built-in MCP" per its own docs), so this harness runs off the prompt's
 // inlined schema context plus pi's own read/bash tools in the sandbox —
 // no live RexaDB DB tools here.
-class PiClient implements HarnessClient {
+class PiClient extends JsonlHarnessClient implements HarnessClient {
   providerId = "pi" as const;
 
   spawn(options: HarnessSpawnOptions): ChildProcess {
@@ -775,11 +748,6 @@ class PiClient implements HarnessClient {
       ["--print", "--mode", "json", "--no-approve", options.prompt],
       { cwd, env: options.env },
     );
-  }
-
-  parseLine(line: string): AgentStreamEvent | null {
-    const events = this.parseLineAll(line);
-    return events.length > 0 ? events[0] : null;
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -840,9 +808,7 @@ class PiClient implements HarnessClient {
 
       return events;
     } catch {
-      if (line.trim().length > 0) {
-        return [{ type: "text_delta", content: line }];
-      }
+      return this.fallback(line);
     }
     return [];
   }

@@ -4017,23 +4017,31 @@ export function ConnectionManager({
                   heading="Connections"
                   className="p-0! **:[[cmdk-group-heading]]:scroll-mt-16 **:[[cmdk-group-heading]]:p-3! **:[[cmdk-group-heading]]:pb-1!"
                 >
-                  {visibleCommandMenuConnections.map((conn) => (
-                    <CommandItem
-                      key={conn.id}
-                      value={`${conn.name} ${conn.id}`}
-                      keywords={[conn.name, conn.connectionString]}
-                      onSelect={() => {
-                        setCommandMenuOpen(false);
-                        void openConnection(conn);
-                      }}
-                      className="px-3! h-9 rounded-lg border border-transparent font-medium hover:border-studio-border/80 hover:bg-studio-row-hover gap-3"
-                    >
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
-                        <Search className="size-4" aria-hidden="true" />
-                      </span>
-                      {conn.name}
-                    </CommandItem>
-                  ))}
+                {visibleCommandMenuConnections.map((conn) => {
+                    const { provider } = getProviderInfo(conn);
+                    return (
+                      <CommandItem
+                        key={conn.id}
+                        value={`${conn.name} ${conn.id}`}
+                        keywords={[conn.name, conn.connectionString]}
+                        onSelect={() => {
+                          setCommandMenuOpen(false);
+                          void openConnection(conn);
+                        }}
+                        className="px-3! h-9 rounded-lg border border-transparent font-medium hover:border-studio-border/80 hover:bg-studio-row-hover gap-3"
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
+                          <ProviderLogo type={provider} className="size-4" />
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          title={conn.name}
+                        >
+                          {conn.name}
+                        </span>
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               </CommandList>
             </Command>
@@ -4369,6 +4377,79 @@ export function ConnectionManager({
                     Connections
                   </h1>
                   <div className="flex items-center gap-2">
+                    {supabaseAccounts.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
+                          else setConnectionScreen("supabase");
+                        }}
+                        title={
+                          supabaseAccounts.length === 1
+                            ? `Supabase — ${supabaseAccounts[0]?.email || supabaseAccounts[0]?.name || "1 account"}`
+                            : `Supabase — ${supabaseAccounts.length} accounts`
+                        }
+                        aria-label="Open Supabase accounts"
+                        className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
+                      >
+                        <SupabaseLogo className="h-4 w-4" />
+                      </button>
+                    )}
+                    {spacetimedbAccounts.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
+                          else setConnectionScreen("spacetimedb-account");
+                        }}
+                        title={
+                          spacetimedbAccounts.length === 1
+                            ? "SpacetimeDB — 1 account"
+                            : `SpacetimeDB — ${spacetimedbAccounts.length} accounts`
+                        }
+                        aria-label="Open SpacetimeDB accounts"
+                        className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
+                      >
+                        <SpacetimeDbLogo className="h-4 w-4 text-foreground/80" />
+                      </button>
+                    )}
+                    {neonAccounts.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (onOpenNeonAccounts) onOpenNeonAccounts();
+                          else setConnectionScreen("neon-cli");
+                        }}
+                        title={
+                          neonAccounts.length === 1
+                            ? `Neon — ${neonAccounts[0]?.label || neonAccounts[0]?.profileName || "1 account"}`
+                            : `Neon — ${neonAccounts.length} accounts`
+                        }
+                        aria-label="Open Neon accounts"
+                        className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
+                      >
+                        <NeonLogo className="h-4 w-4" />
+                      </button>
+                    )}
+                    {PLANETSCALE_LOGIN_ENABLED &&
+                      planetscaleAccounts.length > 0 && (
+                        <button
+                          onClick={() => {
+                            if (onOpenPlanetscaleAccounts)
+                              onOpenPlanetscaleAccounts();
+                            else setConnectionScreen("planetscale-account");
+                          }}
+                          title={
+                            planetscaleAccounts.length === 1
+                              ? `PlanetScale — ${planetscaleAccounts[0]?.email || planetscaleAccounts[0]?.name || "1 account"}`
+                              : `PlanetScale — ${planetscaleAccounts.length} accounts`
+                          }
+                          aria-label="Open PlanetScale accounts"
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
+                        >
+                          <ProviderLogo
+                            type="planetscale"
+                            className="h-4 w-4"
+                          />
+                        </button>
+                      )}
                     <button
                       onClick={() => setConnectionScreen("settings")}
                       title="Settings"
@@ -5223,6 +5304,18 @@ export function ConnectionManager({
           ) : connectionScreen === "supabase" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                {!isSupabaseMode && (
+                  <div className="mb-4 flex items-center">
+                    <Button
+                      variant="ghost"
+                      onClick={() => setConnectionScreen("list")}
+                      className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </Button>
+                  </div>
+                )}
                 <SupabaseAccountsScreen
                   accounts={supabaseAccounts}
                   activeAccountId={activeSupabaseAccountId}
@@ -5244,6 +5337,18 @@ export function ConnectionManager({
           ) : connectionScreen === "spacetimedb-account" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                {!isSpacetimeDbMode && (
+                  <div className="mb-4 flex items-center">
+                    <Button
+                      variant="ghost"
+                      onClick={() => setConnectionScreen("list")}
+                      className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </Button>
+                  </div>
+                )}
                 <SpacetimeDbAccountsScreen
                   accounts={spacetimedbAccounts}
                   activeAccountId={activeSpacetimeDbAccountId}
@@ -5265,6 +5370,18 @@ export function ConnectionManager({
           ) : connectionScreen === "neon-cli" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                {!isNeonCliMode && (
+                  <div className="mb-4 flex items-center">
+                    <Button
+                      variant="ghost"
+                      onClick={() => setConnectionScreen("list")}
+                      className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </Button>
+                  </div>
+                )}
                 <NeonAccountsScreen
                   accounts={neonAccounts}
                   activeAccountId={activeNeonAccountId}
@@ -5290,6 +5407,18 @@ export function ConnectionManager({
           ) : connectionScreen === "planetscale-account" ? (
             <div className="h-full min-h-0 w-full overflow-y-auto scrollbar-hide">
               <div className="mx-auto w-full max-w-5xl px-6 py-6">
+                {!isPlanetscaleMode && (
+                  <div className="mb-4 flex items-center">
+                    <Button
+                      variant="ghost"
+                      onClick={() => setConnectionScreen("list")}
+                      className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back
+                    </Button>
+                  </div>
+                )}
                 <PlanetscaleAccountsScreen
                   accounts={planetscaleAccounts}
                   activeAccountId={activePlanetscaleAccountId}
@@ -5358,137 +5487,139 @@ export function ConnectionManager({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (supabaseAccounts.length > 0) {
-                        if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
-                        else setConnectionScreen("supabase");
-                      } else {
-                        handleAddSupabaseAccount();
-                      }
-                    }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
-                  >
-                    <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
-                      <SupabaseLogo className="h-7 w-7" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">
-                        Supabase Account
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {supabaseAccounts.length === 0
-                          ? "Log in to browse and connect your projects"
-                          : supabaseAccounts.length === 1
-                            ? `Logged in as ${
-                                supabaseAccounts[0]?.email ||
-                                supabaseAccounts[0]?.name ||
-                                "Supabase account"
-                              }`
-                            : `${supabaseAccounts.length} accounts linked`}
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (spacetimedbAccounts.length > 0) {
-                        if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
-                        else setConnectionScreen("spacetimedb-account");
-                      } else {
-                        handleAddSpacetimeDbAccount();
-                      }
-                    }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
-                  >
-                    <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
-                      <SpacetimeDbLogo className="h-[26px] w-[26px] text-foreground/80" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">
-                        SpacetimeDB Account
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {spacetimedbAccounts.length === 0
-                          ? "Log in to browse and connect your databases"
-                          : spacetimedbAccounts.length === 1
-                            ? `Logged in as ${
-                                spacetimedbAccounts[0]?.identity
-                                  ? `${spacetimedbAccounts[0].identity.slice(0, 8)}…`
-                                  : "SpacetimeDB account"
-                              }`
-                            : `${spacetimedbAccounts.length} accounts linked`}
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (neonAccounts.length > 0) {
-                        if (onOpenNeonAccounts) onOpenNeonAccounts();
-                        else setConnectionScreen("neon-cli");
-                      } else {
-                        void handleAddNeonAccount();
-                      }
-                    }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
-                  >
-                    <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
-                      <NeonLogo className="h-7 w-7" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">
-                        Neon Account
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {neonAccounts.length === 0
-                          ? "Sign in (via Neon CLI) to browse and connect your projects"
-                          : neonAccounts.length === 1
-                            ? `Signed in as ${
-                                neonAccounts[0]?.label || neonAccounts[0]?.profileName
-                              }`
-                            : `${neonAccounts.length} accounts linked`}
-                      </div>
-                    </div>
-                  </button>
-
-                  {PLANETSCALE_LOGIN_ENABLED && (
+                  <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
                       onClick={() => {
-                        if (planetscaleAccounts.length > 0) {
-                          if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
-                          else setConnectionScreen("planetscale-account");
+                        if (supabaseAccounts.length > 0) {
+                          if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
+                          else setConnectionScreen("supabase");
                         } else {
-                          handleAddPlanetscaleAccount();
+                          handleAddSupabaseAccount();
                         }
                       }}
-                      className="w-full flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-4 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
+                      className="w-full min-w-0 flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
                     >
                       <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
-                        <ProviderLogo type="planetscale" className="h-7 w-7" />
+                        <SupabaseLogo className="h-7 w-7" />
                       </div>
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">
-                          PlanetScale Account
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          Supabase Account
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {planetscaleAccounts.length === 0
-                            ? "Log in to browse and connect your databases"
-                            : planetscaleAccounts.length === 1
+                        <div className="text-xs text-muted-foreground line-clamp-2">
+                          {supabaseAccounts.length === 0
+                            ? "Log in to browse and connect your projects"
+                            : supabaseAccounts.length === 1
                               ? `Logged in as ${
-                                  planetscaleAccounts[0]?.email ||
-                                  planetscaleAccounts[0]?.name ||
-                                  "PlanetScale account"
+                                  supabaseAccounts[0]?.email ||
+                                  supabaseAccounts[0]?.name ||
+                                  "Supabase account"
                                 }`
-                              : `${planetscaleAccounts.length} accounts linked`}
+                              : `${supabaseAccounts.length} accounts linked`}
                         </div>
                       </div>
                     </button>
-                  )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (spacetimedbAccounts.length > 0) {
+                          if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
+                          else setConnectionScreen("spacetimedb-account");
+                        } else {
+                          handleAddSpacetimeDbAccount();
+                        }
+                      }}
+                      className="w-full min-w-0 flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
+                    >
+                      <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                        <SpacetimeDbLogo className="h-[26px] w-[26px] text-foreground/80" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          SpacetimeDB Account
+                        </div>
+                        <div className="text-xs text-muted-foreground line-clamp-2">
+                          {spacetimedbAccounts.length === 0
+                            ? "Log in to browse and connect your databases"
+                            : spacetimedbAccounts.length === 1
+                              ? `Logged in as ${
+                                  spacetimedbAccounts[0]?.identity
+                                    ? `${spacetimedbAccounts[0].identity.slice(0, 8)}…`
+                                    : "SpacetimeDB account"
+                                }`
+                              : `${spacetimedbAccounts.length} accounts linked`}
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (neonAccounts.length > 0) {
+                          if (onOpenNeonAccounts) onOpenNeonAccounts();
+                          else setConnectionScreen("neon-cli");
+                        } else {
+                          void handleAddNeonAccount();
+                        }
+                      }}
+                      className="w-full min-w-0 flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
+                    >
+                      <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                        <NeonLogo className="h-7 w-7" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          Neon Account
+                        </div>
+                        <div className="text-xs text-muted-foreground line-clamp-2">
+                          {neonAccounts.length === 0
+                            ? "Sign in (via Neon CLI) to browse and connect your projects"
+                            : neonAccounts.length === 1
+                              ? `Signed in as ${
+                                  neonAccounts[0]?.label || neonAccounts[0]?.profileName
+                                }`
+                              : `${neonAccounts.length} accounts linked`}
+                        </div>
+                      </div>
+                    </button>
+
+                    {PLANETSCALE_LOGIN_ENABLED && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (planetscaleAccounts.length > 0) {
+                            if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
+                            else setConnectionScreen("planetscale-account");
+                          } else {
+                            handleAddPlanetscaleAccount();
+                          }
+                        }}
+                        className="w-full min-w-0 flex items-center gap-3 rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3 text-left hover:border-studio-border hover:bg-studio-row-hover/80"
+                      >
+                        <div className="flex-shrink-0 h-10 w-10 rounded-lg bg-muted/60 flex items-center justify-center">
+                          <ProviderLogo type="planetscale" className="h-7 w-7" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            PlanetScale Account
+                          </div>
+                          <div className="text-xs text-muted-foreground line-clamp-2">
+                            {planetscaleAccounts.length === 0
+                              ? "Log in to browse and connect your databases"
+                              : planetscaleAccounts.length === 1
+                                ? `Logged in as ${
+                                    planetscaleAccounts[0]?.email ||
+                                    planetscaleAccounts[0]?.name ||
+                                    "PlanetScale account"
+                                  }`
+                                : `${planetscaleAccounts.length} accounts linked`}
+                          </div>
+                        </div>
+                      </button>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     {providerCards.map((card) => (

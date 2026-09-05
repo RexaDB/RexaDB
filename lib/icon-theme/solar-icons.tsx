@@ -35,6 +35,7 @@ import {
   CodeFile as SolarCodeFile,
   File as SolarFile,
   DangerCircle as SolarDangerCircle,
+  WalletMoney as SolarWalletMoney,
 } from "@solar-icons/react";
 
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -191,6 +192,10 @@ export const Table2 = createThemedLucideIcon(
 export const GitGraph = createThemedLucideIcon(
   "GitGraph",
   SolarBranchingPathsDown as any,
+);
+export const WalletMoney = createThemedLucideIcon(
+  "WalletMoney",
+  SolarWalletMoney as any,
 );
 
 // --- Re-export custom icons (not solar/lucide) ---

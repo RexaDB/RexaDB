@@ -64,6 +64,7 @@ function SheetContent({
   resizeHandleLabel = "Resize sheet",
   style,
   contained = false,
+  noOverlay = false,
   onInteractOutside: onInteractOutsideProp,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
@@ -74,11 +75,11 @@ function SheetContent({
   maxResizeWidth?: number
   resizeHandleLabel?: string
   contained?: boolean
+  /** Skip the dim/blur backdrop so the sheet floats like a docked panel. */
+  noOverlay?: boolean
 }) {
   const contentRef = React.useRef<HTMLDivElement | null>(null)
   const resizeHandleRef = React.useRef<HTMLDivElement | null>(null)
-  const [isResizing, setIsResizing] = React.useState(false)
-  const [isResizeHovered, setIsResizeHovered] = React.useState(false)
   const [resizedWidth, setResizedWidth] = React.useState<number | null>(null)
   const isSideSheet = side === "right" || side === "left"
   const dockContainer = React.useContext(SheetDockContext)
@@ -121,7 +122,6 @@ function SheetContent({
   const startResize = React.useCallback((startClientX: number) => {
     if (!contentRef.current) return
     const startWidth = contentRef.current.getBoundingClientRect().width
-    setIsResizing(true)
     document.body.style.cursor = "col-resize"
     preventTextSelection()
 
@@ -132,7 +132,6 @@ function SheetContent({
     }
 
     const stopResize = () => {
-      setIsResizing(false)
       document.body.style.cursor = ""
       allowTextSelection()
       window.removeEventListener("pointermove", handlePointerMove)
@@ -175,7 +174,7 @@ function SheetContent({
 
   return (
     <Wrapper {...wrapperProps}>
-      {contained ? null : <SheetOverlay />}
+      {contained || noOverlay ? null : <SheetOverlay />}
       {isDocked && resizable && isSideSheet && (
         <ResizeHandle
           ref={resizeHandleRef}
@@ -207,8 +206,8 @@ function SheetContent({
                 "data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b",
                 "data-[side=left]:sm:max-w-sm data-[side=right]:sm:max-w-sm",
               ),
-          !contained && isSideSheet && side === "right" && (isResizeHovered ? "border-l-blue-500/60" : "border-l-border"),
-          !contained && isSideSheet && side === "left" && (isResizeHovered ? "border-r-blue-500/60" : "border-r-border"),
+          !contained && isSideSheet && side === "right" && "border-l-border",
+          !contained && isSideSheet && side === "left" && "border-r-border",
           className
         )}
         style={mergedStyle}
@@ -221,22 +220,18 @@ function SheetContent({
           <ResizeHandle
             orientation="vertical"
             onMouseDown={handleResizeMouseDown}
+            aria-label={resizeHandleLabel}
             className={cn("absolute top-0 h-full z-[70]", side === "right" ? "left-0" : "right-0")}
           />
         )}
         {resizable && isSideSheet && !contained && (
-          <div
-            role="separator"
-            aria-label={resizeHandleLabel}
-            aria-orientation="vertical"
+          // Floating overlay sheets get the same VS Code sash as docked
+          // sheets and sidebars: hover line + resting dots affordance.
+          <ResizeHandle
+            orientation="vertical"
             onMouseDown={handleResizeMouseDown}
-            onMouseEnter={() => setIsResizeHovered(true)}
-            onMouseLeave={() => setIsResizeHovered(false)}
-            className={cn(
-              "absolute top-0 z-[70] h-full w-3 cursor-col-resize select-none bg-transparent",
-              side === "right" ? "left-0" : "right-0",
-              isResizing && "bg-transparent"
-            )}
+            aria-label={resizeHandleLabel}
+            className={cn("absolute top-0 h-full z-[70]", side === "right" ? "left-0" : "right-0")}
           />
         )}
         {children}

@@ -84,7 +84,7 @@ export interface TabTypeConfig<TMeta = Record<string, unknown>> {
   /** Canonical icon key resolved to a lucide component via TAB_ICON_COMPONENTS */
   icon?: string;
   /** Optional: semantic grouping to help future code (e.g. "database", "auth", "settings", "create", "content") */
-  group?: "content" | "database" | "auth" | "settings" | "create" | "special";
+  group?: "content" | "database" | "auth" | "payments" | "settings" | "create" | "special";
   /** Render the tab's view. Receives the tab and the full studio hook return value. */
   renderComponent?: (opts: RenderTabOptions) => ReactNode;
 }
@@ -182,6 +182,12 @@ export const TAB_REGISTRY: {
   "auth-users": TabTypeConfig;
   "auth-sessions": TabTypeConfig;
   "auth-providers": TabTypeConfig;
+  "payments-plans": TabTypeConfig;
+  "payments-customers": TabTypeConfig;
+  "payments-subscriptions": TabTypeConfig;
+  "payments-revenue": TabTypeConfig;
+  "payments-webhooks": TabTypeConfig;
+  "payments-setup": TabTypeConfig;
   settings: TabTypeConfig;
   "agent-settings": TabTypeConfig;
   "profile-settings": TabTypeConfig;
@@ -708,6 +714,14 @@ export const TAB_REGISTRY: {
   "auth-users": simpleConfig("auth-users", "auth", "Users", "user", "auth"),
   "auth-sessions": simpleConfig("auth-sessions", "auth", "Sessions", "clock", "auth"),
   "auth-providers": simpleConfig("auth-providers", "auth", "Providers", "shield", "auth"),
+
+  // ── payments (PayKit billing in the user's Supabase project) ─────────
+  "payments-plans": simpleConfig("payments-plans", "payments", "Plans", "boxes", "payments"),
+  "payments-customers": simpleConfig("payments-customers", "payments", "Customers", "user", "payments"),
+  "payments-subscriptions": simpleConfig("payments-subscriptions", "payments", "Subscriptions", "history", "payments"),
+  "payments-revenue": simpleConfig("payments-revenue", "payments", "Revenue", "chart", "payments"),
+  "payments-webhooks": simpleConfig("payments-webhooks", "payments", "Webhooks", "zap", "payments"),
+  "payments-setup": simpleConfig("payments-setup", "payments", "Setup", "settings", "payments"),
 
   // ── settings ───────────────────────────────────────────────────────────
   settings: {

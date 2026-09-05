@@ -199,27 +199,26 @@ export function AgentsModelPicker({
     };
   }, [activeModels]);
 
-  const filteredCurrent = useMemo(() => {
-    if (!searchQuery.trim()) return currentModels;
-    const q = searchQuery.toLowerCase();
-    return currentModels.filter(
+  const filterModels = (models: typeof currentModels, query: string) => {
+    if (!query.trim()) return models;
+    const q = query.toLowerCase();
+    return models.filter(
       (m) =>
         m.label.toLowerCase().includes(q) ||
         m.id.toLowerCase().includes(q) ||
         m.description?.toLowerCase().includes(q),
     );
-  }, [currentModels, searchQuery]);
+  };
 
-  const filteredLegacy = useMemo(() => {
-    if (!searchQuery.trim()) return legacyModels;
-    const q = searchQuery.toLowerCase();
-    return legacyModels.filter(
-      (m) =>
-        m.label.toLowerCase().includes(q) ||
-        m.id.toLowerCase().includes(q) ||
-        m.description?.toLowerCase().includes(q),
-    );
-  }, [legacyModels, searchQuery]);
+  const filteredCurrent = useMemo(
+    () => filterModels(currentModels, searchQuery),
+    [currentModels, searchQuery],
+  );
+
+  const filteredLegacy = useMemo(
+    () => filterModels(legacyModels, searchQuery),
+    [legacyModels, searchQuery],
+  );
 
   const allFiltered = useMemo(() => {
     if (legacyModels.length > 0 && legacyExpanded) {
@@ -227,6 +226,23 @@ export function AgentsModelPicker({
     }
     return filteredCurrent;
   }, [filteredCurrent, filteredLegacy, legacyModels.length, legacyExpanded]);
+
+  const renderModelRows = (models: typeof currentModels) =>
+    models.map((model) => (
+      <div key={model.id}>
+        <ModelRow
+          model={model}
+          isSelected={model.id === selectedModel}
+          providerName={activeMeta?.name ?? "Agent"}
+          ProviderIcon={resolveModelIcon(model, ActiveIcon)}
+          onSelect={() => {
+            onSelectModel(model.id);
+            setOpen(false);
+          }}
+        />
+        <div className="h-0.5" />
+      </div>
+    ));
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -318,21 +334,7 @@ export function AgentsModelPicker({
             <div className="pl-2 pr-2">
               {allFiltered.length > 0 ? (
                 <>
-                  {filteredCurrent.map((model) => (
-                    <div key={model.id}>
-                      <ModelRow
-                        model={model}
-                        isSelected={model.id === selectedModel}
-                        providerName={activeMeta?.name ?? "Agent"}
-                        ProviderIcon={resolveModelIcon(model, ActiveIcon)}
-                        onSelect={() => {
-                          onSelectModel(model.id);
-                          setOpen(false);
-                        }}
-                      />
-                      <div className="h-0.5" />
-                    </div>
-                  ))}
+                  {renderModelRows(filteredCurrent)}
 
                   {/* Legacy section (collapsible, starts collapsed) */}
                   {legacyModels.length > 0 && filteredLegacy.length > 0 && (
@@ -344,22 +346,7 @@ export function AgentsModelPicker({
                           onToggle={() => setLegacyExpanded((v) => !v)}
                         />
                       )}
-                      {(legacyExpanded || searchQuery.trim()) &&
-                        filteredLegacy.map((model) => (
-                          <div key={model.id}>
-                            <ModelRow
-                              model={model}
-                              isSelected={model.id === selectedModel}
-                              providerName={activeMeta?.name ?? "Agent"}
-                              ProviderIcon={resolveModelIcon(model, ActiveIcon)}
-                              onSelect={() => {
-                                onSelectModel(model.id);
-                                setOpen(false);
-                              }}
-                            />
-                            <div className="h-0.5" />
-                          </div>
-                        ))}
+                      {(legacyExpanded || searchQuery.trim()) && renderModelRows(filteredLegacy)}
                     </>
                   )}
                 </>

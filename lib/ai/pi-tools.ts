@@ -44,48 +44,7 @@ function failTool(error: unknown): never {
   throw new Error(message);
 }
 
-function getDbCapabilities(dbType: string) {
-  return {
-    supportsNamespaces: dbType !== "redis",
-    supportsStructuredSchema: dbType !== "redis",
-    supportsRelatedTables: !["mongodb", "redis", "clickhouse", "trino"].includes(dbType),
-    supportsReadOnlyQuery: !["redis"].includes(dbType),
-    supportsSampleRows: !["redis"].includes(dbType),
-    querySyntax: dbType === "mongodb" ? "mongo-json-or-shell" : dbType === "redis" ? "redis-command" : "sql",
-  };
-}
-
-function ensureReadOnlySql(query: string) {
-  const normalized = String(query || "").trim().replace(/;+$/g, "");
-  if (!normalized) {
-    throw new Error("SQL is required.");
-  }
-
-  if (!/^(select|with|explain)\b/i.test(normalized)) {
-    throw new Error("Only read-only SQL is allowed. Use SELECT, WITH, or EXPLAIN.");
-  }
-
-  if (/\b(insert|update|delete|merge|drop|alter|create|truncate|grant|revoke|comment|vacuum|analyze|refresh|reindex|call|do|copy)\b/i.test(normalized)) {
-    throw new Error("Potentially mutating SQL was rejected.");
-  }
-}
-
-function quoteIdentifier(dbType: string, value: string) {
-  if (dbType === "mysql" || dbType === "clickhouse") return `\`${value.replace(/`/g, "``")}\``;
-  if (dbType === "mssql") return `[${value.replace(/]/g, "]]")}]`;
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function tableRef(dbType: string, schema: string, table: string) {
-  if (!schema || dbType === "spacetimedb") return quoteIdentifier(dbType, table);
-  return `${quoteIdentifier(dbType, schema)}.${quoteIdentifier(dbType, table)}`;
-}
-
-function buildSampleQuery(dbType: string, schema: string, table: string, limit: number) {
-  const ref = tableRef(dbType, schema, table);
-  if (dbType === "mssql") return `SELECT TOP ${limit} * FROM ${ref};`;
-  return `SELECT * FROM ${ref} LIMIT ${limit};`;
-}
+import { getDbCapabilities, ensureReadOnlySql, buildSampleQuery } from "@/lib/db/sql-guards";
 
 function normalizeDashboardRef(value: string) {
   return String(value || "").trim().replace(/^@+/, "").toLowerCase();

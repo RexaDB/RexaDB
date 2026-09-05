@@ -642,18 +642,19 @@ export function dmxDotBloomParts(
   };
 }
 
-function getMatrix5Layout(
+function getMatrixLayout(
+  n: number,
   size: number,
   dotSize: number,
-  cellPadding?: number
+  cellPadding?: number,
+  minGap = 1
 ): { gap: number; matrixSpan: number } {
-  const n = MATRIX_SIZE;
   if (cellPadding != null) {
     const g = Math.max(0, cellPadding);
     const matrixSpan = dotSize * n + g * (n - 1);
     return { gap: g, matrixSpan };
   }
-  const g = Math.max(1, Math.floor((size - dotSize * n) / (n - 1)));
+  const g = Math.max(minGap, Math.floor((size - dotSize * n) / (n - 1)));
   return { gap: g, matrixSpan: size };
 }
 
@@ -682,54 +683,39 @@ function clamp01Dmx(n: number | undefined) {
   return Math.min(1, Math.max(0, n));
 }
 
-interface DotMatrixBaseProps extends DotMatrixCommonProps {
-  phase: DotMatrixPhase;
-  reducedMotion?: boolean;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  animationResolver?: DotAnimationResolver;
+/* ── Unified geometry + rendering (dedupes DotMatrixBase vs DotMatrix3Base) ── */
+
+export interface DotMatrixGeometry {
+  cellCount: number;
+  center: number;
+  maxRadius: number;
+  minGap: number;
+  extraRootClass?: string;
+  useGridStyle: boolean;
+  getPatternIndexes: (pattern: MatrixPattern) => number[];
+  indexToCoord: (index: number) => { row: number; col: number };
+  distance: (index: number) => number;
+  angle: (index: number, row: number, col: number, center: number) => number;
+  radius: (index: number, row: number, col: number, center: number, maxRadius: number) => number;
+  manhattan: (index: number) => number;
 }
 
-export function DotMatrixBase({
-  size = 24,
-  dotSize = 3,
-  color = "currentColor",
-  colorPreset,
-  speed = 1,
-  ariaLabel = "Loading",
-  className,
-  pattern = "diamond",
-  dotShape = "circle",
-  muted = false,
-  bloom = false,
-  halo = 0,
-  dotClassName,
-  phase,
-  reducedMotion = false,
-  onMouseEnter,
-  onMouseLeave,
-  animationResolver,
-  opacityBase,
-  opacityMid,
-  opacityPeak,
-  cellPadding,
-  boxSize,
-  minSize
-}: DotMatrixBaseProps) {
-  const patternIndexes = new Set(getPatternIndexes(pattern));
-  const safeSpeed = speed > 0 ? speed : 1;
-  const speedScale = 1 / safeSpeed;
-  const { gap, matrixSpan } = getMatrix5Layout(size, dotSize, cellPadding);
-  const { outerDim, useWrapper } = resolveDmxBoxOuterDim({ boxSize, minSize });
-  const scale = useWrapper && matrixSpan > 0 ? outerDim / matrixSpan : 1;
-  const center = Math.floor(MATRIX_SIZE / 2);
-  const ob = clamp01Dmx(opacityBase);
-  const om = clamp01Dmx(opacityMid);
-  const op = clamp01Dmx(opacityPeak);
-  const unit = dotSize + gap;
-  const { resolvedColor, dotFill } = resolveDmxColorTokens(color, colorPreset);
-
-  const dmxVarStyle = {
+function buildDmxVarStyle(options: {
+  matrixSpan: number;
+  dotSize: number;
+  speedScale: number;
+  halo: number;
+  dotFill: string;
+  resolvedColor: string;
+  ob?: number;
+  om?: number;
+  op?: number;
+  scale: number;
+  useWrapper: boolean;
+  minSize?: number;
+}): CSSProperties {
+  const { matrixSpan, dotSize, speedScale, halo, dotFill, resolvedColor, ob, om, op, scale, useWrapper, minSize } = options;
+  return {
     width: matrixSpan,
     height: matrixSpan,
     "--dmx-speed": speedScale,
@@ -747,14 +733,32 @@ export function DotMatrixBase({
       }
       : { minWidth: minSize, minHeight: minSize })
   } as unknown as CSSProperties;
+}
 
-  const dots = Array.from({ length: MATRIX_SIZE * MATRIX_SIZE }).map((_, index) => {
-    const { row, col } = indexToCoord(index);
+function buildDmxDots(options: {
+  geometry: DotMatrixGeometry;
+  patternIndexes: Set<number>;
+  unit: number;
+  dotSize: number;
+  animationResolver?: DotAnimationResolver;
+  phase: DotMatrixPhase;
+  reducedMotion: boolean;
+  ob?: number;
+  om?: number;
+  op?: number;
+  bloom: boolean;
+  halo: number;
+  dotClassName?: string;
+}): ReactNode[] {
+  const { geometry, patternIndexes, unit, dotSize, animationResolver, phase, reducedMotion, ob, om, op, bloom, halo, dotClassName } = options;
+  const { center, maxRadius, cellCount } = geometry;
+  return Array.from({ length: cellCount }).map((_, index) => {
+    const { row, col } = geometry.indexToCoord(index);
     const isActive = patternIndexes.has(index);
-    const distance = distanceFromCenter(index);
-    const angle = polarAngle(index);
-    const radiusNormalizedValue = normalizedRadius(index);
-    const manhattan = manhattanDistance(index);
+    const distance = geometry.distance(index);
+    const angle = geometry.angle(index, row, col, center);
+    const radiusNormalizedValue = geometry.radius(index, row, col, center, maxRadius);
+    const manhattan = geometry.manhattan(index);
     const deltaX = (col - center) * unit;
     const deltaY = (row - center) * unit;
 
@@ -834,11 +838,31 @@ export function DotMatrixBase({
       />
     );
   });
+}
 
+function DmxMatrixFrame(options: {
+  geometry: DotMatrixGeometry;
+  dmxVarStyle: CSSProperties;
+  gridStyle: CSSProperties;
+  dots: ReactNode[];
+  dotShape: DotShape;
+  muted: boolean;
+  bloom: boolean;
+  halo: number;
+  className?: string;
+  useWrapper: boolean;
+  outerDim: number;
+  minSize?: number;
+  ariaLabel: string;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
+  const { geometry, dmxVarStyle, gridStyle, dots, dotShape, muted, bloom, halo, className, useWrapper, outerDim, minSize, ariaLabel, onMouseEnter, onMouseLeave } = options;
   const matrix = (
     <div
       className={cx(
         "dmx-root",
+        geometry.extraRootClass,
         `dmx-dot-shape-${dotShape}`,
         muted && "dmx-muted",
         dmxBloomRootActive(bloom, halo) && "dmx-bloom",
@@ -847,7 +871,7 @@ export function DotMatrixBase({
       )}
       style={dmxVarStyle}
     >
-      <div className="dmx-grid" style={{ gap }}>{dots}</div>
+      <div className="dmx-grid" style={gridStyle}>{dots}</div>
     </div>
   );
 
@@ -883,6 +907,7 @@ export function DotMatrixBase({
       aria-label={ariaLabel}
       className={cx(
         "dmx-root",
+        geometry.extraRootClass,
         `dmx-dot-shape-${dotShape}`,
         muted && "dmx-muted",
         dmxBloomRootActive(bloom, halo) && "dmx-bloom",
@@ -893,9 +918,134 @@ export function DotMatrixBase({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="dmx-grid" style={{ gap }}>{dots}</div>
+      <div className="dmx-grid" style={gridStyle}>{dots}</div>
     </div>
   );
+}
+
+interface DotMatrixInternalProps extends DotMatrixCommonProps {
+  geometry: DotMatrixGeometry;
+  defaultPattern: MatrixPattern;
+  phase: DotMatrixPhase;
+  reducedMotion?: boolean;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  animationResolver?: DotAnimationResolver;
+}
+
+function DotMatrixInternal({
+  size = 24,
+  dotSize = 3,
+  color = "currentColor",
+  colorPreset,
+  speed = 1,
+  ariaLabel = "Loading",
+  className,
+  pattern,
+  dotShape = "circle",
+  muted = false,
+  bloom = false,
+  halo = 0,
+  dotClassName,
+  phase,
+  reducedMotion = false,
+  onMouseEnter,
+  onMouseLeave,
+  animationResolver,
+  opacityBase,
+  opacityMid,
+  opacityPeak,
+  cellPadding,
+  boxSize,
+  minSize,
+  geometry,
+  defaultPattern
+}: DotMatrixInternalProps & { defaultPattern: MatrixPattern }) {
+  const resolvedPattern = pattern ?? defaultPattern;
+  const patternIndexes = new Set(geometry.getPatternIndexes(resolvedPattern));
+  const safeSpeed = speed > 0 ? speed : 1;
+  const speedScale = 1 / safeSpeed;
+  const { gap, matrixSpan } = getMatrixLayout(geometry.cellCount === 9 ? MATRIX_SIZE_3 : MATRIX_SIZE, size, dotSize, cellPadding, geometry.minGap);
+  const { outerDim, useWrapper } = resolveDmxBoxOuterDim({ boxSize, minSize });
+  const scale = useWrapper && matrixSpan > 0 ? outerDim / matrixSpan : 1;
+  const ob = clamp01Dmx(opacityBase);
+  const om = clamp01Dmx(opacityMid);
+  const op = clamp01Dmx(opacityPeak);
+  const unit = dotSize + gap;
+  const { resolvedColor, dotFill } = resolveDmxColorTokens(color, colorPreset);
+
+  const dmxVarStyle = buildDmxVarStyle({ matrixSpan, dotSize, speedScale, halo, dotFill, resolvedColor, ob, om, op, scale, useWrapper, minSize });
+  const gridStyle: CSSProperties = geometry.useGridStyle
+    ? {
+      gap,
+      gridTemplateColumns: `repeat(${Math.sqrt(geometry.cellCount)}, minmax(0, 1fr))`,
+      gridTemplateRows: `repeat(${Math.sqrt(geometry.cellCount)}, minmax(0, 1fr))`
+    } as CSSProperties
+    : ({ gap } as CSSProperties);
+  const dots = buildDmxDots({ geometry, patternIndexes, unit, dotSize, animationResolver, phase, reducedMotion, ob, om, op, bloom, halo, dotClassName });
+
+  return (
+    <DmxMatrixFrame
+      geometry={geometry}
+      dmxVarStyle={dmxVarStyle}
+      gridStyle={gridStyle}
+      dots={dots}
+      dotShape={dotShape}
+      muted={muted}
+      bloom={bloom}
+      halo={halo}
+      className={className}
+      useWrapper={useWrapper}
+      outerDim={outerDim}
+      minSize={minSize}
+      ariaLabel={ariaLabel}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    />
+  );
+}
+
+const MATRIX5_GEOMETRY: DotMatrixGeometry = {
+  cellCount: 25,
+  center: 2,
+  maxRadius: Math.SQRT2 * 2,
+  minGap: 1,
+  useGridStyle: false,
+  getPatternIndexes: (p) => getPatternIndexes(p),
+  indexToCoord: (i) => indexToCoord(i),
+  distance: (i) => distanceFromCenter(i),
+  angle: (i) => polarAngle(i),
+  radius: (i) => normalizedRadius(i),
+  manhattan: (i) => manhattanDistance(i)
+};
+
+function getMatrix3Geometry(): DotMatrixGeometry {
+  return {
+    cellCount: 9,
+    center: Math.floor(MATRIX_SIZE_3 / 2),
+    maxRadius: Math.hypot(Math.floor(MATRIX_SIZE_3 / 2), Math.floor(MATRIX_SIZE_3 / 2)),
+    minGap: 0,
+    extraRootClass: "dmx-matrix-3",
+    useGridStyle: true,
+    getPatternIndexes: (p) => getPattern3Indexes(p),
+    indexToCoord: (i) => indexToCoord3(i),
+    distance: (i) => distanceFromCenter3(i),
+    angle: (_i, row, col, center) => Math.atan2(row - center, col - center),
+    radius: (_i, row, col, center, maxRadius) => (maxRadius > 0 ? Math.hypot(row - center, col - center) / maxRadius : 0),
+    manhattan: (i) => manhattanDistance3(i)
+  };
+}
+
+interface DotMatrixBaseProps extends DotMatrixCommonProps {
+  phase: DotMatrixPhase;
+  reducedMotion?: boolean;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  animationResolver?: DotAnimationResolver;
+}
+
+export function DotMatrixBase(props: DotMatrixBaseProps) {
+  return <DotMatrixInternal {...props} geometry={MATRIX5_GEOMETRY} defaultPattern="diamond" />;
 }
 
 export const MATRIX_SIZE_3 = 3;
@@ -1139,242 +1289,23 @@ export function wave3PathOpacityFromNorm(
   return mid + ((t - 0.5) / 0.5) * (peak - mid);
 }
 
-function getMatrix3Layout(
-  size: number,
-  dotSize: number,
-  cellPadding?: number
-): { gap: number; matrixSpan: number } {
-  const n = MATRIX_SIZE_3;
-  if (cellPadding != null) {
-    const g = Math.max(0, cellPadding);
-    const matrixSpan = dotSize * n + g * (n - 1);
-    return { gap: g, matrixSpan };
-  }
-  const g = Math.max(0, Math.floor((size - dotSize * n) / (n - 1)));
-  return { gap: g, matrixSpan: size };
-}
-
-interface DotMatrix3BaseProps extends DotMatrixCommonProps {
-  phase: DotMatrixPhase;
-  reducedMotion?: boolean;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  animationResolver?: DotAnimationResolver;
-}
+export type DotMatrix3BaseProps = DotMatrixBaseProps;
 
 export function DotMatrix3Base({
-  size = 24,
-  dotSize = 3,
-  color = "currentColor",
-  colorPreset,
-  speed = 1,
-  ariaLabel = "Loading",
-  className,
-  pattern = "full",
-  dotShape = "circle",
-  muted = false,
-  bloom = false,
-  halo = 0,
-  dotClassName,
-  phase,
-  reducedMotion = false,
-  onMouseEnter,
-  onMouseLeave,
-  animationResolver,
   opacityBase = 0.06,
-  opacityMid,
-  opacityPeak,
   cellPadding = 1,
-  boxSize,
-  minSize
-}: DotMatrix3BaseProps) {
-  const patternIndexes = new Set(getPattern3Indexes(pattern));
-  const safeSpeed = speed > 0 ? speed : 1;
-  const speedScale = 1 / safeSpeed;
-  const { gap, matrixSpan } = getMatrix3Layout(size, dotSize, cellPadding);
-  const { outerDim, useWrapper } = resolveDmxBoxOuterDim({ boxSize, minSize });
-  const scale = useWrapper && matrixSpan > 0 ? outerDim / matrixSpan : 1;
-  const center = CENTER_3;
-  const ob = clamp01Dmx(opacityBase);
-  const om = clamp01Dmx(opacityMid);
-  const op = clamp01Dmx(opacityPeak);
-  const unit = dotSize + gap;
-  const { resolvedColor, dotFill } = resolveDmxColorTokens(color, colorPreset);
-
-  const dmxVarStyle = {
-    width: matrixSpan,
-    height: matrixSpan,
-    "--dmx-speed": speedScale,
-    ["--dmx-dot-size" as const]: `${dotSize}px`,
-    ["--dmx-halo-level" as const]: halo,
-    ["--dmx-dot-fill" as const]: dotFill,
-    color: resolvedColor,
-    ...(ob !== undefined && { ["--dmx-opacity-base" as const]: ob }),
-    ...(om !== undefined && { ["--dmx-opacity-mid" as const]: om }),
-    ...(op !== undefined && { ["--dmx-opacity-peak" as const]: op }),
-    ...(useWrapper
-      ? {
-        transform: `scale(${scale})`,
-        transformOrigin: "center center" as const
-      }
-      : { minWidth: minSize, minHeight: minSize })
-  } as unknown as CSSProperties;
-
-  const gridStyle = {
-    gap,
-    gridTemplateColumns: `repeat(${MATRIX_SIZE_3}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${MATRIX_SIZE_3}, minmax(0, 1fr))`
-  };
-
-  const dots = Array.from({ length: MATRIX_SIZE_3 * MATRIX_SIZE_3 }).map((_, index) => {
-    const { row, col } = indexToCoord3(index);
-    const isActive = patternIndexes.has(index);
-    const distance = distanceFromCenter3(index);
-    const angle = Math.atan2(row - center, col - center);
-    const radiusNormalizedValue = Math.hypot(row - center, col - center) / MAX_RADIUS_3;
-    const manhattan = manhattanDistance3(index);
-    const deltaX = (col - center) * unit;
-    const deltaY = (row - center) * unit;
-
-    const animationState = animationResolver
-      ? animationResolver({
-        index,
-        row,
-        col,
-        distanceFromCenter: distance,
-        angleFromCenter: angle,
-        radiusNormalized: radiusNormalizedValue,
-        manhattanDistance: manhattan,
-        phase,
-        isActive,
-        reducedMotion
-      })
-      : {};
-
-    const resolvedAnimationStyle = animationState.style ? { ...animationState.style } : undefined;
-    let isBloomDot = false;
-    let stylePatch: CSSProperties | undefined = resolvedAnimationStyle;
-
-    if (isActive) {
-      const rawOpacity = stylePatch?.opacity;
-      if (stylePatch != null && typeof rawOpacity === "number") {
-        const remappedOpacity = remapOpacityToTriplet(rawOpacity, ob, om, op);
-        stylePatch = { ...stylePatch, opacity: remappedOpacity };
-        const parts = dmxDotBloomParts(true, rawOpacity, bloom, halo, ob, om, op);
-        (stylePatch as CSSProperties & { "--dmx-bloom-level"?: number })["--dmx-bloom-level"] = parts.level;
-        isBloomDot = parts.bloomDot;
-      } else {
-        const parts = dmxDotBloomParts(true, 0, bloom, halo, ob, om, op);
-        if (parts.level > 0) {
-          stylePatch = {
-            ...(stylePatch ?? {}),
-            ["--dmx-bloom-level" as const]: parts.level
-          } as CSSProperties & { "--dmx-bloom-level"?: number };
-        }
-        isBloomDot = parts.bloomDot;
-      }
-    }
-
-    const dotStyle = {
-      width: dotSize,
-      height: dotSize,
-      "--dmx-distance": distance,
-      "--dmx-row": row,
-      "--dmx-col": col,
-      "--dmx-x": `${deltaX}px`,
-      "--dmx-y": `${deltaY}px`,
-      "--dmx-angle": angle,
-      "--dmx-radius": radiusNormalizedValue,
-      "--dmx-manhattan": manhattan,
-      ...stylePatch,
-      ...(!isActive
-        ? {
-          opacity: 0,
-          visibility: "hidden" as const,
-          pointerEvents: "none" as const,
-          animation: "none"
-        }
-        : {})
-    } as CSSProperties;
-
-    return (
-      <span
-        key={index}
-        aria-hidden="true"
-        className={cx(
-          "dmx-dot",
-          !isActive && "dmx-inactive",
-          isBloomDot && "dmx-bloom-dot",
-          dotClassName,
-          animationState.className
-        )}
-        style={dotStyle}
-      />
-    );
-  });
-
-  const matrix = (
-    <div
-      className={cx(
-        "dmx-root",
-        "dmx-matrix-3",
-        `dmx-dot-shape-${dotShape}`,
-        muted && "dmx-muted",
-        dmxBloomRootActive(bloom, halo) && "dmx-bloom",
-        dmxBloomHaloSpreadClass(halo),
-        !useWrapper && className
-      )}
-      style={dmxVarStyle}
-    >
-      <div className="dmx-grid" style={gridStyle}>{dots}</div>
-    </div>
-  );
-
-  if (useWrapper) {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        aria-label={ariaLabel}
-        className={className}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: outerDim,
-          height: outerDim,
-          minWidth: minSize,
-          minHeight: minSize,
-          overflow: "hidden"
-        }}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        {matrix}
-      </div>
-    );
-  }
-
+  pattern = "full",
+  ...rest
+}: DotMatrix3BaseProps & { opacityBase?: number; cellPadding?: number; pattern?: MatrixPattern }) {
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label={ariaLabel}
-      className={cx(
-        "dmx-root",
-        "dmx-matrix-3",
-        `dmx-dot-shape-${dotShape}`,
-        muted && "dmx-muted",
-        dmxBloomRootActive(bloom, halo) && "dmx-bloom",
-        dmxBloomHaloSpreadClass(halo),
-        className
-      )}
-      style={dmxVarStyle}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="dmx-grid" style={gridStyle}>{dots}</div>
-    </div>
+    <DotMatrixInternal
+      {...rest}
+      pattern={pattern}
+      opacityBase={opacityBase}
+      cellPadding={cellPadding}
+      geometry={getMatrix3Geometry()}
+      defaultPattern="full"
+    />
   );
 }
 

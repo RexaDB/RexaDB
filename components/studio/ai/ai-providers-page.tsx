@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Search, X } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ApiKeyField, BaseUrlField, ModelListEditor } from "@/components/studio/ai/ai-provider-shared";
 import {
   Dialog,
   DialogContent,
@@ -169,71 +170,29 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
               </DialogHeader>
 
               <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">API Key</Label>
-                  <Input
-                    type="password"
-                    placeholder="sk-..."
-                    className="h-8 font-mono text-xs"
-                    value={activeConfig.apiKey}
-                    onChange={(event) => updateProvider(active.id, { apiKey: event.target.value })}
-                  />
-                </div>
+                <ApiKeyField
+                  value={activeConfig.apiKey}
+                  onChange={(apiKey) => updateProvider(active.id, { apiKey })}
+                />
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Models</Label>
-                  <div className="space-y-1.5">
-                    {activeConfig.models.map((model) => (
-                      <div
-                        key={model}
-                        className="flex items-center justify-between rounded-lg border border-border px-2.5 py-1.5"
-                      >
-                        <span className="text-xs text-foreground">{model}</span>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          onClick={() =>
-                            updateProvider(active.id, {
-                              models: activeConfig.models.filter((item) => item !== model),
-                            })
-                          }
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Add model id"
-                      className="h-8 text-xs"
-                      value={modelDraft}
-                      onChange={(event) => setModelDraft(event.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addModel();
-                        }
-                      }}
-                    />
-                    <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs" onClick={addModel}>
-                      <Plus className="h-4 w-4" />
-                      Add
-                    </Button>
-                  </div>
-                </div>
+                <ModelListEditor
+                  models={activeConfig.models}
+                  draft={modelDraft}
+                  onDraftChange={setModelDraft}
+                  onAdd={addModel}
+                  onRemove={(model) =>
+                    updateProvider(active.id, {
+                      models: activeConfig.models.filter((item) => item !== model),
+                    })
+                  }
+                />
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">
-                    Base URL <span className="text-muted-foreground/60">(optional override)</span>
-                  </Label>
-                  <Input
-                    className="h-8 font-mono text-xs"
-                    placeholder={active.baseUrl || "Provider default"}
-                    value={activeConfig.baseUrl || ""}
-                    onChange={(event) => updateProvider(active.id, { baseUrl: event.target.value })}
-                  />
-                </div>
+                <BaseUrlField
+                  value={activeConfig.baseUrl || ""}
+                  placeholder={active.baseUrl || "Provider default"}
+                  onChange={(baseUrl) => updateProvider(active.id, { baseUrl })}
+                  label={<>Base URL <span className="text-muted-foreground/60">(optional override)</span></>}
+                />
 
                 {!activePinned && (
                   <Button

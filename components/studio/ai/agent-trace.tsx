@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { ElapsedTime, SHIMMER_KEYFRAMES, ShimmerLabel } from "@/components/studio/ai/shimmer-label";
+import { useElapsed } from "@/components/studio/ai/use-elapsed";
 
 /* ─────────────────────────────────────────────────────────
  * AGENT TRACE — live step trace shown while the model is
@@ -16,23 +18,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
  * not a canned timeline.
  * ───────────────────────────────────────────────────────── */
 
-function useElapsed(active: boolean) {
-  const [ds, setDs] = useState(0);
-  const wasActive = useRef(false);
-  useEffect(() => {
-    if (active) {
-      if (!wasActive.current) setDs(0);
-      wasActive.current = true;
-      const t = setInterval(() => setDs((d) => d + 1), 100);
-      return () => clearInterval(t);
-    }
-    wasActive.current = false;
-  }, [active]);
-  const total = ds / 10;
-  if (total < 60) return `${total.toFixed(1)}s`;
-  return `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
-}
-
 export default function AgentTrace({
   steps,
   active,
@@ -42,7 +27,7 @@ export default function AgentTrace({
   active: boolean;
   label?: string;
 }) {
-  const elapsed = useElapsed(active);
+  const elapsed = useElapsed(active, { preserveOnInactive: true });
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
   const hasRows = steps.length > 0;
   const autoExpanded = hasRows;
@@ -63,17 +48,12 @@ export default function AgentTrace({
         onClick={() => setManualExpanded((current) => !(current ?? autoExpanded))}
         className="-mx-1.5 flex w-fit items-center gap-2 rounded-md px-1.5 py-1 transition-colors duration-100 enabled:hover:bg-muted disabled:cursor-default"
       >
-        <span
+        <ShimmerLabel
+          label={label}
+          tone="foreground"
           className="bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
-          style={{
-            backgroundImage: "linear-gradient(90deg, var(--muted-foreground) 35%, var(--foreground) 50%, var(--muted-foreground) 65%)",
-            backgroundSize: "200% 100%",
-            animation: "shimmer-text 1.4s linear infinite",
-          }}
-        >
-          {label}
-        </span>
-        <span className="font-mono text-[11.5px] text-muted-foreground tabular-nums">{elapsed}</span>
+        />
+        <ElapsedTime value={elapsed} className="font-mono text-[11.5px] text-muted-foreground tabular-nums" />
         {hasRows && (
           <svg
             width="14"
@@ -132,7 +112,7 @@ export default function AgentTrace({
           </div>
         </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } } @keyframes shimmer-text { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } } @media (prefers-reduced-motion: reduce) { span[style*="shimmer-text"] { animation: none !important; } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } } ${SHIMMER_KEYFRAMES} @media (prefers-reduced-motion: reduce) { span[style*="shimmer-text"] { animation: none !important; } }`}</style>
     </div>
   );
 }

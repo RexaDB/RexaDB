@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/shared/provider-logo";
+import { getTabIcon } from "@/lib/studio/tab-registry";
+import { isPostgresCatalogDbType } from "@/lib/db/connection-type";
 import { getConnections } from "@/lib/api/actions-client";
 import type { Connection } from "@/lib/db/schema";
 import { useConfirm } from "@/hooks/use-confirm";
@@ -52,9 +54,12 @@ import {
   FunctionSquare,
   Gauge,
   Braces,
+  CreditCard,
 } from "lucide-react";
+import { PaymentsPanel } from "./payments/payments-panel";
+import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "import-export" | "themes" | null;
+type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "import-export" | "themes" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -282,6 +287,17 @@ export function StudioShellSidebar({
       Icon: Shield,
       show: Boolean(studio.schemas?.includes?.("auth")),
     },
+    {
+      id: "payments",
+      label: "Payments",
+      Icon: CreditCard,
+      // supabase-mgmt connections + direct Postgres connections to Supabase
+      // (db.<ref>.supabase.co). Other engines have no Edge Functions target.
+      show: shouldShowPayments(
+        studio.connection?.connectionType ?? studio.dbType,
+        studio.connection?.connectionString,
+      ),
+    },
     { id: "workflows", label: "Workflows", Icon: Workflow },
   ];
 
@@ -338,6 +354,7 @@ export function StudioShellSidebar({
             {section === "dashboard" && <DashboardPanel studio={studio} />}
             {section === "database" && <DatabasePanel studio={studio} />}
             {section === "auth" && <AuthPanel studio={studio} />}
+            {section === "payments" && <PaymentsPanel studio={studio} />}
             {section === "workflows" && <WorkflowsPanel studio={studio} />}
           </div>
         </div>
@@ -561,8 +578,7 @@ function TablesPanel({ studio }: { studio: any }) {
   );
 
   const schemaExplorer = Boolean(studio.schemaExplorer);
-  const isPostgres =
-    studio.dbType === "postgres" || studio.dbType === "supabase-mgmt";
+  const isPostgres = isPostgresCatalogDbType(studio.dbType);
   const qLower = q.toLowerCase();
 
   const functions: any[] = schemaExplorer && isPostgres ? (studio.functions ?? []) : [];
@@ -1055,27 +1071,43 @@ function DashboardPanel({ studio }: { studio: any }) {
 }
 
 function DatabasePanel({ studio }: { studio: any }) {
-  const items: Array<{ label: string; view: string }> = [
-    { label: "Schema Diagram", view: "schema" },
-    { label: "Tables", view: "tables" },
-    { label: "Functions", view: "functions" },
-    { label: "Triggers", view: "triggers" },
-    { label: "Enums", view: "enums" },
-    { label: "Indexes", view: "indexes" },
+  const dbType: string = studio.dbType;
+  // Functions / triggers / enums / indexes only load against Postgres catalogs —
+  // hide them for other connection types instead of showing empty views.
+  const pgCatalog = isPostgresCatalogDbType(dbType);
+  const items: Array<{ label: string; view: string; tabType: string; show?: boolean }> = [
+    { label: "Schema Diagram", view: "schema", tabType: "database-schema" },
+    {
+      label: dbType === "mongodb" ? "Collections" : "Tables",
+      view: "tables",
+      tabType: "database-tables",
+    },
+    { label: "Functions", view: "functions", tabType: "database-functions", show: pgCatalog },
+    { label: "Triggers", view: "triggers", tabType: "database-triggers", show: pgCatalog },
+    { label: "Enums", view: "enums", tabType: "database-enums", show: pgCatalog },
+    { label: "Indexes", view: "indexes", tabType: "database-indexes", show: pgCatalog },
   ];
   return (
     <div className="flex flex-col gap-0.5 pt-1">
-      {items.map((i) => (
-        <button
-          key={i.view}
-          type="button"
-          onClick={() => studio.openDatabaseTab?.(i.view)}
-          className={ROW}
-        >
-          <DbIcon className="size-4 shrink-0" />
-          <span>{i.label}</span>
-        </button>
-      ))}
+      {items
+        .filter((i) => i.show !== false)
+        .map((i) => {
+          const Icon = getTabIcon(i.tabType) ?? DbIcon;
+          return (
+            <button
+              key={i.view}
+              type="button"
+              onClick={() => studio.openDatabaseTab?.(i.view)}
+              className={cn(
+                ROW,
+                studio.databaseView === i.view && "bg-white/10 text-foreground",
+              )}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span>{i.label}</span>
+            </button>
+          );
+        })}
     </div>
   );
 }

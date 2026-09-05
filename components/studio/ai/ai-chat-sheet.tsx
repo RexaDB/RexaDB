@@ -37,6 +37,8 @@ import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
 import { useAiUser } from "@/hooks/use-ai-user";
+import { useResizeDrag } from "@/hooks/use-resize-drag";
+import { ResizeHandle } from "@/components/app-shell/resize-handle";
 
 import { buildLightDashboardContext } from "@/lib/ai/dashboard-context";
 import { applyAppThemeVariables } from "@/lib/studio/app-themes";
@@ -134,28 +136,12 @@ export function AiChatSheet({
 
   const [width, setWidth] = useState(400);
 
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-
-    const onMouseMove = (ev: MouseEvent) => {
-      const newWidth = Math.min(700, Math.max(320, startWidth + ev.clientX - startX));
-      setWidth(newWidth);
-    };
-
-    const onMouseUp = () => {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
+  const handleResizeStart = useResizeDrag({
+    startWidth: width,
+    minWidth: 320,
+    maxWidth: 700,
+    onWidthChange: setWidth,
+  });
 
   const handleApplyTheme = useCallback(
     (block: ThemeBlockData) => {
@@ -774,24 +760,13 @@ export function AiChatSheet({
         className="fixed left-12 top-10 bottom-8 z-50 flex flex-col overflow-hidden rounded-lg border border-border text-foreground"
         style={{ width, background: "var(--shell-content-bg)" }}
       >
-        <div
-          className="group/resize absolute left-full top-0 bottom-0 z-[60] flex w-[6px] cursor-col-resize items-center justify-center bg-transparent touch-none select-none"
-          onMouseDown={handleResizeStart}
-        >
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 rounded-full bg-transparent transition-colors duration-100 group-hover/resize:bg-foreground/30 group-active/resize:bg-foreground/45"
+          <ResizeHandle
+            orientation="vertical"
+            onMouseDown={handleResizeStart}
+            aria-label="Resize AI sidebar"
+            className="absolute left-full top-0 bottom-0"
           />
-          <div
-            className="pointer-events-none relative z-[1] flex flex-col items-center gap-[3px] opacity-45 transition-opacity duration-100 group-hover/resize:opacity-0"
-            aria-hidden
-          >
-            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
-            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
-            <span className="size-[3px] shrink-0 rounded-full bg-muted-foreground" />
-          </div>
-        </div>
-        {chatInner}
+          {chatInner}
       </div>,
       document.body,
     );

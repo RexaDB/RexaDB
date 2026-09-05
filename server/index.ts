@@ -9,6 +9,16 @@ import "drizzle-orm";
 import "drizzle-orm/bun-sqlite";
 import "nearley";
 import { extractIndexColumns } from "../lib/db/pg-utils";
+import {
+  deployPaykitFunctions,
+  exposePaykitSchema,
+  getPaykitStatus,
+  pushPaykitSchema,
+  repairPaykitProject,
+  setPaykitSecrets,
+  syncPaykitProducts,
+} from "./supabase-paykit";
+import { createStripeWebhookEndpoint } from "./stripe";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
@@ -165,6 +175,24 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
     res.status(502).json({ success: false, error: e.message });
   }
 });
+
+// PayKit billing scaffolding for the USER's Supabase projects (smgt).
+// Fully automatic via the Management API; manual CLI fallback lives in the UI.
+// NOTE: static imports (not dynamicPostRoute) — `bun build --compile` cannot
+// resolve variable dynamic import() at runtime, so dynamically-imported
+// modules are missing from the packaged binary (bunfs).
+app.post("/api/supabase-paykit/status", simplePostRoute((body) => getPaykitStatus(body)));
+app.post("/api/supabase-paykit/push-schema", simplePostRoute((body) => pushPaykitSchema(body)));
+app.post("/api/supabase-paykit/expose", simplePostRoute((body) => exposePaykitSchema(body)));
+app.post("/api/supabase-paykit/repair", simplePostRoute((body) => repairPaykitProject(body)));
+app.post("/api/supabase-paykit/sync-products", simplePostRoute((body) => syncPaykitProducts(body)));
+app.post("/api/supabase-paykit/deploy", simplePostRoute((body) => deployPaykitFunctions(body)));
+app.post("/api/supabase-paykit/secrets", simplePostRoute((body) => setPaykitSecrets(body)));
+
+// Stripe API proxy (avoids CORS in the browser). Creates a webhook endpoint
+// with URL + events pre-set; the secret key travels in the request body and
+// is never logged or stored.
+app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => createStripeWebhookEndpoint(body)));
 
 // PlanetScale API proxy (avoids CORS in the browser). Used for browsing
 // orgs/databases/branches and minting branch passwords — never for query
@@ -2635,26 +2663,8 @@ app.post("/api/agents/chat/stream", async (req, res) => {
       try {
         const result = await mod.fetchAllTablesWithColumns(connectionString, {});
         if (result?.success && Array.isArray(result.data)) {
-          const grouped = new Map<
-            string,
-            { schema: string; table: string; columns: Array<{ name: string; type: string }> }
-          >();
-          for (const row of result.data) {
-            const schema = String(row?.table_schema || row?.schema || "").trim();
-            const table = String(row?.table_name || row?.name || "").trim();
-            if (!schema || !table) continue;
-            const key = `${schema}.${table}`;
-            const existing = grouped.get(key) || { schema, table, columns: [] };
-            const columnName = String(row?.column_name || "").trim();
-            if (columnName) {
-              existing.columns.push({
-                name: columnName,
-                type: String(row?.data_type || "text"),
-              });
-            }
-            grouped.set(key, existing);
-          }
-          schemaTables = Array.from(grouped.values());
+          const { groupSchemaRows } = await import("../lib/ai/schema-grouping");
+          schemaTables = groupSchemaRows(result.data);
           log(
             `[agents/chat/stream] loaded ${schemaTables.length} tables server-side for connection`,
             connectionId ?? connectionName ?? "",

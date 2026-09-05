@@ -45,31 +45,15 @@ import {
 } from "@/components/studio/agents/provider-icons";
 import { fetchAllTablesWithColumns } from "@/lib/api/actions-client";
 import type { LightSchemaContextTable } from "@/lib/ai/types";
+import { groupSchemaRows } from "@/lib/ai/schema-grouping";
 import { listAppModes } from "@/lib/agents/app-modes";
 import { detectConnectionDbType } from "@/lib/db/connection-type";
 import type { Connection } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/format-relative";
 
 function normalizeSchemaRows(rows: any[]): LightSchemaContextTable[] {
-  const grouped = new Map<string, LightSchemaContextTable>();
-  for (const row of rows) {
-    const schema = String(row?.table_schema || row?.schema || "").trim();
-    const table = String(row?.table_name || row?.name || "").trim();
-    if (!schema || !table) continue;
-    const key = `${schema}.${table}`;
-    const existing = grouped.get(key) || { schema, table, columns: [] };
-    const columnName = String(row?.column_name || "").trim();
-    if (columnName) {
-      existing.columns.push({
-        name: columnName,
-        type: String(row?.data_type || "text"),
-      });
-    }
-    grouped.set(key, existing);
-  }
-  return Array.from(grouped.values()).sort((a, b) =>
-    `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`),
-  );
+  return groupSchemaRows(rows);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -512,15 +496,7 @@ export default function AgentsClient() {
 
 /* t3code-style helpers: compact relative time like Sidebar.tsx:204 */
 function formatRelativeTimeLabelForThread(updatedAt: number): string {
-  const diffMs = Date.now() - updatedAt;
-  if (diffMs < 60_000) return "now";
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatRelativeTime(updatedAt, { dateStyle: "short" });
 }
 
 function formatWorkingDuration(startedAt: number | null): string {

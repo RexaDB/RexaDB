@@ -4,30 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { fetchAllTablesWithColumns, fetchSchemas, fetchTables } from "@/lib/api/actions-client";
 import type { LightSchemaContextTable } from "@/lib/ai/types";
+import { groupSchemaRows } from "@/lib/ai/schema-grouping";
 
 function normalizeRows(rows: any[]): LightSchemaContextTable[] {
-  const grouped = new Map<string, LightSchemaContextTable>();
-
-  for (const row of rows) {
-    const schema = String(row?.table_schema || row?.schema || "").trim();
-    const table = String(row?.table_name || row?.name || "").trim();
-    if (!schema || !table) continue;
-
-    const key = `${schema}.${table}`;
-    const existing = grouped.get(key) || { schema, table, columns: [] };
-    const columnName = String(row?.column_name || "").trim();
-    if (columnName) {
-      existing.columns.push({
-        name: columnName,
-        type: String(row?.data_type || "text"),
-      });
-    }
-    grouped.set(key, existing);
-  }
-
-  return Array.from(grouped.values()).sort((a, b) =>
-    `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`),
-  );
+  return groupSchemaRows(rows);
 }
 
 async function loadSchemaTables(connectionString: string) {
