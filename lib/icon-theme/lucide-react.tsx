@@ -136,6 +136,7 @@ import {
   PaletteIcon as LucidePaletteIcon,
   PanelLeft as LucidePanelLeft,
   PanelLeftDashed as LucidePanelLeftDashed,
+  PanelRight as LucidePanelRight,
   PanelRightClose as LucidePanelRightClose,
   Pencil as LucidePencil,
   PencilLine as LucidePencilLine,
@@ -349,6 +350,7 @@ export const Palette = createThemedLucideIcon("Palette", LucidePalette);
 export const PaletteIcon = createThemedLucideIcon("PaletteIcon", LucidePaletteIcon);
 export const PanelLeft = createThemedLucideIcon("PanelLeft", LucidePanelLeft);
 export const PanelLeftDashed = createThemedLucideIcon("PanelLeftDashed", LucidePanelLeftDashed);
+export const PanelRight = createThemedLucideIcon("PanelRight", LucidePanelRight);
 export const PanelRightClose = createThemedLucideIcon("PanelRightClose", LucidePanelRightClose);
 export const Pencil = createThemedLucideIcon("Pencil", LucidePencil);
 export const PencilLine = createThemedLucideIcon("PencilLine", LucidePencilLine);

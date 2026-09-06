@@ -2,7 +2,14 @@
 
 import dagre from "@dagrejs/dagre";
 import { toPng, toSvg } from "html-to-image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   ReactFlow,
@@ -38,6 +45,7 @@ import {
   Fingerprint,
   Rows3,
   Loader2,
+  Trash2,
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,7 +59,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { ConnectionDbType } from "@/lib/db/connection-type";
 
-interface Column {
+export interface SchemaDiagramColumn {
   name: string;
   type: string;
   isPrimary: boolean;
@@ -63,7 +71,10 @@ interface Column {
   } | null;
 }
 
-interface TableData extends Record<string, unknown> {
+/** @deprecated Prefer SchemaDiagramColumn */
+type Column = SchemaDiagramColumn;
+
+export interface SchemaDiagramTable extends Record<string, unknown> {
   schema: string;
   name: string;
   columns: Column[];
@@ -71,7 +82,24 @@ interface TableData extends Record<string, unknown> {
   onCopySql?: (tableName: string) => void;
   onOpenTable?: (tableName: string) => void;
   onFocusTable?: (tableName: string) => void;
+  onEditTable?: (tableName: string) => void;
+  onDeleteTable?: (tableName: string) => void;
+  editable?: boolean;
+  /** When true, relationship handles stay interactive. */
+  allowConnect?: boolean;
 }
+
+/** @deprecated Prefer SchemaDiagramTable */
+type TableData = SchemaDiagramTable;
+
+export type SchemaDiagramMode = "readonly" | "editable";
+
+export type SchemaDiagramRelationship = {
+  sourceTable: string;
+  sourceColumn: string;
+  targetTable: string;
+  targetColumn: string;
+};
 
 interface SchemaDiagramProps {
   schemaData: Record<string, TableData>;
@@ -84,6 +112,21 @@ interface SchemaDiagramProps {
   setNewFKData?: (data: any) => void;
   onOpenTable?: (tableName: string) => void;
   highlightedTable?: string | null;
+  /** readonly = live DB diagram; editable = ERD designer (local model). */
+  mode?: SchemaDiagramMode;
+  /** Controlled positions for editable mode (keyed by table name). */
+  positions?: Record<string, { x: number; y: number }>;
+  onPositionsChange?: (positions: Record<string, { x: number; y: number }>) => void;
+  /** Called when the design model changes (editable mode). */
+  onSchemaDataChange?: (next: Record<string, TableData>) => void;
+  onAddTable?: () => void;
+  onEditTable?: (tableName: string) => void;
+  onDeleteTable?: (tableName: string) => void;
+  onEditRelationship?: (rel: SchemaDiagramRelationship) => void;
+  onSave?: () => void;
+  onExportSql?: () => void;
+  /** Extra toolbar controls rendered in the top-right panel. */
+  toolbarExtras?: ReactNode;
 }
 
 // Custom Node Component for Tables
@@ -112,34 +155,69 @@ const TableNode = ({ data }: { data: TableData }) => {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem
-              onClick={() => data.onCopyName?.(data.name)}
-              className="gap-2"
-            >
-              <Copy className="w-4 h-4" />
-              Copy name
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => data.onCopySql?.(data.name)}
-              className="gap-2"
-            >
-              <PencilLine className="w-4 h-4" />
-              Copy SQL
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => data.onOpenTable?.(data.name)}
-              className="gap-2"
-            >
-              <Rows3 className="w-4 h-4" />
-              Table editor
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => data.onFocusTable?.(data.name)}
-              className="gap-2"
-            >
-              <GitFork className="w-4 h-4" />
-              Focus in schema
-            </DropdownMenuItem>
+            {data.editable ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() => data.onEditTable?.(data.name)}
+                  className="gap-2"
+                >
+                  <PencilLine className="w-4 h-4" />
+                  Edit table
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onCopySql?.(data.name)}
+                  className="gap-2"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy SQL
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onFocusTable?.(data.name)}
+                  className="gap-2"
+                >
+                  <GitFork className="w-4 h-4" />
+                  Focus in diagram
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onDeleteTable?.(data.name)}
+                  className="gap-2 text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete table
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  onClick={() => data.onCopyName?.(data.name)}
+                  className="gap-2"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy name
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onCopySql?.(data.name)}
+                  className="gap-2"
+                >
+                  <PencilLine className="w-4 h-4" />
+                  Copy SQL
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onOpenTable?.(data.name)}
+                  className="gap-2"
+                >
+                  <Rows3 className="w-4 h-4" />
+                  Table editor
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => data.onFocusTable?.(data.name)}
+                  className="gap-2"
+                >
+                  <GitFork className="w-4 h-4" />
+                  Focus in schema
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -189,7 +267,7 @@ const TableNode = ({ data }: { data: TableData }) => {
                 type="target"
                 position={Position.Left}
                 id={`${col.name}-target`}
-                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${(data.dbType === "postgres" || data.dbType === "supabase-mgmt") ? "" : "pointer-events-none"}`}
+                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${data.allowConnect ? "" : "pointer-events-none"}`}
                 style={{
                   top: HEADER_HEIGHT + idx * ROW_HEIGHT + ROW_HEIGHT / 2,
                   height: ROW_HEIGHT,
@@ -200,7 +278,7 @@ const TableNode = ({ data }: { data: TableData }) => {
                 type="source"
                 position={Position.Right}
                 id={`${col.name}-source`}
-                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${(data.dbType === "postgres" || data.dbType === "supabase-mgmt") ? "" : "pointer-events-none"}`}
+                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${data.allowConnect ? "" : "pointer-events-none"}`}
                 style={{
                   top: HEADER_HEIGHT + idx * ROW_HEIGHT + ROW_HEIGHT / 2,
                   height: ROW_HEIGHT,
@@ -255,9 +333,20 @@ export function SchemaDiagram({
   setNewFKData,
   onOpenTable,
   highlightedTable,
+  mode = "readonly",
+  positions,
+  onPositionsChange,
+  onSchemaDataChange,
+  onAddTable,
+  onEditTable,
+  onDeleteTable,
+  onEditRelationship,
+  onSave,
+  onExportSql,
+  toolbarExtras,
 }: SchemaDiagramProps) {
   const { theme, systemTheme } = useTheme();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableData>>([]);
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node<TableData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -278,6 +367,35 @@ export function SchemaDiagram({
   const measuredSizesRef = useRef<
     Map<string, { width: number; height: number }>
   >(new Map());
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
+  const isEditable = mode === "editable";
+  const allowConnect =
+    isEditable || dbType === "postgres" || dbType === "supabase-mgmt";
+
+  const onNodesChange = useCallback(
+    (changes: Parameters<typeof onNodesChangeBase>[0]) => {
+      onNodesChangeBase(changes);
+      if (!isEditable || !onPositionsChange) return;
+      const hasPositionChange = changes.some(
+        (c) => c.type === "position" && "position" in c && c.dragging === false,
+      );
+      if (!hasPositionChange) return;
+      // Defer so React Flow state has the latest node positions.
+      window.requestAnimationFrame(() => {
+        const instance = reactFlowRef.current;
+        if (!instance) return;
+        const next: Record<string, { x: number; y: number }> = {
+          ...(positionsRef.current ?? {}),
+        };
+        for (const node of instance.getNodes()) {
+          next[node.id] = { x: node.position.x, y: node.position.y };
+        }
+        onPositionsChange(next);
+      });
+    },
+    [isEditable, onNodesChangeBase, onPositionsChange],
+  );
 
   const currentTheme = (theme === "system" ? systemTheme : theme) as ColorMode;
 
@@ -391,6 +509,10 @@ export function SchemaDiagram({
         heightById: sizeMap((s) => s.height),
         onOpenTable,
         onFocusTable: makeFocusNodeHandler(reactFlowRef),
+        onEditTable,
+        onDeleteTable,
+        editable: isEditable,
+        allowConnect,
         selectedSchema,
         tables: sortedTables,
         widthById: sizeMap((s) => s.width),
@@ -400,6 +522,15 @@ export function SchemaDiagram({
         newNodes = getLayoutedElementsViaDagre(sharedLayoutOpts);
       } else {
         newNodes = getLayoutedElementsViaGrid({ ...sharedLayoutOpts, layoutWidth });
+      }
+
+      // Prefer saved designer positions so rearranging survives reloads.
+      const savedPositions = positionsRef.current;
+      if (savedPositions && Object.keys(savedPositions).length > 0) {
+        newNodes = newNodes.map((node) => {
+          const pos = savedPositions[node.id];
+          return pos ? { ...node, position: { x: pos.x, y: pos.y } } : node;
+        });
       }
 
       const newEdges: Edge[] = [];
@@ -425,6 +556,8 @@ export function SchemaDiagram({
                 height: 12,
                 color: edgeColor,
               },
+              selectable: isEditable,
+              focusable: isEditable,
             });
           }
         });
@@ -482,7 +615,11 @@ export function SchemaDiagram({
     sortedTables,
     selectedSchema,
     onOpenTable,
+    onEditTable,
+    onDeleteTable,
     layoutMode,
+    isEditable,
+    allowConnect,
   ]);
 
   useEffect(() => {
@@ -495,25 +632,77 @@ export function SchemaDiagram({
     if (measured.size === 0) return;
     measuredSizesRef.current = measured;
 
-    setNodes(
-      getLayoutedElementsViaDagre({
-        dbType,
-        heightById: new Map(
-          Array.from(measured.entries()).map(([id, size]) => [id, size.height]),
-        ),
-        onOpenTable,
-        selectedSchema,
-        tables: sortedTables,
-        widthById: new Map(
-          Array.from(measured.entries()).map(([id, size]) => [id, size.width]),
-        ),
-      }),
-    );
+    const laidOut = getLayoutedElementsViaDagre({
+      dbType,
+      heightById: new Map(
+        Array.from(measured.entries()).map(([id, size]) => [id, size.height]),
+      ),
+      onOpenTable,
+      onEditTable,
+      onDeleteTable,
+      editable: isEditable,
+      allowConnect,
+      selectedSchema,
+      tables: sortedTables,
+      widthById: new Map(
+        Array.from(measured.entries()).map(([id, size]) => [id, size.width]),
+      ),
+    });
+    setNodes(laidOut);
+    if (isEditable && onPositionsChange) {
+      const next: Record<string, { x: number; y: number }> = {};
+      for (const node of laidOut) {
+        next[node.id] = { x: node.position.x, y: node.position.y };
+      }
+      onPositionsChange(next);
+    }
 
     window.requestAnimationFrame(() => {
       reactFlowRef.current?.fitView({ duration: 400, padding: 0.2 });
     });
-  }, [dbType, onOpenTable, selectedSchema, setNodes, sortedTables]);
+  }, [
+    allowConnect,
+    dbType,
+    isEditable,
+    onDeleteTable,
+    onEditTable,
+    onOpenTable,
+    onPositionsChange,
+    selectedSchema,
+    setNodes,
+    sortedTables,
+  ]);
+
+  const applyDesignRelationship = useCallback(
+    (rel: SchemaDiagramRelationship) => {
+      if (!onSchemaDataChange || !schemaData) return;
+      const next: Record<string, TableData> = {};
+      for (const [key, table] of Object.entries(schemaData)) {
+        if (!table) continue;
+        if (table.name !== rel.sourceTable) {
+          next[key] = table;
+          continue;
+        }
+        next[key] = {
+          ...table,
+          columns: table.columns.map((col) =>
+            col.name === rel.sourceColumn
+              ? {
+                  ...col,
+                  references: {
+                    schema: selectedSchema,
+                    table: rel.targetTable,
+                    column: rel.targetColumn,
+                  },
+                }
+              : col,
+          ),
+        };
+      }
+      onSchemaDataChange(next);
+    },
+    [onSchemaDataChange, schemaData, selectedSchema],
+  );
 
   const copySchemaAsSql = useCallback(async () => {
     if (
@@ -626,10 +815,19 @@ export function SchemaDiagram({
             <GitFork className="w-8 h-8 text-primary" />
           </div>
           <h2 className="text-sm font-semibold text-foreground tracking-tight">
-            {isMongo ? "No Collections Found" : "No Tables Found"}
+            {isEditable
+              ? "Start your ERD"
+              : isMongo
+                ? "No Collections Found"
+                : "No Tables Found"}
           </h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            {isMongo ? (
+            {isEditable ? (
+              <>
+                Add tables visually, define columns and relationships, then
+                export SQL when you are ready.
+              </>
+            ) : isMongo ? (
               <>
                 There are no collections in the{" "}
                 <code className="bg-muted px-1 rounded">{selectedSchema}</code>{" "}
@@ -643,7 +841,16 @@ export function SchemaDiagram({
               </>
             )}
           </p>
-          {refreshCurrentTab && (
+          {isEditable && onAddTable ? (
+            <Button
+              onClick={onAddTable}
+              variant="outline"
+              className="mt-4 gap-2 border-primary/20 hover:bg-primary/5 hover:text-primary hover:border-primary/40"
+            >
+              <PencilLine className="w-4 h-4" />
+              Add table
+            </Button>
+          ) : refreshCurrentTab ? (
             <Button
               onClick={() => refreshCurrentTab()}
               variant="outline"
@@ -652,7 +859,7 @@ export function SchemaDiagram({
               <RefreshCw className="w-4 h-4" />
               Refresh Schema
             </Button>
-          )}
+          ) : null}
         </div>
       </div>
     );
@@ -680,9 +887,36 @@ export function SchemaDiagram({
           strokeDasharray: "6,4",
         }}
         connectionRadius={48}
+        onEdgeClick={
+          isEditable
+            ? (_event, edge) => {
+                const sourceColumn = edge.sourceHandle?.replace(
+                  /-source$|-target$/,
+                  "",
+                );
+                const targetColumn = edge.targetHandle?.replace(
+                  /-source$|-target$/,
+                  "",
+                );
+                if (
+                  !edge.source ||
+                  !edge.target ||
+                  !sourceColumn ||
+                  !targetColumn
+                )
+                  return;
+                onEditRelationship?.({
+                  sourceTable: edge.source,
+                  sourceColumn,
+                  targetTable: edge.target,
+                  targetColumn,
+                });
+              }
+            : undefined
+        }
         onConnectStart={(_, params) => {
           connectHandledRef.current = false;
-          if (dbType !== "postgres") return;
+          if (!allowConnect) return;
           const table = params.nodeId || "";
           const handleId = params.handleId || "";
           const column = handleId.replace(/-source$|-target$/, "");
@@ -693,15 +927,6 @@ export function SchemaDiagram({
           }
         }}
         onConnect={(params) => {
-          if (dbType !== "postgres") {
-            toast.info("Relationship creation is available for Postgres only");
-            return;
-          }
-          if (!setIsAddFKSheetOpen || !setNewFKData) {
-            toast.error("Foreign key creation is not enabled in this view");
-            return;
-          }
-
           const sourceTable = params.source;
           const targetTable = params.target;
           const sourceColumn = params.sourceHandle?.replace(
@@ -713,25 +938,47 @@ export function SchemaDiagram({
             "",
           );
 
-          if (sourceTable && targetTable && sourceColumn && targetColumn) {
-            connectHandledRef.current = true;
-            setNewFKData({
-              sourceSchema: selectedSchema,
-              sourceTable,
-              sourceColumn,
-              targetSchema: selectedSchema,
-              targetTable,
-              targetColumn,
-            });
-            setIsAddFKSheetOpen(true);
-          } else {
+          if (!(sourceTable && targetTable && sourceColumn && targetColumn)) {
             toast.error(
               "Could not detect columns. Drag from a column to another column.",
             );
+            return;
           }
+
+          connectHandledRef.current = true;
+
+          if (isEditable) {
+            applyDesignRelationship({
+              sourceTable,
+              sourceColumn,
+              targetTable,
+              targetColumn,
+            });
+            toast.success("Relationship added");
+            return;
+          }
+
+          if (dbType !== "postgres" && dbType !== "supabase-mgmt") {
+            toast.info("Relationship creation is available for Postgres only");
+            return;
+          }
+          if (!setIsAddFKSheetOpen || !setNewFKData) {
+            toast.error("Foreign key creation is not enabled in this view");
+            return;
+          }
+
+          setNewFKData({
+            sourceSchema: selectedSchema,
+            sourceTable,
+            sourceColumn,
+            targetSchema: selectedSchema,
+            targetTable,
+            targetColumn,
+          });
+          setIsAddFKSheetOpen(true);
         }}
         onConnectEnd={(event) => {
-          if (dbType !== "postgres") return;
+          if (!allowConnect) return;
           if (connectHandledRef.current) {
             dragSourceRef.current = null;
             connectHandledRef.current = false;
@@ -758,6 +1005,18 @@ export function SchemaDiagram({
           const targetColumn = rowEl.getAttribute("data-col") || "";
           if (!targetTable || !targetColumn) return;
           if (targetTable === src.table) return;
+
+          if (isEditable) {
+            applyDesignRelationship({
+              sourceTable: src.table,
+              sourceColumn: src.column,
+              targetTable,
+              targetColumn,
+            });
+            toast.success("Relationship added");
+            return;
+          }
+
           if (!setIsAddFKSheetOpen || !setNewFKData) return;
 
           setNewFKData({
@@ -772,10 +1031,13 @@ export function SchemaDiagram({
           setIsAddFKSheetOpen(true);
         }}
         isValidConnection={(connection) => {
-          if (dbType !== "postgres") return false;
+          if (!allowConnect) return false;
           if (connection.source === connection.target) return false;
           return true;
         }}
+        nodesDraggable
+        nodesConnectable={allowConnect}
+        elementsSelectable
         proOptions={{ hideAttribution: true }}
         colorMode={currentTheme}
         style={{ "--xy-background-color": "transparent" } as React.CSSProperties}
@@ -796,10 +1058,21 @@ export function SchemaDiagram({
           className="border rounded-lg shadow-sm bg-card"
         />
 
-        {refreshCurrentTab && (
+        {(refreshCurrentTab || isEditable) && (
           <Panel position="top-right">
             <div className="flex items-center gap-2">
-              {schemas.length > 0 && onSchemaChange && (
+              {isEditable && onAddTable && (
+                <Button
+                  onClick={onAddTable}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 bg-background border-border hover:bg-muted/40 text-xs gap-2 shadow-sm"
+                >
+                  <PencilLine className="w-3 h-3" />
+                  Add table
+                </Button>
+              )}
+              {!isEditable && schemas.length > 0 && onSchemaChange && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -831,7 +1104,10 @@ export function SchemaDiagram({
                 </DropdownMenu>
               )}
               <Button
-                onClick={() => void copySchemaAsSql()}
+                onClick={() => {
+                  if (onExportSql) onExportSql();
+                  else void copySchemaAsSql();
+                }}
                 variant="outline"
                 size="sm"
                 className="h-8 bg-background border-border hover:bg-muted/40 text-xs gap-2 shadow-sm"
@@ -841,8 +1117,19 @@ export function SchemaDiagram({
                 ) : (
                   <Copy className="w-3 h-3" />
                 )}
-                Copy SQL
+                {isEditable ? "Export SQL" : "Copy SQL"}
               </Button>
+              {isEditable && onSave && (
+                <Button
+                  onClick={onSave}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 bg-background border-border hover:bg-muted/40 text-xs gap-2 shadow-sm"
+                >
+                  <Check className="w-3 h-3" />
+                  Save
+                </Button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -896,52 +1183,22 @@ export function SchemaDiagram({
                   Grid
                 </Button>
               </div>
-              <Button
-                onClick={() => refreshCurrentTab()}
-                variant="outline"
-                size="sm"
-                className="h-8 bg-background border-border hover:bg-muted/40 text-xs gap-2 shadow-sm"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Refresh
-              </Button>
+              {!isEditable && refreshCurrentTab && (
+                <Button
+                  onClick={() => refreshCurrentTab()}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 bg-background border-border hover:bg-muted/40 text-xs gap-2 shadow-sm"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Refresh
+                </Button>
+              )}
+              {toolbarExtras}
             </div>
           </Panel>
         )}
       </ReactFlow>
-      <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2">
-        <div className="bg-card/80 backdrop-blur-md border border-border rounded-lg px-2 py-1 shadow-xl flex items-center gap-1">
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <div className="w-1.5 h-1.5 rounded-lg bg-primary/50" />
-            Relationships
-          </div>
-          <div className="w-px h-3 bg-border/80" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Key className="w-3 h-3 text-warning/85 -rotate-45" />
-            Primary key
-          </div>
-          <div className="w-px h-3 bg-border/80" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Hash className="w-3 h-3 text-foreground/55" />
-            Identity
-          </div>
-          <div className="w-px h-3 bg-border/80" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Fingerprint className="w-3 h-3 text-foreground/55" />
-            Unique
-          </div>
-          <div className="w-px h-3 bg-border/80" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Diamond className="w-3 h-3 text-foreground/55" />
-            Nullable
-          </div>
-          <div className="w-px h-3 bg-border/80" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/60 flex items-center gap-2 hover:text-foreground transition-colors cursor-default">
-            <Diamond className="w-3 h-3 text-foreground/75 fill-current" />
-            Non-nullable
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -983,14 +1240,42 @@ function makeFocusNodeHandler(reactFlowRef: {
   };
 }
 
-function buildSchemaSql(
+export function buildSchemaSql(
   tables: TableData[],
   selectedSchema: string,
   dbType: ConnectionDbType,
 ) {
-  return tables
+  const ordered = orderTablesForSql(tables, selectedSchema);
+  return ordered
     .map((table) => buildTableSql(table, selectedSchema, dbType))
     .join("\n\n");
+}
+
+/** Create referenced tables before dependents so inline REFERENCES stay valid. */
+function orderTablesForSql(tables: TableData[], selectedSchema: string) {
+  const byName = new Map(tables.map((t) => [t.name, t]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const ordered: TableData[] = [];
+
+  const visit = (name: string) => {
+    if (visited.has(name) || !byName.has(name)) return;
+    if (visiting.has(name)) return; // cycle — keep going without looping
+    visiting.add(name);
+    const table = byName.get(name)!;
+    for (const col of table.columns) {
+      const ref = col.references;
+      if (!ref) continue;
+      if (ref.schema.toLowerCase() !== selectedSchema.toLowerCase()) continue;
+      visit(ref.table);
+    }
+    visiting.delete(name);
+    visited.add(name);
+    ordered.push(table);
+  };
+
+  for (const table of tables) visit(table.name);
+  return ordered;
 }
 
 function collectMeasuredSizes(
@@ -1017,6 +1302,10 @@ function makeLayoutNodes(
   selectedSchema: string,
   onOpenTable?: (tableName: string) => void,
   onFocusTable?: (tableName: string) => void,
+  onEditTable?: (tableName: string) => void,
+  onDeleteTable?: (tableName: string) => void,
+  editable?: boolean,
+  allowConnect?: boolean,
 ): Node<TableData>[] {
   return tables.map((table) => ({
     id: table.name,
@@ -1030,6 +1319,10 @@ function makeLayoutNodes(
       selectedSchema,
       onOpenTable,
       onFocusTable,
+      onEditTable,
+      onDeleteTable,
+      editable,
+      allowConnect,
     ),
   }));
 }
@@ -1041,10 +1334,16 @@ function makeNodeData(
   selectedSchema: string,
   onOpenTable?: (tableName: string) => void,
   onFocusTable?: (tableName: string) => void,
+  onEditTable?: (tableName: string) => void,
+  onDeleteTable?: (tableName: string) => void,
+  editable?: boolean,
+  allowConnect?: boolean,
 ): TableData {
   return {
     ...table,
     dbType,
+    editable: Boolean(editable),
+    allowConnect: Boolean(allowConnect),
     onCopyName: makeCopyNameHandler(),
     onCopySql: makeCopySqlHandler(tables, selectedSchema, dbType),
     onOpenTable: (name: string) => {
@@ -1052,6 +1351,12 @@ function makeNodeData(
     },
     onFocusTable: (name: string) => {
       onFocusTable?.(name);
+    },
+    onEditTable: (name: string) => {
+      onEditTable?.(name);
+    },
+    onDeleteTable: (name: string) => {
+      onDeleteTable?.(name);
     },
   };
 }
@@ -1100,6 +1405,10 @@ function getLayoutedElementsViaGrid({
   layoutWidth,
   onOpenTable,
   onFocusTable,
+  onEditTable,
+  onDeleteTable,
+  editable,
+  allowConnect,
   selectedSchema,
   tables,
   widthById,
@@ -1109,11 +1418,25 @@ function getLayoutedElementsViaGrid({
   layoutWidth: number;
   onOpenTable?: (tableName: string) => void;
   onFocusTable?: (tableName: string) => void;
+  onEditTable?: (tableName: string) => void;
+  onDeleteTable?: (tableName: string) => void;
+  editable?: boolean;
+  allowConnect?: boolean;
   selectedSchema: string;
   tables: TableData[];
   widthById: Map<string, number>;
 }) {
-  const prebuiltNodes = makeLayoutNodes(tables, dbType, selectedSchema, onOpenTable, onFocusTable);
+  const prebuiltNodes = makeLayoutNodes(
+    tables,
+    dbType,
+    selectedSchema,
+    onOpenTable,
+    onFocusTable,
+    onEditTable,
+    onDeleteTable,
+    editable,
+    allowConnect,
+  );
   const dagreGraph = buildDagreGraph(
     tables,
     selectedSchema,
@@ -1196,6 +1519,10 @@ function getLayoutedElementsViaDagre({
   heightById,
   onOpenTable,
   onFocusTable,
+  onEditTable,
+  onDeleteTable,
+  editable,
+  allowConnect,
   selectedSchema,
   tables,
   widthById,
@@ -1204,11 +1531,25 @@ function getLayoutedElementsViaDagre({
   heightById: Map<string, number>;
   onOpenTable?: (tableName: string) => void;
   onFocusTable?: (tableName: string) => void;
+  onEditTable?: (tableName: string) => void;
+  onDeleteTable?: (tableName: string) => void;
+  editable?: boolean;
+  allowConnect?: boolean;
   selectedSchema: string;
   tables: TableData[];
   widthById: Map<string, number>;
 }) {
-  const nodes: Node<TableData>[] = makeLayoutNodes(tables, dbType, selectedSchema, onOpenTable, onFocusTable);
+  const nodes: Node<TableData>[] = makeLayoutNodes(
+    tables,
+    dbType,
+    selectedSchema,
+    onOpenTable,
+    onFocusTable,
+    onEditTable,
+    onDeleteTable,
+    editable,
+    allowConnect,
+  );
 
   const heightByIdWithPadding = new Map<string, number>();
   const widthByIdWithPadding = new Map<string, number>();
@@ -1300,6 +1641,9 @@ function quoteTableRef(
   table: string,
   dbType: ConnectionDbType,
 ) {
+  // SQLite has no real schemas in everyday DDL — "main"."users" is awkward
+  // and often rejected by tooling. Emit bare table names instead.
+  if (dbType === "sqlite") return quoteIdentifier(table, dbType);
   return `${quoteIdentifier(schema, dbType)}.${quoteIdentifier(table, dbType)}`;
 }
 

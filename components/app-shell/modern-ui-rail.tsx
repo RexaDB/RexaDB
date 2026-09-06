@@ -14,6 +14,7 @@ import {
   WalletMoney,
   Workflow,
 } from "@/lib/icon-theme/solar-icons";
+import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
@@ -142,6 +143,12 @@ export function ModernUIRail({
         label: "Workflows",
         icon: <Workflow className="w-5 h-5 shrink-0" />,
         onClick: () => selectView("workflows"),
+      },
+      {
+        id: "erd",
+        label: "ERD Designer",
+        icon: <GitFork className="w-5 h-5 shrink-0" />,
+        onClick: () => selectView("erd"),
       },
       ...(showPayments
         ? [

@@ -1,8 +1,7 @@
 const AUTHORIZE_URL = "https://app.planetscale.com/oauth/authorize";
 
-// PlanetScale OAuth login isn't ready to ship — keep it visible in dev only
-// so it can keep being built against without exposing it in prod builds.
-export const PLANETSCALE_LOGIN_ENABLED = process.env.NODE_ENV !== "production";
+/** PlanetScale OAuth login is available in all environments. */
+export const PLANETSCALE_LOGIN_ENABLED = true;
 
 // Bare scope names — matches PlanetScale docs and what oauth/token/info
 // returns. Namespaced forms (user:/organization:) are accepted at authorize

@@ -133,6 +133,7 @@ const TAB_DRAG_ICON_COLORS: Record<string, string> = {
   "create-table": "text-green-500",
   "create-key": "text-green-500",
   "database-schema": "text-purple-500",
+  "erd-designer": "text-purple-500",
   "database-tables": "text-blue-500",
   "database-functions": "text-yellow-500",
   "database-extensions": "text-pink-500",

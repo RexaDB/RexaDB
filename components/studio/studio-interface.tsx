@@ -73,6 +73,8 @@ export function StudioInterface({
   const [isGlobalSqlSheetOpen, setIsGlobalSqlSheetOpen] = useState(false);
   const [isUniversalSearchOpen, setIsUniversalSearchOpen] = useState(false);
   const [isAiSheetOpen, setIsAiSheetOpen] = useState(false);
+  /** Ask AI can sit in the secondary sidebar or float as a popup. */
+  const [aiPanelMode, setAiPanelMode] = useState<"sidebar" | "popup">("sidebar");
   const [isThreadsOpen, setIsThreadsOpen] = useState(false);
   const [aiInitialChatId, setAiInitialChatId] = useState<string | null>(null);
   const [aiActiveChatId, setAiActiveChatId] = useState<string | null>(null);
@@ -195,6 +197,16 @@ export function StudioInterface({
   }, [globalSqlQuery, studio.dbType]);
 
   const handleToggleAiSheet = useCallback(() => {
+    // Header secondary-sidebar control while the AI popup is open → dock it
+    // back instead of closing the chat entirely.
+    if (isAiSheetOpen && aiPanelMode === "popup") {
+      if (aiActiveChatId) {
+        setAiInitialChatId(aiActiveChatId);
+        setAiSelectChatToken((token) => token + 1);
+      }
+      setAiPanelMode("sidebar");
+      return;
+    }
     setIsAiSheetOpen((current) => {
       const nextOpen = !current;
       if (nextOpen) {
@@ -207,7 +219,7 @@ export function StudioInterface({
       }
       return nextOpen;
     });
-  }, []);
+  }, [aiActiveChatId, aiPanelMode, isAiSheetOpen]);
 
   const handleToggleAgentsPanel = useCallback(() => {
     openAgentsWindow(studio.connection.id);
@@ -508,6 +520,25 @@ export function StudioInterface({
     }))
     .filter((entry: any) => entry.table);
 
+  const handleAiPopOut = useCallback(() => {
+    if (aiActiveChatId) {
+      setAiInitialChatId(aiActiveChatId);
+      setAiSelectChatToken((token) => token + 1);
+    }
+    setAiPanelMode("popup");
+    setIsAiSheetOpen(true);
+    setIsGlobalSqlSheetOpen(false);
+  }, [aiActiveChatId]);
+
+  const handleAiDock = useCallback(() => {
+    if (aiActiveChatId) {
+      setAiInitialChatId(aiActiveChatId);
+      setAiSelectChatToken((token) => token + 1);
+    }
+    setAiPanelMode("sidebar");
+    setIsAiSheetOpen(true);
+  }, [aiActiveChatId]);
+
   const aiChatSheetProps = {
     dashboardApplyLabel:
       aiDashboardTarget.mode === "edit" ? "Apply Changes" : "Create Dashboard",
@@ -527,6 +558,8 @@ export function StudioInterface({
       }
       setIsAiSheetOpen(nextOpen);
     },
+    onPopOut: handleAiPopOut,
+    onDock: handleAiDock,
     connectionId: studio.connection.id,
     connectionString: studio.currentConnectionString,
     dbType: studio.dbType,
@@ -547,6 +580,9 @@ export function StudioInterface({
     setCustomEditorThemes: studio.setCustomEditorThemes,
     setEditorThemeId: studio.setEditorThemeId,
   };
+
+  const aiSidebarOpen = isAiSheetOpen && aiPanelMode === "sidebar";
+  const aiPopupOpen = isAiSheetOpen && aiPanelMode === "popup";
 
   const layout = (
     <div className="flex flex-col text-foreground overflow-hidden h-full relative">
@@ -732,7 +768,8 @@ export function StudioInterface({
     sidebarOpen: studio.isSidebarVisible,
     onSidebarOpenChange: studio.setIsSidebarVisible,
     onAskAI: handleToggleAiSheet,
-    isAskAIOpen: isAiSheetOpen,
+    isAskAIOpen: aiSidebarOpen,
+    askAIActive: isAiSheetOpen,
     onAgentsClick: handleToggleAgentsPanel,
     onQueryHistory: studio.openHistoryTab,
     user: { name: displayName, email: authUser?.email },
@@ -808,7 +845,9 @@ export function StudioInterface({
       <ModernUIShell
         studio={studio}
         {...appShellProps}
-        aiChatPanel={<AiChatSheet {...aiChatSheetProps} embedded />}
+        aiChatPanel={
+          aiSidebarOpen ? <AiChatSheet {...aiChatSheetProps} embedded /> : null
+        }
         sqlSheetPanel={sqlSheetPanel}
         isSqlSheetOpen={isGlobalSqlSheetOpen}
         threadsPanel={threadsPanel}
@@ -827,6 +866,7 @@ export function StudioInterface({
       >
         {layout}
       </ModernUIShell>
+      {aiPopupOpen && <AiChatSheet {...aiChatSheetProps} floating />}
       {settingsDialog}
     </>
   );

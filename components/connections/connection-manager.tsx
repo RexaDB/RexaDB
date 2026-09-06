@@ -85,7 +85,11 @@ import {
   ArrowUpDown,
   SlidersHorizontal,
   Settings,
+  Download,
+  CheckCircle2,
+  Loader2,
 } from "@/lib/icon-theme/lucide-react";
+import { useAppUpdateContext } from "@/components/providers/app-update-context";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -263,6 +267,121 @@ const REXADB_UPGRADE_URL =
 
 // openExternalUrl imported from @/lib/desktop
 
+/** Pill update CTA — same height as provider/settings icon buttons (h-7), rounded-full. */
+function ConnectionsUpdatePill({
+  updateState,
+  installing,
+  dismissed,
+  updatesExpired,
+  onDownload,
+  onInstall,
+  onRenew,
+}: {
+  updateState: {
+    enabled: boolean;
+    checking: boolean;
+    downloading: boolean;
+    updateAvailable: boolean;
+    updateDownloaded: boolean;
+    latestVersion: string | null;
+    progressPercent: number | null;
+  };
+  installing: boolean;
+  dismissed: boolean;
+  updatesExpired: boolean;
+  onDownload: () => void;
+  onInstall: () => void;
+  onRenew: () => void;
+}) {
+  const {
+    enabled,
+    checking,
+    downloading,
+    updateAvailable,
+    updateDownloaded,
+    latestVersion,
+    progressPercent,
+  } = updateState;
+
+  if (!enabled || checking || dismissed) return null;
+  if (!updateAvailable && !downloading && !updateDownloaded) return null;
+
+  const pill =
+    "flex h-7 select-none items-center gap-1.5 rounded-full border px-2.5 text-xs no-drag transition-colors";
+  const version = latestVersion ? ` · v${latestVersion}` : "";
+
+  if (updatesExpired && updateAvailable) {
+    return (
+      <button
+        type="button"
+        onClick={onRenew}
+        title="Renew to update"
+        className={cn(
+          pill,
+          "border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/15 hover:border-amber-500/40 hover:text-amber-300",
+        )}
+      >
+        <ExternalLink className="size-3.5 shrink-0" />
+        <span className="truncate">Renew{version}</span>
+      </button>
+    );
+  }
+
+  if (updateDownloaded) {
+    return (
+      <button
+        type="button"
+        onClick={onInstall}
+        disabled={installing}
+        title="Restart to apply update"
+        className={cn(
+          pill,
+          "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/40 hover:text-emerald-300 disabled:opacity-60",
+        )}
+      >
+        {installing ? (
+          <Loader2 className="size-3.5 shrink-0 animate-spin" />
+        ) : (
+          <CheckCircle2 className="size-3.5 shrink-0" />
+        )}
+        <span className="truncate">Restart{version}</span>
+      </button>
+    );
+  }
+
+  if (downloading) {
+    return (
+      <div
+        className={cn(
+          pill,
+          "border-blue-500/30 bg-blue-500/10 text-blue-400",
+        )}
+        title="Downloading update"
+      >
+        <Loader2 className="size-3.5 shrink-0 animate-spin" />
+        <span className="truncate">
+          {progressPercent !== null ? `${progressPercent}%` : "Updating…"}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      title="Download update"
+      className={cn(
+        pill,
+        "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/40 hover:text-blue-300",
+      )}
+    >
+      <Download className="size-3.5 shrink-0" />
+      <span className="truncate">Update{version}</span>
+    </button>
+  );
+}
+
 export function ConnectionManager({
   hideHeader = false,
   embedded = false,
@@ -310,6 +429,14 @@ export function ConnectionManager({
     iconThemeId,
   } = useGlobalStudioSettings();
   const router = useRouter();
+  const {
+    updateState,
+    installing,
+    dismissed,
+    handleDownload,
+    handleInstall,
+    handleRenewOtl,
+  } = useAppUpdateContext();
   useEffect(() => {
     if (typeof window === "undefined" || !window.localStorage) return;
     const root = document.documentElement;
@@ -4377,6 +4504,15 @@ export function ConnectionManager({
                     Connections
                   </h1>
                   <div className="flex items-center gap-2">
+                    <ConnectionsUpdatePill
+                      updateState={updateState}
+                      installing={installing}
+                      dismissed={dismissed}
+                      updatesExpired={entitlement.updatesExpired}
+                      onDownload={() => void handleDownload()}
+                      onInstall={() => void handleInstall()}
+                      onRenew={() => void handleRenewOtl()}
+                    />
                     {supabaseAccounts.length > 0 && (
                       <button
                         onClick={() => {

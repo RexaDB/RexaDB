@@ -7,10 +7,19 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, X, Plus, Shield, Settings } from "@/lib/icon-theme/lucide-react";
+import {
+  ArrowUp,
+  X,
+  Plus,
+  Shield,
+  Settings,
+  Maximize2,
+  PanelRight,
+} from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api-base";
@@ -84,6 +93,10 @@ interface AiChatSheetProps {
   floating?: boolean;
   /** Render the chat body without any outer container (the host lays it out). */
   embedded?: boolean;
+  /** Undock from the secondary sidebar into a floating popup. */
+  onPopOut?: () => void;
+  /** Re-dock a floating popup back into the secondary sidebar. */
+  onDock?: () => void;
   customAppThemes: CustomAppTheme[];
   setCustomAppThemes: Dispatch<SetStateAction<CustomAppTheme[]>>;
   setAppThemeId: (value: string) => void;
@@ -117,6 +130,8 @@ export function AiChatSheet({
   sleek,
   floating,
   embedded,
+  onPopOut,
+  onDock,
   customAppThemes,
   setCustomAppThemes,
   setAppThemeId,
@@ -134,14 +149,67 @@ export function AiChatSheet({
     "schema_only" | "schema_with_data"
   >("schema_with_data");
 
-  const [width, setWidth] = useState(400);
+  const [width, setWidth] = useState(floating ? 480 : 400);
+  const [popupOffset, setPopupOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
 
   const handleResizeStart = useResizeDrag({
     startWidth: width,
     minWidth: 320,
-    maxWidth: 700,
+    maxWidth: floating ? 900 : 700,
     onWidthChange: setWidth,
   });
+
+  const handlePopupDragStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!floating) return;
+      // Only drag from the chrome itself — buttons / menus keep their clicks.
+      if ((event.target as HTMLElement).closest("button, a, input, [role='menu']")) {
+        return;
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: popupOffset.x,
+        originY: popupOffset.y,
+      };
+    },
+    [floating, popupOffset.x, popupOffset.y],
+  );
+
+  const handlePopupDragMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      setPopupOffset({
+        x: drag.originX + (event.clientX - drag.startX),
+        y: drag.originY + (event.clientY - drag.startY),
+      });
+    },
+    [],
+  );
+
+  const handlePopupDragEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      dragRef.current = null;
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // already released
+      }
+    },
+    [],
+  );
 
   const handleApplyTheme = useCallback(
     (block: ThemeBlockData) => {
@@ -532,13 +600,22 @@ export function AiChatSheet({
       <TooltipProvider delayDuration={120}>
         <div
           className={cn(
-            "flex h-full flex-col overflow-hidden text-foreground",
+            "relative flex h-full flex-col overflow-hidden text-foreground",
             floating || embedded
               ? "bg-[var(--shell-content-bg)]"
               : "bg-background",
           )}
         >
-          <div className="flex h-[44px] items-center justify-between border-b border-border px-4">
+          <div
+            className={cn(
+              "flex h-[44px] items-center justify-between border-b border-border px-4",
+              floating && "cursor-grab active:cursor-grabbing select-none",
+            )}
+            onPointerDown={floating ? handlePopupDragStart : undefined}
+            onPointerMove={floating ? handlePopupDragMove : undefined}
+            onPointerUp={floating ? handlePopupDragEnd : undefined}
+            onPointerCancel={floating ? handlePopupDragEnd : undefined}
+          >
             <div className="flex items-center">
               <AiChatHistoryMenu
                 activeChatId={activeChatId}
@@ -622,6 +699,50 @@ export function AiChatSheet({
                   Permissions
                 </TooltipContent>
               </Tooltip>
+              {onPopOut && !floating && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+                      onClick={onPopOut}
+                      size="icon"
+                      variant="ghost"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    className="rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground shadow-md"
+                    hideArrow
+                    side="bottom"
+                    sideOffset={6}
+                  >
+                    Open as popup
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {onDock && floating && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
+                      onClick={onDock}
+                      size="icon"
+                      variant="ghost"
+                    >
+                      <PanelRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    className="rounded-lg border border-border bg-card px-2 py-1 text-xs text-foreground shadow-md"
+                    hideArrow
+                    side="bottom"
+                    sideOffset={6}
+                  >
+                    Dock to sidebar
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -756,17 +877,24 @@ export function AiChatSheet({
 
   if (floating) {
     return createPortal(
-      <div
-        className="fixed left-12 top-10 bottom-8 z-50 flex flex-col overflow-hidden rounded-lg border border-border text-foreground"
-        style={{ width, background: "var(--shell-content-bg)" }}
-      >
+      <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-6">
+        <div
+          className="pointer-events-auto relative flex max-h-[min(820px,calc(100vh-3rem))] flex-col overflow-hidden rounded-xl border border-border text-foreground shadow-2xl"
+          style={{
+            width,
+            height: "min(760px, calc(100vh - 3rem))",
+            background: "var(--shell-content-bg)",
+            transform: `translate(${popupOffset.x}px, ${popupOffset.y}px)`,
+          }}
+        >
           <ResizeHandle
             orientation="vertical"
             onMouseDown={handleResizeStart}
-            aria-label="Resize AI sidebar"
-            className="absolute left-full top-0 bottom-0"
+            aria-label="Resize AI popup"
+            className="absolute right-0 top-0 bottom-0 translate-x-1/2"
           />
           {chatInner}
+        </div>
       </div>,
       document.body,
     );

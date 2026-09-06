@@ -4,6 +4,8 @@ import { QueryHistoryView } from "@/components/studio/query-history-view";
 import { ConnectionAnalytics } from "@/components/connections/connection-analytics";
 import { AdvisorView } from "@/components/advisor/advisor-view";
 import { WorkflowView } from "@/components/workflows/workflow-view";
+import { ErdDesignerView } from "@/components/studio/erd/erd-designer-view";
+import type { ConnectionDbType } from "@/lib/db/connection-type";
 import { ProfileSettingsView } from "@/components/studio/profile-settings-view";
 import { ConnectStudioView } from "@/components/studio/connect-studio-view";
 import { DiffTableView } from "@/components/studio/snapshots/diff-table-view";
@@ -147,6 +149,7 @@ export const TAB_REGISTRY: {
   sql: TabTypeConfig;
   dashboard: TabTypeConfig;
   workflow: TabTypeConfig;
+  "erd-designer": TabTypeConfig;
   "create-table": TabTypeConfig;
   "create-key": TabTypeConfig;
   "create-enum": TabTypeConfig;
@@ -285,6 +288,46 @@ export const TAB_REGISTRY: {
         })()}
       />
     ),
+  },
+
+  "erd-designer": {
+    type: "erd-designer",
+    viewMode: "erd",
+    defaultName: (meta) => String((meta as { name?: string }).name ?? "ERD Designer"),
+    buildTabId: (meta) => {
+      const erdId = (meta as { erdId?: string }).erdId;
+      return erdId ? `erd-${erdId}` : "erd";
+    },
+    createTab: (id, meta) => {
+      const m = meta as { erdId?: string; name?: string };
+      const tab: StudioInitialTab & { erdId?: string } = {
+        id,
+        type: "erd-designer" as StudioInitialTab["type"],
+        name: m.name ?? "ERD Designer",
+      };
+      if (m.erdId) tab.erdId = m.erdId;
+      return tab;
+    },
+    shouldClone: true,
+    icon: "schema",
+    group: "content",
+    renderComponent: (opts) => {
+      const match = opts.tab.id.match(/^erd-(.+?)(?:::pane::.*)?$/);
+      const erdId =
+        match?.[1] ??
+        (opts.tab as StudioInitialTab & { erdId?: string }).erdId;
+      const studio = opts.studio as {
+        connection?: { id?: number };
+        dbType?: ConnectionDbType;
+      };
+      return (
+        <ErdDesignerView
+          erdId={erdId}
+          connectionId={studio.connection?.id ?? 0}
+          dbType={studio.dbType ?? "postgres"}
+        />
+      );
+    },
   },
 
   // ── create ─────────────────────────────────────────────────────────────

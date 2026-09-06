@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { AppBootSkeleton } from "@/components/gates/app-boot-skeleton";
 
 // The Rust side's own health-check fallback (src-tauri/src/lib.rs spawn_sidecar)
 // can take up to ~65s in the worst case (5s initial wait + 30 retries * 2s) to
@@ -13,6 +12,9 @@ import { AppBootSkeleton } from "@/components/gates/app-boot-skeleton";
 // sidecar. Poll comfortably past the Rust-side worst case, and keep
 // resyncing in the background afterward in case the sidecar restarts (it
 // respawns automatically on crash, possibly on a different port).
+//
+// While waiting, render nothing — the old ModernUIShell-shaped boot skeleton
+// is gone now that the home screen is the standalone connection manager.
 const GIVE_UP_AFTER_MS = 90_000;
 const BACKGROUND_RESYNC_INTERVAL_MS = 5_000;
 
@@ -87,7 +89,7 @@ export function SidecarGate({ children }: { children: React.ReactNode }) {
     };
   }, [ready]);
 
-  if (ready) return <>{children}</>;
+  if (!ready) return null;
 
-  return <AppBootSkeleton />;
+  return <>{children}</>;
 }

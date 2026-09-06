@@ -68,6 +68,7 @@ export const SIDEBAR_VIEWS = [
   { id: "database", name: "Database" },
   { id: "dashboard", name: "Dashboard" },
   { id: "workflows", name: "Workflows" },
+  { id: "erd", name: "ERD Designer" },
 ] as const;
 
 export type Keybinding = {

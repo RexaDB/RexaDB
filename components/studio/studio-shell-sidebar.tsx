@@ -57,9 +57,11 @@ import {
   CreditCard,
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
+import { ErdsPanel } from "./erd/erds-panel";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
+import { GitFork } from "@/lib/icon-theme/lucide-react";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "import-export" | "themes" | null;
+type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "import-export" | "themes" | "erd" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -299,6 +301,7 @@ export function StudioShellSidebar({
       ),
     },
     { id: "workflows", label: "Workflows", Icon: Workflow },
+    { id: "erd", label: "ERD Designer", Icon: GitFork },
   ];
 
   const title = section
@@ -356,6 +359,7 @@ export function StudioShellSidebar({
             {section === "auth" && <AuthPanel studio={studio} />}
             {section === "payments" && <PaymentsPanel studio={studio} />}
             {section === "workflows" && <WorkflowsPanel studio={studio} />}
+            {section === "erd" && <ErdsPanel studio={studio} />}
           </div>
         </div>
       )}

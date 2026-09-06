@@ -947,7 +947,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     return null;
   }, [openTabs, getPaneIdForTab, getCurrentPaneId]);
 
-  const [viewMode, setViewMode] = useState<"tables" | "sql" | "code" | "database" | "dashboard" | "create-table" | "create-key" | "create-enum" | "create-index" | "create-trigger" | "create-schema" | "create-database" | "import-export" | "settings" | "agent-settings" | "profile-settings" | "keybindings" | "history" | "auth" | "rls-policy-edit" | "analytics" | "advisor" | "connect-studio" | "manage-workspaces" | "snapshots" | "snapshot-table" | "diff-table" | "workflow">("tables");
+  const [viewMode, setViewMode] = useState<"tables" | "sql" | "code" | "database" | "dashboard" | "create-table" | "create-key" | "create-enum" | "create-index" | "create-trigger" | "create-schema" | "create-database" | "import-export" | "settings" | "agent-settings" | "profile-settings" | "keybindings" | "history" | "auth" | "rls-policy-edit" | "analytics" | "advisor" | "connect-studio" | "manage-workspaces" | "snapshots" | "snapshot-table" | "diff-table" | "workflow" | "erd">("tables");
   const [schemaHighlightedTable, setSchemaHighlightedTable] = useState<string | null>(null);
 
 
@@ -1013,7 +1013,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1024,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -5583,6 +5583,26 @@ END $$;`.trim();
     }
   }, [openTabs, buildNewTabs, setOpenTabs, switchTab]);
 
+  const openErdTab = useCallback((erdId?: string, name?: string) => {
+    const tabId = erdId ? `erd-${erdId}` : "erd";
+    const existingTab = openTabs.find((t) => t.id === tabId);
+    if (!existingTab) {
+      const newTab: any = {
+        id: tabId,
+        type: "erd-designer",
+        name: name || "ERD Designer",
+      };
+      if (erdId) newTab.erdId = erdId;
+      const newTabs = buildNewTabs(newTab);
+      setOpenTabs(newTabs);
+      switchTab(tabId, newTabs);
+    } else {
+      switchTab(tabId);
+    }
+    setSidebarView("erd");
+    setIsSidebarVisible(true);
+  }, [openTabs, buildNewTabs, setOpenTabs, switchTab, setSidebarView, setIsSidebarVisible]);
+
   useEffect(() => {
     const handleWorkflowSaved = (event: Event) => {
       const detail = (event as CustomEvent<{ workflowId?: string; name?: string }>).detail;
@@ -5592,6 +5612,19 @@ END $$;`.trim();
     };
     window.addEventListener("studio:workflow-saved", handleWorkflowSaved);
     return () => window.removeEventListener("studio:workflow-saved", handleWorkflowSaved);
+  }, [setOpenTabs]);
+
+  useEffect(() => {
+    const handleErdSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ erdId?: string; name?: string }>).detail;
+      if (!detail?.erdId || !detail.name) return;
+      const tabId = `erd-${detail.erdId}`;
+      setOpenTabs((prev) =>
+        prev.map((t) => (t.id === tabId ? { ...t, name: detail.name! } : t)),
+      );
+    };
+    window.addEventListener("studio:erd-saved", handleErdSaved);
+    return () => window.removeEventListener("studio:erd-saved", handleErdSaved);
   }, [setOpenTabs]);
 
   const openConnectStudioTab = useCallback(() => {
@@ -8371,7 +8404,7 @@ END $$;`.trim();
         break;
       case "SET_SIDEBAR_VIEW":
         if (!binding.sidebar) return;
-        if (["dashboard", "tables", "sql", "database", "import-export", "workflows"].includes(binding.sidebar)) {
+        if (["dashboard", "tables", "sql", "database", "import-export", "workflows", "erd"].includes(binding.sidebar)) {
           setSidebarView(binding.sidebar as any);
           setIsSidebarVisible(true);
         }
@@ -8735,6 +8768,7 @@ END $$;`.trim();
     openAnalyticsTab,
     openAdvisorTab,
     openWorkflowsTab,
+    openErdTab,
     openSnapshotsTab,
     openConnectStudioTab,
     openManageWorkspacesTab,

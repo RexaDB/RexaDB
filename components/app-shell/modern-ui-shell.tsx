@@ -73,7 +73,11 @@ export type ModernUIShellProps = {
 	onSidebarOpenChange?: (open: boolean) => void;
 	/** Bottom-bar actions (Linear-style, bottom-right of content panel) */
 	onAskAI?: () => void;
+	/** Whether the Ask AI secondary sidebar column is open. */
 	isAskAIOpen?: boolean;
+	/** Whether Ask AI is open in any presentation (sidebar or popup).
+	 *  Defaults to `isAskAIOpen` when omitted — used for status-bar highlight. */
+	askAIActive?: boolean;
 	onQueryHistory?: () => void;
 	/** Opens the Cmd+K command menu (header search bar). */
 	onOpenSearch?: () => void;
@@ -149,6 +153,7 @@ export function ModernUIShell({
 	showHome,
 	onAskAI,
 	isAskAIOpen,
+	askAIActive,
 	onQueryHistory,
 	onOpenSearch,
 	keybindings,
@@ -669,7 +674,7 @@ export function ModernUIShell({
 				{statusBarOpen && (
 					<ModernStatusBar
 						studio={studio}
-						isAskAIOpen={isAskAIOpen}
+						isAskAIOpen={askAIActive ?? isAskAIOpen}
 						onAskAI={onAskAI}
 						onAgentsClick={onAgentsClick}
 						onQueryHistory={onQueryHistory}
