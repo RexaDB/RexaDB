@@ -70,6 +70,25 @@ export const PAYKIT_QUERIES = {
     p.price_interval, p.price_currency, p.stripe_product_id, p.stripe_price_id,
     (SELECT count(*) FROM ${P}.subscription s WHERE s.product_internal_id = p.internal_id AND s.status IN ('active','trialing') AND s.canceled = false AND s.ended_at IS NULL) AS active_subs
   FROM ${P}.product p ORDER BY p.price_amount NULLS FIRST, p.id`,
+  /** Paid invoices per day (cents + order counts) for the revenue chart. */
+  revenueDaily: `SELECT date_trunc('day', created_at)::date AS day, coalesce(sum(amount), 0) AS cents, count(*) AS orders FROM ${P}.invoice WHERE status = 'paid' GROUP BY 1 ORDER BY 1`,
+  /** Approximate MRR per day from active monthly subscriptions over time. */
+  mrrDaily: `SELECT d.day AS day, coalesce(sum(p.price_amount * s.quantity), 0) AS cents
+    FROM (SELECT date_trunc('day', now() - (n || ' days')::interval)::date AS day FROM generate_series(0, 400) AS n) d
+    LEFT JOIN ${P}.subscription s ON s.status IN ('active', 'trialing') AND s.canceled = false AND d.day >= date_trunc('day', coalesce(s.started_at, s.created_at))::date AND (s.ended_at IS NULL OR d.day < date_trunc('day', s.ended_at)::date)
+    LEFT JOIN ${P}.product p ON p.internal_id = s.product_internal_id AND p.price_interval = 'month' AND p.price_amount IS NOT NULL
+    GROUP BY 1 ORDER BY 1`,
+  /** Active subscription count per day. */
+  activeSubsDaily: `SELECT d.day AS day, count(DISTINCT s.id) AS subs
+    FROM (SELECT date_trunc('day', now() - (n || ' days')::interval)::date AS day FROM generate_series(0, 400) AS n) d
+    LEFT JOIN ${P}.subscription s ON s.status IN ('active', 'trialing') AND s.canceled = false AND d.day >= date_trunc('day', coalesce(s.started_at, s.created_at))::date AND (s.ended_at IS NULL OR d.day < date_trunc('day', s.ended_at)::date)
+    GROUP BY 1 ORDER BY 1`,
+  /** Checkout sessions started per day. */
+  checkoutsDaily: `SELECT date_trunc('day', created_at)::date AS day, count(*) AS checkouts FROM ${P}.metadata WHERE type = 'checkout_session' GROUP BY 1 ORDER BY 1`,
+  /** Canceled/ended subscriptions per day. */
+  cancelsDaily: `SELECT date_trunc('day', coalesce(ended_at, updated_at))::date AS day, count(*) AS cancels FROM ${P}.subscription WHERE canceled = true OR ended_at IS NOT NULL GROUP BY 1 ORDER BY 1`,
+  /** Recent customers for the timeline. */
+  recentCustomers: `SELECT id, email, name, created_at FROM ${P}.customer ORDER BY created_at DESC LIMIT 30`,
 };
 
 export function formatMoney(amountCents: number | null | undefined, currency?: string | null): string {

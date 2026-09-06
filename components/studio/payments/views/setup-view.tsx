@@ -23,7 +23,6 @@ import {
   fetchPaykitStatus,
   loadPaykitDrafts,
   pushPaykitSchema,
-  repairPaykitProject,
   setPaykitSecrets,
   syncPaykitProducts,
 } from "@/lib/supabase-paykit/deploy-client";
@@ -96,6 +95,13 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
   const [secretsOpen, setSecretsOpen] = useState(false);
   /** When true, saving secrets automatically starts the setup run. */
   const [gateRun, setGateRun] = useState(false);
+  /**
+   * Project ref secrets were last saved for in this session. The Supabase
+   * secrets list can lag behind a successful write, so a just-completed
+   * local save counts as ready — otherwise every Run click reopens the
+   * modal even though the values are already stored.
+   */
+  const [savedSecretsRef, setSavedSecretsRef] = useState<string | null>(null);
   const [dialogView, setDialogView] = useState<"secrets" | "webhook">("secrets");
   const [copiedUrl, setCopiedUrl] = useState(false);
 
@@ -392,51 +398,6 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
     !done &&
     (lastRunClean || (status !== null && !status.secretsReady));
 
-  // Gaps in an EXISTING setup that repair can fill without a full re-run:
-  // missing RLS, missing service_role grants, missing Data API exposure.
-  // Absent tables are not gaps — that is "Run setup" territory.
-  // A stale function bundle is NOT repairable in place (needs redeploy),
-  // so it gets its own hint pointing at Run setup instead of the Fix pill.
-  const repairGaps: string[] = [];
-  const bundleStale = status !== null && !running && status.functionsStale === true;
-  if (status && !running) {
-    const rlsMissing = status.tables.filter(
-      (t) => t.present && t.rlsEnabled === false,
-    ).length;
-    if (rlsMissing > 0) {
-      repairGaps.push(
-        `RLS disabled on ${rlsMissing} table${rlsMissing === 1 ? "" : "s"}`,
-      );
-    }
-    if (status.grantsReady === false) {
-      repairGaps.push("service_role grants incomplete");
-    }
-    if (status.postgrestExposed === false) {
-      repairGaps.push("paykit schema not exposed via Data API");
-    }
-  }
-
-  const [repairing, setRepairing] = useState(false);
-  const runRepair = async () => {
-    if (!token || !ref) return;
-    setRepairing(true);
-    try {
-      const result = await repairPaykitProject(token, ref);
-      if (result.applied.length > 0) {
-        toast.success(`Fixed: ${result.applied.join("; ")}.`);
-      } else {
-        toast.success("Nothing missing — already complete.");
-      }
-      if (result.status) setStatus(result.status);
-      else await refresh();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Repair failed.");
-      await refresh();
-    } finally {
-      setRepairing(false);
-    }
-  };
-
   const saveSecrets = async () => {
     if (!token || !ref) return;
     const payload: Record<string, string> = {};
@@ -452,6 +413,7 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
       await setPaykitSecrets(token, ref, payload);
       const shouldRun = gateRun;
       setGateRun(false);
+      setSavedSecretsRef(ref);
       setSecretInputs({ STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "" });
       setSecretsOpen(false);
       toast.success("Secrets saved to the Supabase project.");
@@ -470,7 +432,7 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
       toast.error("Fix plan errors in the Plans tab before running setup.");
       return;
     }
-    if (status?.secretsReady) {
+    if (status?.secretsReady || savedSecretsRef === ref) {
       void runSetup();
       return;
     }
@@ -514,19 +476,21 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
             </div>
 
             {(runError || exposeNote) && (
-              <p className="mt-5 break-words rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed">
-                {runError ?? exposeNote}
-              </p>
+              <div className="mx-auto mt-5 flex w-full max-w-[440px] items-center justify-center rounded-full border border-border bg-card px-8 py-3 text-center shadow-sm">
+                <span className="break-words text-xs leading-relaxed text-muted-foreground">
+                  {runError ?? exposeNote}
+                </span>
+              </div>
             )}
 
             <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
-              {showRun && !repairing && (
+              {showRun && (
                 <Button
                   className={pillButton}
-                  disabled={draftErrors.length > 0 || repairing}
+                  disabled={draftErrors.length > 0}
                   onClick={handleRunClick}
                 >
-                  {ran ? "Fix setup" : "Run setup"}
+                  Run setup
                 </Button>
               )}
               {running && (
@@ -535,10 +499,10 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
                   Setting up…
                 </Button>
               )}
-              {showSecrets && !repairing && (
+              {showSecrets && (
                 <Button
                   className={pillButton}
-                  disabled={!token || savingSecrets || repairing}
+                  disabled={!token || savingSecrets}
                   onClick={() => {
                     setGateRun(false);
                     setSecretsOpen(true);
@@ -560,38 +524,7 @@ export function PaymentsSetupView({ studio }: { studio: any }) {
                   triggerClassName="h-11 flex-1 rounded-full px-8 text-sm font-medium"
                 />
               )}
-              {repairGaps.length > 0 && !running && (
-                <Button
-                  className={pillButton}
-                  disabled={repairing}
-                  onClick={() => void runRepair()}
-                >
-                  {repairing && <Loader2 className="size-4 animate-spin" />}
-                  {repairing ? "Fixing…" : "Fix missing pieces"}
-                </Button>
-              )}
             </div>
-            {repairGaps.length > 0 && !running && !repairing && (
-              <div className="mt-2 flex justify-center">
-                <span className="inline-flex h-[22px] items-center rounded-full bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-600 dark:text-amber-400">
-                  Missing: {repairGaps.join(" · ")}
-                </span>
-              </div>
-            )}
-            {bundleStale && (
-              <div className="mt-2 flex justify-center">
-                <span className="inline-flex h-[22px] items-center rounded-full bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-600 dark:text-amber-400">
-                  Edge Functions outdated — Run setup to update
-                </span>
-              </div>
-            )}
-            {status && !running && status.functions.some((f) => f.deployed && f.verifyJwt === true) && (
-              <div className="mt-2 flex justify-center">
-                <span className="inline-flex h-[22px] items-center rounded-full bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-600 dark:text-amber-400">
-                  Gateway JWT verification is on — Run setup to disable it
-                </span>
-              </div>
-            )}
             {draftErrors.length > 0 && (
               <p className="mt-2 text-right text-[11px] text-amber-500">
                 Define valid plans first (Plans tab) to enable Run setup.
