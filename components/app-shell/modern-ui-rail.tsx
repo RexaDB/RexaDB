@@ -15,8 +15,10 @@ import {
   Workflow,
 } from "@/lib/icon-theme/solar-icons";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
+import { HardDrive as HardDriveIcon } from "@/lib/icon-theme/lucide-react";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
+import { shouldShowStorage } from "@/lib/studio/storage-utils";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
 import { NavUser } from "@/components/navigation/nav-user";
 
@@ -76,6 +78,14 @@ export function ModernUIRail({
   const showPayments = shouldShowPayments(
     studio.connection?.connectionType ?? studio.dbType,
     studio.connection?.connectionString,
+  );
+  // Supabase Storage: supabase-mgmt connections plus direct Postgres
+  // connections to db.<ref>.supabase.co (or any connection with a `storage`
+  // schema). Other engines have no Storage target, so the item stays hidden.
+  const showStorage = shouldShowStorage(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.connection?.connectionString,
+    studio.schemas,
   );
   const navigation = items ? activeId : studio.sidebarView;
 
@@ -157,6 +167,16 @@ export function ModernUIRail({
               label: "Payments",
               icon: <WalletMoney className="w-5 h-5 shrink-0" />,
               onClick: () => selectView("payments"),
+            },
+          ]
+        : []),
+      ...(showStorage
+        ? [
+            {
+              id: "storage",
+              label: "Storage",
+              icon: <HardDriveIcon className="w-5 h-5 shrink-0" />,
+              onClick: () => selectView("storage"),
             },
           ]
         : []),

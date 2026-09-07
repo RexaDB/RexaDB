@@ -57,11 +57,14 @@ import {
   CreditCard,
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
+import { StoragePanel } from "./storage/storage-panel";
 import { ErdsPanel } from "./erd/erds-panel";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
+import { shouldShowStorage } from "@/lib/studio/storage-utils";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
+import { HardDrive } from "@/lib/icon-theme/lucide-react";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "import-export" | "themes" | "erd" | null;
+type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "import-export" | "themes" | "erd" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -300,6 +303,18 @@ export function StudioShellSidebar({
         studio.connection?.connectionString,
       ),
     },
+    {
+      id: "storage",
+      label: "Storage",
+      Icon: HardDrive,
+      // supabase-mgmt + direct Postgres-to-Supabase connections (or any
+      // connection exposing a `storage` schema). Hidden elsewhere.
+      show: shouldShowStorage(
+        studio.connection?.connectionType ?? studio.dbType,
+        studio.connection?.connectionString,
+        studio.schemas,
+      ),
+    },
     { id: "workflows", label: "Workflows", Icon: Workflow },
     { id: "erd", label: "ERD Designer", Icon: GitFork },
   ];
@@ -358,6 +373,7 @@ export function StudioShellSidebar({
             {section === "database" && <DatabasePanel studio={studio} />}
             {section === "auth" && <AuthPanel studio={studio} />}
             {section === "payments" && <PaymentsPanel studio={studio} />}
+            {section === "storage" && <StoragePanel studio={studio} />}
             {section === "workflows" && <WorkflowsPanel studio={studio} />}
             {section === "erd" && <ErdsPanel studio={studio} />}
           </div>

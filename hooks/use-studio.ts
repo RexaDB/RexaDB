@@ -1013,7 +1013,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1024,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "themes" | "workflows" | "agents" | "erd"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -5685,6 +5685,31 @@ END $$;`.trim();
     openSimpleTab('payments-setup', 'payments-setup', 'Setup', paymentsTabOptions);
   }, [openSimpleTab, setSidebarView]);
 
+  const storageTabOptions = {
+    afterCreated: () => setSidebarView('storage'),
+    afterExisting: () => setSidebarView('storage'),
+  };
+
+  const openStorageFilesTab = useCallback(() => {
+    openSimpleTab('storage-files', 'storage-files', 'Files', storageTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openStorageSettingsTab = useCallback(() => {
+    openSimpleTab('storage-settings', 'storage-settings', 'Settings', storageTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openStoragePoliciesTab = useCallback(() => {
+    openSimpleTab('storage-policies', 'storage-policies', 'Policies', storageTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openStorageBucketTab = useCallback((bucketName: string) => {
+    if (!bucketName) return;
+    openTab('storage-bucket', { bucketName }, {
+      afterCreated: () => setSidebarView('storage'),
+      afterExisting: () => setSidebarView('storage'),
+    });
+  }, [openTab, setSidebarView]);
+
   const openCreateTriggerTab = useCallback(() => {
     openSimpleTab('create-trigger', 'create-trigger', 'New Trigger', {
       guard: { condition: !!createSupport.trigger, errorMsg: 'Create Trigger is supported only for PostgreSQL connections.' },
@@ -8503,6 +8528,10 @@ END $$;`.trim();
     openPaymentsRevenueTab,
     openPaymentsWebhooksTab,
     openPaymentsSetupTab,
+    openStorageFilesTab,
+    openStorageSettingsTab,
+    openStoragePoliciesTab,
+    openStorageBucketTab,
     closeTabById,
     openCreateTableTab,
     openCreateKeyTab,
@@ -8787,6 +8816,10 @@ END $$;`.trim();
     openPaymentsRevenueTab,
     openPaymentsWebhooksTab,
     openPaymentsSetupTab,
+    openStorageFilesTab,
+    openStorageSettingsTab,
+    openStoragePoliciesTab,
+    openStorageBucketTab,
     closeTabById,
     closeTabsByIds,
     closeOtherTabsInPane,

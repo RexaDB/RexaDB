@@ -296,7 +296,7 @@ export function useInitialStudioData({
         }
         if (
           !delayedUiRestoreBlockedRef.current &&
-          (settings.sidebarView === "dashboard" || settings.sidebarView === "tables" || settings.sidebarView === "sql" || settings.sidebarView === "database" || settings.sidebarView === "import-export" || settings.sidebarView === "auth" || settings.sidebarView === "themes" || settings.sidebarView === "workflows" || settings.sidebarView === "agents" || settings.sidebarView === "erd")
+          (settings.sidebarView === "dashboard" || settings.sidebarView === "tables" || settings.sidebarView === "sql" || settings.sidebarView === "database" || settings.sidebarView === "import-export" || settings.sidebarView === "auth" || settings.sidebarView === "payments" || settings.sidebarView === "storage" || settings.sidebarView === "themes" || settings.sidebarView === "workflows" || settings.sidebarView === "agents" || settings.sidebarView === "erd")
         ) {
           setSidebarView(settings.sidebarView);
         }

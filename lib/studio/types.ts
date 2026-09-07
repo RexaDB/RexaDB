@@ -75,6 +75,8 @@ export interface StudioInitialTab {
   query?: string;
   dirty?: boolean;
   pinned?: boolean;
+  /** Storage bucket name for `storage-bucket` tabs */
+  bucketName?: string;
   /** VS Code-style preview tab — temporary until confirmed by double-click, edit, or pin */
   isPreview?: boolean;
 }

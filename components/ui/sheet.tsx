@@ -180,7 +180,7 @@ function SheetContent({
           ref={resizeHandleRef}
           orientation="vertical"
           onMouseDown={handleResizeMouseDown}
-          className="mt-9"
+          className="mt-8"
         />
       )}
       <SheetPrimitive.Content
@@ -195,7 +195,7 @@ function SheetContent({
             ? cn(
                 "w-[min(350px,92vw)] rounded-lg border border-border",
                 isDocked
-                  ? "relative mt-9 min-h-0 shrink-0 overflow-hidden"
+                  ? "relative mt-8 min-h-0 shrink-0 overflow-hidden"
                   : "absolute top-1.5 right-1.5 bottom-1.5 z-50",
               )
             : cn(

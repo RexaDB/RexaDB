@@ -45,6 +45,7 @@ import {
   User,
   Workflow,
   Zap,
+  HardDrive,
 } from "@/lib/icon-theme/lucide-react";
 import {
   Table2 as SolarTable2,
@@ -86,7 +87,7 @@ export interface TabTypeConfig<TMeta = Record<string, unknown>> {
   /** Canonical icon key resolved to a lucide component via TAB_ICON_COMPONENTS */
   icon?: string;
   /** Optional: semantic grouping to help future code (e.g. "database", "auth", "settings", "create", "content") */
-  group?: "content" | "database" | "auth" | "payments" | "settings" | "create" | "special";
+  group?: "content" | "database" | "auth" | "payments" | "storage" | "settings" | "create" | "special";
   /** Render the tab's view. Receives the tab and the full studio hook return value. */
   renderComponent?: (opts: RenderTabOptions) => ReactNode;
 }
@@ -138,6 +139,8 @@ export const TAB_ICON_COMPONENTS: Record<string, LucideIcon> = {
   server: Server,
   camera: Camera,
   diff: GitFork,
+  storage: HardDrive,
+  "storage-files": FolderOpen,
 };
 
 export function getTabIcon(type: string): LucideIcon | undefined {
@@ -191,6 +194,10 @@ export const TAB_REGISTRY: {
   "payments-revenue": TabTypeConfig;
   "payments-webhooks": TabTypeConfig;
   "payments-setup": TabTypeConfig;
+  "storage-files": TabTypeConfig;
+  "storage-settings": TabTypeConfig;
+  "storage-policies": TabTypeConfig;
+  "storage-bucket": TabTypeConfig;
   settings: TabTypeConfig;
   "agent-settings": TabTypeConfig;
   "profile-settings": TabTypeConfig;
@@ -765,6 +772,31 @@ export const TAB_REGISTRY: {
   "payments-revenue": simpleConfig("payments-revenue", "payments", "Revenue", "chart", "payments"),
   "payments-webhooks": simpleConfig("payments-webhooks", "payments", "Webhooks", "zap", "payments"),
   "payments-setup": simpleConfig("payments-setup", "payments", "Setup", "settings", "payments"),
+
+  // ── storage (Supabase Storage for mgmt / Supabase Postgres) ──────────
+  "storage-files": simpleConfig("storage-files", "storage", "Files", "storage-files", "storage"),
+  "storage-settings": simpleConfig("storage-settings", "storage", "Settings", "settings", "storage"),
+  "storage-policies": simpleConfig("storage-policies", "storage", "Policies", "shield", "storage"),
+  "storage-bucket": {
+    type: "storage-bucket",
+    viewMode: "storage",
+    defaultName: (meta) => String((meta as { bucketName?: string }).bucketName ?? "Bucket"),
+    buildTabId: (meta) => {
+      const name = (meta as { bucketName?: string }).bucketName ?? "bucket";
+      return `storage-bucket-${name}`;
+    },
+    createTab: (id, meta) => {
+      const m = meta as { bucketName?: string };
+      return {
+        id,
+        type: "storage-bucket" as StudioInitialTab["type"],
+        name: m.bucketName ?? "Bucket",
+        bucketName: m.bucketName,
+      } as StudioInitialTab;
+    },
+    icon: "storage",
+    group: "storage",
+  },
 
   // ── settings ───────────────────────────────────────────────────────────
   settings: {

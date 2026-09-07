@@ -44,6 +44,10 @@ import {
 } from "./payments/views/revenue-view";
 import { PaymentsSetupView } from "./payments/views/setup-view";
 import { AuthProvidersView } from "./auth/auth-providers-view";
+import { StorageFilesView } from "./storage/storage-files-view";
+import { StorageSettingsView } from "./storage/storage-settings-view";
+import { StoragePoliciesView } from "./storage/storage-policies-view";
+import { StorageBucketView } from "./storage/storage-bucket-view";
 import { SplitView } from "./split-view";
 import { HorizontalSplitView } from "./horizontal-split-view";
 import { cn } from "@/lib/utils";
@@ -1481,6 +1485,19 @@ export function StudioMainContent({
                   <PaymentsSetupView studio={studio} />
                 ) : (
                   <PaymentsPlansView studio={studio} />
+                )
+              ) : paneViewMode === "storage" ? (
+                tab?.type === "storage-settings" ? (
+                  <StorageSettingsView studio={studio} />
+                ) : tab?.type === "storage-policies" ? (
+                  <StoragePoliciesView studio={studio} />
+                ) : tab?.type === "storage-bucket" ? (
+                  <StorageBucketView
+                    studio={studio}
+                    bucketName={(tab as any)?.bucketName ?? ""}
+                  />
+                ) : (
+                  <StorageFilesView studio={studio} />
                 )
               ) : paneViewMode === "create-table" ? (
                 dbType === "spacetimedb" ? (
