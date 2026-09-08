@@ -694,7 +694,7 @@ export function StorageBucketView({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-studio-bg">
       {/* Breadcrumb header */}
-      <div className="flex items-center justify-between gap-4 border-b border-studio-border px-6 py-3">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
           <button
             type="button"
@@ -789,7 +789,7 @@ export function StorageBucketView({
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 border-b border-studio-border px-6 py-2.5">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-2.5">
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
           <Input
@@ -826,7 +826,7 @@ export function StorageBucketView({
       {/* Explorer columns + preview */}
       <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
         {/* Folders column */}
-        <div className="flex w-60 shrink-0 flex-col overflow-hidden border-r border-studio-border">
+        <div className="flex w-60 shrink-0 flex-col overflow-hidden border-r border-border">
           <div className="min-h-0 flex-1 overflow-y-auto">
             {loading && objects.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -851,7 +851,7 @@ export function StorageBucketView({
                     }}
                     title={active ? "Current folder" : "Open folder"}
                     className={cn(
-                      "group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-studio-border px-4 text-left text-xs transition-colors hover:bg-muted/60",
+                      "group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-border px-4 text-left text-xs transition-colors hover:bg-muted/60",
                       active && "bg-muted",
                     )}
                   >
@@ -882,7 +882,41 @@ export function StorageBucketView({
               <div className="px-4 py-8 text-center text-xs text-muted-foreground">
                 Loading…
               </div>
-            ) : entriesAtSelection.length === 0 ? null : (
+            ) : entriesAtSelection.length === 0 ? (
+              <div className="p-6">
+                <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                  <Folder className="mx-auto size-8 text-muted-foreground/50" />
+                  <div className="mt-3 text-sm font-medium text-foreground">
+                    {search
+                      ? "No matching files"
+                      : path
+                        ? "This folder is empty"
+                        : "No files in this bucket"}
+                  </div>
+                  <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+                    {search
+                      ? "Try a different search term."
+                      : "This bucket is empty. Upload a file or create a folder to get started."}
+                  </p>
+                  {!search && (
+                    <div className="mt-4 flex justify-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setFolderOpen(true)}
+                      >
+                        <FolderPlus className="mr-1.5 size-3.5" />
+                        Create folder
+                      </Button>
+                      <Button size="sm" onClick={handleUploadClick}>
+                        <Upload className="mr-1.5 size-3.5" />
+                        Upload files
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
               entriesAtSelection.map((entry) => {
                 const fullPath = joinPath(path, entry.name);
                 if (entry.kind === "folder") {
@@ -896,7 +930,7 @@ export function StorageBucketView({
                         if (e.key === "Enter") navigateTo(fullPath);
                       }}
                       title="Open folder"
-                      className="group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-studio-border px-4 text-left text-xs transition-colors hover:bg-muted/60"
+                      className="group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-border px-4 text-left text-xs transition-colors hover:bg-muted/60"
                     >
                       <Folder className="size-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate font-medium text-foreground">
@@ -925,7 +959,7 @@ export function StorageBucketView({
                         setSelectedFile({ fullPath, object: entry.object! });
                     }}
                     className={cn(
-                      "group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-studio-border px-4 text-left text-xs transition-colors hover:bg-muted/60",
+                      "group/row flex h-10 w-full cursor-pointer items-center gap-2 border-b border-border px-4 text-left text-xs transition-colors hover:bg-muted/60",
                       active && "bg-muted",
                     )}
                   >
@@ -1015,7 +1049,7 @@ export function StorageBucketView({
           >
             {selectedFile ? (
               <div className="flex h-full flex-col overflow-hidden">
-                <div className="flex h-12 shrink-0 items-center gap-2 border-b border-studio-border px-4 pr-12">
+                <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4 pr-12">
                   <SheetTitle
                     className="truncate text-sm font-medium text-foreground"
                     title={selectedFile.fullPath}
@@ -1090,7 +1124,7 @@ export function StorageBucketView({
                 </Button>
               </div>
 
-              <div className="my-4 h-px bg-border/60" />
+              <div className="my-4 h-px bg-border" />
 
               <Button
                 variant="outline"

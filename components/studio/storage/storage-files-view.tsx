@@ -92,7 +92,7 @@ export function StorageFilesView({ studio }: { studio: any }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-studio-bg">
-      <div className="flex items-center justify-between gap-4 border-b border-studio-border px-6 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
         <div>
           <h1 className="text-sm font-semibold tracking-tight text-foreground">Files</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">

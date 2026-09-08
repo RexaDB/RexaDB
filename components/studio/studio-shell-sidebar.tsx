@@ -58,13 +58,16 @@ import {
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
 import { StoragePanel } from "./storage/storage-panel";
+import { EdgeFunctionsPanel } from "./edge-functions/edge-functions-panel";
 import { ErdsPanel } from "./erd/erds-panel";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { shouldShowStorage } from "@/lib/studio/storage-utils";
+import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { HardDrive } from "@/lib/icon-theme/lucide-react";
+import { EdgeFunctionsIcon } from "@/lib/icon-theme/lucide-react";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "import-export" | "themes" | "erd" | null;
+type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -315,6 +318,17 @@ export function StudioShellSidebar({
         studio.schemas,
       ),
     },
+    {
+      id: "edge-functions",
+      label: "Edge Functions",
+      Icon: EdgeFunctionsIcon,
+      // Supabase projects only (mgmt API): supabase-mgmt + direct
+      // Postgres-to-Supabase connections.
+      show: shouldShowEdgeFunctions(
+        studio.connection?.connectionType ?? studio.dbType,
+        studio.connection?.connectionString,
+      ),
+    },
     { id: "workflows", label: "Workflows", Icon: Workflow },
     { id: "erd", label: "ERD Designer", Icon: GitFork },
   ];
@@ -374,6 +388,7 @@ export function StudioShellSidebar({
             {section === "auth" && <AuthPanel studio={studio} />}
             {section === "payments" && <PaymentsPanel studio={studio} />}
             {section === "storage" && <StoragePanel studio={studio} />}
+            {section === "edge-functions" && <EdgeFunctionsPanel studio={studio} />}
             {section === "workflows" && <WorkflowsPanel studio={studio} />}
             {section === "erd" && <ErdsPanel studio={studio} />}
           </div>

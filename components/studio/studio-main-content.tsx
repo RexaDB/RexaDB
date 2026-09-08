@@ -48,6 +48,9 @@ import { StorageFilesView } from "./storage/storage-files-view";
 import { StorageSettingsView } from "./storage/storage-settings-view";
 import { StoragePoliciesView } from "./storage/storage-policies-view";
 import { StorageBucketView } from "./storage/storage-bucket-view";
+import { EdgeFunctionsView } from "./edge-functions/edge-functions-view";
+import { EdgeSecretsView } from "./edge-functions/edge-secrets-view";
+import { EdgeFunctionView } from "./edge-functions/edge-function-view";
 import { SplitView } from "./split-view";
 import { HorizontalSplitView } from "./horizontal-split-view";
 import { cn } from "@/lib/utils";
@@ -1498,6 +1501,17 @@ export function StudioMainContent({
                   />
                 ) : (
                   <StorageFilesView studio={studio} />
+                )
+              ) : paneViewMode === "edge-functions" ? (
+                tab?.type === "edge-secrets" ? (
+                  <EdgeSecretsView studio={studio} />
+                ) : tab?.type === "edge-function" ? (
+                  <EdgeFunctionView
+                    studio={studio}
+                    functionName={(tab as any)?.functionName ?? ""}
+                  />
+                ) : (
+                  <EdgeFunctionsView studio={studio} />
                 )
               ) : paneViewMode === "create-table" ? (
                 dbType === "spacetimedb" ? (

@@ -514,6 +514,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     metadata: any;
   }>>([]);
   const [isReviewSheetOpen, setIsReviewSheetOpen] = useState(false);
+  const commitAbortControllerRef = useRef<AbortController | null>(null);
   const [foreignKeys, setForeignKeys] = useState<Array<{
     column_name: string;
     foreign_table_schema: string;
@@ -1013,7 +1014,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1024,13 +1025,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "themes" | "workflows" | "agents" | "erd"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -3408,6 +3409,10 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const handleCommitChanges = useCallback(async () => {
     if (!Object.keys(pendingChanges).length && !pendingActions.length || !selectedSchema) return;
 
+    // Create new abort controller for this commit
+    const abortController = new AbortController();
+    commitAbortControllerRef.current = abortController;
+
     const rowOnlyActionTypes = new Set([
       "delete_row",
       "insert_row",
@@ -3431,9 +3436,18 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     setError(null);
 
     try {
+      // Check if aborted
+      if (abortController.signal.aborted) {
+        throw new Error("Commit cancelled by user");
+      }
+
       // 1. Handle pending actions (new way for DDL and complex DML)
       if (pendingActions.length > 0) {
         for (const action of pendingActions) {
+          if (abortController.signal.aborted) {
+            throw new Error("Commit cancelled by user");
+          }
+
           const startTime = Date.now();
           const actionConnectionString = action.type === "redis_command" && action.metadata?.redisDb
             ? updateRedisConnectionStringDatabase(currentConnectionString, action.metadata.redisDb)
@@ -3490,6 +3504,9 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
 
       for (const op of optimisticRowOps) {
+        if (abortController.signal.aborted) {
+          throw new Error("Commit cancelled by user");
+        }
         if (op.kind === "delete") {
           applyOptimisticRowDeletes(op.schema, op.table, op.whereClauses);
         } else if (op.kind === "insert") {
@@ -3501,6 +3518,9 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
       // 2. Handle pending row changes (DML)
       if (Object.keys(pendingChanges).length > 0) {
+        if (abortController.signal.aborted) {
+          throw new Error("Commit cancelled by user");
+        }
         if (!selectedTable) return;
         const hasUnsaveable = Object.keys(pendingChanges).some(id => id.startsWith('idx:'));
         if (hasUnsaveable) {
@@ -3587,11 +3607,23 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       const msg = err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
       console.error("Commit failed:", err);
       setError(msg || "Failed to commit changes");
-      toast.error(msg || "Failed to commit changes");
+      if (msg !== "Commit cancelled by user") {
+        toast.error(msg || "Failed to commit changes");
+      } else {
+        toast.info("Commit cancelled");
+      }
     } finally {
       setIsDeleting(false);
+      commitAbortControllerRef.current = null;
     }
   }, [pendingChanges, pendingActions, selectedSchema, selectedTable, currentConnectionString, filterQuery, sortConfig, addHistoryEntry, loadSchemas, loadTables, loadEnums, loadIndexes, loadTriggers, loadFunctions, loadExtensions, loadRlsPolicies, loadPostgresRoles, loadDatabases, refreshTableData, refreshTablesSidebar, tableStructure, pageSize, page, applyOptimisticRowUpdates, applyOptimisticRowDeletes, applyOptimisticRowInsertions, applyOptimisticTableClear, activeTabId, markTabClean]);
+
+  const handleCancelCommit = useCallback(() => {
+    if (commitAbortControllerRef.current) {
+      commitAbortControllerRef.current.abort();
+      commitAbortControllerRef.current = null;
+    }
+  }, []);
 
   const runAddColumnAction = useCallback(async (opts: {
     reviewAction: { type: string; description: string; sql: string; metadata?: any };
@@ -5707,6 +5739,27 @@ END $$;`.trim();
     openTab('storage-bucket', { bucketName }, {
       afterCreated: () => setSidebarView('storage'),
       afterExisting: () => setSidebarView('storage'),
+    });
+  }, [openTab, setSidebarView]);
+
+  const edgeFunctionsTabOptions = {
+    afterCreated: () => setSidebarView('edge-functions'),
+    afterExisting: () => setSidebarView('edge-functions'),
+  };
+
+  const openEdgeFunctionsTab = useCallback(() => {
+    openSimpleTab('edge-functions', 'edge-functions', 'Functions', edgeFunctionsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openEdgeSecretsTab = useCallback(() => {
+    openSimpleTab('edge-secrets', 'edge-secrets', 'Secrets', edgeFunctionsTabOptions);
+  }, [openSimpleTab, setSidebarView]);
+
+  const openEdgeFunctionTab = useCallback((functionName: string) => {
+    if (!functionName) return;
+    openTab('edge-function', { functionName }, {
+      afterCreated: () => setSidebarView('edge-functions'),
+      afterExisting: () => setSidebarView('edge-functions'),
     });
   }, [openTab, setSidebarView]);
 
@@ -8512,6 +8565,7 @@ END $$;`.trim();
     stopSqlContextQuery,
     refreshCurrentTab,
     handleCommitChanges,
+    handleCancelCommit,
     openHistoryTab,
     openSnapshotsTab,
     openImportExportTab,
@@ -8532,6 +8586,9 @@ END $$;`.trim();
     openStorageSettingsTab,
     openStoragePoliciesTab,
     openStorageBucketTab,
+    openEdgeFunctionsTab,
+    openEdgeSecretsTab,
+    openEdgeFunctionTab,
     closeTabById,
     openCreateTableTab,
     openCreateKeyTab,
@@ -8820,6 +8877,9 @@ END $$;`.trim();
     openStorageSettingsTab,
     openStoragePoliciesTab,
     openStorageBucketTab,
+    openEdgeFunctionsTab,
+    openEdgeSecretsTab,
+    openEdgeFunctionTab,
     closeTabById,
     closeTabsByIds,
     closeOtherTabsInPane,

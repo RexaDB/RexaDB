@@ -16,11 +16,15 @@ import {
 } from "@/lib/icon-theme/solar-icons";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { HardDrive as HardDriveIcon } from "@/lib/icon-theme/lucide-react";
+import { EdgeFunctionsIcon as EdgeFunctionsRailIcon } from "@/lib/icon-theme/lucide-react";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { shouldShowStorage } from "@/lib/studio/storage-utils";
+import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
 import { NavUser } from "@/components/navigation/nav-user";
+import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 
 /**
  * Modern UI's always-visible navigation rail. A brand-new, simple, fixed-width
@@ -68,6 +72,12 @@ export function ModernUIRail({
   user?: { name?: string; email?: string } | null;
 }) {
   const router = useRouter();
+  
+  // Persist rail item order in localStorage
+  const [savedRailOrder, setSavedRailOrder] = useLocalStorage<string[]>(
+    "modern-ui-rail-order",
+    []
+  );
   const editorLabel = getEditorLabel(studio.dbType);
   const tableLabels = getTableLabels(studio.dbType);
   const isSupabase = studio.connection?.connectionType === "supabase";
@@ -86,6 +96,12 @@ export function ModernUIRail({
     studio.connection?.connectionType ?? studio.dbType,
     studio.connection?.connectionString,
     studio.schemas,
+  );
+  // Edge Functions live on the user's Supabase project (mgmt API): same
+  // gating as the other Supabase-project sections.
+  const showEdgeFunctions = shouldShowEdgeFunctions(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.connection?.connectionString,
   );
   const navigation = items ? activeId : studio.sidebarView;
 
@@ -180,7 +196,45 @@ export function ModernUIRail({
             },
           ]
         : []),
+      ...(showEdgeFunctions
+        ? [
+            {
+              id: "edge-functions",
+              label: "Edge Functions",
+              icon: <EdgeFunctionsRailIcon className="w-5 h-5 shrink-0" />,
+              onClick: () => selectView("edge-functions"),
+            },
+          ]
+        : []),
     ];
+
+  // Apply saved order to primary items if available
+  const orderedPrimaryItems = (() => {
+    if (savedRailOrder.length === 0) return primaryItems;
+    
+    // Create a map for quick lookup
+    const itemMap = new Map(primaryItems.map(item => [item.id, item]));
+    
+    // Sort based on saved order, keeping any new items at the end
+    const sorted: ModernUIRailItem[] = [];
+    const seen = new Set<string>();
+    
+    for (const id of savedRailOrder) {
+      if (itemMap.has(id) && !seen.has(id)) {
+        sorted.push(itemMap.get(id)!);
+        seen.add(id);
+      }
+    }
+    
+    // Add any items not in the saved order
+    for (const item of primaryItems) {
+      if (!seen.has(item.id)) {
+        sorted.push(item);
+      }
+    }
+    
+    return sorted;
+  })();
 
   const bottomItems: Array<{
     label: string;
@@ -226,21 +280,35 @@ export function ModernUIRail({
     },
   ];
 
+  const handleRailItemReorder = (newOrder: ModernUIRailItem[]) => {
+    const newOrderIds = newOrder.map(item => item.id);
+    setSavedRailOrder(newOrderIds);
+  };
+
   return (
     <div className="flex h-full w-12 shrink-0 flex-col overflow-hidden bg-sidebar select-none">
       {/* Top inset clears the title bar; bottom group is pinned with mt-auto. */}
       <div className="flex min-h-0 flex-1 flex-col pt-10 pb-1.5 pl-2 pr-1">
-        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto scrollbar-hide">
-          {primaryItems.map(({ id, label, icon, onClick }) => (
-            <NavigationRailItem
-              key={id}
-              label={label}
-              icon={icon}
-              onClick={onClick}
-              active={navigation === id}
-            />
+        <Sortable
+          value={orderedPrimaryItems}
+          onValueChange={handleRailItemReorder}
+          getItemValue={(item) => item.id}
+          strategy="vertical"
+          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto scrollbar-hide"
+        >
+          {orderedPrimaryItems.map(({ id, label, icon, onClick }) => (
+            <SortableItem key={id} value={id} asChild>
+              <SortableItemHandle>
+                <NavigationRailItem
+                  label={label}
+                  icon={icon}
+                  onClick={onClick}
+                  active={navigation === id}
+                />
+              </SortableItemHandle>
+            </SortableItem>
           ))}
-        </div>
+        </Sortable>
         <div className="mt-auto flex shrink-0 flex-col gap-1.5 pt-2">
           {bottomItems.map(({ label, Icon, onClick, active }) => (
             <NavigationRailItem

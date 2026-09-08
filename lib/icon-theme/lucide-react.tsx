@@ -216,6 +216,7 @@ import { createThemedLucideIcon } from "@/lib/icon-theme/runtime";
 import { AuthIcon as CustomAuthIcon } from "@/components/studio/AuthIcon";
 import { TableEditorIcon as CustomTableEditorIcon } from "@/components/studio/TableEditorIcon";
 import { DatabaseIcon as CustomDatabaseIcon } from "@/components/studio/database-icon";
+import { EdgeFunctionsIcon as CustomEdgeFunctionsIcon } from "@/components/studio/edge-functions-icon";
 
 export const Activity = createThemedLucideIcon("Activity", LucideActivity);
 export const AlertCircle = createThemedLucideIcon("AlertCircle", LucideAlertCircle);
@@ -272,6 +273,7 @@ export const Diamond = createThemedLucideIcon("Diamond", LucideDiamond);
 export const Download = createThemedLucideIcon("Download", LucideDownload);
 export const DownloadIcon = createThemedLucideIcon("DownloadIcon", LucideDownloadIcon);
 export const Edit2 = createThemedLucideIcon("Edit2", LucideEdit2);
+export const EdgeFunctionsIcon = createThemedLucideIcon("EdgeFunctionsIcon", CustomEdgeFunctionsIcon);
 export const EllipsisVertical = createThemedLucideIcon("EllipsisVertical", LucideEllipsisVertical);
 export const Eraser = createThemedLucideIcon("Eraser", LucideEraser);
 export const ExternalLink = createThemedLucideIcon("ExternalLink", LucideExternalLink);

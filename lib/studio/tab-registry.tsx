@@ -46,6 +46,7 @@ import {
   Workflow,
   Zap,
   HardDrive,
+  EdgeFunctionsIcon,
 } from "@/lib/icon-theme/lucide-react";
 import {
   Table2 as SolarTable2,
@@ -87,7 +88,7 @@ export interface TabTypeConfig<TMeta = Record<string, unknown>> {
   /** Canonical icon key resolved to a lucide component via TAB_ICON_COMPONENTS */
   icon?: string;
   /** Optional: semantic grouping to help future code (e.g. "database", "auth", "settings", "create", "content") */
-  group?: "content" | "database" | "auth" | "payments" | "storage" | "settings" | "create" | "special";
+  group?: "content" | "database" | "auth" | "payments" | "storage" | "edge-functions" | "settings" | "create" | "special";
   /** Render the tab's view. Receives the tab and the full studio hook return value. */
   renderComponent?: (opts: RenderTabOptions) => ReactNode;
 }
@@ -141,6 +142,7 @@ export const TAB_ICON_COMPONENTS: Record<string, LucideIcon> = {
   diff: GitFork,
   storage: HardDrive,
   "storage-files": FolderOpen,
+  "edge-function": EdgeFunctionsIcon,
 };
 
 export function getTabIcon(type: string): LucideIcon | undefined {
@@ -198,6 +200,9 @@ export const TAB_REGISTRY: {
   "storage-settings": TabTypeConfig;
   "storage-policies": TabTypeConfig;
   "storage-bucket": TabTypeConfig;
+  "edge-functions": TabTypeConfig;
+  "edge-secrets": TabTypeConfig;
+  "edge-function": TabTypeConfig;
   settings: TabTypeConfig;
   "agent-settings": TabTypeConfig;
   "profile-settings": TabTypeConfig;
@@ -772,6 +777,30 @@ export const TAB_REGISTRY: {
   "payments-revenue": simpleConfig("payments-revenue", "payments", "Revenue", "chart", "payments"),
   "payments-webhooks": simpleConfig("payments-webhooks", "payments", "Webhooks", "zap", "payments"),
   "payments-setup": simpleConfig("payments-setup", "payments", "Setup", "settings", "payments"),
+
+  // ── edge functions (Supabase Edge Functions via the mgmt API) ────
+  "edge-functions": simpleConfig("edge-functions", "edge-functions", "Functions", "edge-function", "edge-functions"),
+  "edge-secrets": simpleConfig("edge-secrets", "edge-functions", "Secrets", "key", "edge-functions"),
+  "edge-function": {
+    type: "edge-function",
+    viewMode: "edge-functions",
+    defaultName: (meta) => String((meta as { functionName?: string }).functionName ?? "Function"),
+    buildTabId: (meta) => {
+      const name = (meta as { functionName?: string }).functionName ?? "function";
+      return `edge-function-${name}`;
+    },
+    createTab: (id, meta) => {
+      const m = meta as { functionName?: string };
+      return {
+        id,
+        type: "edge-function" as StudioInitialTab["type"],
+        name: m.functionName ?? "Function",
+        functionName: m.functionName,
+      } as StudioInitialTab;
+    },
+    icon: "edge-function",
+    group: "edge-functions",
+  },
 
   // ── storage (Supabase Storage for mgmt / Supabase Postgres) ──────────
   "storage-files": simpleConfig("storage-files", "storage", "Files", "storage-files", "storage"),

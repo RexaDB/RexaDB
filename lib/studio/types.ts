@@ -77,6 +77,8 @@ export interface StudioInitialTab {
   pinned?: boolean;
   /** Storage bucket name for `storage-bucket` tabs */
   bucketName?: string;
+  /** Edge function slug for `edge-function` tabs */
+  functionName?: string;
   /** VS Code-style preview tab — temporary until confirmed by double-click, edit, or pin */
   isPreview?: boolean;
 }
