@@ -178,6 +178,8 @@ function buildPiSystemPrompt(input: Pick<PiAgentInput, "dbType" | "selectedNames
     toolsList,
     "",
     "Use these tools to inspect schemas, run queries, and retrieve data from the connected database.",
+    "Edge Function tools (list/get/create/deploy/update/delete/logs/invocations/secrets) are only for Supabase project connections — otherwise they return 'not available'.",
+    "DB access is read-only, but Edge Function create/deploy/update/delete/secret tools ARE mutating and pre-approved — call them directly when asked.",
     "All listed DB tools are pre-approved — call them directly, never ask the user for permission, and never report 'user rejected permission'. If a tool fails, report its exact error.",
     "For SQLite, the only namespace is 'main' — use it or leave namespace empty. Never try to read the .db file with read/bash; use list_tables / get_table_schema / sample_rows / run_readonly_query instead.",
     "Never fabricate tool results. If a tool fails, report the error message to the user.",

@@ -7,6 +7,7 @@ import {
   Database,
   FunctionSquare,
   GitFork,
+  Globe,
   Layout,
   LogOut,
   Plus,
@@ -78,6 +79,7 @@ interface CommandMenuProps {
   onOpenSpacetimeDbReducers?: () => void;
   onOpenSpacetimeDbLogs?: () => void;
   onOpenSpacetimeDbSchema?: () => void;
+  onOpenBrowser?: () => void;
   commandMenuSections: Array<{ id: string; name: string; isVisible: boolean }>;
   /** User keybindings so listed shortcuts reflect remaps. */
   keybindings?: Record<string, Keybinding>;
@@ -126,6 +128,7 @@ export function CommandMenu({
   onOpenSpacetimeDbReducers,
   onOpenSpacetimeDbLogs,
   onOpenSpacetimeDbSchema,
+  onOpenBrowser,
   commandMenuSections = [],
   keybindings,
 }: CommandMenuProps) {
@@ -346,6 +349,17 @@ export function CommandMenu({
             icon: Camera,
             action: onOpenSnapshots,
           },
+          ...(onOpenBrowser
+            ? [
+                {
+                  id: "open-browser",
+                  label: "Open Browser",
+                  keywords: ["browser", "web", "internet", "url"],
+                  icon: Globe,
+                  action: () => onOpenBrowser(),
+                },
+              ]
+            : []),
           ...(onUniversalSearch
             ? [
                 {
@@ -459,6 +473,7 @@ export function CommandMenu({
     onSelectTable,
     onToggleSidebar,
     onOpenSnapshots,
+    onOpenBrowser,
     onUniversalSearch,
     schemas,
     sectionVisibility,

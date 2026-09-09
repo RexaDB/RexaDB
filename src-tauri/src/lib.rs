@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use tauri::Emitter;
-use tauri::Listener;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater;
@@ -659,6 +658,8 @@ fn settings_save_keybindings(
     fs::write(&path, format!("{}\n", json)).map_err(|e| e.to_string())?;
     Ok(true)
 }
+
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 impl SidecarState {

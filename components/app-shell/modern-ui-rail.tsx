@@ -288,13 +288,13 @@ export function ModernUIRail({
   return (
     <div className="flex h-full w-12 shrink-0 flex-col overflow-hidden bg-sidebar select-none">
       {/* Top inset clears the title bar; bottom group is pinned with mt-auto. */}
-      <div className="flex min-h-0 flex-1 flex-col pt-10 pb-1.5 pl-2 pr-1">
+      <div className="flex min-h-0 flex-1 flex-col pt-10 pb-1.5 pl-2 pr-1 overflow-hidden">
         <Sortable
           value={orderedPrimaryItems}
           onValueChange={handleRailItemReorder}
           getItemValue={(item) => item.id}
           strategy="vertical"
-          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto scrollbar-hide"
+          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto scrollbar-hide overflow-x-hidden"
         >
           {orderedPrimaryItems.map(({ id, label, icon, onClick }) => (
             <SortableItem key={id} value={id} asChild>

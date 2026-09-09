@@ -41,6 +41,7 @@ import {
   Chart,
   House,
 } from "@/lib/icon-theme/solar-icons";
+import { Globe } from "@/lib/icon-theme/lucide-react";
 import { NavUser } from "@/components/navigation/nav-user";
 import { ResizeHandle } from "@/components/app-shell/resize-handle";
 
@@ -214,6 +215,16 @@ export function AppSidebar({
             >
               <DatabaseIcon />
               <span>Connections</span>
+            </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+            <SidebarMenuButton
+              className={FLAT_ITEM}
+              isActive={activePath === "browser"}
+              onClick={() => onNavigate?.("browser")}
+            >
+              <Globe />
+              <span>Browser</span>
             </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

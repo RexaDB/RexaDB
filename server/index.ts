@@ -93,11 +93,20 @@ const corsMiddleware = cors({
     console.warn(`[cors] Blocked request from origin: ${origin}`);
     callback(new Error('Not allowed by CORS'));
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent'],
 });
 
 app.use(corsMiddleware);
+
+// Multipart passthrough for Supabase function deploys (FormData with source
+// files + metadata). Must run BEFORE express.json — the JSON parser cannot
+// parse multipart bodies and would drop the files, causing upstream parse
+// errors on deploy.
+app.use(
+  "/api/supabase-mgmt/proxy",
+  express.raw({ type: "multipart/*", limit: "20mb" }),
+);
 
 // Limit JSON body to 1MB (reduced from 50MB to prevent memory exhaustion)
 app.use(express.json({ limit: "1mb" }));
@@ -153,15 +162,22 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
     };
     if (req.headers.authorization) headers.Authorization = req.headers.authorization;
     if (req.headers["user-agent"]) headers["User-Agent"] = req.headers["user-agent"];
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      headers["Content-Type"] = req.headers["content-type"] || "application/json";
-    }
     const fetchInit: RequestInit = {
       method: req.method,
       headers,
     };
-    if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
-      fetchInit.body = JSON.stringify(req.body);
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      if (Buffer.isBuffer(req.body)) {
+        // Multipart deploy payload (FormData) — forward bytes as-is with the
+        // original boundary. JSON.stringify here would corrupt it.
+        headers["Content-Type"] = req.headers["content-type"] || "application/octet-stream";
+        fetchInit.body = req.body as any;
+      } else {
+        headers["Content-Type"] = req.headers["content-type"] || "application/json";
+        if (req.body) {
+          fetchInit.body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+        }
+      }
     }
     const upstream = await fetch(targetUrl, fetchInit);
     const text = await upstream.text();

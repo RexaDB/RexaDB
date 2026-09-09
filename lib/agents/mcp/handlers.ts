@@ -26,6 +26,20 @@ import {
   toPublicConnectionList,
   type ConnectionDep,
 } from "./registry";
+import {
+  resolveEdgeAccess,
+  listEdgeFunctions,
+  getEdgeFunction,
+  deleteEdgeFunction,
+  updateEdgeFunction,
+  deployEdgeFunction,
+  fetchFunctionBody,
+  fetchFunctionEvents,
+  listEdgeSecrets,
+  upsertEdgeSecrets,
+  deleteEdgeSecrets,
+} from "../../studio/edge-functions-utils";
+import { detectConnectionDbType } from "@/lib/db/connection-type";
 
 /** The MCP SDK's AnySchema type doesn't structurally match zod v4 classic
  * types; runtime is compatible so we cast (same as internal stdio.ts). */
@@ -105,6 +119,23 @@ async function runDbTool(
   } catch (e) {
     return errText(e);
   }
+}
+
+async function resolveEdgeAccessForMcp(
+  deps: ExternalToolDeps,
+  connectionRef: unknown,
+) {
+  const { ctx, meta } = await buildCallContext(deps, connectionRef);
+  const loadConnections = deps.listConnections || listAllConnectionDeps;
+  const all = await loadConnections().catch(() => [] as ConnectionDep[]);
+  const row = all.find((r) => Number(r.id) === Number(meta.id));
+  const connectionString = row?.connectionString || ctx.connectionString;
+  // Prefer the saved connectionType when available, otherwise fall back to
+  // detection (supabase-mgmt:// -> supabase-mgmt, postgres URLs -> postgres
+  // which resolvePaymentsConnection then maps via host inference).
+  const connectionType =
+    row?.connectionType || detectConnectionDbType(connectionString, ctx.dbType);
+  return resolveEdgeAccess(connectionType, connectionString);
 }
 
 /**
@@ -253,6 +284,355 @@ export function registerExternalTools(
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (args: Record<string, unknown>) => run("search_schema", args),
+  );
+
+  // Edge Functions tools
+  server.registerTool(
+    "list_edge_functions",
+    {
+      description: "List all Edge Functions for the selected Supabase project connection.",
+      inputSchema: toolShape({ connection: connectionField }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const { functions, error } = await listEdgeFunctions(access);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: functions });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_edge_function",
+    {
+      description: "Get details of a specific Edge Function by slug.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug (identifier)"),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const { function: fn, error } = await getEdgeFunction(access, slug);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: fn });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "create_edge_function",
+    {
+      description: "Create a new Edge Function by deploying source code.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug (identifier)"),
+        name: z.string().optional().describe("Display name"),
+        verifyJwt: z.boolean().optional().describe("Require JWT verification"),
+        entrypointPath: z.string().optional().describe("Entry point file path (default: index.ts)"),
+        files: z.array(z.object({
+          name: z.string().describe("File name"),
+          content: z.string().describe("File content"),
+        })).describe("Source files to deploy"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const name = typeof args.name === "string" ? args.name : undefined;
+        const verifyJwt = typeof args.verifyJwt === "boolean" ? args.verifyJwt : undefined;
+        const entrypointPath = typeof args.entrypointPath === "string" ? args.entrypointPath : "index.ts";
+        const files = Array.isArray(args.files) ? args.files as Array<{ name: string; content: string }> : [];
+        
+        const { error } = await deployEdgeFunction(access, slug, { entrypointPath, name, verifyJwt }, files);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: { message: "Edge function created successfully", slug } });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_edge_function",
+    {
+      description: "Update Edge Function metadata (name, JWT verification).",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+        name: z.string().optional().describe("New display name"),
+        verifyJwt: z.boolean().optional().describe("JWT verification setting"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const name = typeof args.name === "string" ? args.name : undefined;
+        const verifyJwt = typeof args.verifyJwt === "boolean" ? args.verifyJwt : undefined;
+        
+        const { function: fn, error } = await updateEdgeFunction(access, slug, { name, verify_jwt: verifyJwt });
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: fn });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_edge_function",
+    {
+      description: "Delete an Edge Function by slug.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const { error } = await deleteEdgeFunction(access, slug);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: { message: "Edge function deleted successfully", slug } });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_edge_function_code",
+    {
+      description: "Get the source code of an Edge Function.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const { files, error } = await fetchFunctionBody(access, slug);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: files });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "deploy_edge_function_code",
+    {
+      description: "Deploy updated source code to an Edge Function.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+        entrypointPath: z.string().optional().describe("Entry point file path (default: index.ts)"),
+        files: z.array(z.object({
+          name: z.string().describe("File name"),
+          content: z.string().describe("File content"),
+        })).describe("Source files to deploy"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const entrypointPath = typeof args.entrypointPath === "string" ? args.entrypointPath : "index.ts";
+        const files = Array.isArray(args.files) ? args.files as Array<{ name: string; content: string }> : [];
+        
+        const { error } = await deployEdgeFunction(access, slug, { entrypointPath }, files);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: { message: "Edge function code deployed successfully", slug } });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_edge_function_logs",
+    {
+      description: "Get logs for an Edge Function (invocations or console output).",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+        source: z.enum(["function_edge_logs", "function_logs"]).optional().describe("Log source: function_edge_logs (invocations) or function_logs (console output)"),
+        hours: z.number().int().min(1).max(168).optional().describe("Time range in hours (default: 1)"),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const source = (args.source === "function_edge_logs" || args.source === "function_logs") ? args.source : "function_edge_logs";
+        const hours = typeof args.hours === "number" ? args.hours : 1;
+        
+        const end = new Date();
+        const start = new Date(end.getTime() - hours * 3600 * 1000);
+        
+        const { events, error } = await fetchFunctionEvents(access, slug, source, { start, end });
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: events });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_edge_function_invocations",
+    {
+      description: "Get invocation events for an Edge Function (HTTP requests/responses).",
+      inputSchema: toolShape({
+        connection: connectionField,
+        slug: z.string().describe("Function slug"),
+        hours: z.number().int().min(1).max(168).optional().describe("Time range in hours (default: 1)"),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const slug = typeof args.slug === "string" ? args.slug : "";
+        const hours = typeof args.hours === "number" ? args.hours : 1;
+        
+        const end = new Date();
+        const start = new Date(end.getTime() - hours * 3600 * 1000);
+        
+        const { events, error } = await fetchFunctionEvents(access, slug, "function_edge_logs", { start, end });
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: events });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_edge_secrets",
+    {
+      description: "List all Edge Function secrets for the project.",
+      inputSchema: toolShape({ connection: connectionField }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const { secrets, error } = await listEdgeSecrets(access);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: secrets });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "upsert_edge_secrets",
+    {
+      description: "Create or update Edge Function secrets.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        secrets: z.array(z.object({
+          name: z.string().describe("Secret name"),
+          value: z.string().describe("Secret value"),
+        })).describe("Secrets to create or update"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const secrets = Array.isArray(args.secrets) ? args.secrets as Array<{ name: string; value: string }> : [];
+        
+        const { error } = await upsertEdgeSecrets(access, secrets);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: { message: "Secrets updated successfully", count: secrets.length } });
+      } catch (e) {
+        return errText(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_edge_secrets",
+    {
+      description: "Delete Edge Function secrets by name.",
+      inputSchema: toolShape({
+        connection: connectionField,
+        names: z.array(z.string()).describe("Secret names to delete"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        
+        const names = Array.isArray(args.names) ? args.names as string[] : [];
+        
+        const { error } = await deleteEdgeSecrets(access, names);
+        if (error) return errText(error);
+        
+        return toolText({ ok: true, data: { message: "Secrets deleted successfully", count: names.length } });
+      } catch (e) {
+        return errText(e);
+      }
+    },
   );
 
   return server;

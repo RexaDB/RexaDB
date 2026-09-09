@@ -88,6 +88,7 @@ import {
   Download,
   CheckCircle2,
   Loader2,
+  Globe,
 } from "@/lib/icon-theme/lucide-react";
 import { useAppUpdateContext } from "@/components/providers/app-update-context";
 import Link from "next/link";
@@ -395,6 +396,7 @@ export function ConnectionManager({
   onOpenSpacetimedbAccounts,
   onOpenNeonAccounts,
   onOpenPlanetscaleAccounts,
+  onOpenBrowser,
 }: {
   hideHeader?: boolean;
   /** When `true`, renders as a content pane nested inside an external shell
@@ -412,6 +414,7 @@ export function ConnectionManager({
   onOpenSpacetimedbAccounts?: () => void;
   onOpenNeonAccounts?: () => void;
   onOpenPlanetscaleAccounts?: () => void;
+  onOpenBrowser?: () => void;
 }) {
   useGlobalAppFontFamily();
   const isStandalone = !embedded;
@@ -4169,6 +4172,28 @@ export function ConnectionManager({
                       </CommandItem>
                     );
                   })}
+                </CommandGroup>
+
+                <CommandGroup
+                  heading="Actions"
+                  className="p-0! **:[[cmdk-group-heading]]:scroll-mt-16 **:[[cmdk-group-heading]]:p-3! **:[[cmdk-group-heading]]:pb-1!"
+                >
+                  <CommandItem
+                    value="open-browser"
+                    keywords={["browser", "web", "internet", "url"]}
+                    onSelect={() => {
+                      setCommandMenuOpen(false);
+                      onOpenBrowser?.();
+                    }}
+                    className="px-3! h-9 rounded-lg border border-transparent font-medium hover:border-studio-border/80 hover:bg-studio-row-hover gap-3"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
+                      <Globe className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      Open Browser
+                    </span>
+                  </CommandItem>
                 </CommandGroup>
               </CommandList>
             </Command>

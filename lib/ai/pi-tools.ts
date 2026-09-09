@@ -25,6 +25,19 @@ import {
   getGlobalEditorThemeSettings,
   saveGlobalEditorThemeSettings,
 } from "@/lib/db/actions";
+import {
+  resolveEdgeAccess,
+  listEdgeFunctions,
+  getEdgeFunction,
+  deleteEdgeFunction,
+  updateEdgeFunction,
+  deployEdgeFunction,
+  fetchFunctionBody,
+  fetchFunctionEvents,
+  listEdgeSecrets,
+  upsertEdgeSecrets,
+  deleteEdgeSecrets,
+} from "@/lib/studio/edge-functions-utils";
 
 export type PiToolContext = {
   connectionString: string;
@@ -672,6 +685,331 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
         const questions = [{ q: params.question, type: params.type || "radio", options: params.options }];
         const answers = await createPendingApproval(toolCallId, questions);
         return textResult({ answers, questions, message: "User provided answer" });
+      },
+    }),
+    // Edge Functions tools
+    defineTool({
+      name: "list_edge_functions",
+      label: "List edge functions",
+      description: "List all Edge Functions for the current Supabase project connection.",
+      promptSnippet: "list_edge_functions - list all Edge Functions for the current Supabase project",
+      parameters: Type.Object({}),
+      execute: async () => {
+        context.emitStep("Listing Edge Functions");
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { functions, error } = await listEdgeFunctions(access);
+          if (error) failTool(error);
+          
+          return textResult({ functions });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "get_edge_function",
+      label: "Get edge function",
+      description: "Get details of a specific Edge Function by slug.",
+      promptSnippet: "get_edge_function - get details of a specific Edge Function by slug",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug (identifier)" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Getting Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { function: fn, error } = await getEdgeFunction(access, params.slug);
+          if (error) failTool(error);
+          
+          return textResult({ function: fn });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "create_edge_function",
+      label: "Create edge function",
+      description: "Create a new Edge Function by deploying source code.",
+      promptSnippet: "create_edge_function - create a new Edge Function by deploying source code",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug (identifier)" }),
+        name: Type.Optional(Type.String({ description: "Display name" })),
+        verifyJwt: Type.Optional(Type.Boolean({ description: "Require JWT verification" })),
+        entrypointPath: Type.Optional(Type.String({ description: "Entry point file path (default: index.ts)" })),
+        files: Type.Array(Type.Object({
+          name: Type.String({ description: "File name" }),
+          content: Type.String({ description: "File content" }),
+        }), { description: "Source files to deploy" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Creating Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const entrypointPath = params.entrypointPath || "index.ts";
+          const { error } = await deployEdgeFunction(access, params.slug, { 
+            entrypointPath, 
+            name: params.name, 
+            verifyJwt: params.verifyJwt 
+          }, params.files);
+          if (error) failTool(error);
+          
+          return textResult({ message: "Edge function created successfully", slug: params.slug });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "update_edge_function",
+      label: "Update edge function",
+      description: "Update Edge Function metadata (name, JWT verification).",
+      promptSnippet: "update_edge_function - update Edge Function metadata (name, JWT verification)",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+        name: Type.Optional(Type.String({ description: "New display name" })),
+        verifyJwt: Type.Optional(Type.Boolean({ description: "JWT verification setting" })),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Updating Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { function: fn, error } = await updateEdgeFunction(access, params.slug, { 
+            name: params.name, 
+            verify_jwt: params.verifyJwt 
+          });
+          if (error) failTool(error);
+          
+          return textResult({ function: fn });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "delete_edge_function",
+      label: "Delete edge function",
+      description: "Delete an Edge Function by slug.",
+      promptSnippet: "delete_edge_function - delete an Edge Function by slug",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Deleting Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { error } = await deleteEdgeFunction(access, params.slug);
+          if (error) failTool(error);
+          
+          return textResult({ message: "Edge function deleted successfully", slug: params.slug });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "get_edge_function_code",
+      label: "Get edge function code",
+      description: "Get the source code of an Edge Function.",
+      promptSnippet: "get_edge_function_code - get the source code of an Edge Function",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Getting code for Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { files, error } = await fetchFunctionBody(access, params.slug);
+          if (error) failTool(error);
+          
+          return textResult({ files });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "deploy_edge_function_code",
+      label: "Deploy edge function code",
+      description: "Deploy updated source code to an Edge Function.",
+      promptSnippet: "deploy_edge_function_code - deploy updated source code to an Edge Function",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+        entrypointPath: Type.Optional(Type.String({ description: "Entry point file path (default: index.ts)" })),
+        files: Type.Array(Type.Object({
+          name: Type.String({ description: "File name" }),
+          content: Type.String({ description: "File content" }),
+        }), { description: "Source files to deploy" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Deploying code to Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const entrypointPath = params.entrypointPath || "index.ts";
+          const { error } = await deployEdgeFunction(access, params.slug, { entrypointPath }, params.files);
+          if (error) failTool(error);
+          
+          return textResult({ message: "Edge function code deployed successfully", slug: params.slug });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "get_edge_function_logs",
+      label: "Get edge function logs",
+      description: "Get logs for an Edge Function (invocations or console output).",
+      promptSnippet: "get_edge_function_logs - get logs for an Edge Function (invocations or console output)",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+        source: Type.Optional(Type.Union([Type.Literal("function_edge_logs"), Type.Literal("function_logs")], { 
+          description: "Log source: function_edge_logs (invocations) or function_logs (console output)" 
+        })),
+        hours: Type.Optional(Type.Integer({ minimum: 1, maximum: 168, description: "Time range in hours (default: 1)" })),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Getting logs for Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const source = (params.source === "function_edge_logs" || params.source === "function_logs") ? params.source : "function_edge_logs";
+          const hours = params.hours ?? 1;
+          const end = new Date();
+          const start = new Date(end.getTime() - hours * 3600 * 1000);
+          
+          const { events, error } = await fetchFunctionEvents(access, params.slug, source, { start, end });
+          if (error) failTool(error);
+          
+          return textResult({ events, source, hours });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "get_edge_function_invocations",
+      label: "Get edge function invocations",
+      description: "Get invocation events for an Edge Function (HTTP requests/responses).",
+      promptSnippet: "get_edge_function_invocations - get invocation events for an Edge Function (HTTP requests/responses)",
+      parameters: Type.Object({
+        slug: Type.String({ description: "Function slug" }),
+        hours: Type.Optional(Type.Integer({ minimum: 1, maximum: 168, description: "Time range in hours (default: 1)" })),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Getting invocations for Edge Function ${params.slug}`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const hours = params.hours ?? 1;
+          const end = new Date();
+          const start = new Date(end.getTime() - hours * 3600 * 1000);
+          
+          const { events, error } = await fetchFunctionEvents(access, params.slug, "function_edge_logs", { start, end });
+          if (error) failTool(error);
+          
+          return textResult({ events, hours });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "list_edge_secrets",
+      label: "List edge secrets",
+      description: "List all Edge Function secrets for the project.",
+      promptSnippet: "list_edge_secrets - list all Edge Function secrets for the project",
+      parameters: Type.Object({}),
+      execute: async () => {
+        context.emitStep("Listing Edge Function secrets");
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { secrets, error } = await listEdgeSecrets(access);
+          if (error) failTool(error);
+          
+          return textResult({ secrets });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "upsert_edge_secrets",
+      label: "Upsert edge secrets",
+      description: "Create or update Edge Function secrets.",
+      promptSnippet: "upsert_edge_secrets - create or update Edge Function secrets",
+      parameters: Type.Object({
+        secrets: Type.Array(Type.Object({
+          name: Type.String({ description: "Secret name" }),
+          value: Type.String({ description: "Secret value" }),
+        }), { description: "Secrets to create or update" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Updating ${params.secrets.length} Edge Function secrets`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { error } = await upsertEdgeSecrets(access, params.secrets);
+          if (error) failTool(error);
+          
+          return textResult({ message: "Secrets updated successfully", count: params.secrets.length });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "delete_edge_secrets",
+      label: "Delete edge secrets",
+      description: "Delete Edge Function secrets by name.",
+      promptSnippet: "delete_edge_secrets - delete Edge Function secrets by name",
+      parameters: Type.Object({
+        names: Type.Array(Type.String(), { description: "Secret names to delete" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Deleting ${params.names.length} Edge Function secrets`);
+        try {
+          const connectionType = detectConnectionDbType(context.connectionString);
+          const { access, error: accessError } = await resolveEdgeAccess(connectionType, context.connectionString);
+          if (!access) failTool(accessError || "Edge Functions are not available for this connection type.");
+          
+          const { error } = await deleteEdgeSecrets(access, params.names);
+          if (error) failTool(error);
+          
+          return textResult({ message: "Secrets deleted successfully", count: params.names.length });
+        } catch (error) {
+          failTool(error);
+        }
       },
     }),
   ];

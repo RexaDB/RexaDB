@@ -29,6 +29,7 @@ import {
   FolderOpen,
   FunctionSquare,
   GitFork,
+  Globe,
   History,
   KeyRound,
   LayoutDashboard,
@@ -143,6 +144,7 @@ export const TAB_ICON_COMPONENTS: Record<string, LucideIcon> = {
   storage: HardDrive,
   "storage-files": FolderOpen,
   "edge-function": EdgeFunctionsIcon,
+  browser: Globe,
 };
 
 export function getTabIcon(type: string): LucideIcon | undefined {
@@ -203,6 +205,7 @@ export const TAB_REGISTRY: {
   "edge-functions": TabTypeConfig;
   "edge-secrets": TabTypeConfig;
   "edge-function": TabTypeConfig;
+  browser: TabTypeConfig;
   settings: TabTypeConfig;
   "agent-settings": TabTypeConfig;
   "profile-settings": TabTypeConfig;
@@ -340,6 +343,16 @@ export const TAB_REGISTRY: {
         />
       );
     },
+  },
+
+  browser: {
+    type: "browser",
+    viewMode: "browser",
+    defaultName: "Browser",
+    buildTabId: () => `browser-${uid()}`,
+    createTab: (id) => ({ id, type: "browser", name: "Browser", url: "https://www.google.com" }),
+    icon: "browser",
+    group: "content",
   },
 
   // ── create ─────────────────────────────────────────────────────────────

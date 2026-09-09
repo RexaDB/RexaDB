@@ -316,6 +316,17 @@ function renderApprovalInstructions() {
   ].join("\n");
 }
 
+function renderEdgeFunctionInstructions() {
+  return [
+    "Edge Functions (Supabase only):",
+    "Edge Function tools are ONLY available when the connection is a Supabase project — either a supabase-mgmt connection or a direct Postgres connection to db.<ref>.supabase.co with a linked Supabase account. For all other backends the tools will return 'Edge Functions are not available' — say so plainly and do not retry.",
+    "Available tools: list_edge_functions, get_edge_function, get_edge_function_code, create_edge_function, deploy_edge_function_code, update_edge_function, delete_edge_function, get_edge_function_logs, get_edge_function_invocations, list_edge_secrets, upsert_edge_secrets, delete_edge_secrets.",
+    "Read flow: list_edge_functions first, then get_edge_function / get_edge_function_code for detail. Logs: get_edge_function_logs (source function_edge_logs for HTTP invocations, function_logs for console output, hours 1-168) or get_edge_function_invocations for HTTP requests/responses.",
+    "Write flow: create_edge_function (slug + files[{name, content}], optional entrypointPath default index.ts, name, verifyJwt) creates via deploy; deploy_edge_function_code updates code on an existing slug; update_edge_function patches name/verifyJwt metadata only; delete_edge_function removes by slug. Secrets: list_edge_secrets (names + digests only, never plaintext), upsert_edge_secrets, delete_edge_secrets.",
+    "Unlike DB queries which are read-only, Edge Function create/deploy/update/delete/secret tools ARE mutating and pre-approved — call them directly when the user asks, without asking for extra permission.",
+  ].join("\n");
+}
+
 export function renderWorkflowContext(context: AgentWorkflowContext): string {
   if (!context) return "";
 
@@ -361,13 +372,15 @@ export function buildAgentInstructions(input: {
     "SQLite note: the schema is 'main' — if a tool needs a namespace, use 'main' or leave it empty; both work. Do not try to read the .db file via filesystem tools.",
     "When the user references a dashboard token like `@dashboard.some-name-abc123`, use the dashboard tools to inspect that dashboard before proposing changes.",
     "You may only execute read-only database access through tools.",
-    "Never claim a mutation was executed.",
+    "Never claim a DB mutation was executed.",
     "You may still WRITE or SUGGEST mutating SQL when the user asks for it, but only as a proposal, never as something you executed.",
     "If the user asks for INSERT, UPDATE, DELETE, ALTER, CREATE, DROP, or other write SQL, provide the query in a fenced ```sql block and clearly say it is only a suggested query.",
     "Do not refuse write-query authoring just because execution is read-only.",
+    "Exception: Supabase Edge Function management tools (create/deploy/update/delete/secrets) ARE mutating and may be executed via tools when the user asks.",
     "When useful, return a fenced ```sql block with a single query.",
     renderDashboardInstructions(),
     renderThemeInstructions(),
+    renderEdgeFunctionInstructions(),
     renderWorkflowInstructions(),
     renderTaskInstructions(),
     renderApprovalInstructions(),

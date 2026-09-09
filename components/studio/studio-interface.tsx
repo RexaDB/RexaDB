@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
-import { STUDIO_TAB_ICONS } from "@/lib/studio/tab-registry";
+import { STUDIO_TAB_ICONS, TAB_REGISTRY } from "@/lib/studio/tab-registry";
 import { resolvePaneForTab } from "@/lib/studio/split-layout";
 import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +15,7 @@ import { StudioMainContent } from "./studio-main-content";
 import { FKSelectionSheet } from "./fk-selection-sheet";
 import { AddFKSheet } from "./database/add-fk-sheet";
 import { InsertRowSheet } from "./insert-row-sheet";
+import { ReviewSheet } from "./review-sheet";
 import { useStudio } from "@/hooks/use-studio";
 import { CommandMenu } from "./command-menu";
 import { UniversalSearch } from "./universal-search";
@@ -115,6 +116,14 @@ export function StudioInterface({
     },
     [studio],
   );
+
+  const handleOpenBrowser = useCallback(() => {
+    const browserConfig = TAB_REGISTRY.browser;
+    const browserId = browserConfig.buildTabId({});
+    const newTab = browserConfig.createTab(browserId, {});
+    studio.setOpenTabs((prev: typeof studio.openTabs) => [...prev, newTab]);
+    studio.setActiveTabId(browserId);
+  }, [studio]);
 
   const selectedAppTheme = useMemo(() => {
     if (studio.appThemeId === "system") return null;
@@ -621,6 +630,7 @@ export function StudioInterface({
         onOpenSpacetimeDbReducers={studio.openSpacetimeDbReducers}
         onOpenSpacetimeDbLogs={studio.openSpacetimeDbLogs}
         onOpenSpacetimeDbSchema={studio.openSpacetimeDbSchema}
+        onOpenBrowser={handleOpenBrowser}
         commandMenuSections={studio.commandMenuSections}
         keybindings={studio.keybindings}
       />
@@ -727,6 +737,25 @@ export function StudioInterface({
         handleInsertFKSelection={studio.handleInsertFKSelection}
         loading={studio.mutationLoading}
         isFKSelectionSheetOpen={studio.isFKSelectionSheetOpen}
+      />
+
+      <ReviewSheet
+        isOpen={studio.isReviewSheetOpen}
+        onOpenChange={studio.setIsReviewSheetOpen}
+        pendingChanges={studio.pendingChanges}
+        pendingActions={studio.pendingActions}
+        onCommit={studio.handleCommitChanges}
+        onCancelCommit={studio.handleCancelCommit}
+        loading={studio.isDeleting}
+        onClearPending={() => {
+          studio.setPendingChanges({});
+          studio.setPendingActions([]);
+        }}
+        onRemoveAction={(id) => {
+          studio.setPendingActions((prev: typeof studio.pendingActions) =>
+            prev.filter((action) => action.id !== id)
+          );
+        }}
       />
 
       {studio.tabSplitDrag && (

@@ -34,6 +34,7 @@ import { SpacetimeDbSchemaViewer } from "./spacetimedb/schema-viewer";
 import { AuthUsersView } from "./auth/auth-users-view";
 import { AuthSessionsView } from "./auth/auth-sessions-view";
 import { PaymentsPlansView } from "./payments/views/plans-view";
+import { BrowserTab } from "@/components/browser/browser-tab";
 import {
   PaymentsCustomersView,
   PaymentsSubscriptionsView,
@@ -1619,18 +1620,16 @@ export function StudioMainContent({
                       });
                     }
                   }}
-                  addDashboardWidgetFromBounds={
-                    studio.addDashboardWidgetFromBounds
-                  }
-                  updateDashboardWidget={studio.updateDashboardWidget}
-                  removeDashboardWidget={studio.removeDashboardWidget}
-                  applyDashboardWidgetLayout={studio.applyDashboardWidgetLayout}
-                  tables={tables}
-                  selectedSchema={selectedSchema}
-                  connectionString={currentConnectionString}
-                  editorThemeId={effectiveEditorThemeId}
-                  appEditorTheme={appEditorTheme as MonacoThemeRef | null}
-                  vimMode={studio.vimMode}
+                />
+              ) : tab.type === "browser" ? (
+                <BrowserTab
+                  initialUrl={(tab as any).url || "https://www.google.com"}
+                  onUrlChange={(url) => {
+                    const next = (studio.openTabs as any[]).map((t: any) =>
+                      t.id === tab.id ? { ...t, url } : t,
+                    );
+                    studio.setOpenTabs(next);
+                  }}
                 />
               ) : paneViewMode === "sql" ? (
                 renderSqlEditor({

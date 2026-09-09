@@ -26,6 +26,7 @@ import {
 	SquareTerminal,
 	Columns2,
 	SquareX,
+	Globe,
 } from "lucide-react";
 import {
 	House,
@@ -50,6 +51,7 @@ function TabIcon({ tab }: { tab: AppTab }) {
 	if (tab.kind === "neon") {
 		return <ProviderLogo type="neon" className="size-4" />;
 	}
+	if (tab.kind === "browser") return <Globe className="size-4" />;
 	return <DatabaseIcon className="size-4" />;
 }
 

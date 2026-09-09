@@ -25,6 +25,8 @@ import { ProviderLogo } from "@/components/shared/provider-logo";
 import { PLANETSCALE_LOGIN_ENABLED } from "@/lib/planetscale/auth";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import { WindowControls } from "@/components/shared/window-controls";
+import { BrowserTab } from "@/components/browser/browser-tab";
+import { Globe } from "lucide-react";
 
 const CONNECTIONS_TAB: AppTab = {
   id: "connections",
@@ -56,6 +58,8 @@ const PLANETSCALE_TAB: AppTab = {
   title: "PlanetScale",
 };
 
+let browserTabCounter = 0;
+
 export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const searchParams = useSearchParams();
   const editConnectionId = searchParams.get("edit") ? Number(searchParams.get("edit")) : null;
@@ -80,6 +84,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
   // Used only in standalone (non-embedded) mode to show a connection's
   // analytics full-page, since there is no tab system / shell around it.
   const [standaloneAnalytics, setStandaloneAnalytics] = useState<Connection | null>(null);
+  const [browserUrls, setBrowserUrls] = useState<Record<string, string>>({});
   const keybindings = useMemo(() => getDefaultKeybindings(), []);
 
   useEffect(() => {
@@ -283,6 +288,15 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       else if (path === "neon") openTab(NEON_TAB);
       else if (path === "planetscale" && PLANETSCALE_LOGIN_ENABLED) openTab(PLANETSCALE_TAB);
       else if (path === "settings") setSettingsModalOpen(true);
+      else if (path === "browser") {
+        browserTabCounter++;
+        const browserId = `browser:${browserTabCounter}`;
+        openTab({
+          id: browserId,
+          kind: "browser",
+          title: "Browser",
+        });
+      }
     },
     [openTab],
   );
@@ -337,8 +351,14 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
             },
           ]
         : []),
+      {
+        id: "browser",
+        label: "Browser",
+        icon: <Globe className="w-5 h-5 shrink-0" />,
+        onClick: () => handleNavigate("browser"),
+      },
     ],
-    [openTab],
+    [openTab, handleNavigate],
   );
 
   // Studio-style tab shortcuts: Cmd/Ctrl+W close, Cmd/Ctrl+1–9 switch tab.
@@ -428,6 +448,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
             onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
             onOpenNeonAccounts={() => openTab(NEON_TAB)}
             onOpenPlanetscaleAccounts={() => openTab(PLANETSCALE_TAB)}
+            onOpenBrowser={() => handleNavigate("browser")}
           />
         </div>
       )}
@@ -473,6 +494,15 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
           <ConnectionAnalyticsShell
             connectionId={selectedConnectionId}
             connection={selectedConnection}
+          />
+        </div>
+      )}
+
+      {section === "browser" && (
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+          <BrowserTab
+            initialUrl={browserUrls[activeTabId] || "https://www.google.com"}
+            onUrlChange={(url) => setBrowserUrls(prev => ({ ...prev, [activeTabId]: url }))}
           />
         </div>
       )}
@@ -586,7 +616,8 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
             section === "supabase" ||
             section === "spacetimedb" ||
             section === "neon" ||
-            section === "planetscale"
+            section === "planetscale" ||
+            section === "browser"
               ? section
               : null
           }
