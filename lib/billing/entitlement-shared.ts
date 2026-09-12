@@ -41,8 +41,8 @@ export type EntitlementComputationInput = {
 };
 
 export type EntitlementComputationConstants = {
-  freeMaxConnections: number;
-  freeMaxWorkspaces: number;
+  freeMaxConnections: number | null;
+  freeMaxWorkspaces: number | null;
   offlineGraceMs: number;
 };
 
@@ -61,6 +61,8 @@ export function computeEntitlementFields(
   input: EntitlementComputationInput,
   constants: EntitlementComputationConstants,
 ): ComputedEntitlementFields {
+  // Totally free: cloud + unlimited connections/workspaces for every plan,
+  // including "free". Plan-row values still win when present.
   return {
     lastPaidPlanCode:
       normalizePlanCode(input.latestPaidPlan) !== "free"
@@ -69,19 +71,15 @@ export function computeEntitlementFields(
           ? input.entitlementPlanCode
           : null,
     status: input.subscriptionStatus?.trim() || "none",
-    cloudEnabled: input.planRowCloudEnabled ?? input.entitlementPlanCode !== "free",
+    cloudEnabled: input.planRowCloudEnabled ?? true,
     maxConnections:
       typeof input.planRowMaxConnections === "number"
         ? input.planRowMaxConnections
-        : input.entitlementPlanCode === "free"
-          ? constants.freeMaxConnections
-          : null,
+        : (constants.freeMaxConnections ?? null),
     maxWorkspaces:
       typeof input.planRowMaxWorkspaces === "number"
         ? input.planRowMaxWorkspaces
-        : input.entitlementPlanCode === "free"
-          ? constants.freeMaxWorkspaces
-          : null,
+        : (constants.freeMaxWorkspaces ?? null),
     accessEndsAt: input.accessEndsAt,
     graceEndsAt:
       input.entitlementPlanCode !== "otl" && input.accessEndsAt

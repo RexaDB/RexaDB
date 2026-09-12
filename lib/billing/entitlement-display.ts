@@ -1,6 +1,3 @@
-import {
-  DEFAULT_FREE_MAX_CONNECTIONS,
-} from "@/lib/billing/entitlement-constants";
 import type { ResolvedUserEntitlement } from "@/lib/billing/entitlement-types";
 
 function formatDate(timestamp: number | null) {
@@ -21,7 +18,7 @@ export function buildEntitlementProfileMeta(entitlement: ResolvedUserEntitlement
   }
 
   if (entitlement.effectivePlanCode === "free") {
-    return `Cloud disabled • Up to ${DEFAULT_FREE_MAX_CONNECTIONS} connections`;
+    return `Cloud enabled • Settings sync on • Connections: ${entitlement.maxConnections ?? "unlimited"}`;
   }
 
   return `Cloud ${entitlement.cloudEnabled ? "enabled" : "disabled"} • Settings sync ${entitlement.cloudEnabled ? "on" : "off"} • Connections: ${entitlement.maxConnections ?? "unlimited"}`;

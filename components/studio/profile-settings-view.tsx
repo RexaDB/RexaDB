@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ExternalLink } from "@/lib/icon-theme/lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +15,6 @@ import {
   formatEntitlementPlanLabel,
 } from "@/lib/billing/entitlement-display";
 import { supabase } from "@/lib/supabase/client";
-import { openExternalUrl } from "@/lib/desktop";
-import { REXADB_UPGRADE_URL } from "@/lib/constants";
 
 interface ProfileRecord {
   id: string;
@@ -155,10 +152,6 @@ export function ProfileSettingsView() {
     setProfileFullName(initialProfileFullName);
   };
 
-  const handleUpgradeClick = () => {
-    openExternalUrl(REXADB_UPGRADE_URL);
-  };
-
   const avatarLetter = (profileFullName.trim() || profileEmail.trim() || "U")
     .charAt(0)
     .toUpperCase();
@@ -250,24 +243,14 @@ export function ProfileSettingsView() {
             >
               Refresh Subscription
             </Button>
-            {!isProfileLoading && subscriptionPlanCode === "free" ? (
-              <Button
-                type="button"
-                onClick={handleUpgradeClick}
-                className="h-8 gap-1.5 bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90"
-              >
-                Upgrade on Website
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
           </div>
 
           <div className="rounded-lg border border-studio-border bg-studio-bg/40 p-4 space-y-3">
             <div className="space-y-1">
               <h4 className="text-sm font-semibold">Settings Sync</h4>
               <p className="text-xs text-muted-foreground">
-                Themes, studio settings, and keybindings sync across devices on
-                paid plans. Agent API keys stay on this device.
+                Themes, studio settings, and keybindings sync across devices when
+                signed in. Agent API keys stay on this device.
               </p>
             </div>
             {settingsSyncEnabled || entitlement.cloudEnabled ? (
@@ -296,19 +279,8 @@ export function ProfileSettingsView() {
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  Upgrade to Pro or higher to sync preferences across devices.
+                  Sign in to sync preferences across devices.
                 </p>
-                {subscriptionPlanCode === "free" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 gap-1.5 px-3 text-xs"
-                    onClick={handleUpgradeClick}
-                  >
-                    Upgrade on Website
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </Button>
-                ) : null}
               </div>
             )}
           </div>

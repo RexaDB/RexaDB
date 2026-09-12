@@ -54,7 +54,7 @@ test("recurring entitlement stays active before access end", () => {
   assert.equal(result.effectivePlanCode, "pro");
 });
 
-test("recurring entitlement stays active during grace and downgrades after grace", () => {
+test("totally free: expired recurring entitlement stays active with no downgrade", () => {
   const now = Date.now();
   const payload = {
     version: 1 as const,
@@ -78,8 +78,10 @@ test("recurring entitlement stays active during grace and downgrades after grace
     lastObservedAt: now,
   });
   assert.equal(graceResult.premiumActive, true);
-  assert.equal(graceResult.graceActive, true);
+  assert.equal(graceResult.graceActive, false);
   assert.equal(graceResult.effectivePlanCode, "pro");
+  assert.equal(graceResult.cloudEnabled, true);
+  assert.equal(graceResult.maxConnections, 10);
 
   const expiredResult = evaluateEntitlementPayload(payload, {
     source: "cache",
@@ -95,8 +97,10 @@ test("recurring entitlement stays active during grace and downgrades after grace
     },
     { source: "cache", usingCached: true, lastObservedAt: now },
   );
-  assert.equal(downgraded.premiumActive, false);
-  assert.equal(downgraded.effectivePlanCode, "free");
+  // Totally free: no downgrades even after grace expiry.
+  assert.equal(downgraded.premiumActive, true);
+  assert.equal(downgraded.effectivePlanCode, "pro");
+  assert.equal(downgraded.cloudEnabled, true);
 });
 
 test("otl stays active after updates expire but blocks updates", () => {

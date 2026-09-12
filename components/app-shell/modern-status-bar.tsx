@@ -62,7 +62,7 @@ export function ModernStatusBar({
           : "Settings sync ready";
 
   const settingsSyncTitle = !settingsSyncEnabled
-    ? "Settings stay on this device. Upgrade or sign in on a paid plan to sync."
+    ? "Settings stay on this device. Sign in to sync."
     : settingsSyncStatus === "error"
       ? settingsSyncError || "Settings sync failed. Click to retry."
       : lastSyncedAt

@@ -11,8 +11,7 @@ export interface AccountChipItem {
 
 /**
  * Linked-account switcher as a row of pills instead of a full bordered
- * section with its own header — most accounts are 1-2 deep (free plans cap
- * at one), so giving it a whole boxed list was more chrome than content.
+ * section with its own header.
  */
 export function AccountChips({
   accounts,
@@ -82,7 +81,7 @@ export function AccountChips({
         type="button"
         onClick={onAdd}
         disabled={!canAdd}
-        title={canAdd ? addLabel : "Upgrade to Pro to link more accounts"}
+        title={canAdd ? addLabel : "Cannot add more accounts"}
         className="flex h-8 items-center gap-1.5 rounded-full border border-dashed border-studio-border/70 px-3 text-xs text-muted-foreground transition-colors hover:border-studio-border hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Plus className="h-3 w-3" />

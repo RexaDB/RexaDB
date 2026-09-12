@@ -166,7 +166,6 @@ import {
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
-import { openExternalUrl } from "@/lib/desktop";
 import { API_BASE } from "@/lib/api-base";
 import {
   initStudioAuth,
@@ -189,9 +188,6 @@ import {
   type SupabaseMgmtAccount,
 } from "@/lib/supabase-mgmt/token-store";
 import {
-  canAddSupabaseAccount,
-} from "@/lib/supabase-mgmt/limits";
-import {
   registerActiveSupabaseProjects,
 } from "@/lib/supabase-mgmt/register";
 import { listProjects } from "@/lib/supabase-mgmt/client";
@@ -203,9 +199,6 @@ import {
   type SpacetimeDbMgmtAccount,
 } from "@/lib/spacetimedb-mgmt/token-store";
 import {
-  canAddSpacetimeDbAccount,
-} from "@/lib/spacetimedb-mgmt/limits";
-import {
   registerSpacetimeDbDatabases,
 } from "@/lib/spacetimedb-mgmt/register";
 import { listSpacetimeDbDatabases } from "@/lib/spacetimedb-mgmt/client";
@@ -216,7 +209,6 @@ import {
   removeNeonCliAccount,
   type NeonCliAccount,
 } from "@/lib/neon-cli/profile-store";
-import { canAddNeonAccount } from "@/lib/neon-cli/limits";
 import { detectNeonCli } from "@/lib/neon-cli/detect";
 import { PlanetscaleLoginDialog } from "@/components/planetscale/planetscale-login-dialog";
 import { PlanetscaleAccountsScreen } from "@/components/planetscale/planetscale-account-screen";
@@ -225,7 +217,6 @@ import {
   removePlanetscaleAccount,
   type PlanetscaleAccount,
 } from "@/lib/planetscale/token-store";
-import { canAddPlanetscaleAccount } from "@/lib/planetscale/limits";
 import { PLANETSCALE_LOGIN_ENABLED } from "@/lib/planetscale/auth";
 
 // Removed Pattern import
@@ -261,12 +252,6 @@ type PlanEntitlements = {
   maxConnections: number | null;
   updatesUntil: number | null;
 };
-
-const REXADB_UPGRADE_URL =
-  process.env.NEXT_PUBLIC_REXADB_UPGRADE_URL?.trim() ||
-  "https://rexadb.app/pricing";
-
-// openExternalUrl imported from @/lib/desktop
 
 /** Pill update CTA — same height as provider/settings icon buttons (h-7), rounded-full. */
 function ConnectionsUpdatePill({
@@ -1307,7 +1292,6 @@ export function ConnectionManager({
   const {
     entitlement,
     loading: planLoading,
-    refreshIfStale,
   } = useEntitlementState({
     userId: isSessionActive ? (user?.id ?? null) : null,
     accessToken,
@@ -1411,25 +1395,14 @@ export function ConnectionManager({
 
   const enforceConnectionEntitlements = useCallback(
     async (
-      candidateConn: string,
-      provider: ConnectionProvider | null,
-      opts?: { enforceLimit?: boolean },
+      _candidateConn: string,
+      _provider: ConnectionProvider | null,
+      _opts?: { enforceLimit?: boolean },
     ) => {
-      const shouldEnforceLimit = opts?.enforceLimit ?? true;
-      const currentEntitlement = await refreshIfStale("premium-action");
-      if (
-        shouldEnforceLimit &&
-        currentEntitlement.maxConnections !== null &&
-        connections.length >= currentEntitlement.maxConnections
-      ) {
-        toast.error(
-          `Your ${currentEntitlement.label} plan allows up to ${currentEntitlement.maxConnections} saved connections.`,
-        );
-        return false;
-      }
+      // Totally free: no connection caps.
       return true;
     },
-    [connections.length, refreshIfStale],
+    [],
   );
 
   useEffect(() => {
@@ -2256,8 +2229,9 @@ export function ConnectionManager({
   };
 
   const getCloudSyncKeyOrWarn = (): string | null => {
-    if (!canUseCloudSync) {
-      toast.error("Upgrade to Pro or Team to enable cloud sync.");
+    // Totally free: cloud sync available to any signed-in user.
+    if (!user || localMode) {
+      toast.error("Sign in to enable cloud sync.");
       return null;
     }
     const key = cloudSyncKeyInput.trim();
@@ -2339,24 +2313,9 @@ export function ConnectionManager({
     setConnectionScreen("settings");
   };
 
-  const handleUpgradeClick = () => {
-    openExternalUrl(REXADB_UPGRADE_URL);
-  };
-
   const handleAddSupabaseAccount = useCallback(() => {
-    const check = canAddSupabaseAccount(
-      entitlement.premiumActive,
-      supabaseAccounts.length,
-    );
-    if (!check.allowed) {
-      toast.error(
-        "Free plan allows 1 linked Supabase account. Upgrade to Pro to link more.",
-      );
-      openExternalUrl(REXADB_UPGRADE_URL);
-      return;
-    }
     setSupabaseLoginOpen(true);
-  }, [entitlement.premiumActive, supabaseAccounts.length]);
+  }, []);
 
   const handleRemoveSupabaseAccount = useCallback((id: string) => {
     removeMgmtAccount(id);
@@ -2408,19 +2367,8 @@ export function ConnectionManager({
   };
 
   const handleAddSpacetimeDbAccount = useCallback(() => {
-    const check = canAddSpacetimeDbAccount(
-      entitlement.premiumActive,
-      spacetimedbAccounts.length,
-    );
-    if (!check.allowed) {
-      toast.error(
-        "Free plan allows 1 linked SpacetimeDB account. Upgrade to Pro to link more.",
-      );
-      openExternalUrl(REXADB_UPGRADE_URL);
-      return;
-    }
     setSpacetimedbLoginOpen(true);
-  }, [entitlement.premiumActive, spacetimedbAccounts.length]);
+  }, []);
 
   const handleRemoveSpacetimeDbAccount = useCallback((id: string) => {
     removeSpacetimeDbMgmtAccount(id);
@@ -2488,14 +2436,6 @@ export function ConnectionManager({
   }, []);
 
   const handleAddNeonAccount = useCallback(async () => {
-    const check = canAddNeonAccount(entitlement.premiumActive, neonAccounts.length);
-    if (!check.allowed) {
-      toast.error(
-        "Free plan allows 1 linked Neon account. Upgrade to Pro to link more.",
-      );
-      openExternalUrl(REXADB_UPGRADE_URL);
-      return;
-    }
     const installed = neonCliInstalled ?? (await checkNeonCli());
     if (!installed) {
       if (onOpenNeonAccounts) onOpenNeonAccounts();
@@ -2504,7 +2444,7 @@ export function ConnectionManager({
     }
     setNeonReconnectProfile(null);
     setNeonLoginOpen(true);
-  }, [entitlement.premiumActive, neonAccounts.length, neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
+  }, [neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
 
   const handleReconnectNeonAccount = useCallback(async (profileName: string) => {
     const installed = neonCliInstalled ?? (await checkNeonCli());
@@ -2563,19 +2503,8 @@ export function ConnectionManager({
   };
 
   const handleAddPlanetscaleAccount = useCallback(() => {
-    const check = canAddPlanetscaleAccount(
-      entitlement.premiumActive,
-      planetscaleAccounts.length,
-    );
-    if (!check.allowed) {
-      toast.error(
-        "Free plan allows 1 linked PlanetScale account. Upgrade to Pro to link more.",
-      );
-      openExternalUrl(REXADB_UPGRADE_URL);
-      return;
-    }
     setPlanetscaleLoginOpen(true);
-  }, [entitlement.premiumActive, planetscaleAccounts.length]);
+  }, []);
 
   const handleRemovePlanetscaleAccount = useCallback((id: string) => {
     removePlanetscaleAccount(id);
@@ -3727,8 +3656,6 @@ export function ConnectionManager({
     localDisplayName.trim() ||
     user?.email?.split("@")[0] ||
     "User";
-  const showUpgrade =
-    !planLoading && plan.code === "free" && !!user && !localMode;
 
   const getConnectionTarget = useCallback((conn: Connection) => {
     const raw = conn.connectionString || "";
@@ -4101,17 +4028,6 @@ export function ConnectionManager({
                   user &&
                   renderAuthMenuItem("Sign In Again")}
                 {localMode && !user && renderAuthMenuItem("Sign In")}
-                {showUpgrade && user && (
-                  <>
-                    <DropdownMenuItem
-                      onClick={handleUpgradeClick}
-                      className="gap-2 text-xs cursor-pointer"
-                    >
-                      Upgrade to Pro
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator className="bg-studio-border" />
-                  </>
-                )}
               </>
             }
           />
@@ -5348,11 +5264,6 @@ export function ConnectionManager({
                     disabled={!plan.cloudEnabled}
                   />
                 </div>
-                {!plan.cloudEnabled && (
-                  <p className="text-xs text-muted-foreground">
-                    Upgrade to Pro or Team to enable cloud sync.
-                  </p>
-                )}
                 {plan.cloudEnabled && !cloudSyncEnabled && (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Input
@@ -5483,10 +5394,7 @@ export function ConnectionManager({
                   onSwitchAccount={setActiveSupabaseAccountId}
                   onRemoveAccount={handleRemoveSupabaseAccount}
                   onAddAccount={handleAddSupabaseAccount}
-                  canAddAccount={canAddSupabaseAccount(
-                    entitlement.premiumActive,
-                    supabaseAccounts.length,
-                  ).allowed}
+                  canAddAccount
                   existingConnectionStrings={connections.map(
                     (c) => c.connectionString,
                   )}
@@ -5516,10 +5424,7 @@ export function ConnectionManager({
                   onSwitchAccount={setActiveSpacetimeDbAccountId}
                   onRemoveAccount={handleRemoveSpacetimeDbAccount}
                   onAddAccount={handleAddSpacetimeDbAccount}
-                  canAddAccount={canAddSpacetimeDbAccount(
-                    entitlement.premiumActive,
-                    spacetimedbAccounts.length,
-                  ).allowed}
+                  canAddAccount
                   existingConnectionStrings={connections.map(
                     (c) => c.connectionString,
                   )}
@@ -5549,10 +5454,7 @@ export function ConnectionManager({
                   onSwitchAccount={setActiveNeonAccountId}
                   onRemoveAccount={handleRemoveNeonAccount}
                   onAddAccount={() => void handleAddNeonAccount()}
-                  canAddAccount={canAddNeonAccount(
-                    entitlement.premiumActive,
-                    neonAccounts.length,
-                  ).allowed}
+                  canAddAccount
                   existingConnectionStrings={connections.map(
                     (c) => c.connectionString,
                   )}
@@ -5586,10 +5488,7 @@ export function ConnectionManager({
                   onSwitchAccount={setActivePlanetscaleAccountId}
                   onRemoveAccount={handleRemovePlanetscaleAccount}
                   onAddAccount={handleAddPlanetscaleAccount}
-                  canAddAccount={canAddPlanetscaleAccount(
-                    entitlement.premiumActive,
-                    planetscaleAccounts.length,
-                  ).allowed}
+                  canAddAccount
                   onConnectDatabase={handlePlanetscaleConnectDatabase}
                 />
               </div>
@@ -6792,7 +6691,7 @@ export function ConnectionManager({
               queueCloudPush();
               if (result.skippedLimit > 0) {
                 toast.warning(
-                  `Imported ${result.imported} of ${totalActive} active projects — upgrade for more connections`,
+                  `Imported ${result.imported} of ${totalActive} active projects — ${result.skippedLimit} skipped by connection limit`,
                 );
               } else {
                 toast.success(
@@ -6800,7 +6699,7 @@ export function ConnectionManager({
                 );
               }
             } else if (result.skippedLimit > 0) {
-              toast.warning("Upgrade to Pro for more connections");
+              toast.warning("Some projects were skipped by the connection limit");
             } else if (result.alreadyRegistered > 0) {
               toast.info("All active projects are already connected.");
             } else if (result.failed > 0) {
@@ -6840,7 +6739,7 @@ export function ConnectionManager({
               queueCloudPush();
               if (result.skippedLimit > 0) {
                 toast.warning(
-                  `Imported ${result.imported} of ${total} databases — upgrade for more connections`,
+                  `Imported ${result.imported} of ${total} databases — ${result.skippedLimit} skipped by connection limit`,
                 );
               } else {
                 toast.success(
@@ -6848,7 +6747,7 @@ export function ConnectionManager({
                 );
               }
             } else if (result.skippedLimit > 0) {
-              toast.warning("Upgrade to Pro for more connections");
+              toast.warning("Some databases were skipped by the connection limit");
             } else if (result.alreadyRegistered > 0) {
               toast.info("All databases are already connected.");
             } else if (result.failed > 0) {

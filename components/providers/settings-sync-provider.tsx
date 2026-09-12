@@ -5,8 +5,8 @@ import { useEntitlementState } from "@/hooks/use-entitlement-state";
 import { useSettingsSync } from "@/hooks/use-settings-sync";
 
 /**
- * Background sync of themes, studio settings, font, and keybindings for
- * paid plans (entitlement.cloudEnabled). Free / local mode stay device-local.
+ * Background sync of themes, studio settings, font, and keybindings.
+ * Free for all signed-in users (entitlement.cloudEnabled). Local mode stays device-local.
  */
 export function SettingsSyncProvider({
   children,

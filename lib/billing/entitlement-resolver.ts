@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  DEFAULT_FREE_MAX_CONNECTIONS,
-  DEFAULT_FREE_MAX_WORKSPACES,
   ENTITLEMENT_CHANGED_EVENT,
   ENTITLEMENT_REFRESH_PENDING_STORAGE_KEY,
 } from "@/lib/billing/entitlement-constants";
@@ -42,9 +40,10 @@ function createFreePayload(userId: string | null): SignedEntitlementPayload {
     entitlementPlanCode: "free",
     lastPaidPlanCode: null,
     status: "none",
-    cloudEnabled: false,
-    maxConnections: DEFAULT_FREE_MAX_CONNECTIONS,
-    maxWorkspaces: DEFAULT_FREE_MAX_WORKSPACES,
+    // Totally free: everything unlocked, no caps.
+    cloudEnabled: true,
+    maxConnections: null,
+    maxWorkspaces: null,
     accessEndsAt: null,
     graceEndsAt: null,
     updatesUntil: null,
@@ -61,7 +60,7 @@ export function buildDefaultResolvedEntitlement(userId: string | null): Resolved
     source: "default",
     usingCached: false,
     refreshDue: false,
-    premiumActive: false,
+    premiumActive: true,
     graceActive: false,
     updatesExpired: false,
     clockRollbackDetected: false,
@@ -69,9 +68,9 @@ export function buildDefaultResolvedEntitlement(userId: string | null): Resolved
     effectiveNow: Date.now(),
     effectivePlanCode: "free",
     label: "Free",
-    cloudEnabled: false,
-    maxConnections: DEFAULT_FREE_MAX_CONNECTIONS,
-    maxWorkspaces: DEFAULT_FREE_MAX_WORKSPACES,
+    cloudEnabled: true,
+    maxConnections: null,
+    maxWorkspaces: null,
     accessEndsAt: null,
     graceEndsAt: null,
     updatesUntil: null,
@@ -92,23 +91,13 @@ export function evaluateEntitlementPayload(
   const clockRollbackDetected = rawNow < lastObservedAt;
   const effectiveNow = clockRollbackDetected ? lastObservedAt : rawNow;
   const isOtl = payload.entitlementPlanCode === "otl";
-  const isPaidRecurring = !isOtl && payload.entitlementPlanCode !== "free";
 
-  let premiumActive = false;
-  let graceActive = false;
+  // Totally free: every entitlement grants full access. No downgrades,
+  // no grace checks, no premium gating.
+  const premiumActive = true;
+  const graceActive = false;
 
-  if (isOtl) {
-    premiumActive = true;
-  } else if (isPaidRecurring) {
-    if (payload.accessEndsAt && effectiveNow <= payload.accessEndsAt) {
-      premiumActive = true;
-    } else if (payload.graceEndsAt && effectiveNow <= payload.graceEndsAt) {
-      premiumActive = true;
-      graceActive = true;
-    }
-  }
-
-  const effectivePlanCode = premiumActive ? payload.entitlementPlanCode : "free";
+  const effectivePlanCode = payload.entitlementPlanCode || "free";
   const updatesExpired = Boolean(isOtl && payload.updatesUntil && effectiveNow > payload.updatesUntil);
   const refreshDue = effectiveNow >= payload.refreshAfter;
 
@@ -139,9 +128,9 @@ export function evaluateEntitlementPayload(
     effectiveNow,
     effectivePlanCode,
     label: formatPlanLabel(effectivePlanCode),
-    cloudEnabled: premiumActive ? payload.cloudEnabled : false,
-    maxConnections: premiumActive ? payload.maxConnections : DEFAULT_FREE_MAX_CONNECTIONS,
-    maxWorkspaces: premiumActive ? payload.maxWorkspaces : DEFAULT_FREE_MAX_WORKSPACES,
+    cloudEnabled: true,
+    maxConnections: payload.maxConnections ?? null,
+    maxWorkspaces: payload.maxWorkspaces ?? null,
     accessEndsAt: payload.accessEndsAt,
     graceEndsAt: payload.graceEndsAt,
     updatesUntil: payload.updatesUntil,

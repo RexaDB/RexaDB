@@ -196,12 +196,12 @@ export function SupabaseAccountsScreen({
         result.imported + result.alreadyRegistered + result.skippedLimit;
       if (result.imported > 0 && result.skippedLimit > 0) {
         toast.warning(
-          `Imported ${result.imported} of ${activeTotal} active projects — upgrade for more connections`,
+          `Imported ${result.imported} of ${activeTotal} active projects — ${result.skippedLimit} skipped by connection limit`,
         );
       } else if (result.imported > 0) {
         toast.success(`Imported ${result.imported} of ${activeTotal} active projects`);
       } else if (result.skippedLimit > 0) {
-        toast.warning("Upgrade to Pro for more connections");
+        toast.warning("Some projects were skipped by the connection limit");
       } else if (result.alreadyRegistered > 0) {
         toast.info("All active projects are already connected.");
       } else if (result.failed > 0) {

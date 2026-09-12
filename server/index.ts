@@ -1850,7 +1850,7 @@ app.delete("/api/workspaces", async (req, res) => {
 app.get("/api/billing/entitlement", async (req, res) => {
   try {
     const { getEntitlementPrivateKeyPem, signEntitlementPayload } = await import("../lib/billing/entitlement-server");
-    const { DEFAULT_FREE_MAX_CONNECTIONS, DEFAULT_FREE_MAX_WORKSPACES, ENTITLEMENT_CACHE_TTL_MS } = await import("../lib/billing/entitlement-constants");
+    const { ENTITLEMENT_CACHE_TTL_MS } = await import("../lib/billing/entitlement-constants");
 
     const auth = req.headers.authorization || "";
     const token = auth.replace(/^Bearer\s+/i, "").trim();
@@ -1868,9 +1868,9 @@ app.get("/api/billing/entitlement", async (req, res) => {
       entitlementPlanCode: "free",
       lastPaidPlanCode: null,
       status: "none",
-      cloudEnabled: false,
-      maxConnections: DEFAULT_FREE_MAX_CONNECTIONS,
-      maxWorkspaces: DEFAULT_FREE_MAX_WORKSPACES,
+      cloudEnabled: true,
+      maxConnections: null,
+      maxWorkspaces: null,
       accessEndsAt: null,
       graceEndsAt: null,
       updatesUntil: null,
