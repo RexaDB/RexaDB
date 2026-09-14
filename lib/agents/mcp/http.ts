@@ -70,7 +70,7 @@ export async function handleMcpHttpRequest(req: any, res: any) {
         return;
       }
       sweepIdleSessions();
-      const server = createExternalMcpServer();
+      const server = createExternalMcpServer({ transport: "http" });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {

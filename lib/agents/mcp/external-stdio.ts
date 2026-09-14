@@ -17,7 +17,7 @@ import { registerExternalTools } from "./handlers";
 
 async function main() {
   const server = new McpServer({ name: "rexadb", version: "2.0.0" });
-  registerExternalTools(server);
+  registerExternalTools(server, { transport: "stdio" });
 
   // Log to stderr only — stdout is the MCP JSON-RPC channel.
   try {

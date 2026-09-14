@@ -39,6 +39,12 @@ import {
   upsertEdgeSecrets,
   deleteEdgeSecrets,
 } from "../../studio/edge-functions-utils";
+import {
+  appendMcpAudit,
+  extractRowCountForAudit,
+  isWriteSqlForAudit,
+  type McpAuditDraft,
+} from "./audit-log";
 import { detectConnectionDbType } from "@/lib/db/connection-type";
 
 /** The MCP SDK's AnySchema type doesn't structurally match zod v4 classic
@@ -59,7 +65,33 @@ const tableField = z.string().describe("Table or collection name");
 export type ExternalToolDeps = {
   loadConfig?: () => Promise<McpExternalConfig>;
   listConnections?: () => Promise<ConnectionDep[]>;
+  /** Override the audit sink (tests). Defaults to SQLite appendMcpAudit. */
+  audit?: (draft: McpAuditDraft) => void | Promise<void>;
+  /** Transport label recorded in the audit log ("stdio" | "http"). */
+  transport?: string;
 };
+
+/** Mode-denial messages (server-side least privilege, not prompt hints). */
+const EDGE_WRITE_DENIED =
+  "This MCP permission mode is read-only — Edge Function writes (deploy/update/delete/secrets) are blocked. Switch to a mode with write access to proceed.";
+const EDGE_READ_DENIED =
+  "This MCP permission mode does not allow reading data.";
+
+function auditOf(deps: ExternalToolDeps) {
+  return deps.audit || appendMcpAudit;
+}
+
+function logAudit(deps: ExternalToolDeps, draft: McpAuditDraft) {
+  try {
+    const sink = auditOf(deps);
+    const result = sink({ ...draft, transport: draft.transport ?? deps.transport });
+    if (result && typeof (result as Promise<void>).catch === "function") {
+      (result as Promise<void>).catch(() => {});
+    }
+  } catch {
+    // never fail the tool call on logging errors
+  }
+}
 
 function toolText(result: Awaited<ReturnType<typeof executeDbTool>>) {
   if (!result.ok) {
@@ -109,13 +141,34 @@ async function runDbTool(
   name: DbToolName,
   args: Record<string, unknown>,
 ) {
+  const startedAt = Date.now();
   try {
     const namespace = typeof args.namespace === "string" ? args.namespace : undefined;
-    const { ctx } = await buildCallContext(deps, args.connection, namespace);
+    const { ctx, meta, mode } = await buildCallContext(deps, args.connection, namespace);
     // `connection` is router-level; strip before dispatch.
     const { connection: _connection, ...toolArgs } = args;
     void _connection;
-    return toolText(await executeDbTool(name, ctx, toolArgs));
+    const result = await executeDbTool(name, ctx, toolArgs);
+    // Audit every run_sql call (read + write) with query cost, plus any
+    // mode-denied call so blocked writes leave a trail.
+    const deniedByMode =
+      !result.ok && /does not allow|read-only|blocked/i.test(result.error);
+    if (name === "run_sql" || deniedByMode) {
+      const query = typeof toolArgs.query === "string" ? toolArgs.query : undefined;
+      logAudit(deps, {
+        tool: name,
+        modeId: mode.id,
+        connectionId: meta.id,
+        connectionName: meta.name,
+        isWrite: name === "run_sql" ? isWriteSqlForAudit(query || "") : true,
+        success: result.ok,
+        error: result.ok ? null : result.error,
+        durationMs: Date.now() - startedAt,
+        rowCount: result.ok ? extractRowCountForAudit(result.data) : null,
+        query: name === "run_sql" ? (query ?? null) : null,
+      });
+    }
+    return toolText(result);
   } catch (e) {
     return errText(e);
   }
@@ -125,7 +178,7 @@ async function resolveEdgeAccessForMcp(
   deps: ExternalToolDeps,
   connectionRef: unknown,
 ) {
-  const { ctx, meta } = await buildCallContext(deps, connectionRef);
+  const { ctx, meta, mode } = await buildCallContext(deps, connectionRef);
   const loadConnections = deps.listConnections || listAllConnectionDeps;
   const all = await loadConnections().catch(() => [] as ConnectionDep[]);
   const row = all.find((r) => Number(r.id) === Number(meta.id));
@@ -135,7 +188,68 @@ async function resolveEdgeAccessForMcp(
   // which resolvePaymentsConnection then maps via host inference).
   const connectionType =
     row?.connectionType || detectConnectionDbType(connectionString, ctx.dbType);
-  return resolveEdgeAccess(connectionType, connectionString);
+  const { access, error } = await resolveEdgeAccess(connectionType, connectionString);
+  return { access, error, mode, meta };
+}
+
+/**
+ * Server-side least-privilege gate for Edge read tools. Mirrors the
+ * `allowSqlRead` enforcement in db-tools-core (sample_rows).
+ * Exported for unit tests.
+ */
+export function denyEdgeReadIfNeeded(
+  deps: ExternalToolDeps,
+  tool: string,
+  mode: { allowSqlRead: boolean; id: string },
+  meta: { id: number; name: string },
+) {
+  if (mode.allowSqlRead) return null;
+  logAudit(deps, {
+    tool,
+    modeId: mode.id,
+    connectionId: meta.id,
+    connectionName: meta.name,
+    isWrite: false,
+    success: false,
+    error: EDGE_READ_DENIED,
+    durationMs: 0,
+  });
+  return errText(new Error(EDGE_READ_DENIED));
+}
+
+/**
+ * Server-side least-privilege gate for Edge write tools. Mutating Edge calls
+ * require a mode with write access — same rule as mutating SQL.
+ * Exported for unit tests.
+ */
+export function denyEdgeWriteIfNeeded(
+  deps: ExternalToolDeps,
+  tool: string,
+  mode: { allowSqlWrite: boolean; id: string },
+  meta: { id: number; name: string },
+  extra?: { slug?: string | null; secretCount?: number | null },
+) {
+  if (mode.allowSqlWrite) return null;
+  logAudit(deps, {
+    tool,
+    modeId: mode.id,
+    connectionId: meta.id,
+    connectionName: meta.name,
+    isWrite: true,
+    success: false,
+    error: EDGE_WRITE_DENIED,
+    durationMs: 0,
+    slug: extra?.slug ?? null,
+    secretCount: extra?.secretCount ?? null,
+  });
+  return errText(new Error(EDGE_WRITE_DENIED));
+}
+
+function auditEdgeWrite(
+  deps: ExternalToolDeps,
+  draft: Omit<McpAuditDraft, "transport" | "isWrite">,
+) {
+  logAudit(deps, { ...draft, isWrite: true });
 }
 
 /**
@@ -296,8 +410,10 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "list_edge_functions", mode, meta);
+        if (denied) return denied;
         
         const { functions, error } = await listEdgeFunctions(access);
         if (error) return errText(error);
@@ -321,8 +437,10 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "get_edge_function", mode, meta);
+        if (denied) return denied;
         
         const slug = typeof args.slug === "string" ? args.slug : "";
         const { function: fn, error } = await getEdgeFunction(access, slug);
@@ -354,16 +472,29 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const slug = typeof args.slug === "string" ? args.slug : "";
+        const denied = denyEdgeWriteIfNeeded(deps, "create_edge_function", mode, meta, { slug });
+        if (denied) return denied;
         const name = typeof args.name === "string" ? args.name : undefined;
         const verifyJwt = typeof args.verifyJwt === "boolean" ? args.verifyJwt : undefined;
         const entrypointPath = typeof args.entrypointPath === "string" ? args.entrypointPath : "index.ts";
         const files = Array.isArray(args.files) ? args.files as Array<{ name: string; content: string }> : [];
         
         const { error } = await deployEdgeFunction(access, slug, { entrypointPath, name, verifyJwt }, files);
+        auditEdgeWrite(deps, {
+          tool: "create_edge_function",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          slug,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: { message: "Edge function created successfully", slug } });
@@ -387,14 +518,27 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const slug = typeof args.slug === "string" ? args.slug : "";
+        const denied = denyEdgeWriteIfNeeded(deps, "update_edge_function", mode, meta, { slug });
+        if (denied) return denied;
         const name = typeof args.name === "string" ? args.name : undefined;
         const verifyJwt = typeof args.verifyJwt === "boolean" ? args.verifyJwt : undefined;
         
         const { function: fn, error } = await updateEdgeFunction(access, slug, { name, verify_jwt: verifyJwt });
+        auditEdgeWrite(deps, {
+          tool: "update_edge_function",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          slug,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: fn });
@@ -416,11 +560,24 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const slug = typeof args.slug === "string" ? args.slug : "";
+        const denied = denyEdgeWriteIfNeeded(deps, "delete_edge_function", mode, meta, { slug });
+        if (denied) return denied;
         const { error } = await deleteEdgeFunction(access, slug);
+        auditEdgeWrite(deps, {
+          tool: "delete_edge_function",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          slug,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: { message: "Edge function deleted successfully", slug } });
@@ -442,8 +599,10 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "get_edge_function_code", mode, meta);
+        if (denied) return denied;
         
         const slug = typeof args.slug === "string" ? args.slug : "";
         const { files, error } = await fetchFunctionBody(access, slug);
@@ -473,14 +632,27 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const slug = typeof args.slug === "string" ? args.slug : "";
+        const denied = denyEdgeWriteIfNeeded(deps, "deploy_edge_function_code", mode, meta, { slug });
+        if (denied) return denied;
         const entrypointPath = typeof args.entrypointPath === "string" ? args.entrypointPath : "index.ts";
         const files = Array.isArray(args.files) ? args.files as Array<{ name: string; content: string }> : [];
         
         const { error } = await deployEdgeFunction(access, slug, { entrypointPath }, files);
+        auditEdgeWrite(deps, {
+          tool: "deploy_edge_function_code",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          slug,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: { message: "Edge function code deployed successfully", slug } });
@@ -504,8 +676,10 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "get_edge_function_logs", mode, meta);
+        if (denied) return denied;
         
         const slug = typeof args.slug === "string" ? args.slug : "";
         const source = (args.source === "function_edge_logs" || args.source === "function_logs") ? args.source : "function_edge_logs";
@@ -537,8 +711,10 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "get_edge_function_invocations", mode, meta);
+        if (denied) return denied;
         
         const slug = typeof args.slug === "string" ? args.slug : "";
         const hours = typeof args.hours === "number" ? args.hours : 1;
@@ -565,13 +741,19 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
+        const denied = denyEdgeReadIfNeeded(deps, "list_edge_secrets", mode, meta);
+        if (denied) return denied;
         
         const { secrets, error } = await listEdgeSecrets(access);
         if (error) return errText(error);
         
-        return toolText({ ok: true, data: secrets });
+        // Least privilege: AI clients get names only — never secret values.
+        return toolText({
+          ok: true,
+          data: secrets.map((s) => ({ name: s.name, updated_at: s.updated_at ?? null })),
+        });
       } catch (e) {
         return errText(e);
       }
@@ -593,12 +775,26 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const secrets = Array.isArray(args.secrets) ? args.secrets as Array<{ name: string; value: string }> : [];
+        const denied = denyEdgeWriteIfNeeded(deps, "upsert_edge_secrets", mode, meta, { secretCount: secrets.length });
+        if (denied) return denied;
         
         const { error } = await upsertEdgeSecrets(access, secrets);
+        auditEdgeWrite(deps, {
+          tool: "upsert_edge_secrets",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          // counts only — never secret names/values
+          secretCount: secrets.length,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: { message: "Secrets updated successfully", count: secrets.length } });
@@ -620,12 +816,26 @@ export function registerExternalTools(
     },
     async (args: Record<string, unknown>) => {
       try {
-        const { access, error: accessError } = await resolveEdgeAccessForMcp(deps, args.connection);
+        const startedAt = Date.now();
+        const { access, error: accessError, mode, meta } = await resolveEdgeAccessForMcp(deps, args.connection);
         if (!access) return errText(accessError || "Edge Functions are not available for this connection type.");
         
         const names = Array.isArray(args.names) ? args.names as string[] : [];
+        const denied = denyEdgeWriteIfNeeded(deps, "delete_edge_secrets", mode, meta, { secretCount: names.length });
+        if (denied) return denied;
         
         const { error } = await deleteEdgeSecrets(access, names);
+        auditEdgeWrite(deps, {
+          tool: "delete_edge_secrets",
+          modeId: mode.id,
+          connectionId: meta.id,
+          connectionName: meta.name,
+          success: !error,
+          error: error ?? null,
+          durationMs: Date.now() - startedAt,
+          // counts only — never secret names
+          secretCount: names.length,
+        });
         if (error) return errText(error);
         
         return toolText({ ok: true, data: { message: "Secrets deleted successfully", count: names.length } });

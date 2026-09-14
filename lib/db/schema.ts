@@ -154,6 +154,28 @@ export const mcpServerConfig = sqliteTable("mcp_server_config", {
 });
 
 
+// Server-side audit log for the external MCP server: every mutating tool
+// call plus query cost (duration, row count, query hash + truncated preview).
+// Never stores connection strings, secret values, or function source code.
+export const mcpAuditLog = sqliteTable("mcp_audit_log", {
+  id: text("id").primaryKey(),
+  createdAt: integer("created_at").notNull(),
+  transport: text("transport"),
+  modeId: text("mode_id"),
+  connectionId: integer("connection_id"),
+  connectionName: text("connection_name"),
+  tool: text("tool").notNull(),
+  isWrite: integer("is_write", { mode: "boolean" }).default(false).notNull(),
+  success: integer("success", { mode: "boolean" }).default(true).notNull(),
+  error: text("error"),
+  durationMs: integer("duration_ms"),
+  rowCount: integer("row_count"),
+  queryHash: text("query_hash"),
+  queryPreview: text("query_preview"),
+  slug: text("slug"),
+  secretCount: integer("secret_count"),
+});
+
 export const schemaCacheMeta = sqliteTable("schema_cache_meta", {
   connectionString: text("connection_string").primaryKey(),
   schemasUpdatedAt: integer("schemas_updated_at"),
@@ -255,6 +277,7 @@ export type AiChat = typeof aiChats.$inferSelect;
 export type AiChatMessageRow = typeof aiChatMessages.$inferSelect;
 export type UserAiSettingsRow = typeof userAiSettings.$inferSelect;
 export type McpServerConfigRow = typeof mcpServerConfig.$inferSelect;
+export type McpAuditLogRow = typeof mcpAuditLog.$inferSelect;
 
 export const workflows = sqliteTable("workflows", {
   id: text("id").primaryKey(),

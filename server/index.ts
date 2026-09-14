@@ -607,6 +607,26 @@ app.get("/api/mcp/config/token", async (_req, res) => {
   }
 });
 
+// Server-side MCP audit log (writes + query cost). Same localhost trust level
+// as the other /api/mcp routes. Query params: limit (1-500), writesOnly=1,
+// tool=<name>, connectionId=<id>.
+app.get("/api/mcp/audit-log", async (req, res) => {
+  try {
+    const { listMcpAuditLog } = await import("../lib/agents/mcp/audit-log");
+    const q = req.query as Record<string, string | undefined>;
+    const connectionId = q.connectionId !== undefined ? Number(q.connectionId) : undefined;
+    const entries = await listMcpAuditLog({
+      limit: q.limit !== undefined ? Number(q.limit) : 100,
+      writesOnly: q.writesOnly === "1" || q.writesOnly === "true",
+      tool: q.tool || undefined,
+      connectionId: connectionId !== undefined && Number.isInteger(connectionId) ? connectionId : undefined,
+    });
+    res.json({ success: true, data: { entries } });
+  } catch (e: any) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 app.post("/api/mcp/modes", async (req, res) => {
   try {
     const { loadMcpExternalConfig, saveMcpExternalConfig, sanitizeMcpExternalConfig } = await import("../lib/agents/mcp/external-config");
