@@ -18,9 +18,32 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import { getTabIcon } from "@/lib/studio/tab-registry";
 import { isPostgresCatalogDbType } from "@/lib/db/connection-type";
@@ -55,6 +78,11 @@ import {
   Gauge,
   Braces,
   CreditCard,
+  Globe,
+  Unlock,
+  Terminal,
+  MoreVertical,
+  Eye,
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
 import { StoragePanel } from "./storage/storage-panel";
@@ -66,8 +94,20 @@ import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { HardDrive } from "@/lib/icon-theme/lucide-react";
 import { EdgeFunctionsIcon } from "@/lib/icon-theme/lucide-react";
+import { Puzzle } from "@/lib/icon-theme/lucide-react";
+import { ExtensionSidebarSection } from "./extension-sidebar-section";
+import { ExtensionManagerSection } from "./extension-manager-section";
+import { parseExtensionsSidebarView } from "@/lib/extensions/sidebar-view";
+import { useExtensions } from "@/lib/extensions/react";
+import { TableContextMenuItems } from "./database/table-utils";
+import {
+  ConfirmDialogState,
+  DEFAULT_CONFIRM_DIALOG,
+  copyItemName,
+  getTableDerivedValues,
+} from "@/lib/studio/table-utils";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | null;
+type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | "extensions" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -240,6 +280,17 @@ export function StudioShellSidebar({
 }) {
   const [section, setSection] = useState<Section | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]);
+  // Extension sidebars address as `extensions` (all) or
+  // `extensions:<containerId>` (one container, rail target).
+  const extensionsView = parseExtensionsSidebarView(section as string | null);
+  // Per-container sidebar title (rail target `extensions:<containerId>` shows
+  // the container's title, not a generic "Extensions"). The hook falls back
+  // to empty lists outside the provider, so this is always safe.
+  const { containers: extensionContainers } = useExtensions();
+  const extensionContainerTitle =
+    extensionsView.active && extensionsView.containerId
+      ? extensionContainers.find((c) => c.containerId === extensionsView.containerId)?.title
+      : undefined;
 
   // Sync local section state with the external sidebarView state
   useEffect(() => {
@@ -331,10 +382,13 @@ export function StudioShellSidebar({
     },
     { id: "workflows", label: "Workflows", Icon: Workflow },
     { id: "erd", label: "ERD Designer", Icon: GitFork },
+    { id: "extensions", label: "Extensions", Icon: Puzzle },
   ];
 
   const title = section
-    ? (navItems.find((i) => i.id === section)?.label ?? "")
+    ? (extensionsView.active
+        ? (extensionContainerTitle ?? "Extensions")
+        : (navItems.find((i) => i.id === section)?.label ?? ""))
     : "";
 
   return (
@@ -391,6 +445,13 @@ export function StudioShellSidebar({
             {section === "edge-functions" && <EdgeFunctionsPanel studio={studio} />}
             {section === "workflows" && <WorkflowsPanel studio={studio} />}
             {section === "erd" && <ErdsPanel studio={studio} />}
+            {extensionsView.active && extensionsView.containerId ? (
+              // Standalone container sidebar: ONLY that container's views.
+              <ExtensionSidebarSection studio={studio} activeContainer={extensionsView.containerId} />
+            ) : (
+              // Extensions manager sidebar: management only, never content views.
+              extensionsView.active && <ExtensionManagerSection studio={studio} />
+            )}
           </div>
         </div>
       )}
@@ -601,6 +662,9 @@ function TablesPanel({ studio }: { studio: any }) {
     indexes: true,
     enums: true,
   });
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(
+    DEFAULT_CONFIRM_DIALOG,
+  );
   const schemas: string[] = (studio.schemas ?? []).filter(
     (s: string) => !String(s).startsWith("pg_"),
   );
@@ -638,12 +702,61 @@ function TablesPanel({ studio }: { studio: any }) {
       : enums.filter((e) => e.schema === selectedSchema)
   );
 
+  const { isMongo, itemNoun, copyDefinitionLabel, canExportSql } =
+    getTableDerivedValues(studio.dbType);
+  const editorLabel =
+    studio.dbType === "postgres" || studio.dbType === "supabase-mgmt"
+      ? "SQL Editor"
+      : studio.dbType === "mongodb"
+        ? "Mongo Editor"
+        : studio.dbType === "redis"
+          ? "Redis Editor"
+          : "Editor";
+  const openEditorLabel = `Open in ${editorLabel}`;
+  const viewTableSet = new Set(studio.viewTables ?? []);
+
+  const handleCopyItemName = (name: string) => copyItemName(name, itemNoun);
+
   function toggleSection(section: string) {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }
 
   return (
     <div className="flex flex-col gap-0.5">
+      <AlertDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
+      >
+        <AlertDialogContent className="bg-popover border-border text-foreground shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm font-semibold">
+              {confirmDialog.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground">
+              {confirmDialog.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-9 text-xs border-border bg-transparent hover:bg-muted transition-colors">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirmDialog.onConfirm();
+                setConfirmDialog((prev) => ({ ...prev, open: false }));
+              }}
+              className={
+                confirmDialog.variant === "destructive"
+                  ? "bg-red-500 hover:bg-red-600 text-white border-none h-9 text-xs"
+                  : "bg-primary hover:bg-primary/90 text-white border-none h-9 text-xs"
+              }
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="relative my-1">
         <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -717,20 +830,160 @@ function TablesPanel({ studio }: { studio: any }) {
             {q ? "No matches" : "No tables"}
           </div>
         ) : (
-          filtered.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => studio.handleTableClick?.(t, studio.selectedSchema)}
-              className={cn(
-                ROW,
-                studio.selectedTable === t && "bg-white/10 text-foreground",
-              )}
-            >
-              <Table2 className="size-4 shrink-0" />
-              <span className="truncate">{t}</span>
-            </button>
-          ))
+          filtered.map((table) => {
+            const securityInfo = studio.tableSecurity?.[table];
+            const rlsEnabled = securityInfo?.rlsEnabled;
+            const showDataApi = Boolean(studio.dataApiInstalled);
+            const isView = viewTableSet.has(table);
+            const ItemIcon = isView ? Eye : Table2;
+
+            const renderMenuItems = (
+              Component: any,
+              Sub: any,
+              SubTrigger: any,
+              SubContent: any,
+              Separator: any,
+              isDropdown = false,
+            ) => {
+              const handleAction =
+                (fn?: (t: string, s: string) => void) =>
+                (e: React.MouseEvent) => {
+                  if (isDropdown) e.stopPropagation();
+                  fn?.(table, selectedSchema);
+                };
+
+              return (
+                <>
+                  <Component
+                    className="text-xs"
+                    onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
+                  >
+                    <ItemIcon className="mr-2 h-3.5 w-3.5" />
+                    Open {itemNoun}
+                  </Component>
+                  <Component
+                    className="text-xs"
+                    onClick={handleAction((t, s) =>
+                      studio.openSqlEditor?.(t, s),
+                    )}
+                  >
+                    <Terminal className="mr-2 h-3.5 w-3.5" />
+                    {openEditorLabel}
+                  </Component>
+                  <Component
+                    className="text-xs"
+                    onClick={handleAction((t) => studio.viewTableSchema?.(t))}
+                  >
+                    <GitFork className="mr-2 h-3.5 w-3.5" />
+                    View Schema
+                  </Component>
+                  <TableContextMenuItems
+                    Component={Component}
+                    Sub={Sub}
+                    SubTrigger={SubTrigger}
+                    SubContent={SubContent}
+                    Separator={Separator}
+                    itemNoun={itemNoun}
+                    copyDefinitionLabel={copyDefinitionLabel}
+                    duplicateLabel={`Duplicate ${itemNoun}`}
+                    isMongo={isMongo}
+                    canExportSql={canExportSql}
+                    isDropdown={isDropdown}
+                    table={table}
+                    selectedSchema={selectedSchema}
+                    tags={studio.tags ?? []}
+                    tableTags={studio.tableTags ?? {}}
+                    handleAction={handleAction}
+                    onToggleTag={(s, t, tagName) =>
+                      studio.toggleTableTag?.(s, t, tagName)
+                    }
+                    handleCopyName={(t) => void handleCopyItemName(t)}
+                    handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
+                    handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
+                    onExport={(format) => studio.exportData?.(format)}
+                    setConfirmDialog={setConfirmDialog}
+                    onEmpty={(t, s) => studio.emptyTable?.(t, s)}
+                    onDelete={(t, s) => studio.deleteTable?.(t, s)}
+                    beforeExport={<Separator />}
+                  />
+                </>
+              );
+            };
+
+            return (
+              <ContextMenu key={`${selectedSchema}.${table}`}>
+                <ContextMenuTrigger>
+                  <div className="relative group">
+                    <button
+                      type="button"
+                      onClick={() => studio.handleTableClick?.(table, selectedSchema)}
+                      className={cn(
+                        ROW,
+                        studio.selectedTable === table && "bg-white/10 text-foreground",
+                        "w-full",
+                      )}
+                    >
+                      <ItemIcon className="size-4 shrink-0" />
+                      <span className="truncate flex-1">{table}</span>
+                      {(showDataApi || rlsEnabled === false) && (
+                        <span className="flex items-center gap-1 shrink-0">
+                          {showDataApi && (
+                            <span title="Accessible via Data API">
+                              <Globe className="w-3.5 h-3.5 text-primary/70" />
+                            </span>
+                          )}
+                          {rlsEnabled === false && (
+                            <span title="RLS disabled">
+                              <Unlock className="w-3.5 h-3.5 text-red-500/80" />
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        asChild
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className={cn(
+                            "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
+                            "opacity-0 group-hover:opacity-100",
+                          )}
+                        >
+                          <MoreVertical className="size-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        className="min-w-[160px]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {renderMenuItems(
+                          DropdownMenuItem,
+                          DropdownMenuSub,
+                          DropdownMenuSubTrigger,
+                          DropdownMenuSubContent,
+                          DropdownMenuSeparator,
+                          true,
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="min-w-[160px]">
+                  {renderMenuItems(
+                    ContextMenuItem,
+                    ContextMenuSub,
+                    ContextMenuSubTrigger,
+                    ContextMenuSubContent,
+                    ContextMenuSeparator,
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
+            );
+          })
         )
       ) : (
         <div className="flex flex-col gap-2">
@@ -750,20 +1003,160 @@ function TablesPanel({ studio }: { studio: any }) {
                     No tables found
                   </div>
                 ) : (
-                  filtered.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => studio.handleTableClick?.(t, studio.selectedSchema)}
-                      className={cn(
-                        ROW,
-                        studio.selectedTable === t && "bg-white/10 text-foreground",
-                      )}
-                    >
-                      <Table2 className="size-4 shrink-0" />
-                      <span className="truncate">{t}</span>
-                    </button>
-                  ))
+                  filtered.map((table) => {
+                    const securityInfo = studio.tableSecurity?.[table];
+                    const rlsEnabled = securityInfo?.rlsEnabled;
+                    const showDataApi = Boolean(studio.dataApiInstalled);
+                    const isView = viewTableSet.has(table);
+                    const ItemIcon = isView ? Eye : Table2;
+
+                    const renderMenuItems = (
+                      Component: any,
+                      Sub: any,
+                      SubTrigger: any,
+                      SubContent: any,
+                      Separator: any,
+                      isDropdown = false,
+                    ) => {
+                      const handleAction =
+                        (fn?: (t: string, s: string) => void) =>
+                        (e: React.MouseEvent) => {
+                          if (isDropdown) e.stopPropagation();
+                          fn?.(table, selectedSchema);
+                        };
+
+                      return (
+                        <>
+                          <Component
+                            className="text-xs"
+                            onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
+                          >
+                            <ItemIcon className="mr-2 h-3.5 w-3.5" />
+                            Open {itemNoun}
+                          </Component>
+                          <Component
+                            className="text-xs"
+                            onClick={handleAction((t, s) =>
+                              studio.openSqlEditor?.(t, s),
+                            )}
+                          >
+                            <Terminal className="mr-2 h-3.5 w-3.5" />
+                            {openEditorLabel}
+                          </Component>
+                          <Component
+                            className="text-xs"
+                            onClick={handleAction((t) => studio.viewTableSchema?.(t))}
+                          >
+                            <GitFork className="mr-2 h-3.5 w-3.5" />
+                            View Schema
+                          </Component>
+                          <TableContextMenuItems
+                            Component={Component}
+                            Sub={Sub}
+                            SubTrigger={SubTrigger}
+                            SubContent={SubContent}
+                            Separator={Separator}
+                            itemNoun={itemNoun}
+                            copyDefinitionLabel={copyDefinitionLabel}
+                            duplicateLabel={`Duplicate ${itemNoun}`}
+                            isMongo={isMongo}
+                            canExportSql={canExportSql}
+                            isDropdown={isDropdown}
+                            table={table}
+                            selectedSchema={selectedSchema}
+                            tags={studio.tags ?? []}
+                            tableTags={studio.tableTags ?? {}}
+                            handleAction={handleAction}
+                            onToggleTag={(s, t, tagName) =>
+                              studio.toggleTableTag?.(s, t, tagName)
+                            }
+                            handleCopyName={(t) => void handleCopyItemName(t)}
+                            handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
+                            handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
+                            onExport={(format) => studio.exportData?.(format)}
+                            setConfirmDialog={setConfirmDialog}
+                            onEmpty={(t, s) => studio.emptyTable?.(t, s)}
+                            onDelete={(t, s) => studio.deleteTable?.(t, s)}
+                            beforeExport={<Separator />}
+                          />
+                        </>
+                      );
+                    };
+
+                    return (
+                      <ContextMenu key={`${selectedSchema}.${table}`}>
+                        <ContextMenuTrigger>
+                          <div className="relative group">
+                            <button
+                              type="button"
+                              onClick={() => studio.handleTableClick?.(table, selectedSchema)}
+                              className={cn(
+                                ROW,
+                                studio.selectedTable === table && "bg-white/10 text-foreground",
+                                "w-full",
+                              )}
+                            >
+                              <ItemIcon className="size-4 shrink-0" />
+                              <span className="truncate flex-1">{table}</span>
+                              {(showDataApi || rlsEnabled === false) && (
+                                <span className="flex items-center gap-1 shrink-0">
+                                  {showDataApi && (
+                                    <span title="Accessible via Data API">
+                                      <Globe className="w-3.5 h-3.5 text-primary/70" />
+                                    </span>
+                                  )}
+                                  {rlsEnabled === false && (
+                                    <span title="RLS disabled">
+                                      <Unlock className="w-3.5 h-3.5 text-red-500/80" />
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                            </button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                asChild
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
+                                    "opacity-0 group-hover:opacity-100",
+                                  )}
+                                >
+                                  <MoreVertical className="size-3.5" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="end"
+                                className="min-w-[160px] border border-border bg-popover shadow-2xl"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {renderMenuItems(
+                                  DropdownMenuItem,
+                                  DropdownMenuSub,
+                                  DropdownMenuSubTrigger,
+                                  DropdownMenuSubContent,
+                                  DropdownMenuSeparator,
+                                  true,
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="min-w-[160px]">
+                          {renderMenuItems(
+                            ContextMenuItem,
+                            ContextMenuSub,
+                            ContextMenuSubTrigger,
+                            ContextMenuSubContent,
+                            ContextMenuSeparator,
+                          )}
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
+                  })
                 )}
               </div>
             )}

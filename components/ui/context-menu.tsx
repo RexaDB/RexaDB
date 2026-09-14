@@ -85,7 +85,7 @@ function ContextMenuSubContent({
     <ContextMenuPrimitive.SubContent
       data-slot="context-menu-sub-content"
       className={cn(
-        "bg-popover text-popover-foreground min-w-32 rounded-lg border p-1 shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50",
+        "ring-border ring-1 bg-popover text-popover-foreground min-w-32 rounded-lg p-1 shadow-lg outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50",
         className,
       )}
       {...props}
@@ -102,7 +102,7 @@ function ContextMenuContent({
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
         className={cn(
-          "bg-[#1c1c1e] text-[#efeff4] border-[#38383a] min-w-40 overflow-hidden rounded-lg border p-1 shadow-2xl animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50",
+          "ring-border ring-1 bg-popover text-popover-foreground min-w-40 overflow-hidden rounded-lg p-1 shadow-2xl animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50",
           className,
         )}
         {...props}
@@ -123,7 +123,7 @@ function ContextMenuItem({
       data-slot="context-menu-item"
       data-inset={inset}
       className={cn(
-        "focus:bg-[#3a3a3c] focus:text-white relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-xs outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 transition-colors",
+        "focus:bg-accent focus:text-accent-foreground relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-xs outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 transition-colors",
         className,
       )}
       {...props}
@@ -208,7 +208,7 @@ function ContextMenuSeparator({
   return (
     <ContextMenuPrimitive.Separator
       data-slot="context-menu-separator"
-      className={cn("bg-[#38383a] -mx-1 my-1 h-[0.5px]", className)}
+      className={cn("bg-border -mx-1 my-1 h-px", className)}
       {...props}
     />
   );

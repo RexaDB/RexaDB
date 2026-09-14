@@ -404,7 +404,7 @@ export function TablesList({
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                               align="end"
-                              className="w-56 bg-popover border-border shadow-2xl"
+                              className="w-56"
                             >
                               {renderMenuItems(
                                 DropdownMenuItem,
@@ -420,7 +420,7 @@ export function TablesList({
                         </div>
                       </div>
                     </ContextMenuTrigger>
-                    <ContextMenuContent className="w-56 bg-popover border-border shadow-2xl">
+                    <ContextMenuContent className="w-56">
                       {renderMenuItems(
                         ContextMenuItem,
                         ContextMenuSub,
