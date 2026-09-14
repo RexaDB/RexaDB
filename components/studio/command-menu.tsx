@@ -11,6 +11,7 @@ import {
   Layout,
   LogOut,
   Plus,
+  Puzzle,
   RefreshCw,
   Search,
   Table2,
@@ -37,6 +38,7 @@ import {
 import { defaultFilter } from "cmdk";
 import { ConnectionDbType } from "@/lib/db/connection-type";
 import { getTableLabels } from "@/lib/studio/db-labels";
+import { useExtensions } from "@/lib/extensions/react";
 import {
   formatShortcutForPlatform,
   getKeybindingCombo,
@@ -80,6 +82,7 @@ interface CommandMenuProps {
   onOpenSpacetimeDbLogs?: () => void;
   onOpenSpacetimeDbSchema?: () => void;
   onOpenBrowser?: () => void;
+  onOpenExtensions?: () => void;
   commandMenuSections: Array<{ id: string; name: string; isVisible: boolean }>;
   /** User keybindings so listed shortcuts reflect remaps. */
   keybindings?: Record<string, Keybinding>;
@@ -95,7 +98,7 @@ interface CommandItem {
 }
 
 interface CommandGroup {
-  id: SectionId | "functions" | "schemas";
+  id: SectionId | "functions" | "schemas" | string;
   title: string;
   items: CommandItem[];
 }
@@ -129,12 +132,14 @@ export function CommandMenu({
   onOpenSpacetimeDbLogs,
   onOpenSpacetimeDbSchema,
   onOpenBrowser,
+  onOpenExtensions,
   commandMenuSections = [],
   keybindings,
 }: CommandMenuProps) {
   const labels = getTableLabels(dbType);
   const isMongo = dbType === "mongodb";
   const isRedis = dbType === "redis";
+  const { commands: extensionCommands, executeCommand } = useExtensions();
 
   const [search, setSearch] = useState("");
   const [selectedValue, setSelectedValue] = useState("");
@@ -360,6 +365,17 @@ export function CommandMenu({
                 },
               ]
             : []),
+          ...(onOpenExtensions
+            ? [
+                {
+                  id: "manage-extensions",
+                  label: "Manage Extensions",
+                  keywords: ["extension", "extensions", "plugin", "marketplace", "install"],
+                  icon: Puzzle,
+                  action: () => onOpenExtensions(),
+                },
+              ]
+            : []),
           ...(onUniversalSearch
             ? [
                 {
@@ -452,6 +468,32 @@ export function CommandMenu({
       });
     }
 
+    // Extensions: every `contributes.commands` + runtime-registered command
+    // appears in Cmd+K under its extension group, VS Code-style.
+    if (extensionCommands.length > 0) {
+      const byGroup = new Map<string, typeof extensionCommands>();
+      for (const cmd of extensionCommands) {
+        const g = cmd.group || "Extensions";
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g)!.push(cmd);
+      }
+      for (const [groupTitle, cmds] of byGroup) {
+        groups.push({
+          id: `extensions-${groupTitle}`,
+          title: `Extensions · ${groupTitle}`,
+          items: cmds.map((cmd) => ({
+            id: `ext-${cmd.command}`,
+            label: cmd.title,
+            keywords: ["extension", cmd.command, cmd.title],
+            icon: Plus,
+            action: () => {
+              void executeCommand(cmd.command);
+            },
+          })),
+        });
+      }
+    }
+
     return groups;
   }, [
     functions,
@@ -474,11 +516,14 @@ export function CommandMenu({
     onToggleSidebar,
     onOpenSnapshots,
     onOpenBrowser,
+    onOpenExtensions,
     onUniversalSearch,
     schemas,
     sectionVisibility,
     shortcutFor,
     tables,
+    extensionCommands,
+    executeCommand,
   ]);
 
   const filteredGroups = useMemo(() => {

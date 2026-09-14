@@ -11,6 +11,7 @@ import { DatabaseIcon } from "@/lib/icon-theme/solar-icons";
 import { Clock, MessagesSquare, Sparkles, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettingsSyncStatus } from "@/hooks/use-settings-sync-status";
+import { useExtensions } from "@/lib/extensions/react";
 
 /**
  * VS Code-style status bar for the Modern UI — the real footer of the window.
@@ -50,6 +51,12 @@ export function ModernStatusBar({
   const itemClass =
     "flex min-h-6 items-center gap-1.5 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground";
   const buttonClass = cn(itemClass, "cursor-pointer");
+
+  // Extensions (VS Code-like `window.createStatusBarItem`). useExtensions()
+  // returns a safe empty fallback when the provider is absent (tests).
+  const { statusItems: extensionItems, executeCommand: executeExtensionCommand } = useExtensions();
+  const leftExtensionItems = extensionItems.filter((i) => i.alignment === "left");
+  const rightExtensionItems = extensionItems.filter((i) => i.alignment !== "left");
 
   const settingsSyncLabel = !settingsSyncEnabled
     ? "Settings not synced"
@@ -219,7 +226,33 @@ export function ModernStatusBar({
           )}
         </>
       )}
+      {leftExtensionItems.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => {
+            if (item.command) void executeExtensionCommand(item.command);
+          }}
+          className={buttonClass}
+          title={item.tooltip ?? item.text}
+        >
+          <span className="truncate">{item.text}</span>
+        </button>
+      ))}
       <div className="ml-auto flex min-w-0 items-center gap-1">
+        {rightExtensionItems.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => {
+              if (item.command) void executeExtensionCommand(item.command);
+            }}
+            className={buttonClass}
+            title={item.tooltip ?? item.text}
+          >
+            <span className="truncate">{item.text}</span>
+          </button>
+        ))}
         {onAskAI && (
           <button
             type="button"

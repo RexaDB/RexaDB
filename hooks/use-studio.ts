@@ -8373,6 +8373,10 @@ END $$;`.trim();
     openSimpleTab('keybindings', 'keybindings', 'Keybindings');
   }, [openSimpleTab]);
 
+  const openExtensionsTab = useCallback(() => {
+    openSimpleTab('extensions', 'extensions', 'Extensions');
+  }, [openSimpleTab]);
+
   const goToRelativeTab = useCallback((direction: "next" | "prev") => {
     if (!openTabs.length) return;
     const currentIndex = activeTabId ? openTabs.findIndex((tab) => tab.id === activeTabId) : -1;
@@ -8573,6 +8577,7 @@ END $$;`.trim();
     openSettingsTab,
     openProfileSettingsTab,
     openKeybindingsTab,
+    openExtensionsTab,
     openAuthUsersTab,
     openAuthSessionsTab,
     openAuthProvidersTab,
@@ -8864,6 +8869,7 @@ END $$;`.trim();
     openSettingsTab,
     openProfileSettingsTab,
     openKeybindingsTab,
+    openExtensionsTab,
     openAuthUsersTab,
     openAuthSessionsTab,
     openAuthProvidersTab,

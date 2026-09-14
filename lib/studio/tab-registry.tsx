@@ -13,6 +13,9 @@ import { SnapshotTableView } from "@/components/studio/snapshots/snapshot-table-
 import { ImportExportView } from "@/components/studio/import-export-view";
 import { SettingsView } from "@/components/studio/settings-view";
 import { KeybindingsView } from "@/components/studio/keybindings-view";
+import { ExtensionsView } from "@/components/studio/extensions-view";
+import { ExtensionTabView } from "@/components/studio/extension-tab-view";
+import { ExtensionPanelTabView } from "@/components/studio/extension-panel-tab-view";
 import { ManageWorkspacesView } from "@/components/studio/manage-workspaces-view";
 import { SnapshotsView } from "@/components/studio/snapshots/snapshots-view";
 import {
@@ -37,6 +40,7 @@ import {
   List,
   Lock,
   Plus,
+  Puzzle,
   Search,
   Server,
   Settings,
@@ -145,6 +149,7 @@ export const TAB_ICON_COMPONENTS: Record<string, LucideIcon> = {
   "storage-files": FolderOpen,
   "edge-function": EdgeFunctionsIcon,
   browser: Globe,
+  extensions: Puzzle,
 };
 
 export function getTabIcon(type: string): LucideIcon | undefined {
@@ -210,6 +215,9 @@ export const TAB_REGISTRY: {
   "agent-settings": TabTypeConfig;
   "profile-settings": TabTypeConfig;
   keybindings: TabTypeConfig;
+  extensions: TabTypeConfig;
+  "extension-view": TabTypeConfig;
+  "extension-panel": TabTypeConfig;
 } = {
   // ── content ────────────────────────────────────────────────────────────
   table: {
@@ -859,6 +867,61 @@ export const TAB_REGISTRY: {
   keybindings: {
     ...simpleConfig("keybindings", "keybindings", "Keybindings", "key", "settings"),
     renderComponent: (opts) => <KeybindingsView studio={opts.studio as any} />,
+  },
+  extensions: {
+    ...simpleConfig("extensions", "extensions", "Extensions", "extensions", "settings"),
+    renderComponent: () => <ExtensionsView />,
+  },
+  "extension-view": {
+    type: "extension-view",
+    viewMode: "extension-view",
+    defaultName: (meta) => String((meta as { title?: string }).title ?? "Extension View"),
+    buildTabId: (meta) => `extview-${(meta as { viewId?: string }).viewId ?? "unknown"}`,
+    createTab: (id, meta) => {
+      const m = meta as { viewId?: string; title?: string; extensionId?: string };
+      const tab: StudioInitialTab & { extensionViewId?: string; extensionId?: string } = {
+        id,
+        type: "extension-view" as StudioInitialTab["type"],
+        name: m.title ?? "Extension View",
+      };
+      if (m.viewId) tab.extensionViewId = m.viewId;
+      if (m.extensionId) tab.extensionId = m.extensionId;
+      return tab;
+    },
+    icon: "extensions",
+    group: "content",
+    renderComponent: (opts) => {
+      const viewId =
+        (opts.tab as StudioInitialTab & { extensionViewId?: string }).extensionViewId ??
+        opts.tab.id.replace(/^extview-/, "").replace(/::pane::.*$/, "");
+      return <ExtensionTabView viewId={viewId} />;
+    },
+  },
+  "extension-panel": {
+    type: "extension-panel",
+    viewMode: "extension-panel",
+    defaultName: (meta) => String((meta as { title?: string }).title ?? "Extension Panel"),
+    buildTabId: (meta) => `extpanel-${(meta as { panelId?: string }).panelId ?? "unknown"}`,
+    createTab: (id, meta) => {
+      const m = meta as { panelId?: string; title?: string; extensionId?: string; html?: string };
+      const tab: StudioInitialTab = {
+        id,
+        type: "extension-panel" as StudioInitialTab["type"],
+        name: m.title ?? "Extension Panel",
+      };
+      if (m.panelId) tab.extensionPanelId = m.panelId;
+      if (m.extensionId) tab.extensionId = m.extensionId;
+      if (m.html) tab.extensionPanelHtml = m.html;
+      return tab;
+    },
+    icon: "extensions",
+    group: "content",
+    renderComponent: (opts) => {
+      const t = opts.tab as StudioInitialTab;
+      const panelId =
+        t.extensionPanelId ?? opts.tab.id.replace(/^extpanel-/, "").replace(/::pane::.*$/, "");
+      return <ExtensionPanelTabView panelId={panelId} html={t.extensionPanelHtml} />;
+    },
   },
 } satisfies Record<string, TabTypeConfig>;
 

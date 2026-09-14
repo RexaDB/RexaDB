@@ -11,6 +11,7 @@ import {
 } from "@/lib/studio/editor-themes";
 import { getSqlSuggestions } from "@/lib/studio/sql-suggestions";
 import { buildShortcutCombo } from "@/lib/studio/keybindings";
+import { useExtensions } from "@/lib/extensions/react";
 import type { BaseSqlInputProps } from "@/lib/studio/sql-input-types";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -64,6 +65,10 @@ export function MonacoSqlInput({
   const vimDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const vimStatusRef = useRef<HTMLDivElement | null>(null);
   const statusBarRef = useRef<HTMLDivElement | null>(null);
+  // Extension-provided completion items (VS Code-like `languages.registerCompletionItems`).
+  const { completions: extensionCompletions } = useExtensions();
+  const extensionCompletionsRef = useRef(extensionCompletions);
+  extensionCompletionsRef.current = extensionCompletions;
   const aiModeRef = useRef(aiMode);
   const slashAiTriggerRef = useRef(slashAiTrigger);
   const [isDragging, setIsDragging] = useState(false);
@@ -157,32 +162,46 @@ export function MonacoSqlInput({
             dbType,
           );
           if (!result) return { suggestions: [] };
-          return {
-            suggestions: result.items.map((item, index) => {
-              const start = model.getPositionAt(result.tokenStart);
-              const end = model.getPositionAt(result.tokenEnd);
-              return {
-                label: item.label,
-                insertText: item.insertText,
-                detail: item.detail,
-                sortText: index.toString().padStart(4, "0"),
-                kind:
-                  item.kind === "table"
-                    ? monaco.languages.CompletionItemKind.Class
-                    : item.kind === "column"
-                      ? monaco.languages.CompletionItemKind.Field
-                      : item.kind === "function"
-                        ? monaco.languages.CompletionItemKind.Function
-                        : monaco.languages.CompletionItemKind.Keyword,
-                range: {
-                  startLineNumber: start.lineNumber,
-                  startColumn: start.column,
-                  endLineNumber: end.lineNumber,
-                  endColumn: end.column,
-                },
-              };
-            }),
-          };
+          const start = model.getPositionAt(result.tokenStart);
+          const end = model.getPositionAt(result.tokenEnd);
+          const base = result.items.map((item, index) => {
+            return {
+              label: item.label,
+              insertText: item.insertText,
+              detail: item.detail,
+              sortText: index.toString().padStart(4, "0"),
+              kind:
+                item.kind === "table"
+                  ? monaco.languages.CompletionItemKind.Class
+                  : item.kind === "column"
+                    ? monaco.languages.CompletionItemKind.Field
+                    : item.kind === "function"
+                      ? monaco.languages.CompletionItemKind.Function
+                      : monaco.languages.CompletionItemKind.Keyword,
+              range: {
+                startLineNumber: start.lineNumber,
+                startColumn: start.column,
+                endLineNumber: end.lineNumber,
+                endColumn: end.column,
+              },
+            };
+          });
+          // Extension contributions (VS Code-like languages API), sorted after core.
+          const extra =
+            extensionCompletionsRef.current?.["sql"]?.map((item, i) => ({
+              label: item.label,
+              insertText: item.insertText ?? item.label,
+              detail: item.detail ?? "Extension",
+              sortText: `9${i.toString().padStart(3, "0")}`,
+              kind: monaco.languages.CompletionItemKind.Keyword,
+              range: {
+                startLineNumber: start.lineNumber,
+                startColumn: start.column,
+                endLineNumber: end.lineNumber,
+                endColumn: end.column,
+              },
+            })) ?? [];
+          return { suggestions: [...base, ...extra] };
         },
       });
   };

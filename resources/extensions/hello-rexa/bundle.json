@@ -1,0 +1,129 @@
+{
+  "manifest": {
+    "id": "rexa.hello-rexa",
+    "name": "hello-rexa",
+    "publisher": "rexa",
+    "version": "1.0.0",
+    "displayName": "Hello Rexa",
+    "description": "Example RexaDB extension exercising every v1 contribution point.",
+    "engines": {
+      "rexadb": "^1.0.0"
+    },
+    "main": "main.js",
+    "activationEvents": [
+      "onStartupFinished"
+    ],
+    "capabilities": [
+      "query:read",
+      "connections:read",
+      "clipboard"
+    ],
+    "contributes": {
+      "commands": [
+        {
+          "command": "hello-rexa.say-hello",
+          "title": "Hello Rexa: Say Hello",
+          "group": "Hello Rexa"
+        },
+        {
+          "command": "hello-rexa.insert-select-star",
+          "title": "Hello Rexa: Insert SELECT *",
+          "group": "Hello Rexa"
+        },
+        {
+          "command": "hello-rexa.open-dashboard",
+          "title": "Hello Rexa: Open Dashboard Panel",
+          "group": "Hello Rexa"
+        },
+        {
+          "command": "hello-rexa.show-schema",
+          "title": "Hello Rexa: Show Schema Summary",
+          "group": "Hello Rexa"
+        }
+      ],
+      "viewsContainers": [
+        {
+          "id": "hello-rexa.group",
+          "title": "Hello Rexa",
+          "icon": "👋"
+        }
+      ],
+      "views": [
+        {
+          "id": "hello-rexa.connections",
+          "name": "Hello Connections",
+          "type": "tree",
+          "containerId": "hello-rexa.group"
+        },
+        {
+          "id": "hello-rexa.welcome",
+          "name": "Hello Webview",
+          "type": "webview",
+          "containerId": "hello-rexa.group",
+          "html": "<html><body style='font-family:sans-serif;padding:12px'><h3>Hello Rexa webview</h3><p>Rendered in a sandboxed iframe via <code>acquireRexaApi()</code>.</p></body></html>"
+        }
+      ],
+      "webviewPanels": [
+        {
+          "id": "hello-rexa.dashboard",
+          "title": "Hello Dashboard",
+          "area": "both",
+          "html": "<html><body style='font-family:sans-serif;padding:16px'><h2>Hello Dashboard</h2><p>Opened with <code>rexa.window.openWebviewPanel</code>.</p></body></html>"
+        }
+      ],
+      "statusBar": [
+        {
+          "id": "hello",
+          "text": "$(smiley) Hello Rexa",
+          "tooltip": "Hello Rexa status item",
+          "command": "hello-rexa.say-hello",
+          "alignment": "right",
+          "priority": 100
+        }
+      ],
+      "languages": [
+        {
+          "id": "sql",
+          "keywords": [
+            "HELLO_REXA"
+          ],
+          "formatter": false
+        }
+      ],
+      "themes": [
+        {
+          "id": "hello-rexa-warm",
+          "label": "Hello Warm",
+          "uiTheme": "vs-dark",
+          "cssVariables": {
+            "accent": "#f59e0b"
+          }
+        }
+      ],
+      "resultVisualizers": [
+        {
+          "id": "hello-rexa.json-tree",
+          "label": "Hello JSON Tree",
+          "selector": "*:json"
+        }
+      ],
+      "cellRenderers": [
+        {
+          "id": "hello-rexa.uppercase",
+          "label": "Hello Uppercase",
+          "forTypes": [
+            "text"
+          ]
+        }
+      ],
+      "aiTools": [
+        {
+          "id": "hello-rexa.explain-plan",
+          "label": "Explain plan",
+          "description": "Explains the active query plan."
+        }
+      ]
+    }
+  },
+  "code": "/**\n * Hello Rexa — example RexaDB extension (Worker sandbox, no imports).\n * Declares `activate(rexa)`; the host injects `rexa` (VS Code-like API).\n * Install via Extensions manager: paste `bundle.json`, or copy this file's\n * contents as `code` with `manifest.json` as `manifest`.\n */\nasync function activate(rexa) {\n  // 1. Commands (appear in Cmd+K under \"Hello Rexa\").\n  await rexa.commands.registerCommand(\"hello-rexa.say-hello\", \"Hello Rexa: Say Hello\", \"Hello Rexa\");\n  await rexa.commands.registerCommand(\"hello-rexa.insert-select-star\", \"Hello Rexa: Insert SELECT *\", \"Hello Rexa\");\n  await rexa.commands.registerCommand(\"hello-rexa.open-dashboard\", \"Hello Rexa: Open Dashboard Panel\", \"Hello Rexa\");\n  await rexa.commands.registerCommand(\"hello-rexa.show-schema\", \"Hello Rexa: Show Schema Summary\", \"Hello Rexa\");\n\n  // The Worker shim routes host->worker handler calls by name:\n  // `command:<id>` for commands, `tree:<viewId>` for tree views.\n  rexa.__registerHandler(\"command:hello-rexa.say-hello\", async () => {\n    await rexa.window.showInformationMessage(\"Hello from Hello Rexa!\");\n    return \"greeted\";\n  });\n  rexa.__registerHandler(\"command:hello-rexa.insert-select-star\", async () => {\n    const current = await rexa.rexaDb.getActiveQuery();\n    await rexa.rexaDb.setActiveQuery(`${current}SELECT * `.trimStart());\n    return \"inserted\";\n  });\n  rexa.__registerHandler(\"command:hello-rexa.open-dashboard\", async () => {\n    await rexa.window.openWebviewPanel(\n      \"hello-rexa.dashboard\",\n      \"<html><body style='font-family:sans-serif;padding:16px'><h2>Hello Dashboard</h2><p>Opened at runtime.</p></body></html>\",\n    );\n    return \"opened\";\n  });\n  rexa.__registerHandler(\"command:hello-rexa.show-schema\", async () => {\n    const schema = await rexa.rexaDb.getSchema();\n    await rexa.window.showInformationMessage(\n      `${schema.database || \"active database\"} (${schema.dbType}): ${schema.tables.length} table(s) across ${schema.schemas.length} schema(s).`\n    );\n    return schema;\n  });\n\n  // 2. Sidebar tree view.\n  rexa.__registerHandler(\"tree:hello-rexa.connections\", async (parentId) => {\n    if (!parentId) {\n      const connections = await rexa.rexaDb.getConnections();\n      return connections.map((c) => ({\n        id: `conn-${c.id}`,\n        label: c.name,\n        description: c.dbType,\n        collapsible: true,\n      }));\n    }\n    return [{ id: `${parentId}-info`, label: \"Connection details live in RexaDB\", collapsible: false }];\n  });\n  await rexa.window.registerTreeDataProvider(\"hello-rexa.connections\");\n\n  // 3. Status bar (rail icon comes from the viewsContainer `icon` — one\n  // activity-rail entry opening this container's sidebar; no runtime\n  // createRailItem here so we never produce a duplicate second icon).\n  await rexa.window.createStatusBarItem(\"hello\", \"$(smiley) Hello Rexa\", {\n    tooltip: \"Hello Rexa status item\",\n    command: \"hello-rexa.say-hello\",\n    alignment: \"right\",\n    priority: 100,\n  });\n\n  // 4. Open the webview as an editor tab on demand via command.\n  rexa.__registerHandler(\"command:hello-rexa.open-tab\", async () => {\n    await rexa.window.openTab(\"hello-rexa.welcome\", { title: \"Hello Rexa\" });\n    return \"tab-opened\";\n  });\n  await rexa.commands.registerCommand(\"hello-rexa.open-tab\", \"Hello Rexa: Open Webview Tab\", \"Hello Rexa\");\n\n  // 4. Languages (SQL keyword completion).\n  await rexa.languages.registerCompletionItems(\"sql\", [\n    { label: \"HELLO_REXA\", detail: \"Hello Rexa keyword\", insertText: \"HELLO_REXA\" },\n  ]);\n\n  // 5. AI tool.\n  await rexa.ai.registerTool({\n    id: \"hello-rexa.explain-plan\",\n    label: \"Explain plan\",\n    description: \"Explains the active query plan.\",\n  });\n}\n"
+}

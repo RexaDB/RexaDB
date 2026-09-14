@@ -19,6 +19,7 @@ import { SettingsSyncProvider } from "@/components/providers/settings-sync-provi
 import { ClientShim } from "@/components/client-shim";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
 import { SidecarGate } from "@/components/gates/sidecar-gate";
+import { ExtensionProvider } from "@/lib/extensions/react";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -64,7 +65,9 @@ export default function RootLayout({
                   <AppUpdateProvider>
                     <UpdateNotificationProvider>
                     <SettingsSyncProvider>
+                      <ExtensionProvider>
                       {children}
+                      </ExtensionProvider>
                       <Toaster
                         position="bottom-right"
                         theme="system"

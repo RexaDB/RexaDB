@@ -1,0 +1,56 @@
+{
+  "id": "rexa.hello-rexa",
+  "name": "hello-rexa",
+  "publisher": "rexa",
+  "version": "1.0.0",
+  "displayName": "Hello Rexa",
+  "description": "Example RexaDB extension exercising every v1 contribution point.",
+  "engines": { "rexadb": "^1.0.0" },
+  "main": "main.js",
+  "activationEvents": ["onStartupFinished"],
+  "capabilities": ["query:read", "connections:read", "clipboard"],
+  "contributes": {
+    "commands": [
+      { "command": "hello-rexa.say-hello", "title": "Hello Rexa: Say Hello", "group": "Hello Rexa" },
+      { "command": "hello-rexa.insert-select-star", "title": "Hello Rexa: Insert SELECT *", "group": "Hello Rexa" },
+      { "command": "hello-rexa.open-dashboard", "title": "Hello Rexa: Open Dashboard Panel", "group": "Hello Rexa" },
+      { "command": "hello-rexa.show-schema", "title": "Hello Rexa: Show Schema Summary", "group": "Hello Rexa" }
+    ],
+    "viewsContainers": [{ "id": "hello-rexa.group", "title": "Hello Rexa", "icon": "👋" }],
+    "views": [
+      { "id": "hello-rexa.connections", "name": "Hello Connections", "type": "tree", "containerId": "hello-rexa.group" },
+      {
+        "id": "hello-rexa.welcome",
+        "name": "Hello Webview",
+        "type": "webview",
+        "containerId": "hello-rexa.group",
+        "html": "<html><body style='font-family:sans-serif;padding:12px'><h3>Hello Rexa webview</h3><p>Rendered in a sandboxed iframe via <code>acquireRexaApi()</code>.</p></body></html>"
+      }
+    ],
+    "webviewPanels": [
+      {
+        "id": "hello-rexa.dashboard",
+        "title": "Hello Dashboard",
+        "area": "both",
+        "html": "<html><body style='font-family:sans-serif;padding:16px'><h2>Hello Dashboard</h2><p>Opened with <code>rexa.window.openWebviewPanel</code>.</p></body></html>"
+      }
+    ],
+    "statusBar": [
+      { "id": "hello", "text": "$(smiley) Hello Rexa", "tooltip": "Hello Rexa status item", "command": "hello-rexa.say-hello", "alignment": "right", "priority": 100 }
+    ],
+    "languages": [
+      { "id": "sql", "keywords": ["HELLO_REXA"], "formatter": false }
+    ],
+    "themes": [
+      {
+        "id": "hello-rexa-warm",
+        "label": "Hello Warm",
+        "uiTheme": "vs-dark",
+        "cssVariables": { "accent": "#f59e0b" }
+      }
+    ],
+    "resultVisualizers": [{ "id": "hello-rexa.json-tree", "label": "Hello JSON Tree", "selector": "*:json" }],
+    "cellRenderers": [{ "id": "hello-rexa.uppercase", "label": "Hello Uppercase", "forTypes": ["text"] }],
+    "aiTools": [{ "id": "hello-rexa.explain-plan", "label": "Explain plan", "description": "Explains the active query plan." }]
+  }
+}

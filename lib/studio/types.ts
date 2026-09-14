@@ -79,6 +79,14 @@ export interface StudioInitialTab {
   bucketName?: string;
   /** Edge function slug for `edge-function` tabs */
   functionName?: string;
+  /** Extension view id for `extension-view` tabs */
+  extensionViewId?: string;
+  /** Owning extension id for `extension-view` tabs */
+  extensionId?: string;
+  /** Extension panel id for `extension-panel` tabs */
+  extensionPanelId?: string;
+  /** Snapshot of an `extension-panel` tab's html (falls back to the live registry) */
+  extensionPanelHtml?: string;
   /** VS Code-style preview tab — temporary until confirmed by double-click, edit, or pin */
   isPreview?: boolean;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
 import { STUDIO_TAB_ICONS, TAB_REGISTRY } from "@/lib/studio/tab-registry";
@@ -18,14 +18,26 @@ import { InsertRowSheet } from "./insert-row-sheet";
 import { ReviewSheet } from "./review-sheet";
 import { useStudio } from "@/hooks/use-studio";
 import { CommandMenu } from "./command-menu";
+import { ExtensionPanelHost } from "./extension-panel-host";
 import { UniversalSearch } from "./universal-search";
 import {
   listWorkflows,
   createWorkflow,
   updateWorkflow,
   getWorkflow,
+  getConnections as fetchConnectionList,
+  runQuery as runStudioQuery,
+  fetchSchemas as fetchSchemaList,
+  fetchAllTablesWithColumns,
   type SearchAllResult,
 } from "@/lib/api/actions-client";
+import { detectConnectionDbType } from "@/lib/db/connection-type";
+import {
+  registerExtensionDbBridge,
+  unregisterExtensionDbBridge,
+  type ExtensionDbBridge,
+} from "@/lib/extensions/db-bridge";
+import { EXTENSION_OPEN_TAB_EVENT, EXTENSION_OPEN_PANEL_TAB_EVENT } from "@/lib/extensions/react";
 
 import { ShortcutNavigator } from "./shortcut-navigator";
 import { AiChatSheet } from "./ai/ai-chat-sheet";
@@ -124,6 +136,180 @@ export function StudioInterface({
     studio.setOpenTabs((prev: typeof studio.openTabs) => [...prev, newTab]);
     studio.setActiveTabId(browserId);
   }, [studio]);
+
+  // Live DB bridge for extensions (`rexa.rexaDb.*`). Methods read the latest
+  // studio state through a ref so registration is stable across renders.
+  const studioRef = useRef(studio);
+  useEffect(() => {
+    studioRef.current = studio;
+  });
+  useEffect(() => {
+    const normalizeFields = (fields: unknown): string[] =>
+      Array.isArray(fields)
+        ? fields.map((f) => (typeof f === "string" ? f : ((f as { name?: unknown })?.name != null ? String((f as { name?: unknown }).name) : String(f))))
+        : [];
+    const quoteIdent = (dbType: string, ident: string) => {
+      const escaped = String(ident).replace(/`/g, "``").replace(/"/g, '""');
+      return dbType === "mysql" ? `\`${String(ident).replace(/`/g, "``")}\`` : `"${escaped}"`;
+    };
+    const bridge: ExtensionDbBridge = {
+      getConnections: async () => {
+        try {
+          const list = await fetchConnectionList();
+          return list.map((c: { id: number; name: string; connectionString?: string; connectionType?: string }) => ({
+            id: c.id,
+            name: c.name,
+            dbType: detectConnectionDbType(c.connectionString ?? "", c.connectionType),
+          }));
+        } catch {
+          return [];
+        }
+      },
+      getActiveConnection: async () => {
+        const s = studioRef.current;
+        return { id: s.connection.id, name: s.connection.name, dbType: s.dbType };
+      },
+      executeQuery: async <T,>(sql: string, params?: unknown[]) => {
+        const s = studioRef.current;
+        const res = await runStudioQuery(s.currentConnectionString, sql, params ?? []);
+        if (!res.success) throw new Error(res.error || "Query failed");
+        return { rows: (res.data?.rows ?? []) as T[], fields: normalizeFields(res.data?.fields) };
+      },
+      getSchema: async () => {
+        const s = studioRef.current;
+        const connStr = s.currentConnectionString;
+        const connType = (s.connection as { connectionType?: string }).connectionType;
+        const [schemasRes, colsRes] = await Promise.all([
+          fetchSchemaList(connStr, connType).catch(() => ({ success: false as const })),
+          fetchAllTablesWithColumns(connStr).catch(() => ({ success: false as const })),
+        ]);
+        const rows = (colsRes as { success?: boolean; data?: unknown }).success
+          ? ((colsRes as { data: Array<Record<string, unknown>> }).data ?? [])
+          : [];
+        const byTable = new Map<string, { schema: string; name: string; columns: Array<{ name: string; type?: string; nullable?: boolean }> }>();
+        for (const r of rows) {
+          const schema = String(r.table_schema ?? s.selectedSchema ?? "public");
+          const name = String(r.table_name ?? "");
+          if (!name) continue;
+          const key = `${schema}.${name}`;
+          if (!byTable.has(key)) byTable.set(key, { schema, name, columns: [] });
+          if (r.column_name) {
+            byTable.get(key)!.columns.push({
+              name: String(r.column_name),
+              type: r.data_type != null ? String(r.data_type) : undefined,
+              nullable: String(r.is_nullable ?? "YES") !== "NO",
+            });
+          }
+        }
+        const tables = [...byTable.values()];
+        const schemas = (schemasRes as { success?: boolean; data?: unknown }).success &&
+          Array.isArray((schemasRes as { data: unknown }).data)
+          ? ((schemasRes as { data: string[] }).data.map(String))
+          : [...new Set(tables.map((t) => t.schema))];
+        return {
+          database: s.currentDatabase ?? "",
+          dbType: s.dbType,
+          schemas,
+          tables,
+        };
+      },
+      readTable: async (schema, table, limit = 100) => {
+        const s = studioRef.current;
+        if (s.dbType === "mongodb" || s.dbType === "redis" || s.dbType === "spacetimedb") {
+          throw new Error(`readTable is only supported for SQL engines (active: ${s.dbType})`);
+        }
+        const capped = Math.min(Math.max(1, limit), 1000);
+        const ref = `${quoteIdent(s.dbType, schema)}.${quoteIdent(s.dbType, table)}`;
+        const res = await runStudioQuery(s.currentConnectionString, `SELECT * FROM ${ref} LIMIT ${capped}`);
+        if (!res.success) throw new Error(res.error || "Query failed");
+        return { rows: res.data?.rows ?? [], fields: normalizeFields(res.data?.fields) };
+      },
+      getActiveQuery: async () => {
+        const s = studioRef.current;
+        const tab = s.openTabs.find((t: { id: string }) => t.id === s.activeTabId) as
+          | { type?: string; query?: string }
+          | undefined;
+        if (tab?.type === "sql") return tab.query ?? "";
+        const state = s.sqlTabStates?.[s.activeTabId ?? ""] as { query?: string } | undefined;
+        return state?.query ?? tab?.query ?? "";
+      },
+      setActiveQuery: async (sql: string) => {
+        const s = studioRef.current;
+        const activeId = s.activeTabId;
+        const tab = s.openTabs.find((t: { id: string }) => t.id === activeId) as
+          | { type?: string }
+          | undefined;
+        if (tab?.type === "sql" && activeId) {
+          s.setOpenTabs((prev: typeof s.openTabs) =>
+            prev.map((t) => (t.id === activeId ? { ...t, query: sql } : t)),
+          );
+          return;
+        }
+        s.openSqlEditor(undefined, undefined, sql);
+      },
+    };
+    registerExtensionDbBridge(bridge);
+    return () => unregisterExtensionDbBridge(bridge);
+  }, []);
+
+  // Extension views opened as editor tabs (`rexa.window.openTab(viewId)`).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ extensionId?: string; viewId?: string; title?: string }>).detail;
+      if (!detail?.viewId) return;
+      const s = studioRef.current;
+      const config = TAB_REGISTRY["extension-view"];
+      const tabId = config.buildTabId({ viewId: detail.viewId });
+      const existing = s.openTabs.find(
+        (t: { id: string; extensionViewId?: string }) =>
+          t.id === tabId || (t as { extensionViewId?: string }).extensionViewId === detail.viewId,
+      );
+      if (existing) {
+        s.setActiveTabId(existing.id);
+        return;
+      }
+      const newTab = config.createTab(tabId, {
+        viewId: detail.viewId,
+        title: detail.title,
+        extensionId: detail.extensionId,
+      });
+      s.setOpenTabs((prev: typeof s.openTabs) => [...prev, newTab]);
+      s.setActiveTabId(tabId);
+    };
+    window.addEventListener(EXTENSION_OPEN_TAB_EVENT, onOpen);
+    return () => window.removeEventListener(EXTENSION_OPEN_TAB_EVENT, onOpen);
+  }, []);
+
+  // Extension panels with `area: "editor"` opened as editor tabs
+  // (`rexa.window.openWebviewPanel`). One tab per panel — tab content is the
+  // panel's own html, never sidebar content.
+  useEffect(() => {
+    const onOpenPanel = (e: Event) => {
+      const detail = (e as CustomEvent<{ extensionId?: string; panelId?: string; title?: string; html?: string }>).detail;
+      if (!detail?.panelId) return;
+      const s = studioRef.current;
+      const config = TAB_REGISTRY["extension-panel"];
+      const tabId = config.buildTabId({ panelId: detail.panelId });
+      const existing = s.openTabs.find(
+        (t: { id: string; extensionPanelId?: string }) =>
+          t.id === tabId || (t as { extensionPanelId?: string }).extensionPanelId === detail.panelId,
+      );
+      if (existing) {
+        s.setActiveTabId(existing.id);
+        return;
+      }
+      const newTab = config.createTab(tabId, {
+        panelId: detail.panelId,
+        title: detail.title,
+        extensionId: detail.extensionId,
+        html: detail.html,
+      });
+      s.setOpenTabs((prev: typeof s.openTabs) => [...prev, newTab]);
+      s.setActiveTabId(tabId);
+    };
+    window.addEventListener(EXTENSION_OPEN_PANEL_TAB_EVENT, onOpenPanel);
+    return () => window.removeEventListener(EXTENSION_OPEN_PANEL_TAB_EVENT, onOpenPanel);
+  }, []);
 
   const selectedAppTheme = useMemo(() => {
     if (studio.appThemeId === "system") return null;
@@ -631,9 +817,11 @@ export function StudioInterface({
         onOpenSpacetimeDbLogs={studio.openSpacetimeDbLogs}
         onOpenSpacetimeDbSchema={studio.openSpacetimeDbSchema}
         onOpenBrowser={handleOpenBrowser}
+        onOpenExtensions={studio.openExtensionsTab}
         commandMenuSections={studio.commandMenuSections}
         keybindings={studio.keybindings}
       />
+      <ExtensionPanelHost />
 
       <UniversalSearch
         isOpen={isUniversalSearchOpen}

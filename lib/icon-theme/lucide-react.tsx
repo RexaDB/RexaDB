@@ -209,6 +209,8 @@ import {
   Info as LucideInfo,
   SearchX as LucideSearchX,
   WrapText as LucideWrapText,
+  Puzzle as LucidePuzzle,
+  Power as LucidePower,
 
 } from "lucide-react/dist/esm/lucide-react.js";
 
@@ -427,6 +429,8 @@ export const Pause = createThemedLucideIcon("Pause", LucidePause);
 export const Info = createThemedLucideIcon("Info", LucideInfo);
 export const SearchX = createThemedLucideIcon("SearchX", LucideSearchX);
 export const WrapText = createThemedLucideIcon("WrapText", LucideWrapText);
+export const Puzzle = createThemedLucideIcon("Puzzle", LucidePuzzle);
+export const Power = createThemedLucideIcon("Power", LucidePower);
 export const AuthIcon = createThemedLucideIcon("AuthIcon", CustomAuthIcon);
 export const TableEditorIcon = createThemedLucideIcon("TableEditorIcon", CustomTableEditorIcon);
 export const DatabaseIcon = createThemedLucideIcon("DatabaseIcon", CustomDatabaseIcon);

@@ -16,6 +16,10 @@ import {
 } from "@/lib/icon-theme/solar-icons";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { HardDrive as HardDriveIcon } from "@/lib/icon-theme/lucide-react";
+import { Puzzle as PuzzleIcon } from "@/lib/icon-theme/lucide-react";
+import { useExtensions } from "@/lib/extensions/react";
+import { visibleContainerRailEntries } from "@/lib/extensions/rail-icon";
+import { ExtensionRailIcon } from "@/components/studio/extension-rail-icon";
 import { EdgeFunctionsIcon as EdgeFunctionsRailIcon } from "@/lib/icon-theme/lucide-react";
 import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
@@ -117,6 +121,46 @@ export function ModernUIRail({
     }
   };
 
+  // Extensions: view containers + declared/runtime rail items become activity
+  // entries. Containers open their own sidebar (`extensions:<containerId>`);
+  // rail items run their command or reveal their view's container.
+  // Only when the rail is studio-driven (custom `items` surfaces opt out).
+  const {
+    views: extensionViews,
+    containers: extensionContainers,
+    railItems: extensionRailItems,
+    executeCommand: executeExtensionCommand,
+  } = useExtensions();
+  const containerOfView = (viewId: string) =>
+    extensionViews.find((v) => v.viewId === viewId)?.containerId;
+  // Per-extension dedup: an extension with explicit (non-auto) rail items
+  // suppresses its automatic container entries — otherwise manifests that
+  // declare both get 2 rail icons (the reported bug).
+  const extensionRailEntries: ModernUIRailItem[] = items
+    ? []
+    : [
+        ...visibleContainerRailEntries(extensionContainers, extensionRailItems).map((c) => ({
+            id: `extensions:${c.containerId}`,
+            label: c.title,
+            icon: <ExtensionRailIcon icon={c.icon} />,
+            onClick: () => selectView(`extensions:${c.containerId}`),
+          })),
+        ...extensionRailItems
+          .filter((r) => !r.id.startsWith("container:"))
+          .map((r) => ({
+            id: `ext-rail:${r.key}`,
+            label: r.title,
+            icon: <ExtensionRailIcon icon={r.icon} />,
+            onClick: () => {
+              if (r.command) void executeExtensionCommand(r.command);
+              else if (r.viewId) {
+                const containerId = containerOfView(r.viewId);
+                selectView(containerId ? `extensions:${containerId}` : "extensions");
+              } else selectView("extensions");
+            },
+          })),
+      ];
+
   const primaryItems: ModernUIRailItem[] =
     items ??
     [
@@ -176,6 +220,15 @@ export function ModernUIRail({
         icon: <GitFork className="w-5 h-5 shrink-0" />,
         onClick: () => selectView("erd"),
       },
+      // Generic Extensions manager entry — always present. Extension
+      // containers get their own separate rail icons below (brand-new
+      // sidebars, one per container, never merged into this one).
+      {
+        id: "extensions",
+        label: "Extensions",
+        icon: <PuzzleIcon className="w-5 h-5 shrink-0" />,
+        onClick: () => selectView("extensions"),
+      },
       ...(showPayments
         ? [
             {
@@ -206,6 +259,7 @@ export function ModernUIRail({
             },
           ]
         : []),
+      ...extensionRailEntries,
     ];
 
   // Apply saved order to primary items if available
