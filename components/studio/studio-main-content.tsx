@@ -1352,6 +1352,7 @@ export function StudioMainContent({
                     selectedSchema={selectedSchema}
                     onSchemaChange={setSelectedSchema}
                     onAskAI={onAskAI}
+                    dbType={studio.dbType}
                   />
                 ) : paneDatabaseView === "enums" ? (
                   <EnumsList

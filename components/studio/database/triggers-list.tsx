@@ -65,6 +65,7 @@ interface TriggersListProps {
   onDuplicateTrigger?: (trigger: Trigger) => void;
   onDeleteTrigger?: (trigger: Trigger) => void;
   onAskAI?: () => void;
+  dbType?: string;
 }
 
 export function TriggersList({
@@ -78,11 +79,36 @@ export function TriggersList({
   onDuplicateTrigger,
   onDeleteTrigger,
   onAskAI,
+  dbType = "postgres",
 }: TriggersListProps) {
+  const isMssql = dbType === "mssql";
+  // MSSQL rows carry table_name/timing/event; pg-explorer rows carry
+  // table/activation/events — accept both.
+  const normalizedTriggers = useMemo(
+    () =>
+      (triggers ?? []).map((t: any, i: number) => ({
+        ...t,
+        id: t.id ?? `${t.schema}.${t.name}-${i}`,
+        table: t.table ?? t.table_name ?? "",
+        table_name: t.table_name ?? t.table ?? "",
+        activation: t.activation ?? t.timing ?? "",
+        timing: t.timing ?? t.activation ?? "",
+        events: Array.isArray(t.events)
+          ? t.events
+          : t.event
+            ? String(t.event).split(",").map((e: string) => e.trim()).filter(Boolean)
+            : [],
+        event: t.event ?? (Array.isArray(t.events) ? t.events.join(", ") : ""),
+        orientation: t.orientation ?? "ROW",
+        enabled_mode: t.enabled_mode ?? "ENABLED",
+        function_name: t.function_name ?? "",
+      })),
+    [triggers],
+  );
   const [search, setSearch] = useState("");
   const [viewingDefinition, setViewingDefinition] = useState<Trigger | null>(null);
 
-  const schemaTriggers = triggers.filter((t) => t.schema === selectedSchema);
+  const schemaTriggers = normalizedTriggers.filter((t) => t.schema === selectedSchema);
 
   const tables = useMemo(
     () => Array.from(new Set(schemaTriggers.map((x) => x.table))).sort(),
@@ -182,7 +208,35 @@ export function TriggersList({
           </DbToolbarFilters>
           <div className="flex items-center gap-2">
 
-            {onOpenCreateTriggerTab && (
+            {isMssql ? (
+              <>
+              <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" onClick={onAskAI}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
+              </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="ml-auto grow inline-flex">
+                    <Button variant="default" className="grow" disabled>
+                      <Plus className="w-3.5 h-3.5" />
+                      New trigger
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Creating MSSQL triggers coming soon</TooltipContent>
+              </Tooltip>
+              </TooltipProvider>
+              </>
+            ) : (
+            onOpenCreateTriggerTab && (
               <>
               <TooltipProvider>
               <Tooltip>
@@ -203,7 +257,7 @@ export function TriggersList({
                 <Plus className="w-3.5 h-3.5" />
                 New trigger
               </Button>
-              </>)}
+              </>))}
           </div>
         </DbListToolbar>
 
@@ -212,10 +266,14 @@ export function TriggersList({
             <div className="flex-1 flex flex-col justify-start supabase-theme">
               <EmptyStatePresentational
                 icon={Zap}
-                title="Add your first trigger"
-                description="Make your database reactive. Send updates in realtime, call edge functions, or validate data as it comes in."
+                title={isMssql ? `No triggers in ${selectedSchema}` : "Add your first trigger"}
+                description={
+                  isMssql
+                    ? "SQL Server DML triggers on tables in this schema will appear here."
+                    : "Make your database reactive. Send updates in realtime, call edge functions, or validate data as it comes in."
+                }
               >
-                {onOpenCreateTriggerTab && (
+                {!isMssql && onOpenCreateTriggerTab && (
                   <div className="flex items-center gap-2">
                     <TooltipProvider>
                       <Tooltip>
@@ -282,7 +340,7 @@ export function TriggersList({
                       </DatabaseTableCell>
                       <DatabaseTableCell>
                         <div className="flex gap-2 flex-wrap">
-                          {(t.events ?? []).map((event) => (
+                          {(t.events ?? []).map((event: string) => (
                             <Badge key={event} variant="outline" className="text-xs">
                               {t.activation} {event}
                             </Badge>

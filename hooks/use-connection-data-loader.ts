@@ -52,6 +52,7 @@ export function useConnectionDataLoader({
   const loadInitialDataWithConn = useCallback(async (connString: string, forceRefresh: boolean = false) => {
     const connType = detectConnectionDbType(connString);
     const isPgLike = connType === "postgres" || connType === "supabase-mgmt";
+    const isMssql = connType === "mssql";
     setFetchingSchemas(true);
     try {
       const res = await fetchNamespaceList(connString, { forceRefresh });
@@ -75,6 +76,9 @@ export function useConnectionDataLoader({
         let defaultSchema = isPgLike
           ? (normalizedSchemas.includes("public") ? "public" : normalizedSchemas[0])
           : normalizedSchemas[0];
+        if (isMssql && normalizedSchemas.includes("dbo")) {
+          defaultSchema = "dbo";
+        }
         if (usesDatabaseNamespaces(connType)) {
           const dbName = getDatabaseFromConnectionString(connString);
           if (dbName && normalizedSchemas.includes(dbName)) {
@@ -86,8 +90,11 @@ export function useConnectionDataLoader({
         // Load other data
         fetchTables(connString, defaultSchema, { forceRefresh }).then(r => r.success && r.data && setTables(r.data));
         fetchViews(connString, defaultSchema).then(r => r.success && r.data && setViewTables(r.data));
-        if (isPgLike) {
+        if (isPgLike || isMssql) {
           fetchFunctions(connString, defaultSchema).then(r => r.success && r.data && setFunctions(r.data));
+          fetchTriggers(connString, defaultSchema).then(r => r.success && r.data && setTriggers(r.data));
+        }
+        if (isPgLike) {
           fetchTableSecurityInfo(connString, defaultSchema).then((r) => {
             if (r.success && r.data) {
               const next: Record<string, { rlsEnabled: boolean; policyCount: number }> = {};
@@ -101,10 +108,11 @@ export function useConnectionDataLoader({
             }
           });
           fetchRlsPolicies(connString, defaultSchema || null, null).then(r => r.success && r.data && setRlsPolicies(r.data));
-          fetchTriggers(connString, defaultSchema).then(r => r.success && r.data && setTriggers(r.data));
           fetchIndexes(connString, defaultSchema).then(r => r.success && r.data && setIndexes(r.data));
         } else {
-          setFunctions([]);
+          if (!isMssql) {
+            setFunctions([]);
+          }
           setTableSecurity({});
         }
       }
@@ -115,6 +123,13 @@ export function useConnectionDataLoader({
         fetchEnums(connString).then(r => r.success && r.data && setEnums(r.data));
         fetchIndexes(connString).then(r => r.success && r.data && setIndexes(r.data));
         fetchPostgresRoles(connString).then(r => r.success && r.data && setPostgresRoles(r.data));
+      } else if (isMssql) {
+        setExtensions([]);
+        setEnums([]);
+        setIndexes([]);
+        setRlsPolicies([]);
+        setPostgresRoles([]);
+        setTableSecurity({});
       } else {
         setExtensions([]);
         setTriggers([]);

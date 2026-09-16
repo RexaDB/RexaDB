@@ -2233,17 +2233,21 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   useEffect(() => {
     if (databaseExplorer) return;
-    if (!schemaExplorer || (dbType !== "postgres" && dbType !== "supabase-mgmt") || !selectedSchema) {
+    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
+    if (!schemaExplorer || !isRoutineDb || !selectedSchema) {
       return;
     }
     void loadFunctions();
     void loadTriggers();
-    void loadIndexes();
-    void loadEnums();
+    if (dbType === "postgres" || dbType === "supabase-mgmt") {
+      void loadIndexes();
+      void loadEnums();
+    }
   }, [schemaExplorer, databaseExplorer, selectedSchema, dbType]);
 
   const loadAllSchemaData = useCallback(async () => {
-    if ((dbType !== "postgres" && dbType !== "supabase-mgmt") || schemas.length === 0) return;
+    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
+    if (!isRoutineDb || schemas.length === 0) return;
     setFetchingAllSchema(true);
     try {
       const schemaList = schemas.filter((s) => s !== "pg_catalog" && s !== "information_schema");
@@ -2277,6 +2281,16 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       );
       setFunctions(funcResults.flat());
 
+      if (dbType === "mssql") {
+        const trigResults = await Promise.all(
+          schemaList.map(async (schema) => {
+            const res = await fetchTriggers(currentConnectionString, schema);
+            return res.success && res.data ? res.data : [];
+          }),
+        );
+        setTriggers(trigResults.flat());
+        return;
+      }
       const [triggersRes, indexesRes, enumsRes] = await Promise.all([
         fetchTriggers(currentConnectionString),
         fetchIndexes(currentConnectionString),
@@ -2291,12 +2305,16 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   }, [currentConnectionString, dbType, schemas]);
 
   useEffect(() => {
-    if (!databaseExplorer || (dbType !== "postgres" && dbType !== "supabase-mgmt")) return;
+    if (!databaseExplorer) return;
+    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
+    if (!isRoutineDb) return;
     void loadAllSchemaData();
   }, [databaseExplorer, dbType, loadAllSchemaData]);
 
   useEffect(() => {
-    if (dbType !== "postgres" && dbType !== "supabase-mgmt") {
+    const isPgLike = dbType === "postgres" || dbType === "supabase-mgmt";
+    const isRoutineDb = isPgLike || dbType === "mssql";
+    if (!isRoutineDb) {
       setFunctions([]);
       setRlsPolicies([]);
       setPostgresRoles([]);
@@ -2309,10 +2327,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       void loadFunctions();
       return;
     }
-    if (databaseView === "extensions") {
-      void loadExtensions();
-      return;
-    }
     if (databaseView === "triggers") {
       if (
         !triggersLoadedRef.current ||
@@ -2322,6 +2336,11 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         triggersLoadedRef.current = { conn: currentConnectionString, schema: selectedSchema };
         void loadTriggers();
       }
+      return;
+    }
+    if (!isPgLike) return;
+    if (databaseView === "extensions") {
+      void loadExtensions();
       return;
     }
     if (databaseView === "enums") {

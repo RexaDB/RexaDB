@@ -71,6 +71,16 @@ export async function fetchRedisKeys(
 
 export async function fetchFunctions(connectionString: string, schema: string) {
   const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "mssql") {
+    const { getDbFunctions } = await import("./db-engine");
+    try {
+      const routines = await getDbFunctions(connectionString, schema || "dbo");
+      return { success: true, data: routines };
+    } catch (error: any) {
+      console.error("Failed to fetch MSSQL routines:", error);
+      return { success: false, error: error.message };
+    }
+  }
   if (!isPostgresConnection(connectionString) && dbType !== "supabase-mgmt") {
     return { success: true, data: [] as any[] };
   }

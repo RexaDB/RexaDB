@@ -62,6 +62,13 @@ export async function getDbTables(connectionString: string, schema: string): Pro
   return (await import("../sql-engine")).getSqlEngineTables(connectionString, schema);
 }
 
+export async function getDbFunctions(connectionString: string, schema: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "mssql")
+    return (await import("../mssql-client")).getRoutines(connectionString, schema);
+  return [];
+}
+
 export async function getDbViews(connectionString: string, schema: string): Promise<any> {
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedViews(connectionString, schema);
@@ -84,4 +91,11 @@ export async function getDbViews(connectionString: string, schema: string): Prom
     return (result.rows ?? []).map((r: any) => r.table_name);
   }
   return (await import("../sql-engine")).getSqlEngineViews(connectionString, schema);
+}
+
+export async function getDbTriggers(connectionString: string, schema: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "mssql")
+    return (await import("../mssql-client")).getTriggers(connectionString, schema);
+  return [];
 }

@@ -115,6 +115,7 @@ export function FunctionsList({
   schemaData = {},
   onAskAI,
 }: FunctionsListProps) {
+  const isMssql = dbType === "mssql";
   const [search, setSearch] = useState("");
   const [selectedFunction, setSelectedFunction] =
     useState<DatabaseFunction | null>(null);
@@ -127,8 +128,17 @@ export function FunctionsList({
     () => Array.from(new Set(schemaFunctions.map((fn) => fn.return_type))).filter(Boolean).sort(),
     [schemaFunctions]
   );
-  const hasDefiner = schemaFunctions.some((fn) => fn.security_definer);
-  const hasInvoker = schemaFunctions.some((fn) => !fn.security_definer);
+  const uniqueRoutineTypes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          schemaFunctions.map((fn) => String(fn.type || "").toUpperCase()).filter(Boolean),
+        ),
+      ).sort(),
+    [schemaFunctions]
+  );
+  const hasDefiner = !isMssql && schemaFunctions.some((fn) => fn.security_definer);
+  const hasInvoker = !isMssql && schemaFunctions.some((fn) => !fn.security_definer);
   const securityOptions = [
     ...(hasDefiner ? [{ label: "Definer", value: "definer" }] : []),
     ...(hasInvoker ? [{ label: "Invoker", value: "invoker" }] : []),
@@ -136,6 +146,7 @@ export function FunctionsList({
 
   const [returnTypeFilter, setReturnTypeFilter] = useState<string[]>([]);
   const [securityFilter, setSecurityFilter] = useState<string[]>([]);
+  const [routineTypeFilter, setRoutineTypeFilter] = useState<string[]>([]);
 
   const filteredFunctions = useMemo(() => {
     let list = schemaFunctions;
@@ -144,6 +155,11 @@ export function FunctionsList({
     if (returnTypeFilter.length > 0) {
       list = list.filter((f) => returnTypeFilter.includes(f.return_type));
     }
+    if (routineTypeFilter.length > 0) {
+      list = list.filter((f) =>
+        routineTypeFilter.includes(String(f.type || "").toUpperCase()),
+      );
+    }
     if (securityFilter.length > 0) {
       list = list.filter((f) => {
         const sec = f.security_definer ? "definer" : "invoker";
@@ -151,7 +167,7 @@ export function FunctionsList({
       });
     }
     return list;
-  }, [schemaFunctions, search, returnTypeFilter, securityFilter]);
+  }, [schemaFunctions, search, returnTypeFilter, routineTypeFilter, securityFilter]);
 
   useEffect(() => {
     if (!selectedFunction) return;
@@ -280,7 +296,18 @@ export function FunctionsList({
               showSearch
             />
           )}
-          {securityOptions.length > 0 && (
+          {isMssql && uniqueRoutineTypes.length > 1 && (
+            <SelectFilter
+              label="Type"
+              options={uniqueRoutineTypes.map((type) => ({
+                label: type === "PROCEDURE" ? "Procedure" : "Function",
+                value: type,
+              }))}
+              value={routineTypeFilter}
+              onChange={setRoutineTypeFilter}
+            />
+          )}
+          {!isMssql && securityOptions.length > 0 && (
             <SelectFilter
               label="Security"
               options={securityOptions}
@@ -301,6 +328,21 @@ export function FunctionsList({
             <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
           </Tooltip>
           </TooltipProvider>
+          {isMssql ? (
+            <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="ml-auto grow lg:grow-0 inline-flex">
+                  <Button variant="default" className="grow lg:grow-0" disabled>
+                    <Plus className="w-3.5 h-3.5" />
+                    New function
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Editing MSSQL routines coming soon</TooltipContent>
+            </Tooltip>
+            </TooltipProvider>
+          ) : (
           <Button
             variant="default"
             className="ml-auto grow lg:grow-0"
@@ -320,6 +362,7 @@ export function FunctionsList({
             <Plus className="w-3.5 h-3.5" />
             New function
           </Button>
+          )}
         </div>
       </div>
 
@@ -328,8 +371,12 @@ export function FunctionsList({
           <div className="flex-1 flex flex-col justify-start supabase-theme">
             <EmptyStatePresentational
               icon={Database}
-              title="Add your first function"
-              description="PostgreSQL functions are a set of SQL and procedural commands such as declarations, assignments, loops, or flow-of-control."
+              title={isMssql ? `No procedures or functions in ${selectedSchema}` : "Add your first function"}
+              description={
+                isMssql
+                  ? "SQL Server stored procedures and functions in this schema will appear here."
+                  : "PostgreSQL functions are a set of SQL and procedural commands such as declarations, assignments, loops, or flow-of-control."
+              }
             >
               <div className="flex items-center gap-2">
                 <TooltipProvider>
@@ -343,6 +390,7 @@ export function FunctionsList({
                     <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
+                {!isMssql && (
                 <Button
                   variant="default"
                   onClick={() => {
@@ -361,6 +409,7 @@ export function FunctionsList({
                   <Plus className="w-3.5 h-3.5" />
                   New function
                 </Button>
+                )}
               </div>
             </EmptyStatePresentational>
           </div>
@@ -373,7 +422,9 @@ export function FunctionsList({
                   <DatabaseTableHead key="type">Type</DatabaseTableHead>
                   <DatabaseTableHead key="arguments">Arguments</DatabaseTableHead>
                   <DatabaseTableHead key="return_type">Return type</DatabaseTableHead>
-                  <DatabaseTableHead key="security" className="w-[100px]">Security</DatabaseTableHead>
+                  {!isMssql && (
+                    <DatabaseTableHead key="security" className="w-[100px]">Security</DatabaseTableHead>
+                  )}
                   <DatabaseTableHead key="buttons" className="w-1/6" />
                 </DatabaseTableRow>
               </DatabaseTableHeader>
@@ -423,18 +474,20 @@ export function FunctionsList({
                         </span>
                       ) : (
                         <p
-                          title={fn.return_type}
-                          className={`truncate ${fn.return_type === null ? "text-muted-foreground/60" : "text-muted-foreground"}`}
+                          title={fn.return_type || (isMssql && fn.type === "PROCEDURE" ? "Procedure (no return value)" : "")}
+                          className={`truncate ${!fn.return_type ? "text-muted-foreground/60" : "text-muted-foreground"}`}
                         >
-                          {fn.return_type === null ? "\u2013" : fn.return_type}
+                          {fn.return_type || "\u2013"}
                         </p>
                       )}
                     </DatabaseTableCell>
+                    {!isMssql && (
                     <DatabaseTableCell>
                       <p className="truncate text-muted-foreground">
                         {fn.security_definer ? "Definer" : "Invoker"}
                       </p>
                     </DatabaseTableCell>
+                    )}
                     <DatabaseTableCell className="text-right">
                       <div className="flex items-center justify-end">
                         <DropdownMenu>
@@ -455,14 +508,19 @@ export function FunctionsList({
                           <DropdownMenuContent side="bottom" align="end" className="w-52">
                             <DropdownMenuItem
                               className="space-x-2"
-                              onClick={() => openFunctionViewer(fn)}
+                              disabled={isMssql}
+                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                              onClick={() => { if (!isMssql) openFunctionViewer(fn); }}
                             >
                               <Edit2 size={14} />
-                              <p>Edit function</p>
+                              <p>{isMssql ? "View definition" : "Edit function"}</p>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="space-x-2"
+                              disabled={isMssql}
+                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
                               onClick={() => {
+                                if (isMssql) return;
                                 const newFn = { ...fn, name: `${fn.name}_duplicate` };
                                 openFunctionViewer(newFn);
                               }}
@@ -473,9 +531,12 @@ export function FunctionsList({
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="space-x-2"
-                              onClick={() =>
-                                onDeleteFunction(fn.schema, fn.name, fn.arguments)
-                              }
+                              disabled={isMssql}
+                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                              onClick={() => {
+                                if (!isMssql)
+                                  onDeleteFunction(fn.schema, fn.name, fn.arguments);
+                              }}
                             >
                               <Trash2 size={14} />
                               <p>Delete function</p>
@@ -551,7 +612,13 @@ export function FunctionsList({
                   </span>
                 </div>
                 <div className="flex-1 overflow-hidden relative">
-                  {sqlEditorEngine === "monaco" ? (
+                  {!definitionDraft && isMssql ? (
+                    <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        No permission to view this definition, or the object is encrypted.
+                      </p>
+                    </div>
+                  ) : sqlEditorEngine === "monaco" ? (
                     <MonacoSqlInput
                       dbType={dbType}
                       query={definitionDraft}
@@ -567,6 +634,7 @@ export function FunctionsList({
                       appEditorTheme={appEditorTheme}
                       customEditorThemes={customEditorThemes}
                       vimMode={vimMode}
+                      readOnly={isMssql}
                     />
                   ) : (
                     <SqlQueryInput
@@ -586,6 +654,11 @@ export function FunctionsList({
               </div>
             </div>
             <div className="p-4 border-t border-border bg-background/95 flex flex-row items-center justify-end gap-2 shrink-0">
+              {isMssql && (
+                <span className="text-xs text-muted-foreground mr-auto">
+                  MSSQL routines are read-only in this view.
+                </span>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -593,12 +666,13 @@ export function FunctionsList({
                 disabled={isSavingDefinition}
               >
                 <X className="w-3.5 h-3.5 mr-1" />
-                Cancel
+                {isMssql ? "Close" : "Cancel"}
               </Button>
               <Button
                 size="sm"
                 onClick={handleSaveDefinition}
-                disabled={!hasDefinitionChanges || isSavingDefinition}
+                disabled={isMssql || !hasDefinitionChanges || isSavingDefinition}
+                title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
               >
                 <Save className="w-3.5 h-3.5 mr-1" />
                 {isSavingDefinition ? "Saving..." : "Save"}

@@ -143,6 +143,46 @@ export async function toggleExtension(connectionString: string, name: string, in
 }
 
 export async function fetchTriggers(connectionString: string, schema?: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "mssql") {
+    try {
+      const { getDbTriggers } = await import("./db-engine");
+      const rows = await getDbTriggers(connectionString, schema || "dbo");
+      // Normalize to both the legacy pg trigger shape
+      // ({ schema, name, table_name, timing, event, definition })
+      // and the TriggersList shape ({ table, activation, events, ... })
+      // so existing consumers and the UI both render.
+      const data = (rows ?? []).map((r: any) => {
+        const events: string[] = Array.isArray(r.events)
+          ? r.events
+          : r.event
+            ? String(r.event).split(",").map((e: string) => e.trim()).filter(Boolean)
+            : [];
+        const tableName = r.table_name ?? r.table ?? null;
+        const timing = r.timing ?? r.activation ?? "AFTER";
+        return {
+          schema: r.schema,
+          name: r.name,
+          table_name: tableName,
+          table: tableName,
+          table_schema: r.table_schema ?? null,
+          timing,
+          activation: timing,
+          event: r.event ?? events.join(", "),
+          events,
+          orientation: r.orientation ?? "ROW",
+          function_name: r.function_name ?? "",
+          enabled_mode: r.enabled_mode ?? "ENABLED",
+          id: r.id ?? `${r.schema}.${r.name}`,
+          definition: r.definition ?? null,
+        };
+      });
+      return { success: true, data };
+    } catch (error: any) {
+      console.error("Failed to fetch MSSQL triggers:", error);
+      return { success: false, error: error.message };
+    }
+  }
   return withPgClientRead(connectionString, "triggers", async (executeQuery) => {
     const sql = `
       SELECT 

@@ -678,10 +678,11 @@ function TablesPanel({ studio }: { studio: any }) {
 
   const schemaExplorer = Boolean(studio.schemaExplorer);
   const isPostgres = isPostgresCatalogDbType(studio.dbType);
+  const isRoutineDb = isPostgres || studio.dbType === "mssql";
   const qLower = q.toLowerCase();
 
-  const functions: any[] = schemaExplorer && isPostgres ? (studio.functions ?? []) : [];
-  const triggers: any[] = schemaExplorer && isPostgres ? (studio.triggers ?? []) : [];
+  const functions: any[] = schemaExplorer && isRoutineDb ? (studio.functions ?? []) : [];
+  const triggers: any[] = schemaExplorer && isRoutineDb ? (studio.triggers ?? []) : [];
   const indexes: any[] = schemaExplorer && isPostgres ? (studio.indexes ?? []) : [];
   const enums: any[] = schemaExplorer && isPostgres ? (studio.enums ?? []) : [];
 
@@ -1500,9 +1501,11 @@ function DashboardPanel({ studio }: { studio: any }) {
 
 function DatabasePanel({ studio }: { studio: any }) {
   const dbType: string = studio.dbType;
-  // Functions / triggers / enums / indexes only load against Postgres catalogs —
-  // hide them for other connection types instead of showing empty views.
+  // Functions / triggers load against Postgres catalogs and MSSQL (sys.*);
+  // enums / indexes stay Postgres-only. Hide unsupported views instead of
+  // showing empty states.
   const pgCatalog = isPostgresCatalogDbType(dbType);
+  const routineCatalog = pgCatalog || dbType === "mssql";
   const items: Array<{ label: string; view: string; tabType: string; show?: boolean }> = [
     { label: "Schema Diagram", view: "schema", tabType: "database-schema" },
     {
@@ -1510,8 +1513,8 @@ function DatabasePanel({ studio }: { studio: any }) {
       view: "tables",
       tabType: "database-tables",
     },
-    { label: "Functions", view: "functions", tabType: "database-functions", show: pgCatalog },
-    { label: "Triggers", view: "triggers", tabType: "database-triggers", show: pgCatalog },
+    { label: "Functions", view: "functions", tabType: "database-functions", show: routineCatalog },
+    { label: "Triggers", view: "triggers", tabType: "database-triggers", show: routineCatalog },
     { label: "Enums", view: "enums", tabType: "database-enums", show: pgCatalog },
     { label: "Indexes", view: "indexes", tabType: "database-indexes", show: pgCatalog },
   ];
