@@ -300,7 +300,7 @@ function ErdSidebarItem({
         <DropdownMenuContent
           align="start"
           side="right"
-          className="min-w-[160px] border-border bg-[var(--shell-history-bg)] ring-0"
+          className="min-w-[160px] border border-border bg-[var(--shell-history-bg)] ring-0"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">

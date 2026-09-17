@@ -552,6 +552,21 @@ export function saveStudioDashboards(
   });
 }
 
+export function getStudioNotes(connectionId: number) {
+  return request(buildUrl(`/studio/${connectionId}/notes`));
+}
+
+export function saveStudioNotes(
+  connectionId: number,
+  payload: { notes?: any[] },
+) {
+  return request(buildUrl(`/studio/${connectionId}/notes`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getAppFontFamily(): Promise<ApiResult<string>> {
   const fast = await tauriInvoke<string>("settings_get_app_font_family");
   if (fast !== undefined) return { success: true, data: fast };

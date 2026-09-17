@@ -63,7 +63,7 @@ const ALL_THEME_VAR_KEYS = [
   "--syntax-function", "--syntax-variable", "--syntax-comment", "--syntax-type",
 ];
 
-const DEFAULT_DARK_THEME_ID = "zinc-dark-white";
+const DEFAULT_DARK_THEME_ID = "rexadb-dark";
 
 // The resolved theme CSS variables only get applied to `document.documentElement`
 // from a `useEffect` here, once this hook has mounted and (often) loaded the

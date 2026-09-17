@@ -202,8 +202,9 @@ export function ModernUIShell({
 	// Height of the strip between the window top and the content card. Measured
 	// so the floating title bar (and its search bar) stays vertically centered
 	// in that strip without hard-coding a value.
-	// Default matches the content/sidebar top inset (mt-8 / pt-8 = 32px).
-	const [titleBarHeight, setTitleBarHeight] = useState(32);
+	// Default matches the content/sidebar top inset (mt-10 / pt-10 = 40px,
+	// aligned with the first navigation-rail button).
+	const [titleBarHeight, setTitleBarHeight] = useState(40);
 
 	useLayoutEffect(() => {
 		const measure = () => {
@@ -472,11 +473,11 @@ export function ModernUIShell({
 					{/* Fixed sidebar defaults to h-svh (full viewport), which overshoots
 					    once the status bar steals height. top/bottom + height:auto stretch
 					    it to this transformed parent (same column as the content card).
-					    pt-8 matches the content card's mt-8 top inset.
+					    pt-10 matches the content card's mt-10 top inset.
 					    Right padding = --shell-sash-gap so the resize sash is centered
 					    in the gutter between the sidebar card and the content card. */}
 					<AppSidebar
-						className="z-20 top-0 bottom-0 h-auto max-h-none overflow-visible pt-8 pb-0 pl-1.5 pr-[var(--shell-sash-gap,6px)] [&_[data-slot=sidebar-container]]:pr-[var(--shell-sash-gap,6px)] [&_[data-slot=sidebar-inner]]:relative [&_[data-slot=sidebar-inner]]:h-full [&_[data-slot=sidebar-inner]]:overflow-visible [&_[data-slot=sidebar-inner]]:bg-[var(--shell-content-bg)] [&_[data-slot=sidebar-inner]]:rounded-lg [&_[data-slot=sidebar-inner]]:border [&_[data-slot=sidebar-inner]]:border-border [&_[data-slot=sidebar-inner]]:p-1"
+						className="z-20 top-0 bottom-0 h-auto max-h-none overflow-visible pt-10 pb-0 pl-1.5 pr-[var(--shell-sash-gap,6px)] [&_[data-slot=sidebar-container]]:pr-[var(--shell-sash-gap,6px)] [&_[data-slot=sidebar-inner]]:relative [&_[data-slot=sidebar-inner]]:h-full [&_[data-slot=sidebar-inner]]:overflow-visible [&_[data-slot=sidebar-inner]]:bg-[var(--shell-content-bg)] [&_[data-slot=sidebar-inner]]:rounded-lg [&_[data-slot=sidebar-inner]]:border [&_[data-slot=sidebar-inner]]:border-border [&_[data-slot=sidebar-inner]]:p-1"
 						style={{
 							transition: "none",
 							top: 0,
@@ -516,7 +517,7 @@ export function ModernUIShell({
 						<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 						<div
 							ref={cardRef}
-							className="mt-8 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
+							className="mt-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border"
 							style={
 								{
 									"--background": "var(--shell-content-bg)",
@@ -604,10 +605,10 @@ export function ModernUIShell({
 								<ResizeHandle
 									orientation="vertical"
 									onMouseDown={handleSqlSheetResizeStart}
-									className="mt-8"
+									className="mt-10"
 								/>
 								<div
-									className="relative mt-8 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
+									className="relative mt-10 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
 									style={
 										{
 											width: sqlSheetWidth,
@@ -627,10 +628,10 @@ export function ModernUIShell({
 								<ResizeHandle
 									orientation="vertical"
 									onMouseDown={handleAiResizeStart}
-									className="mt-8"
+									className="mt-10"
 								/>
 								<div
-									className="relative mt-8 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
+									className="relative mt-10 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
 									style={
 										{
 											width: aiWidth,
@@ -649,10 +650,10 @@ export function ModernUIShell({
 								<ResizeHandle
 									orientation="vertical"
 									onMouseDown={handleThreadsResizeStart}
-									className="mt-8"
+									className="mt-10"
 								/>
 								<div
-									className="relative mt-8 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
+									className="relative mt-10 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg border border-border"
 									style={
 										{
 											width: threadsWidth,

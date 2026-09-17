@@ -1120,6 +1120,9 @@ app.post("/studio/:connectionId/settings", studioPostRoute(mod.saveStudioSetting
 app.get("/studio/:connectionId/dashboards", studioGetRoute(mod.getStudioDashboards));
 app.post("/studio/:connectionId/dashboards", studioPostRoute(mod.saveStudioDashboards));
 
+app.get("/studio/:connectionId/notes", studioGetRoute(mod.getStudioNotes));
+app.post("/studio/:connectionId/notes", studioPostRoute(mod.saveStudioNotes));
+
 app.get("/studio/:connectionId/bootstrap", async (req, res) => {
   try {
     const rawId = req.params.connectionId;

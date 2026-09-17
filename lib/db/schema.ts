@@ -101,7 +101,7 @@ export const connectionSettings = sqliteTable("connection_settings", {
   sqlEditorEngine: text("sql_editor_engine").$type<"custom" | "monaco">().default("custom"),
   editorThemeId: text("editor_theme_id").default("auto"),
   customEditorThemes: text("custom_editor_themes"),
-  appThemeId: text("app_theme_id").default("zinc-dark-white"),
+  appThemeId: text("app_theme_id").default("rexadb-dark"),
   customAppThemes: text("custom_app_themes"),
   tuiMode: integer("tui_mode", { mode: "boolean" }).default(false),
   tuiTheme: text("tui_theme").$type<"auto" | "light" | "dark">().default("auto"),
@@ -117,6 +117,12 @@ export const dashboardState = sqliteTable("dashboard_state", {
   connectionId: integer("connection_id").primaryKey().references(() => connections.id, { onDelete: "cascade" }),
   dashboardsJson: text("dashboards_json").notNull(),
   foldersJson: text("folders_json").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const noteState = sqliteTable("note_state", {
+  connectionId: integer("connection_id").primaryKey().references(() => connections.id, { onDelete: "cascade" }),
+  notesJson: text("notes_json").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
 

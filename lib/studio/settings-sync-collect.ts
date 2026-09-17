@@ -39,7 +39,7 @@ export async function collectLocalSettingsSyncPayload(): Promise<SettingsSyncPay
       appThemeId:
         typeof appThemeRes.data.appThemeId === "string"
           ? appThemeRes.data.appThemeId
-          : "zinc-dark-white",
+          : "rexadb-dark",
       customAppThemes:
         typeof appThemeRes.data.customAppThemes === "string"
           ? appThemeRes.data.customAppThemes

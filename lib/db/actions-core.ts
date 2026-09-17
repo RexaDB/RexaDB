@@ -121,6 +121,8 @@ import {
   getStudioBootstrap as _getStudioBootstrap,
   getStudioDashboards as _getStudioDashboards,
   saveStudioDashboards as _saveStudioDashboards,
+  getStudioNotes as _getStudioNotes,
+  saveStudioNotes as _saveStudioNotes,
   saveStudioSettings as _saveStudioSettings,
   getConnectionAnalytics as _getConnectionAnalytics,
   getUserAnalytics as _getUserAnalytics,
@@ -2208,6 +2210,24 @@ export async function saveStudioDashboards(
   payload: { dashboards?: any[]; folders?: any[] },
 ) {
   return _saveStudioDashboards(
+    connectionId,
+    payload,
+    ensureCoreTables,
+    ensureConnectionExists,
+  );
+}
+export async function getStudioNotes(connectionId: number) {
+  return _getStudioNotes(
+    connectionId,
+    ensureCoreTables,
+    ensureConnectionExists,
+  );
+}
+export async function saveStudioNotes(
+  connectionId: number,
+  payload: { notes?: any[] },
+) {
+  return _saveStudioNotes(
     connectionId,
     payload,
     ensureCoreTables,

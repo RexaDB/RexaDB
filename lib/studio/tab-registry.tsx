@@ -160,6 +160,7 @@ export const TAB_REGISTRY: {
   table: TabTypeConfig;
   sql: TabTypeConfig;
   dashboard: TabTypeConfig;
+  note: TabTypeConfig;
   workflow: TabTypeConfig;
   "erd-designer": TabTypeConfig;
   "create-table": TabTypeConfig;
@@ -283,6 +284,21 @@ export const TAB_REGISTRY: {
     supportsPreview: true,
     trackPane: true,
     icon: "dashboard",
+    group: "content",
+  },
+
+  note: {
+    type: "note",
+    viewMode: "note",
+    defaultName: (meta) => String((meta as { name?: string }).name ?? "Note"),
+    buildTabId: (meta) => `note-${(meta as { noteId?: string }).noteId}`,
+    createTab: (id, meta) => {
+      const m = meta as { name?: string };
+      return { id, type: "note", name: m.name ?? "Note" };
+    },
+    supportsPreview: true,
+    trackPane: true,
+    icon: "book-open",
     group: "content",
   },
 
@@ -960,6 +976,7 @@ export const STUDIO_TAB_ICONS: Record<string, React.ComponentType<{ className?: 
   table: SolarTable2,
   sql: SolarCode2,
   dashboard: SolarLayoutDashboard,
+  note: BookOpen,
   analytics: SolarBarChart3,
   advisor: SolarBarChart3,
   settings: SolarSettings,

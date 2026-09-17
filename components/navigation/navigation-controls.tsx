@@ -55,7 +55,7 @@ export function NavigationControls({
         </Tooltip>
         <DropdownMenuContent
           align="start"
-          className="w-[20rem] border-border bg-[var(--shell-history-bg)] p-1.5 ring-0"
+          className="w-[20rem] border border-border bg-[var(--shell-history-bg)] p-1.5 ring-0"
         >
           <DropdownMenuLabel className="text-sm font-normal text-muted-foreground">
             Recently viewed

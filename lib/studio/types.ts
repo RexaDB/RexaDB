@@ -268,6 +268,18 @@ export interface Dashboard {
   widgets: DashboardWidget[];
 }
 
+export interface Note {
+  id: string;
+  name: string;
+  /** Raw markdown source. Widgets embed via `[[widget:<id>]]`. */
+  content: string;
+  folderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  /** Cloned dashboard-widget snapshots, rendered auto-size (no x/y/resize). */
+  widgets: DashboardWidget[];
+}
+
 export type AgentGeneratedWidgetType =
   | "area-chart"
   | "bar-chart"

@@ -399,6 +399,50 @@ export async function saveStudioDashboards(
   }
 }
 
+export async function getStudioNotes(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
+  const { db } = await import("./index");
+  const { noteState } = await import("./schema");
+  const { eq } = await import("drizzle-orm");
+  try {
+    await ensureCoreTables();
+    await ensureConnectionExists(connectionId);
+    const rows = await db.select().from(noteState).where(eq(noteState.connectionId, connectionId)).limit(1);
+    const row = rows[0];
+    if (!row) return { success: true, data: { notes: [] } };
+    const notes = JSON.parse((row as any).notesJson || "[]");
+    return { success: true, data: { notes: Array.isArray(notes) ? notes : [] } };
+  } catch (error) {
+    console.error("Failed to fetch studio notes:", error);
+    return { success: false, error: "Failed to fetch studio notes" };
+  }
+}
+
+export async function saveStudioNotes(
+  connectionId: number,
+  payload: { notes?: any[] },
+  ensureCoreTables: () => Promise<void>,
+  ensureConnectionExists: (connectionId: number) => Promise<void>,
+) {
+  const { db } = await import("./index");
+  const { sql } = await import("drizzle-orm");
+  try {
+    await ensureCoreTables();
+    await ensureConnectionExists(connectionId);
+    const notes = Array.isArray(payload?.notes) ? payload.notes : [];
+    const updatedAt = Date.now();
+    await db.run(sql`
+      INSERT INTO note_state (connection_id, notes_json, updated_at)
+      VALUES (${connectionId}, ${JSON.stringify(notes)}, ${updatedAt})
+      ON CONFLICT(connection_id) DO UPDATE SET
+        notes_json = excluded.notes_json, updated_at = excluded.updated_at
+    `);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to save studio notes:", error);
+    return { success: false, error: formatDbError(error) };
+  }
+}
+
 export async function saveStudioSettings(
   connectionId: number,
   settings: any,

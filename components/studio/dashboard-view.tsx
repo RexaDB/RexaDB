@@ -3837,13 +3837,13 @@ export function DashboardView({
   onRefresh,
   isLocked,
   onToggleLock,
-  addDashboardWidgetFromBounds,
-  updateDashboardWidget,
-  removeDashboardWidget,
-  applyDashboardWidgetLayout,
-  tables,
-  selectedSchema,
-  connectionString,
+  addDashboardWidgetFromBounds = () => {},
+  updateDashboardWidget = () => {},
+  removeDashboardWidget = () => {},
+  applyDashboardWidgetLayout = () => {},
+  tables = [],
+  selectedSchema = "public",
+  connectionString = "",
   editorThemeId = "auto",
   appEditorTheme = null,
   vimMode = false,
@@ -5215,7 +5215,7 @@ export function DashboardView({
                     </ContextMenuItem>
                     <ContextMenuItem
                       onClick={() =>
-                        removeDashboardWidget(dashboard.id, widget.id)
+                        removeDashboardWidget?.(dashboard.id, widget.id)
                       }
                       className="text-destructive focus:text-destructive"
                     >

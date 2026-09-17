@@ -576,7 +576,7 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
           }));
 
           return textResult({
-            appThemeId: appResult.success ? (appResult.data as Record<string, unknown>)?.appThemeId || "zinc-dark-white" : "zinc-dark-white",
+            appThemeId: appResult.success ? (appResult.data as Record<string, unknown>)?.appThemeId || "rexadb-dark" : "rexadb-dark",
             editorThemeId: editorResult.success ? (editorResult.data as Record<string, unknown>)?.editorThemeId || "auto" : "auto",
             appThemes: [...builtinApps, ...customApps],
             editorThemes: customEditors,

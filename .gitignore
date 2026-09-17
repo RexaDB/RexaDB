@@ -99,6 +99,9 @@ skills-lock.json
 # Session transcripts
 /session-ses_*.md
 
+# Local plans (not committed)
+/plan-*.md
+
 # Java bridge build artifacts
 /resources/java-bridge/dist/
 /resources/java-bridge/out/

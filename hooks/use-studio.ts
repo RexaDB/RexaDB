@@ -33,7 +33,7 @@ import { generateActionId, executeSqlWithHistory } from "@/lib/studio/execute-wi
 import type { SettingsSectionId } from "@/components/studio/settings/settings-sidebar";
 import type { EditColumnPayload, AddColumnPayload } from "@/components/studio/grid/types";
 import {
-  Snippet, SnippetVersion, Folder, QueryHistory, UseStudioProps, SnippetExportData, DashboardExportData,
+  Snippet, SnippetVersion, Folder, QueryHistory, UseStudioProps, SnippetExportData, DashboardExportData, Note,
   DashboardWidgetType, DashboardConditionOperator, DashboardConditionActionType, DashboardFolder, Dashboard,
   AgentGeneratedWidgetType, AgentGeneratedWidgetPlan, AgentDashboardPlan, AgentChatMessage, AgentChatHistoryMessage,
   SchemaContextTable, QueryValidationShapeResult, SqlEditorEngine, StudioSplitViewState,
@@ -52,6 +52,7 @@ import { useSchemaDataLoader } from "./use-schema-data-loader";
 import { useStudioPersistence } from "./use-studio-persistence";
 import { useConnectionDataLoader } from "./use-connection-data-loader";
 import { useDashboardPersistence } from "./use-dashboard-persistence";
+import { useNotePersistence } from "./use-note-persistence";
 import { useFunctionManagement } from "./use-function-management";
 import { useAgentChatMessages } from "./use-agent-chat-messages";
 import { useStudioDataPersistence } from "./use-studio-data-persistence";
@@ -1014,7 +1015,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [sidebarSortMode, setSidebarSortMode] = useState<'alphabetical' | 'tags'>('alphabetical');
 
 // fallow-ignore-next-line code-duplication
-  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | null>(() => {
+  const [sidebarView, setSidebarViewState] = useState<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | "notes" | null>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       const restoreKey = `rexa-db-restore-state-${propConnection.id}`;
       if (window.localStorage.getItem(restoreKey) !== "0") {
@@ -1025,13 +1026,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return "tables";
   });
-  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | null>) => {
+  const setSidebarView = useCallback((nextView: SetStateAction<"dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | "notes" | null>) => {
     delayedUiRestoreBlockedRef.current = true;
     setSidebarViewState(nextView);
   }, []);
   const sidebarViewRef = useRef(sidebarView);
   const lastSidebarViewRef = useRef<
-    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd"
+    "dashboard" | "tables" | "sql" | "database" | "import-export" | "auth" | "payments" | "storage" | "edge-functions" | "themes" | "workflows" | "agents" | "erd" | "notes"
   >("tables");
   useEffect(() => {
     sidebarViewRef.current = sidebarView;
@@ -1053,6 +1054,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   } | null>(null);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [dashboardFolders, setDashboardFolders] = useState<DashboardFolder[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
 
   const [snippets, setSnippets] = useState<Snippet[]>([]);
 
@@ -1287,6 +1289,12 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     dashboardFolders,
     workspaceId: workspaceContext.workspaceId,
     accessToken: workspaceContext.accessToken,
+  });
+
+  useNotePersistence({
+    connectionId: connection.id,
+    notes,
+    setNotes,
   });
 
   const {
@@ -6852,6 +6860,95 @@ END $$;`.trim();
     );
   }, []);
 
+  const openNoteTab = useCallback((noteId: string) => {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note) return;
+    const targetPaneId = getCurrentPaneId();
+    const tabId = `note-${note.id}`;
+    const paneScopedTabId = splitView.enabled ? `${tabId}::pane::${targetPaneId}` : tabId;
+    const existing = openTabs.find((t) => t.id === paneScopedTabId);
+    if (existing) {
+      if (existing.isPreview) confirmPreviewTab(paneScopedTabId);
+      switchTab(paneScopedTabId, undefined, targetPaneId);
+      return;
+    }
+    const newTab = { id: paneScopedTabId, type: "note" as const, name: note.name };
+    const newTabs = buildNewTabs(newTab, undefined, true);
+    setOpenTabs(newTabs);
+    if (splitView.enabled) {
+      setSplitView((prev) => {
+        const next = assignTabToPane(prev, paneScopedTabId, targetPaneId, true);
+        return { ...next, activePaneId: targetPaneId };
+      });
+    }
+    switchTab(paneScopedTabId, newTabs, targetPaneId);
+  }, [notes, openTabs, switchTab, splitView.enabled, getCurrentPaneId, assignTabToPane, buildNewTabs, confirmPreviewTab, setSplitView, setOpenTabs]);
+
+  const createNote = useCallback((name: string, content = "") => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const now = Date.now();
+    const newNote: Note = {
+      id: Math.random().toString(36).slice(2, 10),
+      name: trimmed,
+      content,
+      folderId: null,
+      createdAt: now,
+      updatedAt: now,
+      widgets: [],
+    };
+    setNotes((prev) => [...prev, newNote]);
+    setSidebarView("notes");
+    const tabId = `note-${newNote.id}`;
+    addTabAndSwitch({ id: tabId, type: "note" as const, name: newNote.name }, tabId);
+    return newNote.id;
+  }, [setSidebarView, addTabAndSwitch]);
+
+  const updateNote = useCallback((noteId: string, updates: Partial<Pick<Note, "name" | "content">>) => {
+    const nextName = typeof updates.name === "string" ? updates.name.trim() : undefined;
+    if (nextName !== undefined && !nextName) return;
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, ...(nextName !== undefined ? { name: nextName } : {}), ...(updates.content !== undefined ? { content: updates.content } : {}), updatedAt: Date.now() } : n))
+    );
+    if (nextName !== undefined) {
+      const tabId = `note-${noteId}`;
+      setOpenTabs((prev) => prev.map((t) => {
+        const base = String(t.id).split("::pane::")[0];
+        return base === tabId ? { ...t, name: nextName } : t;
+      }));
+    }
+  }, [setOpenTabs]);
+
+  const deleteNote = useCallback((noteId: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    const tabId = `note-${noteId}`;
+    setOpenTabs((prev) => prev.filter((t) => String(t.id).split("::pane::")[0] !== tabId));
+  }, [setOpenTabs]);
+
+  const addNoteWidget = useCallback((noteId: string, widget: DashboardWidget) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, widgets: [...n.widgets, widget], updatedAt: Date.now() } : n))
+    );
+  }, []);
+
+  const updateNoteWidget = useCallback((noteId: string, widgetId: string, updates: Partial<DashboardWidget>) => {
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, widgets: n.widgets.map((w) => (w.id === widgetId ? { ...w, ...updates } : w)), updatedAt: Date.now() } : n))
+    );
+  }, []);
+
+  const removeNoteWidget = useCallback((noteId: string, widgetId: string) => {
+    setNotes((prev) =>
+      prev.map((n) => {
+        if (n.id !== noteId) return n;
+        const filtered = n.widgets.filter((w) => w.id !== widgetId);
+        // Drop inline embeds referencing the deleted widget.
+        const content = n.content.replaceAll(`[[widget:${widgetId}]]`, "");
+        return { ...n, widgets: filtered, content, updatedAt: Date.now() };
+      })
+    );
+  }, []);
+
   const closeTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     closeTabById(id);
@@ -8817,6 +8914,15 @@ END $$;`.trim();
     dashboardFolders,
     setDashboards,
     setDashboardFolders,
+    notes,
+    setNotes,
+    openNoteTab,
+    createNote,
+    updateNote,
+    deleteNote,
+    addNoteWidget,
+    updateNoteWidget,
+    removeNoteWidget,
     addTag, toggleTableTag,
     snippets, setSnippets,
     folders, setFolders,

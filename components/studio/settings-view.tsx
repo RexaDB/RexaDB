@@ -1247,7 +1247,7 @@ export function SettingsView({
       setCustomAppThemes,
       appThemeId,
       setAppThemeId,
-      "zinc-dark-white",
+      "rexadb-dark",
       themeId,
     );
 
@@ -1442,7 +1442,7 @@ export function SettingsView({
                       },
                       {
                         id: "dark",
-                        themeId: "zinc-dark-white",
+                        themeId: "rexadb-dark",
                         label: "Dark",
                         preview: "bg-[#0F0F0F]",
                       },

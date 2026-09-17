@@ -107,7 +107,7 @@ import {
   getTableDerivedValues,
 } from "@/lib/studio/table-utils";
 
-type Section = "dashboard" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | "extensions" | null;
+type Section = "dashboard" | "notes" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | "extensions" | null;
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -179,7 +179,7 @@ function SidebarItemWithMenu({
         <DropdownMenuContent
           align="start"
           side="right"
-          className="min-w-[160px] border-border bg-[var(--shell-history-bg)] ring-0"
+          className="min-w-[160px] border border-border bg-[var(--shell-history-bg)] ring-0"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -320,6 +320,7 @@ export function StudioShellSidebar({
     show?: boolean;
   }> = [
     { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+    { id: "notes", label: "Notes", Icon: SquarePen },
     {
       id: "tables",
       label: studio.databaseExplorer
@@ -438,6 +439,7 @@ export function StudioShellSidebar({
             {section === "tables" && <TablesPanel studio={studio} />}
             {section === "sql" && <SqlPanel studio={studio} />}
             {section === "dashboard" && <DashboardPanel studio={studio} />}
+            {section === "notes" && <NotesPanel studio={studio} />}
             {section === "database" && <DatabasePanel studio={studio} />}
             {section === "auth" && <AuthPanel studio={studio} />}
             {section === "payments" && <PaymentsPanel studio={studio} />}
@@ -512,7 +514,7 @@ function ConnectionSwitcher({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          className="w-[13.5rem] border-border bg-[var(--shell-history-bg)] ring-0"
+          className="w-[13.5rem] border border-border bg-[var(--shell-history-bg)] ring-0"
         >
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
             Connections
@@ -1490,6 +1492,83 @@ function DashboardPanel({ studio }: { studio: any }) {
       <RenameDialog
         open={!!renameTarget}
         title="Rename dashboard"
+        value={renameDraft}
+        onChange={setRenameDraft}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={handleRename}
+      />
+    </div>
+  );
+}
+
+function NotesPanel({ studio }: { studio: any }) {
+  const confirm = useConfirm();
+  const notes: any[] = studio.notes ?? [];
+  const { renameTarget, setRenameTarget, renameDraft, setRenameDraft, handleRename } = useRenameHandler(
+    (id, updates) => studio.updateNote?.(id, updates),
+  );
+
+  function handleExport(note: any) {
+    downloadJson(
+      { name: note.name, content: note.content ?? "", widgets: note.widgets ?? [] },
+      `${sanitizeFilename(note.name)}.note.json`,
+    );
+  }
+
+  async function handleDelete(note: any) {
+    const ok = await confirm({
+      title: "Delete note",
+      description: `Delete "${note.name}"? This cannot be undone.`,
+      variant: "destructive",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
+    studio.deleteNote?.(note.id);
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5 pt-1">
+      <button
+        type="button"
+        onClick={() => studio.createNote?.("New Note")}
+        className={ROW}
+      >
+        <Plus className="size-4 shrink-0" />
+        <span>New note</span>
+      </button>
+      {notes.map((n) => (
+        <SidebarItemWithMenu
+          key={n.id}
+          icon={<SquarePen className="size-4 shrink-0" />}
+          label={n.name}
+          onClick={() => studio.openNoteTab?.(n.id)}
+          actions={[
+            {
+              label: "Rename",
+              icon: <Pencil className="size-3.5" />,
+              onClick: () => {
+                setRenameTarget(n);
+                setRenameDraft(n.name);
+              },
+            },
+            {
+              label: "Export",
+              icon: <Download className="size-3.5" />,
+              onClick: () => handleExport(n),
+            },
+            {
+              label: "Delete",
+              icon: <Trash2 className="size-3.5" />,
+              onClick: () => handleDelete(n),
+              destructive: true,
+              separatorBefore: true,
+            },
+          ]}
+        />
+      ))}
+      <RenameDialog
+        open={!!renameTarget}
+        title="Rename note"
         value={renameDraft}
         onChange={setRenameDraft}
         onClose={() => setRenameTarget(null)}

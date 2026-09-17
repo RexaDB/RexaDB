@@ -44,7 +44,7 @@ body {
   --color-icon-muted: var(--icon-muted);
   --color-message: var(--message-surface);
   --color-message-foreground: var(--message-foreground);
-  --font-sans: var(--app-font-sans, var(--font-outfit), var(--font-arabic), var(--font-inter), var(--font-geist-sans), -apple-system, "SF Arabic", "Geeza Pro", sans-serif);
+  --font-sans: var(--app-font-sans, "SF Pro", -apple-system, var(--font-outfit), var(--font-arabic), var(--font-inter), var(--font-geist-sans), "SF Arabic", "Geeza Pro", sans-serif);
   --font-mono: var(--font-geist-mono), monospace;
   --font-space: var(--font-space-grotesk), var(--font-inter), sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);

@@ -25,6 +25,7 @@ import { CreateSchemaView } from "./create-schema-view";
 import { CreateDatabaseView } from "./create-database-view";
 import { MonacoSqlInput } from "./monaco-sql-input";
 import { DashboardView } from "./dashboard-view";
+import { NotesView } from "./notes/notes-view";
 import { RedisKeysList } from "./redis/redis-keys-list";
 import { RedisKeyDetails } from "./redis/redis-key-details";
 import { RedisCreateKeyView } from "./redis/redis-create-key-view";
@@ -145,6 +146,15 @@ function resolveDashboardId(paneTabs: any[], paneActiveTabId: string | null): st
     return null;
   }
   const match = paneTab.id.match(/^dashboard[-_](.+?)(?:[-_][\w]+)?(?:::pane::.*)?$/);
+  return match ? match[1] : null;
+}
+
+function resolveNoteId(paneTabs: any[], paneActiveTabId: string | null): string | null {
+  const paneTab = paneTabs.find((t: any) => t.id === paneActiveTabId);
+  if (!paneTab || (!paneTab.id.startsWith("note-") && !paneTab.id.startsWith("note_"))) {
+    return null;
+  }
+  const match = paneTab.id.match(/^note[-_](.+?)(?:[-_][\w]+)?(?:::pane::.*)?$/);
   return match ? match[1] : null;
 }
 
@@ -1589,6 +1599,19 @@ export function StudioMainContent({
                   onCreateDatabase={studio.handleCreateDatabase}
                   isCreating={studio.isCreatingDatabase}
                 />
+              ) : paneViewMode === "note" ? (
+                <NotesView
+                  note={(() => {
+                    const noteId = resolveNoteId(paneTabs, paneActiveTabId);
+                    if (!noteId) return null;
+                    return (
+                      studio.notes.find((n: any) => n.id === noteId) ||
+                      null
+                    );
+                  })()}
+                  studio={studio}
+                  connectionString={currentConnectionString}
+                />
               ) : paneViewMode === "dashboard" ? (
                 <DashboardView
                   dashboard={(() => {
@@ -1621,6 +1644,20 @@ export function StudioMainContent({
                       });
                     }
                   }}
+                  addDashboardWidgetFromBounds={
+                    studio.addDashboardWidgetFromBounds
+                  }
+                  updateDashboardWidget={studio.updateDashboardWidget}
+                  removeDashboardWidget={studio.removeDashboardWidget}
+                  applyDashboardWidgetLayout={
+                    studio.applyDashboardWidgetLayout
+                  }
+                  tables={(tables || []) as string[]}
+                  selectedSchema={selectedSchema}
+                  connectionString={currentConnectionString}
+                  editorThemeId={effectiveEditorThemeId}
+                  appEditorTheme={appEditorTheme}
+                  vimMode={studio.vimMode}
                 />
               ) : tab.type === "browser" ? (
                 <BrowserTab

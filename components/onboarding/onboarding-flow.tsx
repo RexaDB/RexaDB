@@ -22,7 +22,7 @@ type Step = "welcome" | "theme" | "account";
 
 const STEPS: Step[] = ["welcome", "theme", "account"];
 
-const DARK_THEME = BUILTIN_APP_THEMES.find((t) => t.id === "zinc-dark-white");
+const DARK_THEME = BUILTIN_APP_THEMES.find((t) => t.id === "rexadb-dark");
 const DARK_THEME_ID = DARK_THEME?.id ?? "dark";
 
 const TIPS: string[] = [

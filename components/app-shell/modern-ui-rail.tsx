@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import {
   AuthIcon,
   Database as DatabaseIcon,
+  FileText as NotesIcon,
   House,
   LayoutDashboard,
   Layers,
@@ -169,6 +170,12 @@ export function ModernUIRail({
         label: "Dashboard",
         icon: <LayoutDashboard className="w-5 h-5 shrink-0" />,
         onClick: () => selectView("dashboard"),
+      },
+      {
+        id: "notes",
+        label: "Notes",
+        icon: <NotesIcon className="w-5 h-5 shrink-0" />,
+        onClick: () => selectView("notes"),
       },
       {
         id: "tables",
