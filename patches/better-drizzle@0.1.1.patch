@@ -1,0 +1,37 @@
+diff --git a/node_modules/better-drizzle/.bun-tag-e24e06da5b876128 b/.bun-tag-e24e06da5b876128
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/cjs/shared/client/context.js b/dist/cjs/shared/client/context.js
+index fd661a41301c19f7a897606a770948a697d04772..90abf6319539ecfd1bff18c00e55349842b4a44a 100644
+--- a/dist/cjs/shared/client/context.js
++++ b/dist/cjs/shared/client/context.js
+@@ -107,7 +107,13 @@ const createRuntimeContext = (db, options) => {
+                 },
+                 name: tableName,
+             },
+-            primaryKeyFields: tableConfig.primaryKey.map((column) => column.name),
++            primaryKeyFields: tableConfig.primaryKey
++                .map((column) => {
++                const dbName = typeof column === "string" ? column : column?.name;
++                const field = Object.keys(columns).find((key) => columns[key]?.name === dbName);
++                return field ?? dbName;
++            })
++                .filter(Boolean),
+             relations,
+             relationNames: new Set(Object.keys(tableConfig.relations)),
+             table,
+diff --git a/package.json b/package.json
+index 7fee249eacb8f55742ddb09153f598181cd6ac98..b2081ec10d2a2278bdd4f610fc235e8d4f390d61 100644
+--- a/package.json
++++ b/package.json
+@@ -17,6 +17,10 @@
+ 				"default": "./dist/index.cjs"
+ 			},
+ 			"default": "./dist/index.js"
++		},
++		"./dist/index.cjs": {
++			"types": "./dist/index.d.cts",
++			"default": "./dist/index.cjs"
+ 		}
+ 	},
+ 	"files": [

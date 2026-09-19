@@ -91,26 +91,27 @@ export async function appendMcpAudit(draft: McpAuditDraft): Promise<void> {
   try {
     const { ensureCoreTables } = await import("@/lib/db/ensure-core-tables");
     await ensureCoreTables();
-    const { db } = await import("@/lib/db/index");
-    const { mcpAuditLog } = await import("@/lib/db/schema");
+    const { client } = await import("@/lib/db/index");
     const row = toStoredRow(draft);
-    await db.insert(mcpAuditLog).values({
-      id: row.id,
-      createdAt: row.createdAt,
-      transport: row.transport,
-      modeId: row.modeId,
-      connectionId: row.connectionId,
-      connectionName: row.connectionName,
-      tool: row.tool,
-      isWrite: row.isWrite,
-      success: row.success,
-      error: row.error,
-      durationMs: row.durationMs,
-      rowCount: row.rowCount,
-      queryHash: row.queryHash,
-      queryPreview: row.queryPreview,
-      slug: row.slug,
-      secretCount: row.secretCount,
+    await client.mcpAuditLog.create({
+      data: {
+        id: row.id,
+        createdAt: row.createdAt,
+        transport: row.transport,
+        modeId: row.modeId,
+        connectionId: row.connectionId,
+        connectionName: row.connectionName,
+        tool: row.tool,
+        isWrite: row.isWrite,
+        success: row.success,
+        error: row.error,
+        durationMs: row.durationMs,
+        rowCount: row.rowCount,
+        queryHash: row.queryHash,
+        queryPreview: row.queryPreview,
+        slug: row.slug,
+        secretCount: row.secretCount,
+      },
     });
     // Fire-and-forget retention trim (keep the table bounded).
     void trimMcpAuditLog().catch(() => {});
@@ -140,22 +141,17 @@ export type McpAuditFilter = {
 export async function listMcpAuditLog(filter: McpAuditFilter = {}): Promise<McpAuditRow[]> {
   const { ensureCoreTables } = await import("@/lib/db/ensure-core-tables");
   await ensureCoreTables();
-  const { db } = await import("@/lib/db/index");
-  const { mcpAuditLog } = await import("@/lib/db/schema");
-  const { desc, eq, and } = await import("drizzle-orm");
+  const { client } = await import("@/lib/db/index");
   const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
-  const conditions: any[] = [];
-  if (filter.writesOnly) conditions.push(eq(mcpAuditLog.isWrite, true));
-  if (filter.tool) conditions.push(eq(mcpAuditLog.tool, filter.tool));
-  if (typeof filter.connectionId === "number") {
-    conditions.push(eq(mcpAuditLog.connectionId, filter.connectionId));
-  }
-  const rows = await db
-    .select()
-    .from(mcpAuditLog)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(mcpAuditLog.createdAt))
-    .limit(limit);
+  const rows = await client.mcpAuditLog.findMany({
+    where: {
+      ...(filter.writesOnly ? { isWrite: true } : {}),
+      ...(filter.tool ? { tool: filter.tool } : {}),
+      ...(typeof filter.connectionId === "number" ? { connectionId: filter.connectionId } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
   return rows.map((r: any) => ({
     id: String(r.id),
     createdAt: Number(r.createdAt),

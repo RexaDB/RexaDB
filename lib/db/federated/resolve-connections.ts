@@ -1,7 +1,5 @@
-import { eq, inArray } from "drizzle-orm";
 import { detectConnectionDbType } from "../connection-type";
-import { db } from "../index";
-import { connections } from "../schema";
+import { client } from "../index";
 import { parseFederatedConnectionString } from "./connection-string";
 
 const SQL_FEDERATED_ENGINES = new Set(["postgres", "sqlite", "mysql"]);
@@ -9,7 +7,9 @@ const SQL_FEDERATED_ENGINES = new Set(["postgres", "sqlite", "mysql"]);
 export async function resolveFederatedSources(connectionString: string) {
   const config = parseFederatedConnectionString(connectionString);
   const ids = config.sources.map((source) => source.connectionId);
-  const rows = await db.select().from(connections).where(inArray(connections.id, ids));
+  const rows = await client.connections.findMany({
+    where: { id: { in: ids } },
+  });
   return config.sources.map((source) => {
     const connection = rows.find((row) => row.id === source.connectionId);
     if (!connection) throw new Error(`Federated source "${source.alias}" points to a missing connection.`);

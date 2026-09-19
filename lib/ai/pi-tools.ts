@@ -45,6 +45,8 @@ export type PiToolContext = {
   permissionMode?: "schema_only" | "schema_with_data";
   dashboardContext?: LightDashboardContext[];
   emitStep: (message: string) => void;
+  /** Exa web-search key (Settings → AI → Web search). Tools report a setup hint when missing. */
+  exaApiKey?: string | null;
 };
 
 function textResult(data: unknown): AgentToolResult<unknown> {
@@ -432,6 +434,57 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
               || String(row.table_schema || "").toLowerCase().includes(needle))
             .slice(0, 60);
           return textResult({ matches });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "web_search",
+      label: "Web search",
+      description: "Search the live web — works out of the box (free daily quota), richer results with an Exa API key. Use for current events, docs, versions, and anything beyond the database. Returns titles, URLs, and content snippets.",
+      promptSnippet: "web_search - search the live web, e.g. web_search({query:'postgres 17 new features'})",
+      parameters: Type.Object({
+        query: Type.String({ description: "Search query" }),
+        numResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: "Max results (default 5)" })),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Searching the web for "${params.query}"`);
+        try {
+          const key = typeof context.exaApiKey === "string" ? context.exaApiKey.trim() : "";
+          if (key) {
+            const { searchExa } = await import("@/lib/ai/exa-search");
+            return textResult(await searchExa(params.query, {
+              apiKey: key,
+              numResults: params.numResults ?? 5,
+            }));
+          }
+          const { searchWebFree } = await import("@/lib/ai/exa-mcp");
+          const results = await searchWebFree(params.query, { numResults: params.numResults ?? 5 });
+          return textResult({ results, free: true });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "fetch_web_content",
+      label: "Fetch web content",
+      description: "Fetch full page text for up to 5 URLs — works out of the box. Use after web_search to read a promising result in full. Only fetch URLs returned by web_search.",
+      promptSnippet: "fetch_web_content - fetch full page text, e.g. fetch_web_content({urls:['https://example.com/docs']})",
+      parameters: Type.Object({
+        urls: Type.Array(Type.String(), { minItems: 1, maxItems: 5, description: "URLs to fetch (from web_search results)" }),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Fetching ${params.urls.length} web page(s)`);
+        try {
+          const key = typeof context.exaApiKey === "string" ? context.exaApiKey.trim() : "";
+          if (key) {
+            const { fetchExaContents } = await import("@/lib/ai/exa-search");
+            return textResult({ pages: await fetchExaContents(params.urls, { apiKey: key }) });
+          }
+          const { fetchWebFree } = await import("@/lib/ai/exa-mcp");
+          return textResult({ pages: await fetchWebFree(params.urls), free: true });
         } catch (error) {
           failTool(error);
         }

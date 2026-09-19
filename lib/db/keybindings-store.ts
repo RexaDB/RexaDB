@@ -36,11 +36,10 @@ function writeJsonFile(filePath: string, data: Record<string, Keybinding>) {
  */
 async function migrateFromSqlite(): Promise<Record<string, Keybinding> | null> {
   try {
-    const { db } = await import("./index");
-    const { connectionSettings } = await import("./schema");
+    const { client } = await import("./index");
     const { ensureCoreTables } = await import("./ensure-core-tables");
     await ensureCoreTables();
-    const rows = await db.select().from(connectionSettings);
+    const rows = await client.connectionSettings.findMany({});
     for (const row of rows) {
       if (!row.keybindings) continue;
       try {

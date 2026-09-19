@@ -138,13 +138,12 @@ export function getMcpConfigFilePath(userDataDir?: string): string {
 
 async function readConfigFromDb(): Promise<any | null> {
   try {
-    const { db } = await import("@/lib/db/index");
-    const { mcpServerConfig } = await import("@/lib/db/schema");
+    const { client } = await import("@/lib/db/index");
     const { ensureCoreTables } = await import("@/lib/db/ensure-core-tables");
     await ensureCoreTables();
-    const rows = await db.select().from(mcpServerConfig).limit(1);
-    if (!rows[0]?.configJson) return null;
-    return JSON.parse(rows[0].configJson);
+    const row = await client.mcpServerConfig.findFirst({});
+    if (!row?.configJson) return null;
+    return JSON.parse(row.configJson);
   } catch {
     return null;
   }
@@ -185,14 +184,14 @@ export async function saveMcpExternalConfig(config: McpExternalConfig): Promise<
   if (clean.enabled && !clean.authToken) clean.authToken = generateMcpAuthToken();
   const payload = JSON.stringify(clean);
   try {
-    const { db } = await import("@/lib/db/index");
-    const { mcpServerConfig } = await import("@/lib/db/schema");
+    const { client } = await import("@/lib/db/index");
     const { ensureCoreTables } = await import("@/lib/db/ensure-core-tables");
     await ensureCoreTables();
-    await db
-      .insert(mcpServerConfig)
-      .values({ id: 1, configJson: payload, updatedAt: Date.now() })
-      .onConflictDoUpdate({ target: mcpServerConfig.id, set: { configJson: payload, updatedAt: Date.now() } });
+    await client.mcpServerConfig.upsert({
+      where: { id: 1 },
+      create: { id: 1, configJson: payload, updatedAt: Date.now() },
+      update: { configJson: payload, updatedAt: Date.now() },
+    });
   } catch (error) {
     // DB unavailable (e.g. browser bundle) — fall back to file.
     try {

@@ -429,28 +429,21 @@ export async function logAppError(params: {
 }
 
 export async function getAllUsers() {
-  const { db } = await import("./index");
+  const { client } = await import("./index");
   await ensureCoreTables();
-  const { users } = await import("./schema");
-  const rows = await db.select().from(users);
-  return { success: true, data: { count: rows.length } };
+  const count = await client.users.count({});
+  return { success: true, data: { count } };
 }
 
 export async function getStoredUserProfile(id?: string | null) {
-  const { db } = await import("./index");
-  const { sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const trimmedId = typeof id === "string" ? id.trim() : "";
 
   await ensureCoreTables();
 
-  const { users } = await import("./schema");
-  const { eq, desc, and } = await import("drizzle-orm");
-
-  const rows = trimmedId
-    ? await db.select().from(users).where(eq(users.id, trimmedId)).limit(1)
-    : await db.select().from(users).orderBy(desc(users.createdAt)).limit(1);
-
-  const row = rows[0];
+  const row = trimmedId
+    ? await client.users.findFirst({ where: { id: trimmedId } })
+    : await client.users.findFirst({ orderBy: { createdAt: "desc" } });
 
   if (!row) {
     return { success: false, error: "User not found." };
@@ -838,20 +831,16 @@ function buildAiChatTitle(prompt: string) {
 }
 
 export async function getGlobalAiSettings() {
-  const { db } = await import("./index");
-  const { userAiSettings } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const resolvedUserId = "global";
 
   try {
     await ensureCoreTables();
-    const rows = await db
-      .select()
-      .from(userAiSettings)
-      .where(eq(userAiSettings.userId, resolvedUserId))
-      .limit(1);
+    const row = await client.userAiSettings.findFirst({
+      where: { userId: resolvedUserId },
+    });
     const settings = normalizeGlobalAiSettings(
-      rows[0]?.settingsJson ? JSON.parse(rows[0].settingsJson) : null,
+      row?.settingsJson ? JSON.parse(row.settingsJson) : null,
     );
     return { success: true, data: settings };
   } catch (error) {
@@ -861,8 +850,7 @@ export async function getGlobalAiSettings() {
 }
 
 export async function saveGlobalAiSettings(settings: GlobalAiSettings) {
-  const { db } = await import("./index");
-  const { sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const { emitGlobalAiSettingsUpdated } =
     await import("@/lib/ai/ai-settings-events");
   const resolvedUserId = "global";
@@ -872,13 +860,11 @@ export async function saveGlobalAiSettings(settings: GlobalAiSettings) {
 
   try {
     await ensureCoreTables();
-    await db.run(sql`
-      INSERT INTO user_ai_settings (user_id, settings_json, updated_at)
-      VALUES (${resolvedUserId}, ${payload}, ${updatedAt})
-      ON CONFLICT(user_id) DO UPDATE SET
-        settings_json = excluded.settings_json,
-        updated_at = excluded.updated_at
-    `);
+    await client.userAiSettings.upsert({
+      where: { userId: resolvedUserId },
+      create: { userId: resolvedUserId, settingsJson: payload, updatedAt },
+      update: { settingsJson: payload, updatedAt },
+    });
     emitGlobalAiSettingsUpdated();
     return { success: true, data: normalized };
   } catch (error) {
@@ -888,18 +874,15 @@ export async function saveGlobalAiSettings(settings: GlobalAiSettings) {
 }
 
 export async function listAiChats(connectionId: number) {
-  const { db } = await import("./index");
-  const { aiChats } = await import("./schema");
-  const { eq, desc } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const rows = await db
-      .select()
-      .from(aiChats)
-      .where(eq(aiChats.connectionId, connectionId))
-      .orderBy(desc(aiChats.updatedAt));
+    const rows = await client.aiChats.findMany({
+      where: { connectionId },
+      orderBy: { updatedAt: "desc" },
+    });
     const chats: StoredAiChat[] = rows.map((row) => ({
       id: row.id,
       connectionId: row.connectionId,
@@ -916,9 +899,7 @@ export async function listAiChats(connectionId: number) {
 }
 
 export async function getAiChatMessages(chatId: string) {
-  const { db } = await import("./index");
-  const { aiChatMessages } = await import("./schema");
-  const { eq, asc } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const resolvedChatId = String(chatId || "").trim();
 
   if (!resolvedChatId) {
@@ -927,11 +908,10 @@ export async function getAiChatMessages(chatId: string) {
 
   try {
     await ensureCoreTables();
-    const rows = await db
-      .select()
-      .from(aiChatMessages)
-      .where(eq(aiChatMessages.chatId, resolvedChatId))
-      .orderBy(asc(aiChatMessages.timestamp));
+    const rows = await client.aiChatMessages.findMany({
+      where: { chatId: resolvedChatId },
+      orderBy: { timestamp: "asc" },
+    });
     const messages: StoredAiChatMessage[] = rows.map((row) => ({
       id: row.id,
       chatId: row.chatId,
@@ -948,9 +928,7 @@ export async function getAiChatMessages(chatId: string) {
 }
 
 export async function deleteAiChat(chatId: string) {
-  const { db } = await import("./index");
-  const { aiChats } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const resolvedChatId = String(chatId || "").trim();
 
   if (!resolvedChatId) {
@@ -959,7 +937,7 @@ export async function deleteAiChat(chatId: string) {
 
   try {
     await ensureCoreTables();
-    await db.delete(aiChats).where(eq(aiChats.id, resolvedChatId));
+    await client.aiChats.delete({ where: { id: resolvedChatId } });
     return { success: true };
   } catch (error) {
     console.error("Failed to delete AI chat:", error);
@@ -1105,9 +1083,7 @@ export async function deleteAiChatMessagesAfter(payload: {
   chatId: string;
   timestamp: number;
 }) {
-  const { db } = await import("./index");
-  const { aiChatMessages } = await import("./schema");
-  const { eq, gt, and } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const chatId = String(payload.chatId || "").trim();
   const timestamp = Number(payload.timestamp || 0);
   if (!chatId || !timestamp) {
@@ -1115,14 +1091,9 @@ export async function deleteAiChatMessagesAfter(payload: {
   }
   try {
     await ensureCoreTables();
-    await db
-      .delete(aiChatMessages)
-      .where(
-        and(
-          eq(aiChatMessages.chatId, chatId),
-          gt(aiChatMessages.timestamp, timestamp),
-        ),
-      );
+    await client.aiChatMessages.deleteMany({
+      where: { chatId, timestamp: { gt: timestamp } },
+    });
     return { success: true };
   } catch (error) {
     console.error("Failed to delete AI chat messages:", error);
@@ -1225,19 +1196,17 @@ async function writeCachedColumns(
 }
 
 async function syncConnectionGroupMembers(connId: number, groupNames: string[]) {
-  const { db } = await import("./index");
-  const { connectionGroups, connectionGroupMembers } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
-  await db.delete(connectionGroupMembers).where(eq(connectionGroupMembers.connectionId, connId));
+  await client.connectionGroupMembers.deleteMany({ where: { connectionId: connId } });
   if (groupNames.length === 0) return;
 
-  const allGroups = await db.select().from(connectionGroups);
+  const allGroups = await client.connectionGroups.findMany({});
   const matching = allGroups.filter(g => groupNames.includes(g.name));
   if (matching.length > 0) {
-    await db.insert(connectionGroupMembers).values(
-      matching.map(g => ({ connectionId: connId, groupId: g.id }))
-    );
+    await client.connectionGroupMembers.createMany({
+      data: matching.map(g => ({ connectionId: connId, groupId: g.id })),
+    });
   }
 }
 
@@ -1260,30 +1229,31 @@ export async function addConnection(
     authToken?: string;
   },
 ) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
     const newId = Date.now();
-    await db.insert(connections).values({
-      id: newId,
-      name,
-      connectionString,
-      connectionType,
-      host: options?.host,
-      port: options?.port,
-      database: options?.database,
-      username: options?.username,
-      password: options?.password,
-      sslMode: options?.sslMode,
-      authToken: options?.authToken,
-      environment: options?.environment,
-      color: options?.color,
-      group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
-      isFavorite: options?.isFavorite,
-      createdAt: new Date(),
-      sortOrder: newId,
+    await client.connections.create({
+      data: {
+        id: newId,
+        name,
+        connectionString,
+        connectionType,
+        host: options?.host,
+        port: options?.port,
+        database: options?.database,
+        username: options?.username,
+        password: options?.password,
+        sslMode: options?.sslMode,
+        authToken: options?.authToken,
+        environment: options?.environment,
+        color: options?.color,
+        group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
+        isFavorite: options?.isFavorite,
+        createdAt: new Date(),
+        sortOrder: newId,
+      },
     });
     if (options?.groups && options.groups.length > 0) {
       await syncConnectionGroupMembers(newId, options.groups);
@@ -1301,38 +1271,31 @@ export async function addConnection(
 }
 
 export async function getConnections(workspaceUrl?: string) {
-  const { db } = await import("./index");
-  const { connections, connectionGroupMembers, connectionGroups } = await import("./schema");
-  const { desc, eq, sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
+  const { sql } = await import("drizzle-orm");
 
   try {
     await ensureCoreTables();
     let conns;
     if (workspaceUrl) {
-      conns = await db
-        .select()
-        .from(connections)
-        .where(sql`connection_string LIKE 'workspace:%'`)
-        .orderBy(desc(connections.sortOrder), desc(connections.createdAt));
+      conns = await client.connections.findMany({
+        where: sql`connection_string LIKE 'workspace:%'`,
+        orderBy: [{ sortOrder: "desc" }, { createdAt: "desc" }],
+      });
     } else {
-      conns = await db
-        .select()
-        .from(connections)
-        .orderBy(desc(connections.sortOrder), desc(connections.createdAt));
+      conns = await client.connections.findMany({
+        orderBy: [{ sortOrder: "desc" }, { createdAt: "desc" }],
+      });
     }
 
-    const members = await db
-      .select({
-        connectionId: connectionGroupMembers.connectionId,
-        groupName: connectionGroups.name,
-      })
-      .from(connectionGroupMembers)
-      .innerJoin(connectionGroups, eq(connectionGroupMembers.groupId, connectionGroups.id));
+    const memberRows = await client.connectionGroupMembers.findMany({
+      include: { group: true },
+    });
 
     const groupsByConnId = new Map<number, string[]>();
-    for (const m of members) {
+    for (const m of memberRows) {
       if (!groupsByConnId.has(m.connectionId)) groupsByConnId.set(m.connectionId, []);
-      if (m.groupName) groupsByConnId.get(m.connectionId)!.push(m.groupName);
+      if (m.group?.name) groupsByConnId.get(m.connectionId)!.push(m.group.name);
     }
 
     return conns.map((conn) => ({
@@ -1346,17 +1309,11 @@ export async function getConnections(workspaceUrl?: string) {
 }
 
 export async function getConnection(id: number) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    const results = await db
-      .select()
-      .from(connections)
-      .where(eq(connections.id, id));
-    return results[0] || null;
+    return await client.connections.findFirst({ where: { id } });
   } catch (error) {
     console.error("Failed to get connection:", error);
     return null;
@@ -1364,15 +1321,13 @@ export async function getConnection(id: number) {
 }
 
 export async function deleteConnectionsByPrefix(prefix: string) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
-  const { like } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    const result = await db
-      .delete(connections)
-      .where(like(connections.connectionString, `${prefix}%`));
+    await client.connections.deleteMany({
+      where: { connectionString: { startsWith: prefix } },
+    });
     return { success: true };
   } catch (error) {
     console.error("Failed to delete connections by prefix:", error);
@@ -1381,13 +1336,11 @@ export async function deleteConnectionsByPrefix(prefix: string) {
 }
 
 export async function deleteConnection(id: number) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    await db.delete(connections).where(eq(connections.id, id));
+    await client.connections.delete({ where: { id } });
     return { success: true };
   } catch (error) {
     console.error("Failed to delete connection:", error);
@@ -1396,15 +1349,13 @@ export async function deleteConnection(id: number) {
 }
 
 export async function updateConnection(id: number, data: Record<string, any>) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    await db
-      .update(connections)
-      .set({
+    await client.connections.update({
+      where: { id },
+      data: {
         name: data.name,
         connectionString: data.connectionString,
         connectionType: data.connectionType,
@@ -1421,8 +1372,8 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         group: Array.isArray(data.groups) ? data.groups[0] || null : (data.group || null),
         isFavorite: data.isFavorite,
         lastActive: data.lastActive ? new Date(data.lastActive) : undefined,
-      })
-      .where(eq(connections.id, id));
+      },
+    });
     if (data.groups !== undefined) {
       await syncConnectionGroupMembers(id, data.groups || []);
     }
@@ -1838,17 +1789,12 @@ export async function fetchAllTablesWithColumns(
 // Studio Storage Actions
 
 export async function getStudioFolders(connectionId: number) {
-  const { db } = await import("./index");
-  const { folders } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const foldersData = await db
-      .select()
-      .from(folders)
-      .where(eq(folders.connectionId, connectionId));
+    const foldersData = await client.folders.findMany({ where: { connectionId } });
     return { success: true, data: foldersData };
   } catch (error) {
     console.error("Failed to fetch studio folders:", error);
@@ -1902,17 +1848,12 @@ export async function saveStudioFolders(
 }
 
 export async function getStudioSnippets(connectionId: number) {
-  const { db } = await import("./index");
-  const { snippets } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const snippetsData = await db
-      .select()
-      .from(snippets)
-      .where(eq(snippets.connectionId, connectionId));
+    const snippetsData = await client.snippets.findMany({ where: { connectionId } });
     return { success: true, data: snippetsData };
   } catch (error) {
     console.error("Failed to fetch studio snippets:", error);
@@ -1924,18 +1865,15 @@ export async function saveStudioSnippets(
   connectionId: number,
   snippetsList: any[],
 ) {
-  const { db } = await import("./index");
-  const { snippets, folders, snippetVersions } = await import("./schema");
+  const { client } = await import("./index");
+  const { snippets, snippetVersions } = await import("./schema");
   const { eq, inArray } = await import("drizzle-orm");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
     const normalizedSnippets = Array.isArray(snippetsList) ? snippetsList : [];
-    const existingFolders = await db
-      .select()
-      .from(folders)
-      .where(eq(folders.connectionId, connectionId));
+    const existingFolders = await client.folders.findMany({ where: { connectionId } });
     const folderIdSet = new Set(existingFolders.map((folder) => folder.id));
     const cleanSnippets = normalizedSnippets
       .map((snippet) => {
@@ -1969,10 +1907,7 @@ export async function saveStudioSnippets(
       new Map(cleanSnippets.map((snippet) => [snippet.id, snippet])).values(),
     );
     const keptIds = new Set(dedupedSnippets.map((s) => s.id));
-    const existingRows = await db
-      .select()
-      .from(snippets)
-      .where(eq(snippets.connectionId, connectionId));
+    const existingRows = await client.snippets.findMany({ where: { connectionId } });
     const existingSnippetIds = existingRows.map((r) => r.id);
     const deletedIds = existingSnippetIds.filter((id) => !keptIds.has(id));
     await runCoreTransaction("saveStudioSnippets", async (tx) => {
@@ -1999,20 +1934,15 @@ export async function createSnippetVersion(
   name: string,
   query: string,
 ) {
-  const { db } = await import("./index");
-  const { snippetVersions } = await import("./schema");
-  const { eq, desc } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    const existingVersions = await db
-      .select()
-      .from(snippetVersions)
-      .where(eq(snippetVersions.snippetId, snippetId))
-      .orderBy(desc(snippetVersions.versionNumber))
-      .limit(1);
-    const nextVersion =
-      existingVersions.length > 0 ? existingVersions[0].versionNumber + 1 : 1;
+    const latest = await client.snippetVersions.findFirst({
+      where: { snippetId },
+      orderBy: { versionNumber: "desc" },
+    });
+    const nextVersion = latest ? latest.versionNumber + 1 : 1;
     const newVersion = {
       id: Math.random().toString(36).substring(2, 11),
       snippetId,
@@ -2021,7 +1951,7 @@ export async function createSnippetVersion(
       versionNumber: nextVersion,
       createdAt: Date.now(),
     };
-    await db.insert(snippetVersions).values(newVersion);
+    await client.snippetVersions.create({ data: newVersion });
     return { success: true, data: newVersion };
   } catch (error) {
     console.error("Failed to create snippet version:", error);
@@ -2033,17 +1963,14 @@ export async function getSnippetVersions(
   connectionId: number,
   snippetId: string,
 ) {
-  const { db } = await import("./index");
-  const { snippetVersions } = await import("./schema");
-  const { eq, desc } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    const versions = await db
-      .select()
-      .from(snippetVersions)
-      .where(eq(snippetVersions.snippetId, snippetId))
-      .orderBy(desc(snippetVersions.versionNumber));
+    const versions = await client.snippetVersions.findMany({
+      where: { snippetId },
+      orderBy: { versionNumber: "desc" },
+    });
     return { success: true, data: versions };
   } catch (error) {
     console.error("Failed to fetch snippet versions:", error);
@@ -2056,36 +1983,27 @@ export async function restoreSnippetVersion(
   snippetId: string,
   versionId: string,
 ) {
-  const { db } = await import("./index");
-  const { snippets, snippetVersions } = await import("./schema");
-  const { eq, inArray } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    const versions = await db
-      .select()
-      .from(snippetVersions)
-      .where(eq(snippetVersions.snippetId, snippetId));
+    const versions = await client.snippetVersions.findMany({ where: { snippetId } });
     const version = versions.find((v) => v.id === versionId);
     if (!version) return { success: false, error: "Version not found" };
     const pruneIds = versions
       .filter((v) => v.versionNumber > version.versionNumber)
       .map((v) => v.id);
     if (pruneIds.length > 0) {
-      await db
-        .delete(snippetVersions)
-        .where(inArray(snippetVersions.id, pruneIds));
+      await client.snippetVersions.deleteMany({
+        where: { id: { in: pruneIds } },
+      });
     }
-    const [snippet] = await db
-      .select()
-      .from(snippets)
-      .where(eq(snippets.id, snippetId))
-      .limit(1);
+    const snippet = await client.snippets.findFirst({ where: { id: snippetId } });
     if (!snippet) return { success: false, error: "Snippet not found" };
-    await db
-      .update(snippets)
-      .set({ name: version.name, query: version.query })
-      .where(eq(snippets.id, snippetId));
+    await client.snippets.update({
+      where: { id: snippetId },
+      data: { name: version.name, query: version.query },
+    });
     return {
       success: true,
       data: { name: version.name, query: version.query },
@@ -2606,15 +2524,13 @@ export async function testConnection(
 }
 
 export async function listConnectionGroups() {
-  const { db } = await import("./index");
-  const { connectionGroups } = await import("./schema");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    return await db
-      .select()
-      .from(connectionGroups)
-      .orderBy(connectionGroups.name);
+    return await client.connectionGroups.findMany({
+      orderBy: { name: "asc" },
+    });
   } catch (error) {
     console.error("Failed to list connection groups:", error);
     return [];
@@ -2622,12 +2538,11 @@ export async function listConnectionGroups() {
 }
 
 export async function addConnectionGroup(name: string) {
-  const { db } = await import("./index");
-  const { connectionGroups } = await import("./schema");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    await db.insert(connectionGroups).values({ name, createdAt: new Date() });
+    await client.connectionGroups.create({ data: { name, createdAt: new Date() } });
     return { success: true };
   } catch (error) {
     return {
@@ -2640,20 +2555,18 @@ export async function addConnectionGroup(name: string) {
 }
 
 export async function renameConnectionGroup(oldName: string, newName: string) {
-  const { db } = await import("./index");
-  const { connectionGroups, connections } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    await db
-      .update(connectionGroups)
-      .set({ name: newName })
-      .where(eq(connectionGroups.name, oldName));
-    await db
-      .update(connections)
-      .set({ group: newName })
-      .where(eq(connections.group, oldName));
+    await client.connectionGroups.updateMany({
+      where: { name: oldName },
+      data: { name: newName },
+    });
+    await client.connections.updateMany({
+      where: { group: oldName },
+      data: { group: newName },
+    });
     return { success: true };
   } catch (error) {
     return {
@@ -2666,13 +2579,11 @@ export async function renameConnectionGroup(oldName: string, newName: string) {
 }
 
 export async function deleteConnectionGroup(name: string) {
-  const { db } = await import("./index");
-  const { connectionGroups } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
-    await db.delete(connectionGroups).where(eq(connectionGroups.name, name));
+    await client.connectionGroups.deleteMany({ where: { name } });
     return { success: true };
   } catch (error) {
     return {
@@ -2685,16 +2596,14 @@ export async function deleteConnectionGroup(name: string) {
 }
 
 export async function reorderConnections(orderedIds: number[]) {
-  const { db } = await import("./index");
-  const { connections } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     for (let i = 0; i < orderedIds.length; i++) {
-      await db
-        .update(connections)
-        .set({ sortOrder: orderedIds.length - i })
-        .where(eq(connections.id, orderedIds[i]));
+      await client.connections.update({
+        where: { id: orderedIds[i] },
+        data: { sortOrder: orderedIds.length - i },
+      });
     }
     return { success: true };
   } catch (error) {

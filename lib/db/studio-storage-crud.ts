@@ -7,34 +7,31 @@ export async function getStudioHistory(
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { queryHistory, connections } = await import("./schema");
-  const { eq, asc } = await import("drizzle-orm");
+  const { client } = await import("./index");
   const { logHistoryOperation } = await import("./history-logger");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const rows = await db
-      .select()
-      .from(queryHistory)
-      .leftJoin(connections, eq(queryHistory.connectionId, connections.id))
-      .where(eq(queryHistory.connectionId, connectionId))
-      .orderBy(asc(queryHistory.executedAt));
+    const rows = await client.queryHistory.findMany({
+      where: { connectionId },
+      include: { connection: true },
+      orderBy: { executedAt: "asc" },
+    });
 
     const mappedRows = rows.map((row) => ({
-      id: row.query_history.id,
-      connectionId: row.query_history.connectionId,
-      query: row.query_history.query,
-      executedAt: row.query_history.executedAt,
-      duration: row.query_history.duration,
-      status: row.query_history.status,
-      error: row.query_history.error,
-      rowsCount: row.query_history.rowsCount,
-      caller: row.query_history.caller,
-      executedBy: row.query_history.executedBy,
-      executedByName: row.query_history.executedByName,
-      connectionName: row.connections?.name ?? null,
+      id: row.id,
+      connectionId: row.connectionId,
+      query: row.query,
+      executedAt: row.executedAt,
+      duration: row.duration,
+      status: row.status,
+      error: row.error,
+      rowsCount: row.rowsCount,
+      caller: row.caller,
+      executedBy: row.executedBy,
+      executedByName: row.executedByName,
+      connectionName: row.connection?.name ?? null,
     }));
 
     await logHistoryOperation("load", connectionId, {
@@ -64,17 +61,19 @@ export async function insertHistoryEntry(
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { queryHistory } = await import("./schema");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    await db.insert(queryHistory).values({
-      id: entry.id, connectionId, query: entry.query, executedAt: entry.executedAt,
-      duration: entry.duration, status: entry.status, error: entry.error ?? null,
-      rowsCount: entry.rowsCount ?? null, caller: entry.caller,
-      executedBy: entry.executedBy ?? null, executedByName: entry.executedByName ?? null,
-    }).onConflictDoNothing();
+    await client.queryHistory.create({
+      data: {
+        id: entry.id, connectionId, query: entry.query, executedAt: entry.executedAt,
+        duration: entry.duration, status: entry.status, error: entry.error ?? null,
+        rowsCount: entry.rowsCount ?? null, caller: entry.caller,
+        executedBy: entry.executedBy ?? null, executedByName: entry.executedByName ?? null,
+      },
+      skipDuplicates: true,
+    });
     return { success: true };
   } catch (error) {
     console.error("[rexadb] insertHistoryEntry:error", { connectionId, entryId: entry.id, error });
@@ -83,12 +82,10 @@ export async function insertHistoryEntry(
 }
 
 export async function clearStudioHistory(connectionId: number, ensureCoreTables: () => Promise<void>) {
-  const { db } = await import("./index");
-  const { queryHistory } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
-    await db.delete(queryHistory).where(eq(queryHistory.connectionId, connectionId));
+    await client.queryHistory.deleteMany({ where: { connectionId } });
     return { success: true };
   } catch (error) {
     console.error("[rexadb] clearStudioHistory:error", { connectionId, error });
@@ -164,13 +161,11 @@ export async function saveStudioHistory(
 }
 
 export async function getStudioTags(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { tags } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const tagsData = await db.select().from(tags).where(eq(tags.connectionId, connectionId));
+    const tagsData = await client.tags.findMany({ where: { connectionId } });
     return { success: true, data: tagsData };
   } catch (error) {
     console.error("Failed to fetch studio tags:", error);
@@ -198,13 +193,11 @@ export async function saveStudioTags(connectionId: number, tagsList: any[], ensu
 }
 
 export async function getStudioTableTags(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { tableTags } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const tableTagsData = await db.select().from(tableTags).where(eq(tableTags.connectionId, connectionId));
+    const tableTagsData = await client.tableTags.findMany({ where: { connectionId } });
     return {
       success: true, data: tableTagsData.reduce((acc: any, curr: any) => {
         if (!acc[curr.tableName]) acc[curr.tableName] = [];
@@ -242,13 +235,14 @@ export async function saveStudioTableTags(connectionId: number, tableTagsMap: Re
 }
 
 export async function getStudioTabs(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { openTabs } = await import("./schema");
-  const { eq, asc } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const tabsData = await db.select().from(openTabs).where(eq(openTabs.connectionId, connectionId)).orderBy(asc(openTabs.order));
+    const tabsData = await client.openTabs.findMany({
+      where: { connectionId },
+      orderBy: { order: "asc" },
+    });
     const scopedPrefix = `c${connectionId}:`;
     const decodedTabs = tabsData.map((tab: any) => ({
       ...tab,
@@ -283,14 +277,12 @@ export async function saveStudioTabs(connectionId: number, tabsList: any[], ensu
 }
 
 export async function getStudioSettings(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { connectionSettings } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const settingsData = await db.select().from(connectionSettings).where(eq(connectionSettings.connectionId, connectionId));
-    return { success: true, data: settingsData[0] || null };
+    const settingsData = await client.connectionSettings.findFirst({ where: { connectionId } });
+    return { success: true, data: settingsData };
   } catch (error) {
     console.error("Failed to fetch studio settings:", error);
     return { success: false, error: "Failed to fetch studio settings" };
@@ -304,8 +296,8 @@ export async function getStudioBootstrap(
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
   const { db } = await import("./index");
-  const { connections, connectionSettings, openTabs } = await import("./schema");
-  const { eq, asc, sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
+  const { sql } = await import("drizzle-orm");
 
   try {
     await ensureCoreTables();
@@ -317,14 +309,14 @@ export async function getStudioBootstrap(
       await db.run(sql`ALTER TABLE connection_settings ADD COLUMN vim_mode INTEGER DEFAULT 0`);
     }
 
-    const [connectionRows, tabsRows, settingsRows] = await Promise.all([
-      db.select().from(connections).where(eq(connections.id, connectionId)).limit(1),
-      db.select().from(openTabs).where(eq(openTabs.connectionId, connectionId)).orderBy(asc(openTabs.order)),
-      db.select().from(connectionSettings).where(eq(connectionSettings.connectionId, connectionId)).limit(1),
+    const [connectionRows, tabsRows, settingsRow] = await Promise.all([
+      client.connections.findMany({ where: { id: connectionId }, take: 1 }),
+      client.openTabs.findMany({ where: { connectionId }, orderBy: { order: "asc" } }),
+      client.connectionSettings.findFirst({ where: { connectionId } }),
     ]);
 
     const connection = connectionRows[0] || null;
-    const settings = settingsRows[0] || null;
+    const settings = settingsRow || null;
     const scopedPrefix = `c${connectionId}:`;
     const tabs = tabsRows.map((tab: any) => ({
       ...tab,
@@ -354,14 +346,11 @@ export async function getStudioBootstrap(
 }
 
 export async function getStudioDashboards(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { dashboardState } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const rows = await db.select().from(dashboardState).where(eq(dashboardState.connectionId, connectionId)).limit(1);
-    const row = rows[0];
+    const row = await client.dashboardState.findFirst({ where: { connectionId } });
     if (!row) return { success: true, data: { dashboards: [], folders: [] } };
     const dashboards = JSON.parse(row.dashboardsJson || "[]");
     const folders = JSON.parse(row.foldersJson || "[]");
@@ -378,20 +367,27 @@ export async function saveStudioDashboards(
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
     const dashboards = Array.isArray(payload?.dashboards) ? payload.dashboards : [];
     const folders = Array.isArray(payload?.folders) ? payload.folders : [];
     const updatedAt = Date.now();
-    await db.run(sql`
-      INSERT INTO dashboard_state (connection_id, dashboards_json, folders_json, updated_at)
-      VALUES (${connectionId}, ${JSON.stringify(dashboards)}, ${JSON.stringify(folders)}, ${updatedAt})
-      ON CONFLICT(connection_id) DO UPDATE SET
-        dashboards_json = excluded.dashboards_json, folders_json = excluded.folders_json, updated_at = excluded.updated_at
-    `);
+    await client.dashboardState.upsert({
+      where: { connectionId },
+      create: {
+        connectionId,
+        dashboardsJson: JSON.stringify(dashboards),
+        foldersJson: JSON.stringify(folders),
+        updatedAt,
+      },
+      update: {
+        dashboardsJson: JSON.stringify(dashboards),
+        foldersJson: JSON.stringify(folders),
+        updatedAt,
+      },
+    });
     return { success: true };
   } catch (error) {
     console.error("Failed to save studio dashboards:", error);
@@ -400,14 +396,11 @@ export async function saveStudioDashboards(
 }
 
 export async function getStudioNotes(connectionId: number, ensureCoreTables: () => Promise<void>, ensureConnectionExists: (connectionId: number) => Promise<void>) {
-  const { db } = await import("./index");
-  const { noteState } = await import("./schema");
-  const { eq } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
-    const rows = await db.select().from(noteState).where(eq(noteState.connectionId, connectionId)).limit(1);
-    const row = rows[0];
+    const row = await client.noteState.findFirst({ where: { connectionId } });
     if (!row) return { success: true, data: { notes: [] } };
     const notes = JSON.parse((row as any).notesJson || "[]");
     return { success: true, data: { notes: Array.isArray(notes) ? notes : [] } };
@@ -423,19 +416,17 @@ export async function saveStudioNotes(
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
     const notes = Array.isArray(payload?.notes) ? payload.notes : [];
     const updatedAt = Date.now();
-    await db.run(sql`
-      INSERT INTO note_state (connection_id, notes_json, updated_at)
-      VALUES (${connectionId}, ${JSON.stringify(notes)}, ${updatedAt})
-      ON CONFLICT(connection_id) DO UPDATE SET
-        notes_json = excluded.notes_json, updated_at = excluded.updated_at
-    `);
+    await client.noteState.upsert({
+      where: { connectionId },
+      create: { connectionId, notesJson: JSON.stringify(notes), updatedAt },
+      update: { notesJson: JSON.stringify(notes), updatedAt },
+    });
     return { success: true };
   } catch (error) {
     console.error("Failed to save studio notes:", error);
@@ -449,8 +440,7 @@ export async function saveStudioSettings(
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
@@ -463,12 +453,12 @@ export async function saveStudioSettings(
       executionMode: settings?.executionMode ?? "review",
       sidebarBehavior: settings?.sidebarBehavior ?? "expandable",
       rowSpacing: settings?.rowSpacing ?? "relaxed",
-      alternatingRowColors: settings?.alternatingRowColors ? 1 : 0,
+      alternatingRowColors: Boolean(settings?.alternatingRowColors),
       editorFontSize: settings?.editorFontSize ?? "12px",
       sqlEditorEngine: settings?.sqlEditorEngine ?? "custom",
       editorThemeId: settings?.editorThemeId ?? "auto",
       customEditorThemes: settings?.customEditorThemes ?? null,
-      tuiMode: settings?.tuiMode ? 1 : 0,
+      tuiMode: Boolean(settings?.tuiMode),
       tuiTheme: settings?.tuiTheme ?? "auto",
       commandMenuSections: settings?.commandMenuSections ?? null,
       splitView: settings?.splitView ?? null,
@@ -477,31 +467,11 @@ export async function saveStudioSettings(
       agentApiKey: settings?.agentApiKey ?? null,
     };
     await withSqliteBusyRetry(async () => {
-      await db.run(sql`
-        INSERT INTO connection_settings (
-          connection_id, active_tab_id, sidebar_sort_mode, sidebar_view, sidebar_behavior,
-          keybindings, search_settings, execution_mode, row_spacing, alternating_row_colors,
-          editor_font_size, sql_editor_engine, editor_theme_id, custom_editor_themes,
-          tui_mode, tui_theme, command_menu_sections, split_view,
-          agent_provider, agent_model, agent_api_key
-        ) VALUES (
-          ${connectionId}, ${payload.activeTabId}, ${payload.sidebarSortMode}, ${payload.sidebarView}, ${payload.sidebarBehavior},
-          ${payload.keybindings}, ${payload.searchSettings}, ${payload.executionMode}, ${payload.rowSpacing}, ${payload.alternatingRowColors},
-          ${payload.editorFontSize}, ${payload.sqlEditorEngine}, ${payload.editorThemeId}, ${payload.customEditorThemes},
-          ${payload.tuiMode}, ${payload.tuiTheme}, ${payload.commandMenuSections}, ${payload.splitView},
-          ${payload.agentProvider}, ${payload.agentModel}, ${payload.agentApiKey}
-        ) ON CONFLICT(connection_id) DO UPDATE SET
-          active_tab_id = excluded.active_tab_id, sidebar_sort_mode = excluded.sidebar_sort_mode,
-          sidebar_view = excluded.sidebar_view, sidebar_behavior = excluded.sidebar_behavior,
-          keybindings = excluded.keybindings, search_settings = excluded.search_settings,
-          execution_mode = excluded.execution_mode, row_spacing = excluded.row_spacing,
-          alternating_row_colors = excluded.alternating_row_colors, editor_font_size = excluded.editor_font_size,
-          sql_editor_engine = excluded.sql_editor_engine, editor_theme_id = excluded.editor_theme_id,
-          custom_editor_themes = excluded.custom_editor_themes, tui_mode = excluded.tui_mode,
-          tui_theme = excluded.tui_theme, command_menu_sections = excluded.command_menu_sections,
-          split_view = excluded.split_view, agent_provider = excluded.agent_provider,
-          agent_model = excluded.agent_model, agent_api_key = excluded.agent_api_key
-      `);
+      await client.connectionSettings.upsert({
+        where: { connectionId },
+        create: { connectionId, ...payload } as any,
+        update: { ...payload } as any,
+      });
     }, "saveStudioSettings");
     return { success: true };
   } catch (error) {
@@ -561,19 +531,16 @@ export async function getConnectionAnalytics(
   ensureConnectionExists: (connectionId: number) => Promise<void>,
   range?: string,
 ) {
-  const { db } = await import("./index");
-  const { queryHistory, connections, snippets } = await import("./schema");
-  const { eq, desc, sql, and } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
     await ensureConnectionExists(connectionId);
 
-    const rows = await db
-      .select()
-      .from(queryHistory)
-      .where(eq(queryHistory.connectionId, connectionId))
-      .orderBy(desc(queryHistory.executedAt));
+    const rows = await client.queryHistory.findMany({
+      where: { connectionId },
+      orderBy: { executedAt: "desc" },
+    });
 
     const filteredRows = range ? filterByTimeRange(rows, range) : rows;
 
@@ -620,11 +587,7 @@ export async function getConnectionAnalytics(
     }
     const contributors = Array.from(contributorsMap.values()).sort((a, b) => b.queryCount - a.queryCount);
 
-    const snippetRows = await db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(snippets)
-      .where(eq(snippets.connectionId, connectionId));
-    const totalSnippets = Number(snippetRows[0]?.count || 0);
+    const totalSnippets = await client.snippets.count({ where: { connectionId } });
 
     return {
       success: true,
@@ -655,17 +618,14 @@ export async function getConnectionAnalytics(
 export async function getUserAnalytics(
   ensureCoreTables: () => Promise<void>,
 ) {
-  const { db } = await import("./index");
-  const { queryHistory, connections, snippets } = await import("./schema");
-  const { desc, sql } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
 
-    const allRows = await db
-      .select()
-      .from(queryHistory)
-      .orderBy(desc(queryHistory.executedAt));
+    const allRows = await client.queryHistory.findMany({
+      orderBy: { executedAt: "desc" },
+    });
 
     const {
       totalQueries, successCount, errorCount, successRate,
@@ -673,7 +633,7 @@ export async function getUserAnalytics(
       totalSessions, topQueries, peakDay,
     } = computeAnalytics(allRows);
 
-    const connRows = await db.select().from(connections);
+    const connRows = await client.connections.findMany({});
     const totalConnections = connRows.length;
 
     const connectionsOverview = connRows.map((c) => {
@@ -703,10 +663,7 @@ export async function getUserAnalytics(
       };
     });
 
-    const snippetResult = await db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(snippets);
-    const totalSnippets = Number(snippetResult[0]?.count || 0);
+    const totalSnippets = await client.snippets.count({});
 
     return {
       success: true,

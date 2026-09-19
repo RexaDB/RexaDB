@@ -17,6 +17,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   kilo: "Kilo Code",
   ollama: "Ollama",
+  exa: "Exa (web search)",
 };
 
 /** Providers pinned in the compact settings panel; the full catalog lives on the dedicated Providers page. */

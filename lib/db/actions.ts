@@ -481,12 +481,7 @@ async function getConnectionAnalytics(connectionId: number): Promise<{
     return { success: false, error: "Invalid connection id" };
   }
 
-  const { db } = await import("./index");
-
-  const { queryHistory, connections } = await import("./schema");
-
-  // fallow-ignore-next-line code-duplication
-  const { eq, desc, asc, sql, count, and, gte } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
@@ -494,15 +489,9 @@ async function getConnectionAnalytics(connectionId: number): Promise<{
     const now = Date.now();
     const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
 
-    const allHistory = await db
-      .select()
-      .from(queryHistory)
-      .where(
-        and(
-          eq(queryHistory.connectionId, connectionId),
-          gte(queryHistory.executedAt, oneYearAgo),
-        ),
-      );
+    const allHistory = await client.queryHistory.findMany({
+      where: { connectionId, executedAt: { gte: oneYearAgo } },
+    });
 
     const { totalQueries, successCount, errorCount, successRate } =
       computeBasicStats(allHistory);
@@ -538,12 +527,9 @@ async function getConnectionAnalytics(connectionId: number): Promise<{
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    const connectionRows = await db
-      .select()
-      .from(connections)
-      .where(eq(connections.id, connectionId))
-      .limit(1);
-    const connection = connectionRows[0];
+    const connection = await client.connections.findFirst({
+      where: { id: connectionId },
+    });
 
     const connectionActivity = {
       lastActive: connection?.lastActive
@@ -870,11 +856,7 @@ async function getUserAnalytics(): Promise<{
   data?: UserAnalytics;
   error?: string;
 }> {
-  const { db } = await import("./index");
-  const { queryHistory, connections, snippets } = await import("./schema");
-
-  // fallow-ignore-next-line code-duplication
-  const { gte } = await import("drizzle-orm");
+  const { client } = await import("./index");
 
   try {
     await ensureCoreTables();
@@ -882,10 +864,9 @@ async function getUserAnalytics(): Promise<{
     const now = Date.now();
     const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
 
-    const allHistory = await db
-      .select()
-      .from(queryHistory)
-      .where(gte(queryHistory.executedAt, oneYearAgo));
+    const allHistory = await client.queryHistory.findMany({
+      where: { executedAt: { gte: oneYearAgo } },
+    });
 
     const totalQueries = allHistory.length;
     const successCount = allHistory.filter(
@@ -903,7 +884,7 @@ async function getUserAnalytics(): Promise<{
       queryConnMap.set(cid, (queryConnMap.get(cid) || 0) + 1);
     });
 
-    const allConnections = await db.select().from(connections);
+    const allConnections = await client.connections.findMany({});
     const queriesByConnection = Array.from(queryConnMap.entries())
       .map(([cid, count]) => {
         const conn = allConnections.find((c) => String(c.id) === cid);
@@ -932,8 +913,7 @@ async function getUserAnalytics(): Promise<{
     const totalDuration =
       durations.length > 0 ? durations.reduce((a, b) => a + b, 0) : 0;
 
-    const allSnippets = await db.select().from(snippets);
-    const totalSnippets = allSnippets.length;
+    const totalSnippets = await client.snippets.count({});
 
     let peakDay: { date: string; count: number } | undefined;
     if (queriesByDay.length > 0) {

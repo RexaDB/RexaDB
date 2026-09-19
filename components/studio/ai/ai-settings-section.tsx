@@ -116,6 +116,38 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
         </Select>
       </div>
 
+      {/* Web search (Exa) — key-only, no models. */}
+      {(() => {
+        const exaKey = settings.providers["exa"]?.apiKey || "";
+        return (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <Label className="text-xstracking-wider text-muted-foreground font-medium">
+              Web search (Exa)
+            </Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Lets the agent search the live web. Works out of the box
+              with a free daily quota — add a key for unlimited,
+              richer results ($20 signup credits + $10 free every
+              month).{" "}
+              <a
+                className="underline underline-offset-2"
+                href="https://dashboard.exa.ai/api-keys"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Get a free key
+              </a>
+            </p>
+            <div className="mt-2">
+              <ApiKeyField
+                value={exaKey}
+                onChange={(apiKey) => updateProvider("exa", { apiKey })}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
       <Accordion
         className="space-y-2"
         collapsible

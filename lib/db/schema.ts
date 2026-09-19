@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
 import type { SidebarBehavior } from "@/lib/studio/sidebar-behavior";
 
 export const connectionGroups = sqliteTable("connection_groups", {
@@ -313,3 +314,157 @@ export const workflowRuns = sqliteTable("workflow_runs", {
 
 export type WorkflowRow = typeof workflows.$inferSelect;
 export type WorkflowRunRow = typeof workflowRuns.$inferSelect;
+
+// Relations power better-drizzle's `include` / nested `where` filters
+// (e.g. `where: { connection: { is: { name } } }`). No DB migration needed.
+export const connectionsRelations = relations(connections, ({ many, one }) => ({
+  folders: many(folders),
+  snippets: many(snippets),
+  queryHistory: many(queryHistory),
+  tags: many(tags),
+  tableTags: many(tableTags),
+  openTabs: many(openTabs),
+  connectionSettings: one(connectionSettings),
+  dashboardState: one(dashboardState),
+  noteState: one(noteState),
+  workflows: many(workflows),
+  aiChats: many(aiChats),
+  groupMembers: many(connectionGroupMembers),
+}));
+
+export const connectionGroupsRelations = relations(connectionGroups, ({ many }) => ({
+  members: many(connectionGroupMembers),
+}));
+
+export const connectionGroupMembersRelations = relations(connectionGroupMembers, ({ one }) => ({
+  connection: one(connections, {
+    fields: [connectionGroupMembers.connectionId],
+    references: [connections.id],
+  }),
+  group: one(connectionGroups, {
+    fields: [connectionGroupMembers.groupId],
+    references: [connectionGroups.id],
+  }),
+}));
+
+export const foldersRelations = relations(folders, ({ one, many }) => ({
+  connection: one(connections, {
+    fields: [folders.connectionId],
+    references: [connections.id],
+  }),
+  snippets: many(snippets),
+}));
+
+export const snippetsRelations = relations(snippets, ({ one, many }) => ({
+  connection: one(connections, {
+    fields: [snippets.connectionId],
+    references: [connections.id],
+  }),
+  folder: one(folders, {
+    fields: [snippets.folderId],
+    references: [folders.id],
+  }),
+  versions: many(snippetVersions),
+}));
+
+export const snippetVersionsRelations = relations(snippetVersions, ({ one }) => ({
+  snippet: one(snippets, {
+    fields: [snippetVersions.snippetId],
+    references: [snippets.id],
+  }),
+}));
+
+export const queryHistoryRelations = relations(queryHistory, ({ one }) => ({
+  connection: one(connections, {
+    fields: [queryHistory.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const tagsRelations = relations(tags, ({ one }) => ({
+  connection: one(connections, {
+    fields: [tags.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const tableTagsRelations = relations(tableTags, ({ one }) => ({
+  connection: one(connections, {
+    fields: [tableTags.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const openTabsRelations = relations(openTabs, ({ one }) => ({
+  connection: one(connections, {
+    fields: [openTabs.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const connectionSettingsRelations = relations(connectionSettings, ({ one }) => ({
+  connection: one(connections, {
+    fields: [connectionSettings.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const dashboardStateRelations = relations(dashboardState, ({ one }) => ({
+  connection: one(connections, {
+    fields: [dashboardState.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const noteStateRelations = relations(noteState, ({ one }) => ({
+  connection: one(connections, {
+    fields: [noteState.connectionId],
+    references: [connections.id],
+  }),
+}));
+
+export const usersRelations = relations(users, ({ many, one }) => ({
+  aiChats: many(aiChats),
+  entitlement: one(userEntitlements),
+}));
+
+export const userEntitlementsRelations = relations(userEntitlements, ({ one }) => ({
+  user: one(users, {
+    fields: [userEntitlements.userId],
+    references: [users.id],
+  }),
+}));
+
+export const aiChatsRelations = relations(aiChats, ({ one, many }) => ({
+  connection: one(connections, {
+    fields: [aiChats.connectionId],
+    references: [connections.id],
+  }),
+  user: one(users, {
+    fields: [aiChats.userId],
+    references: [users.id],
+  }),
+  messages: many(aiChatMessages),
+}));
+
+export const aiChatMessagesRelations = relations(aiChatMessages, ({ one }) => ({
+  chat: one(aiChats, {
+    fields: [aiChatMessages.chatId],
+    references: [aiChats.id],
+  }),
+}));
+
+export const workflowsRelations = relations(workflows, ({ one, many }) => ({
+  connection: one(connections, {
+    fields: [workflows.connectionId],
+    references: [connections.id],
+  }),
+  runs: many(workflowRuns),
+}));
+
+export const workflowRunsRelations = relations(workflowRuns, ({ one }) => ({
+  workflow: one(workflows, {
+    fields: [workflowRuns.workflowId],
+    references: [workflows.id],
+  }),
+}));

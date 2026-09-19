@@ -1713,14 +1713,12 @@ function dynamicPostRoute(importPath: string, fn: (body: any, mod: any) => Promi
   };
 }
 
-/** Dynamic-import the workflow dependencies (db, schema, drizzle-orm, ensureCoreTables) */
+/** Dynamic-import the workflow dependencies (better-drizzle client, ensureCoreTables) */
 async function getWorkflowDeps() {
-  const { db } = await import("../lib/db/index");
-  const { workflows, workflowRuns } = await import("../lib/db/schema");
-  const { eq, desc } = await import("drizzle-orm");
+  const { client } = await import("../lib/db/index");
   const { ensureCoreTables } = await import("../lib/db/ensure-core-tables");
   await ensureCoreTables();
-  return { db, workflows, workflowRuns, eq, desc };
+  return { client };
 }
 
 app.post("/api/studio/ws-type", (req, res) => {
@@ -2289,13 +2287,13 @@ function runId() {
 
 app.get("/api/workflows", async (req, res) => {
   try {
-    const { db, workflows, eq } = await getWorkflowDeps();
+    const { client } = await getWorkflowDeps();
     const connectionId = Number(req.query.connectionId);
     if (!connectionId || Number.isNaN(connectionId)) {
       res.json({ success: true, data: [] });
       return;
     }
-    const rows = await db.select().from(workflows).where(eq(workflows.connectionId, connectionId));
+    const rows = await client.workflows.findMany({ where: { connectionId } });
     res.json({ success: true, data: rows });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -2304,7 +2302,7 @@ app.get("/api/workflows", async (req, res) => {
 
 app.post("/api/workflows", async (req, res) => {
   try {
-    const { db, workflows } = await getWorkflowDeps();
+    const { client } = await getWorkflowDeps();
     const now = Date.now();
     const row = {
       id: workflowId(),
@@ -2313,13 +2311,13 @@ app.post("/api/workflows", async (req, res) => {
       description: req.body.description || null,
       nodesJson: JSON.stringify(req.body.nodes || []),
       edgesJson: JSON.stringify(req.body.edges || []),
-      scheduleEnabled: req.body.scheduleEnabled ? 1 : 0,
+      scheduleEnabled: Boolean(req.body.scheduleEnabled),
       scheduleType: req.body.scheduleType || null,
       scheduleValue: req.body.scheduleValue || null,
       createdAt: now,
       updatedAt: now,
     };
-    await db.insert(workflows).values(row as any);
+    await client.workflows.create({ data: row as any });
     res.json({ success: true, data: { ...row, nodes: req.body.nodes || [], edges: req.body.edges || [] } });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -2328,10 +2326,10 @@ app.post("/api/workflows", async (req, res) => {
 
 app.get("/api/workflows/:id", async (req, res) => {
   try {
-    const { db, workflows, eq } = await getWorkflowDeps();
-    const rows = await db.select().from(workflows).where(eq(workflows.id, req.params.id));
-    if (!rows.length) { res.json({ success: false, error: "Not found" }); return; }
-    res.json({ success: true, data: rows[0] });
+    const { client } = await getWorkflowDeps();
+    const row = await client.workflows.findFirst({ where: { id: req.params.id } });
+    if (!row) { res.json({ success: false, error: "Not found" }); return; }
+    res.json({ success: true, data: row });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }
@@ -2339,17 +2337,17 @@ app.get("/api/workflows/:id", async (req, res) => {
 
 app.put("/api/workflows/:id", async (req, res) => {
   try {
-    const { db, workflows, eq } = await getWorkflowDeps();
+    const { client } = await getWorkflowDeps();
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
     if (req.body.name !== undefined) updates.name = req.body.name;
     if (req.body.description !== undefined) updates.description = req.body.description;
     if (req.body.nodes !== undefined) updates.nodesJson = JSON.stringify(req.body.nodes);
     if (req.body.edges !== undefined) updates.edgesJson = JSON.stringify(req.body.edges);
-    if (req.body.scheduleEnabled !== undefined) updates.scheduleEnabled = req.body.scheduleEnabled ? 1 : 0;
+    if (req.body.scheduleEnabled !== undefined) updates.scheduleEnabled = Boolean(req.body.scheduleEnabled);
     if (req.body.scheduleType !== undefined) updates.scheduleType = req.body.scheduleType;
     if (req.body.scheduleValue !== undefined) updates.scheduleValue = req.body.scheduleValue;
     // fallow-ignore-next-line code-duplication
-    await db.update(workflows).set(updates as any).where(eq(workflows.id, req.params.id));
+    await client.workflows.update({ where: { id: req.params.id }, data: updates as any });
     res.json({ success: true });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -2359,8 +2357,8 @@ app.put("/api/workflows/:id", async (req, res) => {
 // fallow-ignore-next-line code-duplication
 app.delete("/api/workflows/:id", async (req, res) => {
   try {
-    const { db, workflows, eq } = await getWorkflowDeps();
-    await db.delete(workflows).where(eq(workflows.id, req.params.id));
+    const { client } = await getWorkflowDeps();
+    await client.workflows.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -2369,12 +2367,11 @@ app.delete("/api/workflows/:id", async (req, res) => {
 
 app.post("/api/workflows/:id/run", async (req, res) => {
   try {
-    const { db, workflows, workflowRuns, eq } = await getWorkflowDeps();
+    const { client } = await getWorkflowDeps();
     const { executeWithMastra } = await import("../lib/workflows/mastra-adapter");
 
-    const rows = await db.select().from(workflows).where(eq(workflows.id, req.params.id));
-    if (!rows.length) { res.json({ success: false, error: "Workflow not found" }); return; }
-    const wf = rows[0];
+    const wf = await client.workflows.findFirst({ where: { id: req.params.id } });
+    if (!wf) { res.json({ success: false, error: "Workflow not found" }); return; }
     // "Run" tests the editor's current canvas, which may have unsaved edits -
     // use the nodes/edges the client sends if provided, falling back to the
     // persisted version for the scheduler and any other caller that omits them.
@@ -2384,13 +2381,15 @@ app.post("/api/workflows/:id/run", async (req, res) => {
 
     const rid = runId();
     const startedAt = Date.now();
-    await db.insert(workflowRuns).values({
-      id: rid,
-      workflowId: wf.id,
-      status: "running",
-      startedAt,
-      trigger,
-    } as any);
+    await client.workflowRuns.create({
+      data: {
+        id: rid,
+        workflowId: wf.id,
+        status: "running",
+        startedAt,
+        trigger,
+      } as any,
+    });
 
     // Stream node-start/node-done as the workflow actually executes them (the
     // runner already awaits each node in graph order before starting the next)
@@ -2410,22 +2409,31 @@ app.post("/api/workflows/:id/run", async (req, res) => {
       const finishedAt = Date.now();
       const status = error ? "error" : "success";
       // fallow-ignore-next-line code-duplication
-      await db.update(workflowRuns).set({
-        status,
-        finishedAt,
-        nodesOutputJson: JSON.stringify(outputs),
-        error: error || null,
-      } as any).where(eq(workflowRuns.id, rid));
+      await client.workflowRuns.update({
+        where: { id: rid },
+        data: {
+          status,
+          finishedAt,
+          nodesOutputJson: JSON.stringify(outputs),
+          error: error || null,
+        } as any,
+      });
       // fallow-ignore-next-line code-duplication
-      await db.update(workflows).set({ lastRunAt: finishedAt, updatedAt: finishedAt } as any).where(eq(workflows.id, wf.id));
+      await client.workflows.update({
+        where: { id: wf.id },
+        data: { lastRunAt: finishedAt, updatedAt: finishedAt } as any,
+      });
       send({ type: "run-complete", runId: rid, status, outputs, error });
     } catch (execErr: any) {
       const finishedAt = Date.now();
-      await db.update(workflowRuns).set({
-        status: "error",
-        finishedAt,
-        error: execErr.message,
-      } as any).where(eq(workflowRuns.id, rid));
+      await client.workflowRuns.update({
+        where: { id: rid },
+        data: {
+          status: "error",
+          finishedAt,
+          error: execErr.message,
+        } as any,
+      });
       send({ type: "run-complete", runId: rid, status: "error", error: execErr.message });
     }
     res.end();
@@ -2436,12 +2444,13 @@ app.post("/api/workflows/:id/run", async (req, res) => {
 
 app.get("/api/workflows/:id/runs", async (req, res) => {
   try {
-    const { db, workflowRuns, eq, desc } = await getWorkflowDeps();
+    const { client } = await getWorkflowDeps();
     const limit = Math.min(Number(req.query.limit) || 20, 100);
-    const rows = await db.select().from(workflowRuns)
-      .where(eq(workflowRuns.workflowId, req.params.id))
-      .orderBy(desc(workflowRuns.startedAt))
-      .limit(limit);
+    const rows = await client.workflowRuns.findMany({
+      where: { workflowId: req.params.id },
+      orderBy: { startedAt: "desc" },
+      take: limit,
+    });
     res.json({ success: true, data: rows });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -2454,14 +2463,12 @@ app.get("/api/workflows/:id/runs", async (req, res) => {
     const { ensureCoreTables } = await import("../lib/db/ensure-core-tables");
     await ensureCoreTables();
 
-    async function runScheduledWorkflows() {
+      async function runScheduledWorkflows() {
       try {
-        const { db } = await import("../lib/db/index");
-        const { workflows, workflowRuns } = await import("../lib/db/schema");
-        const { eq, and } = await import("drizzle-orm");
+        const { client } = await import("../lib/db/index");
         const { executeWithMastra, matchesCron } = await import("../lib/workflows/mastra-adapter");
 
-        const enabled = await db.select().from(workflows).where(eq(workflows.scheduleEnabled as any, 1));
+        const enabled = await client.workflows.findMany({ where: { scheduleEnabled: true } });
         const now = new Date();
 
         for (const wf of enabled) {
@@ -2485,13 +2492,21 @@ app.get("/api/workflows/:id/runs", async (req, res) => {
             const rid = runId();
             const startedAt = Date.now();
 
-            await db.insert(workflowRuns).values({ id: rid, workflowId: wf.id, status: "running", startedAt, trigger: "schedule" } as any);
+            await client.workflowRuns.create({
+              data: { id: rid, workflowId: wf.id, status: "running", startedAt, trigger: "schedule" } as any,
+            });
             const { outputs, error } = await executeWithMastra(nodes, edges, "schedule", undefined, wf.connectionId);
             const finishedAt = Date.now();
             // fallow-ignore-next-line code-duplication
-            await db.update(workflowRuns).set({ status: error ? "error" : "success", finishedAt, nodesOutputJson: JSON.stringify(outputs), error: error || null } as any).where(eq(workflowRuns.id, rid));
+            await client.workflowRuns.update({
+              where: { id: rid },
+              data: { status: error ? "error" : "success", finishedAt, nodesOutputJson: JSON.stringify(outputs), error: error || null } as any,
+            });
             // fallow-ignore-next-line code-duplication
-            await db.update(workflows).set({ lastRunAt: finishedAt, updatedAt: finishedAt } as any).where(eq(workflows.id, wf.id));
+            await client.workflows.update({
+              where: { id: wf.id },
+              data: { lastRunAt: finishedAt, updatedAt: finishedAt } as any,
+            });
             log(`[workflow-scheduler] ran ${wf.name} (${wf.id}) — ${error ? "error" : "success"}`);
           } catch (err: any) {
             log(`[workflow-scheduler] error running ${wf.id}: ${err.message}`);
