@@ -46,6 +46,18 @@ test("dotted identifiers don't collide and round-trip", () => {
   });
 });
 
+test("identifiers with backslashes round-trip exactly once", () => {
+  assert.deepEqual(splitTableKey(tableKey("public", "a\\b")), {
+    schema: "public",
+    table: "a\\b",
+  });
+  assert.deepEqual(splitColumnKey(columnKey("public", "a\\b.c", "d\\e")), {
+    schema: "public",
+    table: "a\\b.c",
+    column: "d\\e",
+  });
+});
+
 test("applyColumnDecorator handles nulls and passthrough", () => {
   assert.deepEqual(applyColumnDecorator(null, null), { display: "NULL", masked: false });
   assert.deepEqual(applyColumnDecorator(undefined, null), { display: "NULL", masked: false });

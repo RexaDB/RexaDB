@@ -16,11 +16,10 @@ function escapeKeyPart(raw: string): string {
     .replace(/\./g, "\\.");
 }
 
-function unescapeKeyPart(raw: string): string {
-  return String(raw || "").replace(/\\(\\|.)/g, (_, ch: string) => ch);
-}
-
-/** Split on unescaped dots; backslash escapes the next char. */
+/**
+ * Split on unescaped dots; a backslash escapes the next char AND is consumed,
+ * so segments come back fully unescaped (single pass — do not unescape again).
+ */
 function splitEscaped(key: string): string[] {
   const parts: string[] = [];
   let current = "";
@@ -52,7 +51,7 @@ export function columnKey(schema: string, table: string, column: string): string
 export function splitTableKey(key: string): { schema: string; table: string } | null {
   const parts = splitEscaped(key);
   if (parts.length !== 2 || parts.some((p) => !p)) return null;
-  return { schema: unescapeKeyPart(parts[0]), table: unescapeKeyPart(parts[1]) };
+  return { schema: parts[0], table: parts[1] };
 }
 
 export function splitColumnKey(
@@ -61,9 +60,9 @@ export function splitColumnKey(
   const parts = splitEscaped(key);
   if (parts.length !== 3 || parts.some((p) => !p)) return null;
   return {
-    schema: unescapeKeyPart(parts[0]),
-    table: unescapeKeyPart(parts[1]),
-    column: unescapeKeyPart(parts[2]),
+    schema: parts[0],
+    table: parts[1],
+    column: parts[2],
   };
 }
 

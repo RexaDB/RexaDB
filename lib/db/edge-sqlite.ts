@@ -375,17 +375,17 @@ function createRqliteDriver(
       const [result] = await rqliteRequest(target, [[sql, ...normalizeArgs(args)]]);
       return { changes: rqliteResultToRows(result ?? {}).changes };
     },
-    // One /db/request carrying BEGIN + statements + COMMIT executes
-    // atomically; separate requests would each auto-commit.
+    // One /db/request with all statements is applied as a single Raft
+    // entry (atomic); separate requests would each auto-commit. No explicit
+    // BEGIN/COMMIT — rqlite rejects bare transaction commands.
     runBatch: async (statements) => {
       if (statements.length === 0) return;
-      await rqliteRequest(target, [
-        ["BEGIN"],
-        ...statements.map(
+      await rqliteRequest(
+        target,
+        statements.map(
           (s): [string, ...unknown[]] => [s.sql, ...normalizeArgs(s.args)],
         ),
-        ["COMMIT"],
-      ]);
+      );
     },
     close: async () => {},
   };
