@@ -1993,6 +1993,7 @@ async function resolveAiReq(req: any, res: any) {
     provider, model, prompt, connectionString, dbType,
     selectedNamespace, lightSchemaContext,
     schemaContext: altSchemaContext, defaultSchema, apiKey: directApiKey,
+    connectionId: rawConnectionId,
   } = req.body;
 
   if (!provider || !model || !prompt || !connectionString || !dbType) {
@@ -2020,8 +2021,33 @@ async function resolveAiReq(req: any, res: any) {
 
   const schemaContext = lightSchemaContext || altSchemaContext || [];
   const namespace = selectedNamespace || defaultSchema || undefined;
+  const connectionId = rawConnectionId ? Number(rawConnectionId) : null;
 
-  return { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace };
+  return { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace, connectionId };
+}
+
+/** Build the create_workflow persistence hook for AI tools (null when unlinked). */
+function makePersistWorkflow(connectionId: number | null) {
+  if (!connectionId || Number.isNaN(connectionId)) return undefined;
+  return async (input: { name: string; description?: string }) => {
+    const { client } = await getWorkflowDeps();
+    const now = Date.now();
+    const row = {
+      id: workflowId(),
+      connectionId,
+      name: String(input.name || "Untitled Workflow"),
+      description: input.description || null,
+      nodesJson: "[]",
+      edgesJson: "[]",
+      scheduleEnabled: false,
+      scheduleType: null,
+      scheduleValue: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await client.workflows.create({ data: row as any });
+    return { id: row.id, name: row.name };
+  };
 }
 
 function handleSseError(error: any, label: string, res: any) {
@@ -2058,7 +2084,7 @@ function setupSsePiAgent(req: any, res: any) {
         res.write(`data: ${JSON.stringify({ type: "assistant_delta", message: event.message })}\n\n`);
         break;
       case "tool_start":
-        res.write(`data: ${JSON.stringify({ type: "tool_start", tool: event.tool, command: event.command })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", command: event.command })}\n\n`);
         break;
       case "tool_output":
         res.write(`data: ${JSON.stringify({ type: "tool_output", output: event.output })}\n\n`);
@@ -2089,6 +2115,8 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       model,
       permissionMode: permissionMode || "schema_only",
       connectionString,
+      connectionId: resolved.connectionId ?? null,
+      persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
       dbType,
       selectedNamespace: namespace,
       schemaContext,
@@ -2097,7 +2125,7 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       workingDirectory: getAgentSandboxCwd(),
       emitStep: (message: string) => {
         if (!aborted) {
-          res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", input: { message }, label: message })}\n\n`);
         }
       },
     };
@@ -2165,7 +2193,7 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
       workingDirectory: getAgentSandboxCwd(),
       emitStep: (message: string) => {
         if (!aborted) {
-          res.write(`data: ${JSON.stringify({ type: "step", message })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", input: { message }, label: message })}\n\n`);
         }
       },
     };
@@ -2452,6 +2480,22 @@ app.get("/api/workflows/:id/runs", async (req, res) => {
       take: limit,
     });
     res.json({ success: true, data: rows });
+  } catch (e: any) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
+app.get("/api/workflows/:id/runs/:runId", async (req, res) => {
+  try {
+    const { client } = await getWorkflowDeps();
+    const row = await client.workflowRuns.findFirst({
+      where: { id: req.params.runId },
+    });
+    if (!row || (row as any).workflowId !== req.params.id) {
+      res.json({ success: false, error: "Run not found" });
+      return;
+    }
+    res.json({ success: true, data: row });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }
@@ -2840,11 +2884,11 @@ app.post("/api/agents/chat/stream", async (req, res) => {
         if (event.type === "assistant_delta" && event.message) {
           res.write(`data: ${JSON.stringify({ type: "text_delta", content: event.message })}\n\n`);
         } else if (event.type === "step" && event.message) {
-          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "step", input: { message: event.message }, label: event.message })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", input: { message: event.message }, label: event.message })}\n\n`);
         } else if (event.type === "tool_start") {
           let input: any = {};
           try { input = event.command ? JSON.parse(event.command) : {}; } catch {}
-          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: event.tool || "tool", input, label: event.tool || "tool", command: event.command })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", input, label: "", command: event.command })}\n\n`);
         } else if (event.type === "tool_output") {
           res.write(`data: ${JSON.stringify({ type: "tool_output", output: event.output || "", isError: !!event.isError })}\n\n`);
         } else if (event.type === "tool_end") {
@@ -2860,6 +2904,8 @@ app.post("/api/agents/chat/stream", async (req, res) => {
         model: resolved.model,
         permissionMode,
         connectionString: resolved.connectionString,
+        connectionId: resolved.connectionId ?? null,
+        persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
         dbType: resolved.dbType,
         selectedNamespace: resolved.namespace,
         schemaContext: schemaTables.length > 0 ? schemaTables : resolved.schemaContext,
@@ -2868,7 +2914,7 @@ app.post("/api/agents/chat/stream", async (req, res) => {
         workingDirectory: agentCwd,
         emitStep: (message: string) => {
           if (!abortState.aborted) {
-            res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "step", input: { message }, label: message })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", input: { message }, label: message })}\n\n`);
           }
         },
       };

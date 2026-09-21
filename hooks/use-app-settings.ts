@@ -111,6 +111,8 @@ export function useAppSettings(planCode = "free") {
     setShowTabIndicator: settings.setShowTabIndicator,
     restoreAppState: settings.restoreAppState,
     setRestoreAppState: settings.setRestoreAppState,
+    openConnectionsInNewWindow: settings.openConnectionsInNewWindow,
+    setOpenConnectionsInNewWindow: settings.setOpenConnectionsInNewWindow,
     schemaExplorer: settings.schemaExplorer,
     setSchemaExplorer: settings.setSchemaExplorer,
     databaseExplorer: settings.databaseExplorer,

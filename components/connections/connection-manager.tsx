@@ -166,6 +166,7 @@ import {
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
+import { openConnectionInNewWindow } from "@/lib/connections/open-connection-window";
 import { API_BASE } from "@/lib/api-base";
 import {
   initStudioAuth,
@@ -415,6 +416,7 @@ export function ConnectionManager({
     customIconThemes,
     setIconThemeId,
     iconThemeId,
+    openConnectionsInNewWindow,
   } = useGlobalStudioSettings();
   const router = useRouter();
   const {
@@ -468,6 +470,10 @@ export function ConnectionManager({
     | "mongodb"
     | "sqlite"
     | "turso"
+    | "rqlite"
+    | "d1"
+    | "starbase"
+    | "valtown"
     | "mysql"
     | "mariadb"
     | "mssql"
@@ -625,6 +631,34 @@ export function ConnectionManager({
       hint: "Hosted SQLite (libSQL)",
     },
     {
+      id: "rqlite",
+      label: "rqlite",
+      logoSrc: "/providers/sqlite.png",
+      placeholder: "rqlite://host:4001",
+      hint: "Distributed SQLite (HTTP)",
+    },
+    {
+      id: "d1",
+      label: "Cloudflare D1",
+      logoSrc: "/providers/cloudflare.svg",
+      placeholder: "d1://ACCOUNT_ID/DATABASE_ID?token=CF_API_TOKEN",
+      hint: "Cloudflare edge SQLite",
+    },
+    {
+      id: "starbase",
+      label: "StarbaseDB",
+      logoSrc: "/providers/cloudflare.svg",
+      placeholder: "starbase://host:8787?token=YOUR_TOKEN",
+      hint: "SQLite on Durable Objects",
+    },
+    {
+      id: "valtown",
+      label: "Val.town",
+      logoSrc: "/providers/sqlite.png",
+      placeholder: "valtown://?token=VAL_TOWN_TOKEN",
+      hint: "Val.town SQLite API",
+    },
+    {
       id: "duckdb",
       label: "DuckDB",
       logoSrc: "/providers/duckdb-logo.svg",
@@ -761,6 +795,30 @@ export function ConnectionManager({
       return "sqlite";
     if (normalized.startsWith("libsql://") || normalized.includes(".turso.io"))
       return "turso";
+    if (
+      normalized.startsWith("rqlite://") ||
+      normalized.startsWith("rqlites://") ||
+      normalized.startsWith("rqlite+http://") ||
+      normalized.startsWith("rqlite+https://")
+    )
+      return "rqlite";
+    if (
+      normalized.startsWith("d1://") ||
+      normalized.startsWith("cloudflare-d1://")
+    )
+      return "d1";
+    if (
+      normalized.startsWith("starbase://") ||
+      normalized.startsWith("starbases://") ||
+      normalized.startsWith("starbasedb://") ||
+      normalized.startsWith("starbasedbs://")
+    )
+      return "starbase";
+    if (
+      normalized.startsWith("valtown://") ||
+      normalized.startsWith("val.town://")
+    )
+      return "valtown";
     if (
       normalized.includes("tsdb.cloud") ||
       normalized.includes("timescale.com") ||
@@ -977,6 +1035,30 @@ export function ConnectionManager({
         return `Turso • ${parsed.hostname || "database"}`;
       } catch {
         return "Turso Connection";
+      }
+    }
+    if (
+      selectedProvider === "rqlite" ||
+      selectedProvider === "starbase" ||
+      selectedProvider === "valtown" ||
+      selectedProvider === "d1"
+    ) {
+      try {
+        const httpEquivalent = trimmed.replace(
+          /^[a-zA-Z0-9+.-]+:\/\//i,
+          "http://",
+        );
+        const parsed = new URL(httpEquivalent);
+        const host = parsed.hostname || "database";
+        const label =
+          providerCards.find((card) => card.id === selectedProvider)?.label ??
+          "Edge SQLite";
+        return `${label} • ${host}`;
+      } catch {
+        return (
+          providerCards.find((card) => card.id === selectedProvider)?.label ??
+          "Edge SQLite Connection"
+        );
       }
     }
     if (selectedProvider === "federated") {
@@ -2974,7 +3056,18 @@ export function ConnectionManager({
     [],
   );
 
-  const openConnection = async (conn: Connection) => {
+  const openConnection = async (
+    conn: Connection,
+    opts?: { forceNewWindow?: boolean },
+  ) => {
+    const openStudioTarget = async (id: number) => {
+      if (opts?.forceNewWindow || openConnectionsInNewWindow) {
+        await openConnectionInNewWindow(id);
+        setOpeningConnectionId(null);
+        return;
+      }
+      router.push(`/studio?id=${id}`);
+    };
     if (workspaceMode) {
       const connType = (conn as any).connectionType || "postgresql";
       const allLocal = await sidecarFetch("/api/connections");
@@ -3008,7 +3101,7 @@ export function ConnectionManager({
                   : "postgres",
           }),
         }).catch(() => {});
-        router.push(`/studio?id=${localSave.id}`);
+        await openStudioTarget(localSave.id);
       } else {
         openConnectionFailureDialog({
           connectionName: conn.name,
@@ -3078,7 +3171,7 @@ export function ConnectionManager({
       "conn.type:",
       conn.connectionType,
     );
-    router.push(`/studio?id=${conn.id}`);
+    await openStudioTarget(conn.id);
   };
 
   const handleOpenStudio = async (
@@ -3086,12 +3179,22 @@ export function ConnectionManager({
     conn: Connection,
   ) => {
     event.preventDefault();
-    await openConnection(conn);
+    await openConnection(conn, {
+      forceNewWindow: event.metaKey || event.ctrlKey || event.shiftKey,
+    });
   };
 
   async function handleDelete(id: number) {
     const res = await removeConnection(id);
     if (res.success) {
+      // Drop the connection's data-dictionary scope (Rust backend, with a
+      // localStorage mirror fallback on web). Best effort — never blocks.
+      try {
+        const { deleteDictionaryScope } = await import("@/lib/dictionary/client");
+        await deleteDictionaryScope(id);
+      } catch {
+        // Ignore.
+      }
       await loadConnections();
       if (!workspaceMode) queueCloudPush();
     } else {
@@ -4717,13 +4820,16 @@ export function ConnectionManager({
                               return (
                                 <div
                                   key={conn.id}
-                                  onClick={() => {
+                                  onClick={(e) => {
                                     if (
                                       reorderMode ||
                                       dragReorderActiveRef.current
                                     )
                                       return;
-                                    void openConnection(conn);
+                                    void openConnection(conn, {
+                                      forceNewWindow:
+                                        e.metaKey || e.ctrlKey || e.shiftKey,
+                                    });
                                   }}
                                   data-conn-index={globalIndex}
                                   onDragOver={(event) => {
@@ -5002,7 +5108,14 @@ export function ConnectionManager({
                                   return (
                                     <tr
                                       key={conn.id}
-                                      onClick={() => void openConnection(conn)}
+                                      onClick={(e) =>
+                                        void openConnection(conn, {
+                                          forceNewWindow:
+                                            e.metaKey ||
+                                            e.ctrlKey ||
+                                            e.shiftKey,
+                                        })
+                                      }
                                       className="border-b border-studio-border/30 hover:bg-studio-row-hover/60 cursor-pointer last:border-b-0"
                                     >
                                       <td className="px-3 py-2.5">

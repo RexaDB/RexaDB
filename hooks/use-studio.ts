@@ -954,7 +954,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
 
 
-  const [databaseView, setDatabaseView] = useState<"schema" | "tables" | "functions" | "extensions" | "triggers" | "enums" | "indexes" | "rls-policies" | "sessions" | "locks" | "explain-plan" | "backup-restore">("schema");
+  const [databaseView, setDatabaseView] = useState<"schema" | "tables" | "functions" | "extensions" | "triggers" | "enums" | "indexes" | "rls-policies" | "sessions" | "locks" | "explain-plan" | "backup-restore" | "catalog">("schema");
 
   const [functions, setFunctions] = useState<any[]>([]);
   const [fetchingFunctions, setFetchingFunctions] = useState(false);
@@ -8377,7 +8377,7 @@ END $$;`.trim();
     router.replace(`${pathname}?${nextSearch}`);
   }, [searchParams, pathname, router]);
 
-  const openDatabaseTab = useCallback((type: 'schema' | 'tables' | 'functions' | 'extensions' | 'triggers' | 'enums' | 'indexes' | 'rls-policies' | 'sessions' | 'locks' | 'explain-plan' | 'backup-restore') => {
+  const openDatabaseTab = useCallback((type: 'schema' | 'tables' | 'functions' | 'extensions' | 'triggers' | 'enums' | 'indexes' | 'rls-policies' | 'sessions' | 'locks' | 'explain-plan' | 'backup-restore' | 'catalog') => {
     if (dbType !== "postgres" && dbType !== "supabase-mgmt" && ["functions", "extensions", "triggers", "enums", "indexes", "rls-policies", "sessions", "locks"].includes(type)) {
       toast.error("That database view is supported only for PostgreSQL connections.");
       return;
@@ -8396,6 +8396,7 @@ END $$;`.trim();
       'locks': 'Locks',
       'explain-plan': 'Explain Plan',
       'backup-restore': 'Backup & Restore',
+      'catalog': 'Data Catalog',
     } as const;
     const typeMap = {
       'schema': 'database-schema' as const,
@@ -8410,6 +8411,7 @@ END $$;`.trim();
       'locks': 'database-locks' as const,
       'explain-plan': 'database-explain-plan' as const,
       'backup-restore': 'database-backup-restore' as const,
+      'catalog': 'database-catalog' as const,
     };
 
     const existingTab = openTabs.find(t => t.id === tabId);

@@ -1275,7 +1275,51 @@ export async function runWorkflow(
   };
 }
 
+export type WorkflowRunRow = {
+  id: string;
+  workflowId: string;
+  status: "running" | "success" | "error";
+  startedAt: number;
+  finishedAt?: number | null;
+  nodesOutputJson?: string | null;
+  nodes_output_json?: string | null;
+  outputs?: unknown;
+  error?: string | null;
+  trigger: "manual" | "schedule";
+};
+
+export type WorkflowNodeLog = {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  output: unknown;
+  logs: string[];
+  error?: string;
+  durationMs: number;
+  skipped?: boolean;
+};
+
+export function parseWorkflowRunOutputs(run: WorkflowRunRow | null | undefined): WorkflowNodeLog[] {
+  if (!run) return [];
+  const raw =
+    (run as any).nodesOutputJson ?? (run as any).nodes_output_json ?? (run as any).outputs;
+  if (Array.isArray(raw)) return raw as WorkflowNodeLog[];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as WorkflowNodeLog[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export function listWorkflowRuns(id: string, limit = 20) {
-  return request<any[]>(buildUrl(`/api/workflows/${id}/runs`, { limit }));
+  return request<WorkflowRunRow[]>(buildUrl(`/api/workflows/${id}/runs`, { limit }));
+}
+
+export function getWorkflowRun(id: string, runId: string) {
+  return request<WorkflowRunRow>(buildUrl(`/api/workflows/${id}/runs/${runId}`));
 }
 

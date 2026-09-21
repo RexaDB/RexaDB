@@ -327,7 +327,10 @@ function WorkflowCanvasInner({
         }}
       >
         <Background gap={16} color="var(--border)" />
-        <Controls className="[&_button]:border-border [&_button]:bg-card" />
+        <Controls
+          showInteractive={false}
+          className="!bg-card !border-2 !border-border !fill-foreground/50 [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button]:hover:!bg-accent [&>button]:hover:!text-accent-foreground"
+        />
         <MiniMap
           className="!border-border !bg-card"
           nodeColor={(n: any) => {

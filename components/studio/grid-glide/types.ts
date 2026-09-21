@@ -1,5 +1,6 @@
 import type React from "react";
 import type { EditColumnPayload } from "../grid/types";
+import type { ColumnDecorator } from "@/lib/dictionary/types";
 
 /**
  * Shared prop contract for the studio data grid. Both the legacy DOM
@@ -129,4 +130,8 @@ export interface DataGridProps {
   hiddenColumns?: string[];
   pendingSearchValue?: string | null;
   onConsumeSearchValue?: () => void;
+  /** Column-name -> display decorator (data dictionary). Applied to
+   *  displayValue only; raw values still drive editing, filtering, and —
+   *  unless masked — copy. */
+  columnDecorators?: Record<string, ColumnDecorator>;
 }

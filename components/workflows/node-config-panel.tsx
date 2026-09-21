@@ -28,10 +28,18 @@ type Props = {
   node: WfNode;
   onChange: (updated: WfNode) => void;
   onClose: () => void;
+  nodeLog?: {
+    logs: string[];
+    error?: string;
+    output?: unknown;
+    durationMs?: number;
+    runLabel?: string;
+  } | null;
 };
 
-export function NodeConfigPanel({ node, onChange, onClose }: Props) {
+export function NodeConfigPanel({ node, onChange, onClose, nodeLog }: Props) {
   const def = getNodeDef(node.type);
+  const [activeTab, setActiveTab] = useState<"config" | "logs">("config");
   // Edits apply immediately (onChange fires on every keystroke) rather than
   // being buffered behind a separate "Save Changes" step - a field you typed
   // into but never explicitly committed used to run with its old/default
@@ -86,7 +94,70 @@ export function NodeConfigPanel({ node, onChange, onClose }: Props) {
         </button>
       </div>
 
-      {/* Fields */}
+      {/* Fields / Logs tabs */}
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-4 pt-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab("config")}
+          className={cn(
+            "rounded-t px-2.5 py-1.5 text-xs font-medium",
+            activeTab === "config" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Config
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("logs")}
+          className={cn(
+            "rounded-t px-2.5 py-1.5 text-xs font-medium",
+            activeTab === "logs" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Logs
+          {nodeLog?.error ? <span className="ml-1 inline-block size-1.5 rounded-full bg-destructive align-middle" /> : null}
+        </button>
+      </div>
+      {activeTab === "logs" ? (
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          {nodeLog?.runLabel && (
+            <p className="text-[11px] text-muted-foreground">{nodeLog.runLabel}</p>
+          )}
+          {nodeLog?.error && (
+            <div className="rounded-md bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+              {nodeLog.error}
+            </div>
+          )}
+          <div>
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Logs {nodeLog?.durationMs != null && <span className="normal-case">· {nodeLog.durationMs}ms</span>}
+            </p>
+            {nodeLog && nodeLog.logs.length > 0 ? (
+              <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+                {nodeLog.logs.join("\n")}
+              </pre>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                No logs for this node yet. Run the workflow, then check back here.
+              </p>
+            )}
+          </div>
+          {nodeLog?.output !== undefined && (
+            <div>
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Output</p>
+              <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+                {(() => {
+                  try {
+                    return JSON.stringify(nodeLog.output, null, 2) ?? "null";
+                  } catch {
+                    return String(nodeLog.output);
+                  }
+                })()}
+              </pre>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Node name */}
         <div className="space-y-1.5">
@@ -186,6 +257,7 @@ export function NodeConfigPanel({ node, onChange, onClose }: Props) {
           </div>
         )}
       </div>
+      )}
 
       <div className="border-t border-border p-3">
         <Button size="sm" variant="outline" className="w-full" onClick={onClose}>

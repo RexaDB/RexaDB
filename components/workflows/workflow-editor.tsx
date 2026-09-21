@@ -19,14 +19,18 @@ import {
   Save,
   Clock,
   Loader2,
+  GitBranch,
+  ScrollText,
 } from "lucide-react";
 import {
   updateWorkflow,
   runWorkflow,
+  type WorkflowNodeLog,
 } from "@/lib/api/actions-client";
 import { WorkflowCanvas, type WfNode, type WfEdge } from "./workflow-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
 import { NodePalette } from "./node-palette";
+import { WorkflowLogsView } from "./workflow-run-logs";
 import {
   ScheduleBuilder,
   describeVisualSchedule,
@@ -78,6 +82,10 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [nodeStatuses, setNodeStatuses] = useState<NodeStatus>({});
+  const [activeTab, setActiveTab] = useState<"canvas" | "logs">("canvas");
+  const [runsRefreshKey, setRunsRefreshKey] = useState(0);
+  const [lastRunOutputs, setLastRunOutputs] = useState<WorkflowNodeLog[] | null>(null);
+  const [lastRunStatus, setLastRunStatus] = useState<string | null>(null);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const scheduleLabel = scheduleEnabled
@@ -164,6 +172,7 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
   async function handleRun() {
     setRunning(true);
     setNodeStatuses({});
+    setLastRunOutputs(null);
     try {
       const res = await runWorkflow(workflow.id, undefined, (event) => {
         if (event.type === "node-start") {
@@ -172,10 +181,20 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
           setNodeStatuses((prev) => ({ ...prev, [event.nodeId]: event.skipped ? null : event.error ? "error" : "success" }));
         }
       }, { nodes, edges });
+      const outputs = (res.data?.outputs ?? []) as WorkflowNodeLog[];
+      setLastRunOutputs(outputs);
+      setLastRunStatus(res.data?.status ?? (res.success ? "success" : "error"));
+      setRunsRefreshKey((k) => k + 1);
       if (res.success || res.data?.status === "success") {
-        toast.success("Workflow completed successfully");
+        toast.success("Workflow completed successfully", {
+          action: { label: "View logs", onClick: () => setActiveTab("logs") },
+        });
       } else {
-        toast.error(res.data?.error || res.error || "Workflow failed");
+        toast.error(res.data?.error || res.error || "Workflow failed", {
+          action: { label: "View logs", onClick: () => setActiveTab("logs") },
+        });
+        // Auto-switch to the Logs tab on failure so the error is visible immediately.
+        setActiveTab("logs");
       }
     } catch (e: any) {
       toast.error(e.message || "Run failed");
@@ -203,6 +222,34 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-background px-4 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* Canvas / Logs tabs */}
+          <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab("canvas")}
+              className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors ${
+                activeTab === "canvas"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <GitBranch className="size-3" />
+              Canvas
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("logs")}
+              className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors ${
+                activeTab === "logs"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ScrollText className="size-3" />
+              Logs
+              {running && <Loader2 className="size-3 animate-spin" />}
+            </button>
+          </div>
           {scheduleEnabled && scheduleLabel && (
             <button
               type="button"
@@ -267,7 +314,18 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
         </div>
       </div>
 
-      {/* ── Canvas area (no tabs) ─────────────────────────────────────── */}
+      {/* ── Canvas / Logs tab content ───────────────────────────────── */}
+      {activeTab === "logs" ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <WorkflowLogsView
+            workflowId={workflow.id}
+            refreshKey={runsRefreshKey}
+            running={running}
+            liveOutputs={lastRunOutputs}
+            liveStatus={lastRunStatus}
+          />
+        </div>
+      ) : (
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {nodes.length === 0 ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-3">
@@ -294,16 +352,28 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
         )}
 
         {/* Node config side panel */}
-        {selectedNode && (
+        {selectedNode && activeTab === "canvas" && (
           <div className="flex w-72 shrink-0 flex-col overflow-hidden border-l border-border bg-background">
             <NodeConfigPanel
               node={selectedNode}
               onChange={updateNode}
               onClose={() => setSelectedNodeId(null)}
+              nodeLog={(() => {
+                const entry = lastRunOutputs?.find((o) => o.nodeId === selectedNode.id);
+                if (!entry) return null;
+                return {
+                  logs: entry.logs,
+                  error: entry.error,
+                  output: entry.output,
+                  durationMs: entry.durationMs,
+                  runLabel: lastRunStatus ? `Last run · ${lastRunStatus}` : "Last run",
+                };
+              })()}
             />
           </div>
         )}
       </div>
+      )}
 
       {/* ── Schedule setup dialog ───────────────────────────────────── */}
       <Dialog open={showScheduleDialog} onOpenChange={handleScheduleDialogOpenChange}>

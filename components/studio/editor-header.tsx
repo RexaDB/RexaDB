@@ -94,7 +94,8 @@ interface EditorHeaderProps {
     | "triggers"
     | "enums"
     | "indexes"
-    | "rls-policies";
+    | "rls-policies"
+    | "catalog";
   openSqlEditor: (
     table?: string,
     schema?: string,

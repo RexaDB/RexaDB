@@ -40,6 +40,18 @@ function isSqliteConnectionString(connectionString: string) {
     || raw.startsWith("libsql://")
     || raw.startsWith("sqlite:")
     || raw.startsWith("file:")
+    || raw.startsWith("rqlite://")
+    || raw.startsWith("rqlites://")
+    || raw.startsWith("rqlite+http://")
+    || raw.startsWith("rqlite+https://")
+    || raw.startsWith("d1://")
+    || raw.startsWith("cloudflare-d1://")
+    || raw.startsWith("starbase://")
+    || raw.startsWith("starbases://")
+    || raw.startsWith("starbasedb://")
+    || raw.startsWith("starbasedbs://")
+    || raw.startsWith("valtown://")
+    || raw.startsWith("val.town://")
     || raw.startsWith("/")
     || /^[a-z]:[\\\/]/i.test(raw)
     || raw.startsWith("./")
@@ -76,6 +88,16 @@ export function detectConnectionDbType(connectionString: string, savedType?: str
     if (normalized === "sqlserver" || normalized === "mssql") return "mssql";
     if (normalized === "mariadb") return "mysql";
     if (normalized === "turso") return "sqlite";
+    if (
+      normalized === "rqlite" ||
+      normalized === "d1" ||
+      normalized === "cloudflare-d1" ||
+      normalized === "starbase" ||
+      normalized === "starbasedb" ||
+      normalized === "valtown"
+    ) {
+      return "sqlite";
+    }
     if (["supabase", "neon", "timescale", "cockroachdb", "yugabytedb", "redshift"].includes(normalized)) return "postgres";
     if (normalized === "planetscale") {
       // PlanetScale ships both MySQL- and Postgres-flavored databases behind
