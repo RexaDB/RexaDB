@@ -147,7 +147,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   const ColumnsDropdown = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="font-normal">
+        <Button variant="outline" size="sm" className="font-normal dark:border-white/15 dark:bg-white/[0.02]">
           <HugeiconsIcon icon={LayoutTable01Icon} className="w-3.5 h-3.5" />
           Columns
         </Button>
@@ -179,7 +179,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   );
 
   return (
-    <div className="relative border-b border-studio-border bg-studio-bg h-12 shrink-0 overflow-hidden">
+    <div className="relative border-b border-border bg-studio-bg h-12 shrink-0 overflow-hidden">
       {/* Default State */}
       <div
         className={cn(

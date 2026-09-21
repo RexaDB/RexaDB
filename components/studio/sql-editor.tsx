@@ -1134,7 +1134,7 @@ export function SqlEditor({
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-studio-bg relative">
       {/* Editor Toolbar */}
-      <div className="h-12 border-b border-studio-border bg-studio-header-bg flex items-center justify-between px-4 shrink-0">
+      <div className="h-12 border-b border-border bg-studio-header-bg flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
           {aiMode ? (
             <Button
@@ -1189,7 +1189,7 @@ export function SqlEditor({
               </span>
             </Button>
           )}
-          <div className="w-[1px] h-4 bg-studio-border mx-1" />
+          <div className="w-[1px] h-4 bg-border mx-1" />
           {!isRedis && !isMongo && (
             <Button
               variant="ghost"
@@ -1202,7 +1202,7 @@ export function SqlEditor({
               <Brain className="w-4 h-4" />
             </Button>
           )}
-          <div className="w-[1px] h-4 bg-studio-border mx-1" />
+          <div className="w-[1px] h-4 bg-border mx-1" />
           {!isRedis && (
             <Button
               variant="ghost"
@@ -1258,7 +1258,7 @@ export function SqlEditor({
           )}
           {aiMode && (
             <>
-              <div className="w-[1px] h-4 bg-studio-border mx-1" />
+              <div className="w-[1px] h-4 bg-border mx-1" />
               {aiSettings && hasAnyModels ? (
                 <AiModelPicker
                   currentProvider={aiProvider}

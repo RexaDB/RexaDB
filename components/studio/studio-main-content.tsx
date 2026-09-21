@@ -1351,6 +1351,11 @@ export function StudioMainContent({
                       tags={studio.tags}
                       tableTags={studio.tableTags}
                       toggleTableTag={studio.toggleTableTag}
+                      addTag={studio.addTag}
+                      removeTag={studio.removeTag}
+                      renameTag={studio.renameTag}
+                      sortMode={studio.sidebarSortMode}
+                      onSortModeChange={studio.setSidebarSortMode}
                       copyTableSchema={studio.copyTableSchema}
                       duplicateTable={studio.duplicateTable}
                       emptyTable={studio.emptyTable}

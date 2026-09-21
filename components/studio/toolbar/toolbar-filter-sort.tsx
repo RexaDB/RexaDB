@@ -566,14 +566,14 @@ export function ToolbarFilterSort({
             variant="outline"
             size="sm"
             onClick={prepareDialog}
-            className={`font-normal ${filterQuery ? "text-blue-500 bg-blue-500/10" : ""}`}
+            className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${filterQuery ? "text-blue-500 bg-blue-500/10" : ""}`}
           >
             <Filter className="w-3.5 h-3.5" />
             {filterQuery ? "Filtered" : "Filter"}
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          align="start"
+          align="end"
           sideOffset={6}
           className="w-[520px] max-w-[calc(100vw-1rem)] p-0 bg-popover text-popover-foreground border-border"
         >
@@ -823,7 +823,7 @@ export function ToolbarFilterSort({
           <Button
             variant="outline"
             size="sm"
-            className={`font-normal ${sortConfig?.length ? "text-blue-500 bg-blue-500/10" : ""}`}
+            className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${sortConfig?.length ? "text-blue-500 bg-blue-500/10" : ""}`}
           >
             <ArrowUpDown className="w-3.5 h-3.5" />
             {sortConfig?.length
@@ -832,7 +832,7 @@ export function ToolbarFilterSort({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          align="start"
+          align="end"
           sideOffset={6}
           className="w-[380px] max-w-[calc(100vw-1rem)] p-0 bg-popover text-popover-foreground border-border"
         >

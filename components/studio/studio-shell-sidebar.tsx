@@ -66,6 +66,8 @@ import {
   Settings,
   Workflow,
   Layers,
+  Folder,
+  FolderOpen,
 } from "@/lib/icon-theme/solar-icons";
 import {
   MoreHorizontal,
@@ -80,9 +82,10 @@ import {
   CreditCard,
   Globe,
   Unlock,
-  Terminal,
   MoreVertical,
   Eye,
+  Tag,
+  X,
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
 import { StoragePanel } from "./storage/storage-panel";
@@ -654,6 +657,291 @@ function SchemaItemRow({
   );
 }
 
+/** Single table row shared by flat + tags-folder views (with menus). */
+function SidebarTableRow({
+  table,
+  selectedSchema,
+  studio,
+  viewTableSet,
+  itemNoun,
+  openEditorLabel,
+  copyDefinitionLabel,
+  canExportSql,
+  isMongo,
+  tagsList,
+  tableTagsMap,
+  tagsForTable,
+  setConfirmDialog,
+  handleCopyItemName,
+}: {
+  table: string;
+  selectedSchema: string;
+  studio: any;
+  viewTableSet: Set<any>;
+  itemNoun: string;
+  openEditorLabel: string;
+  copyDefinitionLabel: string;
+  canExportSql: boolean;
+  isMongo: boolean;
+  tagsList: Array<{ name: string; color: string }>;
+  tableTagsMap: Record<string, string[]>;
+  tagsForTable: (table: string) => string[];
+  confirmDialog?: unknown;
+  setConfirmDialog: (d: any) => void;
+  handleCopyItemName: (name: string) => void;
+}) {
+  const securityInfo = studio.tableSecurity?.[table];
+  const rlsEnabled = securityInfo?.rlsEnabled;
+  const showDataApi = Boolean(studio.dataApiInstalled);
+  const isView = viewTableSet.has(table);
+  const ItemIcon = isView ? Eye : Table2;
+
+  const renderMenuItems = (
+    Component: any,
+    Sub: any,
+    SubTrigger: any,
+    SubContent: any,
+    Separator: any,
+    isDropdown = false,
+  ) => {
+    const handleAction =
+      (fn?: (t: string, s: string) => void) =>
+      (e: React.MouseEvent) => {
+        if (isDropdown) e.stopPropagation();
+        fn?.(table, selectedSchema);
+      };
+    return (
+      <>
+        <Component
+          onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
+        >
+          Open {itemNoun}
+        </Component>
+        <Component
+          onClick={handleAction((t, s) => studio.openSqlEditor?.(t, s))}
+        >
+          {openEditorLabel}
+        </Component>
+        <Component
+          onClick={handleAction((t) => studio.viewTableSchema?.(t))}
+        >
+          View Schema
+        </Component>
+        <TableContextMenuItems
+          Component={Component}
+          Sub={Sub}
+          SubTrigger={SubTrigger}
+          SubContent={SubContent}
+          Separator={Separator}
+          itemNoun={itemNoun}
+          copyDefinitionLabel={copyDefinitionLabel}
+          duplicateLabel={`Duplicate ${itemNoun}`}
+          isMongo={isMongo}
+          canExportSql={canExportSql}
+          isDropdown={isDropdown}
+          table={table}
+          selectedSchema={selectedSchema}
+          tags={tagsList}
+          tableTags={tableTagsMap}
+          handleAction={handleAction}
+          onToggleTag={(s, t, tagName) => studio.toggleTableTag?.(s, t, tagName)}
+          handleCopyName={(t) => void handleCopyItemName(t)}
+          handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
+          handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
+          onExport={(format) => studio.exportData?.(format)}
+          setConfirmDialog={setConfirmDialog}
+          onEmpty={(t, s) => studio.emptyTable?.(t, s)}
+          onDelete={(t, s) => studio.deleteTable?.(t, s)}
+          beforeExport={<Separator />}
+        />
+      </>
+    );
+  };
+
+  return (
+    <ContextMenu key={`${selectedSchema}.${table}`}>
+      <ContextMenuTrigger>
+        <div className="relative group">
+          <button
+            type="button"
+            onClick={() => studio.handleTableClick?.(table, selectedSchema)}
+            className={cn(
+              ROW,
+              studio.selectedTable === table && "bg-white/10 text-foreground",
+              "w-full",
+            )}
+          >
+            <ItemIcon className="size-4 shrink-0" />
+            <span className="truncate flex-1">{table}</span>
+            {(showDataApi || rlsEnabled === false) && (
+              <span className="flex items-center gap-1 shrink-0">
+                {showDataApi && (
+                  <span title="Accessible via Data API">
+                    <Globe className="w-3.5 h-3.5 text-primary/70" />
+                  </span>
+                )}
+                {rlsEnabled === false && (
+                  <span title="RLS disabled">
+                    <Unlock className="w-3.5 h-3.5 text-red-500/80" />
+                  </span>
+                )}
+              </span>
+            )}
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className={cn(
+                  "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
+                  "opacity-0 group-hover:opacity-100",
+                )}
+              >
+                <MoreVertical className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="min-w-[160px]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {renderMenuItems(
+                DropdownMenuItem,
+                DropdownMenuSub,
+                DropdownMenuSubTrigger,
+                DropdownMenuSubContent,
+                DropdownMenuSeparator,
+                true,
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[160px]">
+        {renderMenuItems(
+          ContextMenuItem,
+          ContextMenuSub,
+          ContextMenuSubTrigger,
+          ContextMenuSubContent,
+          ContextMenuSeparator,
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Collapsible tag folders + untagged group, styled like a file tree
+ *  (disclosure chevron, themed folder icon, indent guides, compact rows). */
+function TagFoldersList({
+  tagsList,
+  tablesByTag,
+  untaggedTables,
+  isTagExpanded,
+  toggleTag,
+  onManageTags,
+  onRenameTag,
+  onDeleteTag,
+  renderTable,
+}: {
+  tagsList: Array<{ name: string; color: string }>;
+  tablesByTag: Map<string, string[]>;
+  untaggedTables: string[];
+  isTagExpanded: (name: string) => boolean;
+  toggleTag: (name: string) => void;
+  onManageTags: () => void;
+  onRenameTag: (name: string) => void;
+  onDeleteTag: (name: string) => void;
+  renderTable: (table: string) => React.ReactNode;
+}) {
+  if (tagsList.length === 0) {
+    return (
+      <div className="px-2 py-3 text-center">
+        <Tag className="mx-auto mb-2 size-5 text-muted-foreground/40" />
+        <p className="text-xs text-muted-foreground">No tags yet</p>
+        <button
+          type="button"
+          onClick={onManageTags}
+          className="mt-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          Create your first tag
+        </button>
+      </div>
+    );
+  }
+  const renderFolderRow = (
+    name: string,
+    expanded: boolean,
+    folderColor: string | null,
+    onToggle: () => void,
+  ) => {
+    const FolderIcon = expanded ? FolderOpen : Folder;
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        title={name}
+        className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted-foreground transition-colors select-none hover:bg-white/5 hover:text-foreground"
+      >
+        <FolderIcon
+          className="size-4 shrink-0"
+          style={folderColor ? { color: folderColor } : undefined}
+        />
+        <span className="min-w-0 flex-1 truncate text-left font-normal">{name}</span>
+      </button>
+    );
+  };
+  const renderChildren = (tables: string[], emptyLabel: string) => (
+    <div className="relative ml-[15px] space-y-px border-l border-border/50 pl-1">
+      {tables.length === 0 ? (
+        <div className="px-2 py-1 text-[11px] text-muted-foreground/60">{emptyLabel}</div>
+      ) : (
+        tables.map((t) => renderTable(t))
+      )}
+    </div>
+  );
+  return (
+    <div className="flex min-w-0 flex-col gap-px py-0.5">
+      {tagsList.map((tag) => {
+        const tables = tablesByTag.get(tag.name) ?? [];
+        const expanded = isTagExpanded(tag.name);
+        return (
+          <div key={tag.name} className="min-w-0">
+            <ContextMenu>
+              <ContextMenuTrigger>
+                {renderFolderRow(tag.name, expanded, tag.color, () =>
+                  toggleTag(tag.name),
+                )}
+              </ContextMenuTrigger>
+              <ContextMenuContent className="min-w-[160px]">
+                <ContextMenuItem onClick={() => onRenameTag(tag.name)}>
+                  Rename tag
+                </ContextMenuItem>
+                <ContextMenuItem
+                  className="text-red-500 focus:text-red-500 focus:bg-red-500/10"
+                  onClick={() => onDeleteTag(tag.name)}
+                >
+                  Delete tag
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            {expanded && renderChildren(tables, "No tables")}
+          </div>
+        );
+      })}
+      <div className="min-w-0">
+        {renderFolderRow(
+          "Untagged",
+          isTagExpanded("__untagged"),
+          null,
+          () => toggleTag("__untagged"),
+        )}
+        {isTagExpanded("__untagged") &&
+          renderChildren(untaggedTables, "Everything is tagged")}
+      </div>
+    </div>
+  );
+}
+
 function TablesPanel({ studio }: { studio: any }) {
   const [q, setQ] = useState("");
   const [schemaMenuOpen, setSchemaMenuOpen] = useState(false);
@@ -667,6 +955,22 @@ function TablesPanel({ studio }: { studio: any }) {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(
     DEFAULT_CONFIRM_DIALOG,
   );
+  // Tags-as-folders view state (persisted via studio.sidebarSortMode).
+  const tagView = (studio.sidebarSortMode ?? "alphabetical") === "tags";
+  const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#38bdf8");
+  const [renameTagName, setRenameTagName] = useState<string | null>(null);
+  const [renameTagDraft, setRenameTagDraft] = useState("");
+  function openRenameTagDialog(name: string) {
+    setRenameTagName(name);
+    setRenameTagDraft(name);
+  }
+  function handleRenameTag() {
+    if (renameTagName) studio.renameTag?.(renameTagName, renameTagDraft);
+    setRenameTagName(null);
+  }
   const schemas: string[] = (studio.schemas ?? []).filter(
     (s: string) => !String(s).startsWith("pg_"),
   );
@@ -722,6 +1026,32 @@ function TablesPanel({ studio }: { studio: any }) {
 
   function toggleSection(section: string) {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  }
+
+  // ---- Tags-as-folders derived state ----
+  const tagsList: Array<{ name: string; color: string }> = studio.tags ?? [];
+  const tableTagsMap: Record<string, string[]> = studio.tableTags ?? {};
+  const tagKeyFor = (table: string) => `${selectedSchema}.${table}`;
+  const tagsForTable = (table: string): string[] =>
+    tableTagsMap[tagKeyFor(table)] ?? [];
+  const TAG_COLORS = ["#38bdf8", "#a78bfa", "#34d399", "#fbbf24", "#fb7185", "#f472b6", "#94a3b8"];
+  const isTagExpanded = (name: string) => expandedTags[name] ?? true;
+  function toggleTag(name: string) {
+    setExpandedTags((prev) => ({ ...prev, [name]: !(prev[name] ?? true) }));
+  }
+  const untaggedTables = filtered.filter((t) => tagsForTable(t).length === 0);
+  const tablesByTag = new Map<string, string[]>();
+  for (const tag of tagsList) {
+    tablesByTag.set(
+      tag.name,
+      filtered.filter((t) => tagsForTable(t).includes(tag.name)),
+    );
+  }
+  function handleCreateTag() {
+    const name = newTagName.trim();
+    if (!name) return;
+    studio.addTag?.(name, newTagColor);
+    setNewTagName("");
   }
 
   return (
@@ -826,9 +1156,176 @@ function TablesPanel({ studio }: { studio: any }) {
           <Plus className="size-3.5" />
         </button>
       </div>
+      {/* A-Z / Tags view toggle + new-tag entry — under the schema picker. */}
+      <div className="mb-1 flex items-center gap-2">
+        <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => studio.setSidebarSortMode?.("alphabetical")}
+            className={cn(
+              "flex h-full items-center justify-center rounded-md px-3 transition-colors",
+              !tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="truncate">A-Z</span>
+          </button>
+        <button
+          type="button"
+          onClick={() => studio.setSidebarSortMode?.("tags")}
+          className={cn(
+            "flex h-full items-center justify-center rounded-md px-3 transition-colors",
+            tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <span className="truncate">Tags</span>
+        </button>
+        </div>
+        {tagView && (
+        <button
+          type="button"
+          onClick={() => setTagManagerOpen(true)}
+          className="ml-auto flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Plus className="size-3.5" />
+          <span>New Tag</span>
+        </button>
+        )}
+      </div>
+
+      <Dialog open={tagManagerOpen} onOpenChange={setTagManagerOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Tags as folders</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateTag();
+                }}
+                placeholder="New tag name…"
+                className="h-8 text-sm"
+              />
+              <Button size="sm" onClick={handleCreateTag} disabled={!newTagName.trim()}>
+                <Plus className="size-3.5" />
+                Add
+              </Button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {TAG_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-label={`Use color ${c}`}
+                  onClick={() => setNewTagColor(c)}
+                  className={cn(
+                    "size-5 rounded-full border transition-transform",
+                    newTagColor === c ? "scale-110 border-foreground" : "border-border",
+                  )}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+            <div className="max-h-56 space-y-0.5 overflow-y-auto">
+              {tagsList.length === 0 ? (
+                <div className="px-1 py-2 text-xs text-muted-foreground">
+                  No tags yet. Create one, then right-click a table → Tags to assign it.
+                </div>
+              ) : (
+                tagsList.map((tag) => (
+                  <div
+                    key={tag.name}
+                    className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-white/5"
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tag.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm">{tag.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Delete tag ${tag.name}`}
+                      onClick={() => studio.removeTag?.(tag.name)}
+                      className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-white/10 hover:text-destructive"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Tip: use Tags view to browse tables grouped in tag folders. A table with several tags appears in each folder.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setTagManagerOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameTagName !== null} onOpenChange={(open) => !open && setRenameTagName(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename tag</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameTagDraft}
+            onChange={(e) => setRenameTagDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleRenameTag();
+            }}
+            autoFocus
+            className="h-9 text-sm"
+          />
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setRenameTagName(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleRenameTag} disabled={!renameTagDraft.trim()}>
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {!schemaExplorer || !isPostgres ? (
-        filtered.length === 0 ? (
+        tagView ? (
+          <TagFoldersList
+            tagsList={tagsList}
+            tablesByTag={tablesByTag}
+            untaggedTables={untaggedTables}
+            isTagExpanded={isTagExpanded}
+            toggleTag={toggleTag}
+            onManageTags={() => setTagManagerOpen(true)}
+            onRenameTag={openRenameTagDialog}
+            onDeleteTag={(name) => studio.removeTag?.(name)}
+            renderTable={(table) => (
+              <SidebarTableRow
+                key={`${selectedSchema}.${table}`}
+                table={table}
+                selectedSchema={selectedSchema}
+                studio={studio}
+                viewTableSet={viewTableSet}
+                itemNoun={itemNoun}
+                openEditorLabel={openEditorLabel}
+                copyDefinitionLabel={copyDefinitionLabel}
+                canExportSql={canExportSql}
+                isMongo={isMongo}
+                tagsList={tagsList}
+                tableTagsMap={tableTagsMap}
+                tagsForTable={tagsForTable}
+                confirmDialog={confirmDialog}
+                setConfirmDialog={setConfirmDialog}
+                handleCopyItemName={handleCopyItemName}
+              />
+            )}
+          />
+        ) : filtered.length === 0 ? (
           <div className="px-2 py-2 text-xs text-muted-foreground">
             {q ? "No matches" : "No tables"}
           </div>
@@ -858,26 +1355,20 @@ function TablesPanel({ studio }: { studio: any }) {
               return (
                 <>
                   <Component
-                    className="text-xs"
                     onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
                   >
-                    <ItemIcon className="mr-2 h-3.5 w-3.5" />
                     Open {itemNoun}
                   </Component>
                   <Component
-                    className="text-xs"
                     onClick={handleAction((t, s) =>
                       studio.openSqlEditor?.(t, s),
                     )}
                   >
-                    <Terminal className="mr-2 h-3.5 w-3.5" />
                     {openEditorLabel}
                   </Component>
                   <Component
-                    className="text-xs"
                     onClick={handleAction((t) => studio.viewTableSchema?.(t))}
                   >
-                    <GitFork className="mr-2 h-3.5 w-3.5" />
                     View Schema
                   </Component>
                   <TableContextMenuItems
@@ -1001,7 +1492,37 @@ function TablesPanel({ studio }: { studio: any }) {
             />
             {expandedSections.tables && (
               <div className="space-y-0.5">
-                {filtered.length === 0 ? (
+                {tagView ? (
+                  <TagFoldersList
+                    tagsList={tagsList}
+                    tablesByTag={tablesByTag}
+                    untaggedTables={untaggedTables}
+                    isTagExpanded={isTagExpanded}
+                    toggleTag={toggleTag}
+                    onManageTags={() => setTagManagerOpen(true)}
+                    onRenameTag={openRenameTagDialog}
+                    onDeleteTag={(name) => studio.removeTag?.(name)}
+                    renderTable={(table) => (
+                      <SidebarTableRow
+                        key={`${selectedSchema}.${table}`}
+                        table={table}
+                        selectedSchema={selectedSchema}
+                        studio={studio}
+                        viewTableSet={viewTableSet}
+                        itemNoun={itemNoun}
+                        openEditorLabel={openEditorLabel}
+                        copyDefinitionLabel={copyDefinitionLabel}
+                        canExportSql={canExportSql}
+                        isMongo={isMongo}
+                        tagsList={tagsList}
+                        tableTagsMap={tableTagsMap}
+                        tagsForTable={tagsForTable}
+                        setConfirmDialog={setConfirmDialog}
+                        handleCopyItemName={handleCopyItemName}
+                      />
+                    )}
+                  />
+                ) : filtered.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-muted-foreground">
                     No tables found
                   </div>
@@ -1031,26 +1552,20 @@ function TablesPanel({ studio }: { studio: any }) {
                       return (
                         <>
                           <Component
-                            className="text-xs"
                             onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
                           >
-                            <ItemIcon className="mr-2 h-3.5 w-3.5" />
                             Open {itemNoun}
                           </Component>
                           <Component
-                            className="text-xs"
                             onClick={handleAction((t, s) =>
                               studio.openSqlEditor?.(t, s),
                             )}
                           >
-                            <Terminal className="mr-2 h-3.5 w-3.5" />
                             {openEditorLabel}
                           </Component>
                           <Component
-                            className="text-xs"
                             onClick={handleAction((t) => studio.viewTableSchema?.(t))}
                           >
-                            <GitFork className="mr-2 h-3.5 w-3.5" />
                             View Schema
                           </Component>
                           <TableContextMenuItems

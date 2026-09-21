@@ -34,6 +34,8 @@ import {
   TrashBinMinimalistic2 as SolarTrash,
   CodeFile as SolarCodeFile,
   File as SolarFile,
+  Folder as SolarFolder,
+  FolderOpen as SolarFolderOpen,
   DangerCircle as SolarDangerCircle,
   WalletMoney as SolarWalletMoney,
 } from "@solar-icons/react";
@@ -129,6 +131,8 @@ export const Copy = createThemedLucideIcon("Copy", SolarCopy as any);
 export const Trash2 = createThemedLucideIcon("Trash2", SolarTrash as any);
 export const FileJson = createThemedLucideIcon("FileJson", SolarCodeFile as any);
 export const FileText = createThemedLucideIcon("FileText", SolarFile as any);
+export const Folder = createThemedLucideIcon("Folder", SolarFolder as any);
+export const FolderOpen = createThemedLucideIcon("FolderOpen", SolarFolderOpen as any);
 export const AlertCircle = createThemedLucideIcon("AlertCircle", SolarDangerCircle as any);
 
 // --- New studio sidebar icons ---

@@ -1593,7 +1593,43 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
 
   const addTag = useCallback((name: string, color: string) => {
-    setTags(prev => prev.some(t => t.name === name) ? prev : [...prev, { name, color }]);
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) return;
+    setTags(prev => prev.some(t => t.name === trimmed) ? prev : [...prev, { name: trimmed, color }]);
+  }, []);
+
+  const removeTag = useCallback((name: string) => {
+    setTags(prev => prev.filter(t => t.name !== name));
+    setTableTags(prev => {
+      const next: Record<string, string[]> = {};
+      for (const [key, list] of Object.entries(prev)) {
+        const filtered = (list ?? []).filter(t => t !== name);
+        if (filtered.length > 0) next[key] = filtered;
+      }
+      return next;
+    });
+  }, []);
+
+  const renameTag = useCallback((oldName: string, newName: string) => {
+    const trimmed = String(newName ?? "").trim();
+    if (!trimmed || trimmed === oldName) return;
+    setTags(prev => {
+      if (!prev.some(t => t.name === oldName)) return prev;
+      if (prev.some(t => t.name === trimmed)) {
+        // Merge into the existing tag, drop the old one.
+        return prev.filter(t => t.name !== oldName);
+      }
+      return prev.map(t => (t.name === oldName ? { ...t, name: trimmed } : t));
+    });
+    setTableTags(prev => {
+      const next: Record<string, string[]> = {};
+      for (const [key, list] of Object.entries(prev)) {
+        const renamed = (list ?? []).map(t => (t === oldName ? trimmed : t));
+        const deduped = Array.from(new Set(renamed));
+        if (deduped.length > 0) next[key] = deduped;
+      }
+      return next;
+    });
   }, []);
 
   const toggleTableTag = useCallback((schema: string, table: string, tagName: string) => {
@@ -8925,7 +8961,7 @@ END $$;`.trim();
     addNoteWidget,
     updateNoteWidget,
     removeNoteWidget,
-    addTag, toggleTableTag,
+    addTag, removeTag, renameTag, toggleTableTag,
     snippets, setSnippets,
     folders, setFolders,
     addSnippet, updateSnippet, deleteSnippet,
