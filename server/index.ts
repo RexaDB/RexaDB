@@ -1993,6 +1993,7 @@ async function resolveAiReq(req: any, res: any) {
     provider, model, prompt, connectionString, dbType,
     selectedNamespace, lightSchemaContext,
     schemaContext: altSchemaContext, defaultSchema, apiKey: directApiKey,
+    connectionId: rawConnectionId,
   } = req.body;
 
   if (!provider || !model || !prompt || !connectionString || !dbType) {
@@ -2020,8 +2021,33 @@ async function resolveAiReq(req: any, res: any) {
 
   const schemaContext = lightSchemaContext || altSchemaContext || [];
   const namespace = selectedNamespace || defaultSchema || undefined;
+  const connectionId = rawConnectionId ? Number(rawConnectionId) : null;
 
-  return { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace };
+  return { provider, model, prompt, connectionString, dbType, settings, schemaContext, namespace, connectionId };
+}
+
+/** Build the create_workflow persistence hook for AI tools (null when unlinked). */
+function makePersistWorkflow(connectionId: number | null) {
+  if (!connectionId || Number.isNaN(connectionId)) return undefined;
+  return async (input: { name: string; description?: string }) => {
+    const { client } = await getWorkflowDeps();
+    const now = Date.now();
+    const row = {
+      id: workflowId(),
+      connectionId,
+      name: String(input.name || "Untitled Workflow"),
+      description: input.description || null,
+      nodesJson: "[]",
+      edgesJson: "[]",
+      scheduleEnabled: false,
+      scheduleType: null,
+      scheduleValue: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await client.workflows.create({ data: row as any });
+    return { id: row.id, name: row.name };
+  };
 }
 
 function handleSseError(error: any, label: string, res: any) {
@@ -2089,6 +2115,8 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       model,
       permissionMode: permissionMode || "schema_only",
       connectionString,
+      connectionId: resolved.connectionId ?? null,
+      persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
       dbType,
       selectedNamespace: namespace,
       schemaContext,
@@ -2876,6 +2904,8 @@ app.post("/api/agents/chat/stream", async (req, res) => {
         model: resolved.model,
         permissionMode,
         connectionString: resolved.connectionString,
+        connectionId: resolved.connectionId ?? null,
+        persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
         dbType: resolved.dbType,
         selectedNamespace: resolved.namespace,
         schemaContext: schemaTables.length > 0 ? schemaTables : resolved.schemaContext,

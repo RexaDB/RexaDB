@@ -37,6 +37,8 @@ interface SqliteDriver {
   ) => Promise<Record<string, unknown> | null>;
   run: (sql: string, args?: unknown[]) => Promise<{ changes: number }>;
   close: () => Promise<void>;
+  /** Atomic batch write when the backend supports it (edge HTTP drivers). */
+  runBatch?: (statements: Array<{ sql: string; args?: unknown[] }>) => Promise<void>;
 }
 
 interface SqliteTarget {
@@ -601,27 +603,39 @@ export async function updateSqliteRows(
   return await withDb(connectionString, async (db) => {
     const s = effectiveSchema(schema);
     const tableRef = `${quoteIdentifier(s)}.${quoteIdentifier(table)}`;
+    const statements: Array<{ sql: string; args: unknown[] }> = [];
+    for (const update of updates) {
+      const setEntries = Object.entries(update.set);
+      const whereEntries = Object.entries(update.where);
+      if (setEntries.length === 0 || whereEntries.length === 0) continue;
+
+      const setClause = setEntries
+        .map(([name]) => `${quoteIdentifier(name)} = ?`)
+        .join(", ");
+      const whereClause = whereEntries
+        .map(([name]) => `${quoteIdentifier(name)} = ?`)
+        .join(" AND ");
+      const values = [
+        ...setEntries.map(([, value]) => value),
+        ...whereEntries.map(([, value]) => value),
+      ];
+      statements.push({
+        sql: `UPDATE ${tableRef} SET ${setClause} WHERE ${whereClause}`,
+        args: values,
+      });
+    }
+    if (statements.length === 0) return { success: true };
+    // Edge HTTP drivers auto-commit every request, so a BEGIN/COMMIT wrapper
+    // around sequential runs is NOT atomic — use the driver's single-request
+    // transactional batch instead. Local/libSQL drivers keep BEGIN/COMMIT.
+    if (db.runBatch) {
+      await db.runBatch(statements);
+      return { success: true };
+    }
     await db.run("BEGIN");
     try {
-      for (const update of updates) {
-        const setEntries = Object.entries(update.set);
-        const whereEntries = Object.entries(update.where);
-        if (setEntries.length === 0 || whereEntries.length === 0) continue;
-
-        const setClause = setEntries
-          .map(([name]) => `${quoteIdentifier(name)} = ?`)
-          .join(", ");
-        const whereClause = whereEntries
-          .map(([name]) => `${quoteIdentifier(name)} = ?`)
-          .join(" AND ");
-        const values = [
-          ...setEntries.map(([, value]) => value),
-          ...whereEntries.map(([, value]) => value),
-        ];
-        await db.run(
-          `UPDATE ${tableRef} SET ${setClause} WHERE ${whereClause}`,
-          values,
-        );
+      for (const statement of statements) {
+        await db.run(statement.sql, statement.args);
       }
       await db.run("COMMIT");
     } catch (error) {

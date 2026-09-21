@@ -38,6 +38,8 @@ export type PiAgentInput = {
   model: string;
   permissionMode?: "schema_only" | "schema_with_data";
   connectionString: string;
+  connectionId?: number | null;
+  persistWorkflow?: PiToolContext["persistWorkflow"];
   dbType: string;
   selectedNamespace?: string;
   schemaContext?: LightSchemaContextTable[];
@@ -207,11 +209,14 @@ export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ sess
 
   const toolContext: PiToolContext = {
     connectionString: input.connectionString,
+    connectionId: input.connectionId ?? null,
     defaultNamespace: input.selectedNamespace,
     permissionMode: input.permissionMode,
     dashboardContext: input.dashboardContext,
+    workflowContext: input.workflowContext,
     emitStep: input.emitStep,
     exaApiKey: input.settings.providers?.["exa"]?.apiKey ?? null,
+    persistWorkflow: input.persistWorkflow,
   };
   const tools = createPiDbTools(toolContext);
 

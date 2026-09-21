@@ -79,6 +79,7 @@ import {
 } from "@/lib/studio/table-loading";
 import { useStablePaneTabRenderOrder } from "@/hooks/use-stable-pane-tab-render-order";
 import { useDataDictionary } from "@/hooks/use-data-dictionary";
+import { splitColumnKey, splitTableKey } from "@/lib/dictionary/helpers";
 import { logStudioDebug } from "@/lib/studio/studio-debug";
 import {
   getFirstPaneId,
@@ -678,9 +679,11 @@ export function StudioMainContent({
   const tableColumnDecorators = useMemo(() => {
     const out: Record<string, import("@/lib/dictionary/types").ColumnDecorator> = {};
     if (!selectedSchema || !selectedTable) return out;
-    const prefix = `${selectedSchema}.${selectedTable}.`;
     for (const [key, decorator] of Object.entries(dictionaryScope.decorators || {})) {
-      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = decorator;
+      const parsed = splitColumnKey(key);
+      if (parsed && parsed.schema === selectedSchema && parsed.table === selectedTable) {
+        out[parsed.column] = decorator;
+      }
     }
     return out;
   }, [dictionaryScope, selectedSchema, selectedTable]);
@@ -690,9 +693,9 @@ export function StudioMainContent({
   const tableDescriptionMap = useMemo(() => {
     const out: Record<string, string> = {};
     if (!selectedSchema) return out;
-    const prefix = `${selectedSchema}.`;
     for (const [key, description] of Object.entries(dictionaryScope.tables || {})) {
-      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = description;
+      const parsed = splitTableKey(key);
+      if (parsed && parsed.schema === selectedSchema) out[parsed.table] = description;
     }
     return out;
   }, [dictionaryScope, selectedSchema]);

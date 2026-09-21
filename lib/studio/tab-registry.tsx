@@ -326,7 +326,7 @@ export const TAB_REGISTRY: {
           const match = opts.tab.id.match(/^workflow-(.+?)(?:::pane::.*)?$/);
           return match ? match[1] : undefined;
         })()}
-        connectionId={opts.studio.connection?.id}
+        connectionId={(opts.studio as any)?.connection?.id}
       />
     ),
   },

@@ -765,6 +765,30 @@ export function DataCatalogView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnFilter]);
 
+  // Column search must see unloaded columns: when a query is active, load
+  // every missing table structure so searchCatalog can match columns in
+  // tables the user never expanded. Until all structures resolve, the empty
+  // state below shows a "searching columns" indicator instead of "No matching".
+  const allStructuresLoaded = useMemo(
+    () =>
+      tables.every(
+        (table) => structures[tableKey(selectedSchema, table)] !== undefined,
+      ),
+    [tables, selectedSchema, structures],
+  );
+  const searchStructuresPending =
+    Boolean(query.trim()) && !allStructuresLoaded;
+  useEffect(() => {
+    if (!query.trim()) return;
+    for (const table of tables) {
+      const key = tableKey(selectedSchema, table);
+      if (structures[key] === undefined && !loadingTables[key]) {
+        void ensureStructure(table);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, tables, selectedSchema, structures, loadingTables]);
+
   function reloadNative() {
     if (!supportsNative || !connectionString) return;
     setNativeLoading(true);
@@ -874,15 +898,23 @@ export function DataCatalogView({
 
       <div className="px-8 flex-1 overflow-hidden flex flex-col">
         {visibleTables.length === 0 ? (
-          <EmptyStatePresentational
-            icon={query.trim() ? Search : Database}
-            title={query.trim() ? "No matching tables or columns" : `No tables in ${selectedSchema}`}
-            description={
-              query.trim()
-                ? "Try a different search term, or clear the coverage filter."
-                : "Tables in this schema will appear here once they exist."
-            }
-          />
+          searchStructuresPending ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+              <RefreshCw className="size-5 animate-spin" />
+              <p className="text-sm font-medium">Searching columns…</p>
+              <p className="text-xs">Loading table structures to match columns.</p>
+            </div>
+          ) : (
+            <EmptyStatePresentational
+              icon={query.trim() ? Search : Database}
+              title={query.trim() ? "No matching tables or columns" : `No tables in ${selectedSchema}`}
+              description={
+                query.trim()
+                  ? "Try a different search term, or clear the coverage filter."
+                  : "Tables in this schema will appear here once they exist."
+              }
+            />
+          )
         ) : (
           <div className="flex-1 overflow-y-auto pb-8 space-y-3">
             {visibleTables.map((entry) => {

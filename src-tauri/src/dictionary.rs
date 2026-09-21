@@ -95,20 +95,27 @@ fn normalize_part(raw: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+/// Escape `\` and `.` so dotted identifiers can't collide:
+/// `public` + `audit.events` -> `public.audit\.events`, distinct from
+/// `public.audit` + `events` -> `public\.audit.events`. Mirrors the TS helper.
+fn escape_part(raw: &str) -> String {
+    raw.replace('\\', "\\\\").replace('.', "\\.")
+}
+
 fn table_key(schema: &str, table: &str) -> Result<String, String> {
     Ok(format!(
         "{}.{}",
-        normalize_part(schema)?,
-        normalize_part(table)?
+        escape_part(&normalize_part(schema)?),
+        escape_part(&normalize_part(table)?)
     ))
 }
 
 fn column_key(schema: &str, table: &str, column: &str) -> Result<String, String> {
     Ok(format!(
         "{}.{}.{}",
-        normalize_part(schema)?,
-        normalize_part(table)?,
-        normalize_part(column)?
+        escape_part(&normalize_part(schema)?),
+        escape_part(&normalize_part(table)?),
+        escape_part(&normalize_part(column)?)
     ))
 }
 
@@ -347,6 +354,15 @@ mod tests {
             column_key("public", "users", "id").unwrap(),
             "public.users.id"
         );
+    }
+
+    #[test]
+    fn dotted_identifiers_do_not_collide() {
+        let a = table_key("public", "audit.events").unwrap();
+        let b = table_key("public.audit", "events").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(a, r"public.audit\.events");
+        assert_eq!(b, r"public\.audit.events");
     }
 
     #[test]

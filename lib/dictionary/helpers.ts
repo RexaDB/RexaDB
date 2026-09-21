@@ -9,26 +9,62 @@ import type {
   NativeCommentMaps,
 } from "./types";
 
+function escapeKeyPart(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/\\/g, "\\\\")
+    .replace(/\./g, "\\.");
+}
+
+function unescapeKeyPart(raw: string): string {
+  return String(raw || "").replace(/\\(\\|.)/g, (_, ch: string) => ch);
+}
+
+/** Split on unescaped dots; backslash escapes the next char. */
+function splitEscaped(key: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  const s = String(key || "");
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "\\" && i + 1 < s.length) {
+      current += s[i + 1];
+      i++;
+    } else if (ch === ".") {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
 export function tableKey(schema: string, table: string): string {
-  return `${String(schema || "").trim()}.${String(table || "").trim()}`;
+  return `${escapeKeyPart(schema)}.${escapeKeyPart(table)}`;
 }
 
 export function columnKey(schema: string, table: string, column: string): string {
-  return `${String(schema || "").trim()}.${String(table || "").trim()}.${String(column || "").trim()}`;
+  return `${escapeKeyPart(schema)}.${escapeKeyPart(table)}.${escapeKeyPart(column)}`;
 }
 
 export function splitTableKey(key: string): { schema: string; table: string } | null {
-  const idx = String(key || "").indexOf(".");
-  if (idx <= 0 || idx === key.length - 1) return null;
-  return { schema: key.slice(0, idx), table: key.slice(idx + 1) };
+  const parts = splitEscaped(key);
+  if (parts.length !== 2 || parts.some((p) => !p)) return null;
+  return { schema: unescapeKeyPart(parts[0]), table: unescapeKeyPart(parts[1]) };
 }
 
 export function splitColumnKey(
   key: string,
 ): { schema: string; table: string; column: string } | null {
-  const parts = String(key || "").split(".");
+  const parts = splitEscaped(key);
   if (parts.length !== 3 || parts.some((p) => !p)) return null;
-  return { schema: parts[0], table: parts[1], column: parts[2] };
+  return {
+    schema: unescapeKeyPart(parts[0]),
+    table: unescapeKeyPart(parts[1]),
+    column: unescapeKeyPart(parts[2]),
+  };
 }
 
 // ---------------------------------------------------------------------------

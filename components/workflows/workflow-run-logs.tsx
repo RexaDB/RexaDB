@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -214,20 +214,26 @@ function useWorkflowRuns(workflowId: string, refreshKey: number, enabled: boolea
     if (enabled) void loadRuns();
   }, [enabled, workflowId, refreshKey, loadRuns]);
 
+  const detailRequestRef = useRef(0);
   useEffect(() => {
     if (!enabled || !selectedId) {
       if (!selectedId) setDetail(null);
       return;
     }
-    const fromList = runs.find((r) => r.id === selectedId) ?? null;
+    const requestId = ++detailRequestRef.current;
+    const capturedId = selectedId;
+    const fromList = runs.find((r) => r.id === capturedId) ?? null;
     setDetail(fromList);
     setDetailLoading(true);
-    getWorkflowRun(workflowId, selectedId)
+    getWorkflowRun(workflowId, capturedId)
       .then((res) => {
+        if (detailRequestRef.current !== requestId) return;
         if (res.success && res.data) setDetail(res.data);
       })
       .catch(() => {})
-      .finally(() => setDetailLoading(false));
+      .finally(() => {
+        if (detailRequestRef.current === requestId) setDetailLoading(false);
+      });
   }, [enabled, selectedId, workflowId, runs]);
 
   const detailOutputs = useMemo(() => parseWorkflowRunOutputs(detail), [detail]);

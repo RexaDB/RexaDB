@@ -16,7 +16,7 @@ import {
 import { executeMongoQuery, getMongoCollections } from "@/lib/db/mongo-client";
 import { executeRedisCommand } from "@/lib/db/redis-client";
 import { buildDashboardRef } from "@/lib/ai/dashboard-refs";
-import type { LightDashboardContext } from "@/lib/ai/types";
+import type { AgentWorkflowContext, LightDashboardContext } from "@/lib/ai/types";
 import { parseAppThemeJson, BUILTIN_APP_THEMES, type CustomAppTheme } from "@/lib/studio/app-themes";
 import { parseThemeJson, createThemeId, type CustomEditorTheme } from "@/lib/studio/editor-themes";
 import {
@@ -41,6 +41,7 @@ import {
 
 export type PiToolContext = {
   connectionString: string;
+  connectionId?: number | null;
   defaultNamespace?: string;
   permissionMode?: "schema_only" | "schema_with_data";
   dashboardContext?: LightDashboardContext[];
@@ -48,6 +49,11 @@ export type PiToolContext = {
   emitStep: (message: string) => void;
   /** Exa web-search key (Settings → AI → Web search). Tools report a setup hint when missing. */
   exaApiKey?: string | null;
+  /** Persist a new workflow row; injected server-side so create_workflow is durable. */
+  persistWorkflow?: (input: { name: string; description?: string }) => Promise<{
+    id: string;
+    name: string;
+  }>;
 };
 
 function textResult(data: unknown): AgentToolResult<unknown> {
@@ -270,17 +276,18 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
     defineTool({
       name: "list_workflows",
       label: "List workflows",
-      description: "List workflows available in the current studio session, including their reference tokens.",
+      description: "List workflows available in the current studio session.",
       promptSnippet: "list_workflows - list workflows available in the current studio session",
       parameters: Type.Object({}),
       execute: async () => {
         context.emitStep("Listing workflows");
+        const existing = context.workflowContext?.existing ?? [];
         return textResult({
-          workflows: workflowContext.existing.map((workflow) => ({
+          workflows: existing.map((workflow) => ({
             id: workflow.id,
-            ref: workflow.ref,
             name: workflow.name,
-            nodeCount: workflow.nodes.length,
+            nodeCount: workflow.nodeCount,
+            nodeTypes: workflow.nodeTypes,
           })),
         });
       },
@@ -295,20 +302,42 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
         description: Type.Optional(Type.String({ description: "Workflow description" })),
       }),
       execute: async (toolCallId, params) => {
-        context.emitStep(`Creating workflow "${params.name}"`);
-        const newWorkflow = {
-          id: `workflow-${Date.now()}`,
-          ref: `workflow.${params.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString(36)}`,
-          name: params.name,
-          description: params.description || "",
-          nodes: [],
-          edges: [],
-          createdAt: new Date().toISOString(),
-        };
-        return textResult({
-          workflow: newWorkflow,
-          message: `Workflow "${params.name}" created successfully. You can now add nodes to it using the workflow editor.`,
-        });
+        const name = String(params.name || "").trim();
+        if (!name) failTool("Workflow name is required.");
+        context.emitStep(`Creating workflow "${name}"`);
+        try {
+          if (!context.persistWorkflow) {
+            failTool(
+              "Workflow persistence is unavailable for this session (missing connection).",
+            );
+          }
+          const persisted = await context.persistWorkflow!({
+            name,
+            description: params.description || "",
+          });
+          const entry = {
+            id: persisted.id,
+            name: persisted.name,
+            nodeCount: 0,
+            nodeTypes: [] as string[],
+          };
+          const existing = context.workflowContext?.existing;
+          if (Array.isArray(existing) && !existing.some((w) => w.id === entry.id)) {
+            existing.push(entry);
+          }
+          return textResult({
+            workflow: {
+              id: persisted.id,
+              name: persisted.name,
+              description: params.description || "",
+              nodes: [],
+              edges: [],
+            },
+            message: `Workflow "${persisted.name}" created successfully (id: ${persisted.id}). You can now add nodes to it using the workflow editor.`,
+          });
+        } catch (error) {
+          failTool(error);
+        }
       },
     }),
     defineTool({

@@ -25,6 +25,27 @@ test("table/column keys round-trip", () => {
   assert.equal(splitColumnKey("public.users"), null);
 });
 
+test("dotted identifiers don't collide and round-trip", () => {
+  const a = tableKey("public", "audit.events");
+  const b = tableKey("public.audit", "events");
+  assert.notEqual(a, b);
+  assert.deepEqual(splitTableKey(a), { schema: "public", table: "audit.events" });
+  assert.deepEqual(splitTableKey(b), { schema: "public.audit", table: "events" });
+  const c = columnKey("public", "audit.events", "id");
+  const d = columnKey("public.audit", "events", "id");
+  assert.notEqual(c, d);
+  assert.deepEqual(splitColumnKey(c), {
+    schema: "public",
+    table: "audit.events",
+    column: "id",
+  });
+  assert.deepEqual(splitColumnKey(d), {
+    schema: "public.audit",
+    table: "events",
+    column: "id",
+  });
+});
+
 test("applyColumnDecorator handles nulls and passthrough", () => {
   assert.deepEqual(applyColumnDecorator(null, null), { display: "NULL", masked: false });
   assert.deepEqual(applyColumnDecorator(undefined, null), { display: "NULL", masked: false });

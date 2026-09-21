@@ -7,7 +7,21 @@
 import { isDesktopRuntime } from "@/lib/desktop";
 import type { ColumnDecorator, DictionaryScope } from "./types";
 import { freshEmptyScope } from "./types";
-import { isValidDecorator } from "./helpers";
+import { columnKey, isValidDecorator, tableKey } from "./helpers";
+
+export const DICTIONARY_UPDATED_EVENT = "rexadb:dictionary-updated";
+
+export function notifyDictionaryUpdated(connectionId: number) {
+  try {
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(
+        new CustomEvent(DICTIONARY_UPDATED_EVENT, { detail: { connectionId } }),
+      );
+    }
+  } catch {
+    // Non-DOM test environments — listeners simply won't fire.
+  }
+}
 
 const STORAGE_PREFIX = "rexadb.dictionary.";
 
@@ -95,6 +109,7 @@ export async function setTableDescription(
         table,
         description,
       });
+      notifyDictionaryUpdated(connectionId);
       return;
     } catch {
       // Fall through to local mirror.
@@ -102,7 +117,7 @@ export async function setTableDescription(
   }
   if (typeof window === "undefined") return;
   const scope = readLocal(connectionId);
-  const key = `${schema.trim()}.${table.trim()}`;
+  const key = tableKey(schema, table);
   if (description.trim()) {
     scope.tables[key] = description.trim();
     scope.updatedAt[key] = Date.now();
@@ -111,6 +126,7 @@ export async function setTableDescription(
     delete scope.updatedAt[key];
   }
   writeLocal(connectionId, scope);
+  notifyDictionaryUpdated(connectionId);
 }
 
 export async function setColumnDescription(
@@ -130,6 +146,7 @@ export async function setColumnDescription(
         column,
         description,
       });
+      notifyDictionaryUpdated(connectionId);
       return;
     } catch {
       // Fall through to local mirror.
@@ -137,7 +154,7 @@ export async function setColumnDescription(
   }
   if (typeof window === "undefined") return;
   const scope = readLocal(connectionId);
-  const key = `${schema.trim()}.${table.trim()}.${column.trim()}`;
+  const key = columnKey(schema, table, column);
   if (description.trim()) {
     scope.columns[key] = description.trim();
     scope.updatedAt[key] = Date.now();
@@ -146,6 +163,7 @@ export async function setColumnDescription(
     delete scope.updatedAt[key];
   }
   writeLocal(connectionId, scope);
+  notifyDictionaryUpdated(connectionId);
 }
 
 export async function setColumnDecorator(
@@ -168,6 +186,7 @@ export async function setColumnDecorator(
         column,
         decorator,
       });
+      notifyDictionaryUpdated(connectionId);
       return;
     } catch {
       // Fall through to local mirror.
@@ -175,13 +194,14 @@ export async function setColumnDecorator(
   }
   if (typeof window === "undefined") return;
   const scope = readLocal(connectionId);
-  const key = `${schema.trim()}.${table.trim()}.${column.trim()}`;
+  const key = columnKey(schema, table, column);
   if (decorator) {
     scope.decorators[key] = decorator;
   } else {
     delete scope.decorators[key];
   }
   writeLocal(connectionId, scope);
+  notifyDictionaryUpdated(connectionId);
 }
 
 export async function deleteDictionaryScope(connectionId: number): Promise<void> {
@@ -197,4 +217,5 @@ export async function deleteDictionaryScope(connectionId: number): Promise<void>
   } catch {
     // Ignore.
   }
+  notifyDictionaryUpdated(connectionId);
 }

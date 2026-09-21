@@ -43,6 +43,15 @@ export interface EdgeSqliteDriver {
   get: (sql: string, args?: unknown[]) => Promise<Record<string, unknown> | null>;
   run: (sql: string, args?: unknown[]) => Promise<{ changes: number }>;
   close: () => Promise<void>;
+  /**
+   * Atomic batch write. When present, callers (e.g. updateSqliteRows) must
+   * prefer it over sequential `run` calls: single-statement HTTP backends
+   * auto-commit every request, so a BEGIN/COMMIT wrapper around separate
+   * requests is NOT atomic. Each implementation below issues ONE HTTP
+   * request the backend executes transactionally. Absent = backend has no
+   * transactional batch endpoint (best-effort sequential applies).
+   */
+  runBatch?: (statements: Array<{ sql: string; args?: unknown[] }>) => Promise<void>;
 }
 
 function stripTrailingSlash(value: string) {
@@ -366,6 +375,18 @@ function createRqliteDriver(
       const [result] = await rqliteRequest(target, [[sql, ...normalizeArgs(args)]]);
       return { changes: rqliteResultToRows(result ?? {}).changes };
     },
+    // One /db/request carrying BEGIN + statements + COMMIT executes
+    // atomically; separate requests would each auto-commit.
+    runBatch: async (statements) => {
+      if (statements.length === 0) return;
+      await rqliteRequest(target, [
+        ["BEGIN"],
+        ...statements.map(
+          (s): [string, ...unknown[]] => [s.sql, ...normalizeArgs(s.args)],
+        ),
+        ["COMMIT"],
+      ]);
+    },
     close: async () => {},
   };
 }
@@ -407,6 +428,28 @@ async function d1Request(
   return result[0] ?? {};
 }
 
+async function d1Batch(
+  target: Extract<EdgeSqliteTarget, { kind: "d1" }>,
+  statements: Array<{ sql: string; args?: unknown[] }>,
+): Promise<void> {
+  const url =
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(target.accountId)}` +
+    `/d1/database/${encodeURIComponent(target.databaseId)}/query`;
+  const payload = await postJson(
+    url,
+    { Authorization: `Bearer ${target.token}` },
+    statements.map((s) => ({ sql: s.sql, params: normalizeArgs(s.args) })),
+  );
+  const errors = (payload as { errors?: Array<{ message?: string }> })?.errors ?? [];
+  if (!(payload as { success?: boolean }).success && errors.length) {
+    throw new Error(errors.map((e) => e.message || "D1 error").join("; "));
+  }
+  const results = (payload as { result?: Array<{ error?: string }> }).result ?? [];
+  for (const item of results) {
+    if (item?.error) throw new Error(item.error);
+  }
+}
+
 function createD1Driver(target: Extract<EdgeSqliteTarget, { kind: "d1" }>): EdgeSqliteDriver {
   return {
     all: async (sql, args) => {
@@ -421,6 +464,11 @@ function createD1Driver(target: Extract<EdgeSqliteTarget, { kind: "d1" }>): Edge
       if (isTransactionControl(sql)) return { changes: 0 };
       const res = await d1Request(target, sql, normalizeArgs(args));
       return { changes: Number(res.meta?.changes ?? 0) };
+    },
+    // D1's batch query endpoint executes the whole array transactionally.
+    runBatch: async (statements) => {
+      if (statements.length === 0) return;
+      await d1Batch(target, statements);
     },
     close: async () => {},
   };
@@ -492,6 +540,14 @@ function createStarbaseDriver(
       if (isTransactionControl(sql)) return { changes: 0 };
       const [result] = await starbaseRequest(target, [{ sql, params: normalizeArgs(args) }]);
       return { changes: Number(result?.meta?.rows_written ?? 0) };
+    },
+    // /query/raw accepts a { transaction: [...] } batch executed atomically.
+    runBatch: async (statements) => {
+      if (statements.length === 0) return;
+      await starbaseRequest(
+        target,
+        statements.map((s) => ({ sql: s.sql, params: normalizeArgs(s.args) })),
+      );
     },
     close: async () => {},
   };

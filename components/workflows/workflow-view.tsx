@@ -17,6 +17,79 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
+function CreateWorkflowSheet({
+  open,
+  onOpenChange,
+  name,
+  onNameChange,
+  description,
+  onDescriptionChange,
+  creating,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  name: string;
+  onNameChange: (value: string) => void;
+  description: string;
+  onDescriptionChange: (value: string) => void;
+  creating: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle>Create New Workflow</SheetTitle>
+          <SheetDescription>
+            Create a new workflow to automate database tasks and processes.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label htmlFor="workflow-name" className="text-sm font-medium">
+              Workflow Name
+            </label>
+            <Input
+              id="workflow-name"
+              placeholder="My Workflow"
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="workflow-description" className="text font-medium">
+              Description (optional)
+            </label>
+            <Textarea
+              id="workflow-description"
+              placeholder="Describe what this workflow does..."
+              value={description}
+              onChange={(e) => onDescriptionChange(e.target.value)}
+              rows={3}
+            />
+          </div>
+        </div>
+        <SheetFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={onCreate} disabled={!name.trim() || creating}>
+            {creating ? (
+              <>
+                <Loader2 className="size-4 animate-spin mr-2" />
+                Creating...
+              </>
+            ) : (
+              "Create Workflow"
+            )}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 export function WorkflowView({ workflowId, connectionId }: { workflowId?: string; connectionId?: number }) {
   const [workflow, setWorkflow] = useState<WorkflowRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,21 +157,37 @@ export function WorkflowView({ workflowId, connectionId }: { workflowId?: string
     );
   }
 
+  const createSheet = (
+    <CreateWorkflowSheet
+      open={createDialogOpen}
+      onOpenChange={setCreateDialogOpen}
+      name={newWorkflowName}
+      onNameChange={setNewWorkflowName}
+      description={newWorkflowDescription}
+      onDescriptionChange={setNewWorkflowDescription}
+      creating={isCreating}
+      onCreate={() => void handleCreateWorkflow()}
+    />
+  );
+
   if (notFound || !workflow) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Workflow className="size-10 opacity-40" />
-        <p className="text-sm font-medium">Workflow not found</p>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setCreateDialogOpen(true)}
-          className="gap-2"
-        >
-          <Plus className="size-4" />
-          Create New Workflow
-        </Button>
-      </div>
+      <>
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Workflow className="size-10 opacity-40" />
+          <p className="text-sm font-medium">Workflow not found</p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCreateDialogOpen(true)}
+            className="gap-2"
+          >
+            <Plus className="size-4" />
+            Create New Workflow
+          </Button>
+        </div>
+        {createSheet}
+      </>
     );
   }
 
@@ -108,62 +197,7 @@ export function WorkflowView({ workflowId, connectionId }: { workflowId?: string
         workflow={workflow}
         onSaved={(updated) => setWorkflow((prev) => (prev ? { ...prev, ...updated } : updated))}
       />
-      <Sheet open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Create New Workflow</SheetTitle>
-            <SheetDescription>
-              Create a new workflow to automate database tasks and processes.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label htmlFor="workflow-name" className="text-sm font-medium">
-                Workflow Name
-              </label>
-              <Input
-                id="workflow-name"
-                placeholder="My Workflow"
-                value={newWorkflowName}
-                onChange={(e) => setNewWorkflowName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="workflow-description" className="text font-medium">
-                Description (optional)
-              </label>
-              <Textarea
-                id="workflow-description"
-                placeholder="Describe what this workflow does..."
-                value={newWorkflowDescription}
-                onChange={(e) => setNewWorkflowDescription(e.target.value)}
-                rows={3}
-              />
-            </div>
-          </div>
-          <SheetFooter>
-            <Button
-              variant="outline"
-              onClick={() => setCreateDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateWorkflow}
-              disabled={!newWorkflowName.trim() || isCreating}
-            >
-              {isCreating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin mr-2" />
-                  Creating...
-                </>
-              ) : (
-                "Create Workflow"
-              )}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+      {createSheet}
     </>
   );
 }

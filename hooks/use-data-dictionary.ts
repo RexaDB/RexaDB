@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  DICTIONARY_UPDATED_EVENT,
   getDictionaryScope,
   setTableDescription,
   setColumnDescription,
@@ -60,6 +61,28 @@ export function useDataDictionary(connectionId: number | null | undefined): Data
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Cross-instance sync: a save from the catalog view must refresh the
+  // tables-list / data-grid instance (and vice versa). The dictionary client
+  // broadcasts DICTIONARY_UPDATED_EVENT on every write; the `storage` event
+  // covers cross-tab web fallback writes.
+  useEffect(() => {
+    if (!connectionId || connectionId <= 0 || typeof window === "undefined") return;
+    const onUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ connectionId?: number }>).detail;
+      if (detail && detail.connectionId !== connectionId) return;
+      void refresh();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === `rexadb.dictionary.${connectionId}`) void refresh();
+    };
+    window.addEventListener(DICTIONARY_UPDATED_EVENT, onUpdated);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(DICTIONARY_UPDATED_EVENT, onUpdated);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [connectionId, refresh]);
 
   const mutate = useCallback(
     async (fn: () => Promise<void>): Promise<boolean> => {
