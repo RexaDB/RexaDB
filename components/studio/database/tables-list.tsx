@@ -10,10 +10,6 @@ import {
   Unlock,
   MoreVertical,
   Tag,
-  Download,
-  Eraser,
-  Trash2,
-  Check,
   Eye,
   X,
 } from "@/lib/icon-theme/lucide-react";
@@ -82,9 +78,21 @@ function ExplorerTagRow({
   dataApiInstalled,
   viewTableSet,
   isMongo,
+  canExportSql,
   itemNoun,
+  openEditorLabel,
+  copyDefinitionLabel,
   onTableClick,
+  onOpenSqlEditor,
+  onViewSchema,
   toggleTableTag,
+  copyTableSchema,
+  duplicateTable,
+  emptyTable,
+  deleteTable,
+  exportData,
+  setConfirmDialog,
+  handleCopyItemName,
 }: {
   table: string;
   selectedSchema: string;
@@ -96,9 +104,21 @@ function ExplorerTagRow({
   dataApiInstalled?: boolean;
   viewTableSet: Set<string>;
   isMongo: boolean;
+  canExportSql: boolean;
   itemNoun: string;
+  openEditorLabel: string;
+  copyDefinitionLabel: string;
   onTableClick: (table: string) => void;
+  onOpenSqlEditor?: (table: string, schema?: string) => void;
+  onViewSchema?: (table: string) => void;
   toggleTableTag?: (schema: string, table: string, tag: string) => void;
+  copyTableSchema?: TableActionHandler;
+  duplicateTable?: TableActionHandler;
+  emptyTable?: TableActionHandler;
+  deleteTable?: TableActionHandler;
+  exportData?: ExportDataHandler;
+  setConfirmDialog: (dialog: ConfirmDialogState) => void;
+  handleCopyItemName: (name: string) => void;
 }) {
   const assigned = tableTags[`${selectedSchema}.${table}`] ?? [];
   const securityInfo = tableSecurity?.[table];
@@ -106,6 +126,64 @@ function ExplorerTagRow({
   const showDataApi = Boolean(dataApiInstalled);
   const isView = viewTableSet.has(table);
   const ItemIcon = isView ? Eye : Table2;
+
+  const renderMenuItems = (
+    Component: any,
+    Sub: any,
+    SubTrigger: any,
+    SubContent: any,
+    Separator: any,
+    isDropdown = false,
+  ) => {
+    const handleAction =
+      (fn?: (t: string, s: string) => void) =>
+      (e: React.MouseEvent) => {
+        if (isDropdown) e.stopPropagation();
+        fn?.(table, selectedSchema);
+      };
+
+    return (
+      <>
+        <Component onClick={handleAction((t) => onTableClick(t))}>
+          Open {itemNoun}
+        </Component>
+        <Component onClick={handleAction((t, s) => onOpenSqlEditor?.(t, s))}>
+          {openEditorLabel}
+        </Component>
+        <Component onClick={handleAction((t) => onViewSchema?.(t))}>
+          View Schema
+        </Component>
+        <TableContextMenuItems
+          Component={Component}
+          Sub={Sub}
+          SubTrigger={SubTrigger}
+          SubContent={SubContent}
+          Separator={Separator}
+          itemNoun={itemNoun}
+          copyDefinitionLabel={copyDefinitionLabel}
+          duplicateLabel={`Duplicate ${itemNoun}`}
+          isMongo={isMongo}
+          canExportSql={canExportSql}
+          isDropdown={isDropdown}
+          table={table}
+          selectedSchema={selectedSchema}
+          tags={tags}
+          tableTags={tableTags}
+          handleAction={handleAction}
+          onToggleTag={(s, t, tagName) => toggleTableTag?.(s, t, tagName)}
+          handleCopyName={(t) => void handleCopyItemName(t)}
+          handleCopyDefinition={(t, s) => copyTableSchema?.(t, s)}
+          handleDuplicate={(t, s) => duplicateTable?.(t, s)}
+          onExport={(format) => exportData?.(format)}
+          setConfirmDialog={setConfirmDialog}
+          onEmpty={(t, s) => emptyTable?.(t, s)}
+          onDelete={(t, s) => deleteTable?.(t, s)}
+          beforeExport={<Separator />}
+        />
+      </>
+    );
+  };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger>
@@ -153,40 +231,40 @@ function ExplorerTagRow({
             )}
           </div>
           <span className="text-xs tracking-wider text-muted-foreground/40">{isView ? "View" : "Base Table"}</span>
-          <div className="flex justify-end items-center">
+          <div className="flex justify-end items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
+                >
+                  <MoreVertical className="w-3.5 h-3.5 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {renderMenuItems(
+                  DropdownMenuItem,
+                  DropdownMenuSub,
+                  DropdownMenuSubTrigger,
+                  DropdownMenuSubContent,
+                  DropdownMenuSeparator,
+                  true,
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/20 group-hover:text-primary group-hover:translate-x-1 transition-all" />
           </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
-        <ContextMenuItem onClick={() => onTableClick(table)}>
-          Open {itemNoun}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            Tags
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-48 shadow-2xl">
-            {tags.length === 0 ? (
-              <ContextMenuItem className="disabled opacity-50">No tags defined</ContextMenuItem>
-            ) : (
-              tags.map((tag) => (
-                <ContextMenuItem
-                  key={tag.name}
-                  className="flex items-center justify-between"
-                  onClick={() => toggleTableTag?.(selectedSchema, table, tag.name)}
-                >
-                  <div className="flex items-center">
-                    <div className="w-2 h-2 rounded-lg mr-2" style={{ backgroundColor: tag.color }} />
-                    {tag.name}
-                  </div>
-                  {assigned.includes(tag.name) && <Check className="h-3.5 w-3.5 text-emerald-500" />}
-                </ContextMenuItem>
-              ))
-            )}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+        {renderMenuItems(
+          ContextMenuItem,
+          ContextMenuSub,
+          ContextMenuSubTrigger,
+          ContextMenuSubContent,
+          ContextMenuSeparator,
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -595,21 +673,20 @@ export function TablesList({
           <div className="flex-1 overflow-y-auto divide-y divide-border/60 min-h-0">
             {tagView ? (
               <div className="divide-y divide-border/40">
-                {tags.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-20 text-center">
-                    <Tag className="w-10 h-10 text-muted-foreground/10 mb-4" />
-                    <h3 className="text-sm font-medium text-foreground">No tags yet</h3>
-                    <p className="text-xs text-muted-foreground mt-1 max-w-[240px]">
-                      Create a tag, then right-click a table → Tags to assign it. Folders appear here.
-                    </p>
-                    <Button size="sm" className="mt-3 h-7 text-xs" onClick={() => setTagManagerOpen(true)}>
-                      <Plus className="w-3.5 h-3.5" />
+                {tags.length === 0 && (
+                  <div className="flex items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground">
+                    <Tag className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                    <span className="min-w-0 flex-1 truncate">No tags yet — right-click a table → Tags to assign one.</span>
+                    <button
+                      type="button"
+                      onClick={() => setTagManagerOpen(true)}
+                      className="shrink-0 font-medium text-primary hover:underline"
+                    >
                       New Tag
-                    </Button>
+                    </button>
                   </div>
-                ) : (
-                  <>
-                    {tags.map((tag) => {
+                )}
+                {tags.map((tag) => {
                       const groupTables = tablesByTag.get(tag.name) ?? [];
                       const expanded = isTagExpanded(tag.name);
                       const FolderIcon = expanded ? FolderOpen : Folder;
@@ -659,9 +736,21 @@ export function TablesList({
                                     dataApiInstalled={dataApiInstalled}
                                     viewTableSet={viewTableSet}
                                     isMongo={isMongo}
+                                    canExportSql={canExportSql}
                                     itemNoun={itemNoun}
+                                    openEditorLabel={openEditorLabel}
+                                    copyDefinitionLabel={copyDefinitionLabel}
                                     onTableClick={onTableClick}
+                                    onOpenSqlEditor={onOpenSqlEditor}
+                                    onViewSchema={onViewSchema}
                                     toggleTableTag={toggleTableTag}
+                                    copyTableSchema={copyTableSchema}
+                                    duplicateTable={duplicateTable}
+                                    emptyTable={emptyTable}
+                                    deleteTable={deleteTable}
+                                    exportData={exportData}
+                                    setConfirmDialog={setConfirmDialog}
+                                    handleCopyItemName={handleCopyItemName}
                                   />
                                 ))
                               )}
@@ -698,17 +787,27 @@ export function TablesList({
                                 dataApiInstalled={dataApiInstalled}
                                 viewTableSet={viewTableSet}
                                 isMongo={isMongo}
+                                canExportSql={canExportSql}
                                 itemNoun={itemNoun}
+                                openEditorLabel={openEditorLabel}
+                                copyDefinitionLabel={copyDefinitionLabel}
                                 onTableClick={onTableClick}
+                                onOpenSqlEditor={onOpenSqlEditor}
+                                onViewSchema={onViewSchema}
                                 toggleTableTag={toggleTableTag}
+                                copyTableSchema={copyTableSchema}
+                                duplicateTable={duplicateTable}
+                                emptyTable={emptyTable}
+                                deleteTable={deleteTable}
+                                exportData={exportData}
+                                setConfirmDialog={setConfirmDialog}
+                                handleCopyItemName={handleCopyItemName}
                               />
                             ))
                           )}
                         </div>
                       )}
                     </div>
-                  </>
-                )}
               </div>
             ) : (
               <>

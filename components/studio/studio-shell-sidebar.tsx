@@ -853,21 +853,8 @@ function TagFoldersList({
   onDeleteTag: (name: string) => void;
   renderTable: (table: string) => React.ReactNode;
 }) {
-  if (tagsList.length === 0) {
-    return (
-      <div className="px-2 py-3 text-center">
-        <Tag className="mx-auto mb-2 size-5 text-muted-foreground/40" />
-        <p className="text-xs text-muted-foreground">No tags yet</p>
-        <button
-          type="button"
-          onClick={onManageTags}
-          className="mt-1.5 text-xs font-medium text-primary hover:underline"
-        >
-          Create your first tag
-        </button>
-      </div>
-    );
-  }
+  // No early return on empty tags: the Untagged group below always
+  // renders, so tables never disappear from Tags view.
   const renderFolderRow = (
     name: string,
     expanded: boolean,
@@ -901,6 +888,17 @@ function TagFoldersList({
   );
   return (
     <div className="flex min-w-0 flex-col gap-px py-0.5">
+      {tagsList.length === 0 && (
+        <button
+          type="button"
+          onClick={onManageTags}
+          title="Create your first tag"
+          className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted-foreground transition-colors select-none hover:bg-white/5 hover:text-foreground"
+        >
+          <Tag className="size-4 shrink-0 opacity-60" />
+          <span className="min-w-0 flex-1 truncate text-left font-normal">No tags yet — create one</span>
+        </button>
+      )}
       {tagsList.map((tag) => {
         const tables = tablesByTag.get(tag.name) ?? [];
         const expanded = isTagExpanded(tag.name);
