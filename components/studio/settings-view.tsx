@@ -356,6 +356,8 @@ interface StudioSettingsModel {
   setShowTabIndicator: (value: boolean) => void;
   restoreAppState: boolean;
   setRestoreAppState: (value: boolean) => void;
+  openConnectionsInNewWindow: boolean;
+  setOpenConnectionsInNewWindow: (value: boolean) => void;
   schemaExplorer: boolean;
   setSchemaExplorer: (value: boolean) => void;
   databaseExplorer: boolean;
@@ -825,6 +827,8 @@ export function SettingsView({
     setShowTabIndicator,
     restoreAppState,
     setRestoreAppState,
+    openConnectionsInNewWindow,
+    setOpenConnectionsInNewWindow,
     schemaExplorer,
     setSchemaExplorer,
     databaseExplorer,
@@ -1739,6 +1743,15 @@ export function SettingsView({
                   description="When enabled, reopens tabs and restores your previous session when you return to a connection."
                   value={restoreAppState}
                   onChange={setRestoreAppState}
+                />
+
+                {/* Open Connections in New Window */}
+                <ToggleSetting
+                  settingId="open-new-window"
+                  title="Open Connections in New Window"
+                  description="When enabled, each connection opens in its own window instead of replacing the current one."
+                  value={openConnectionsInNewWindow}
+                  onChange={setOpenConnectionsInNewWindow}
                 />
 
                 {/* Auto-Save Executed Queries */}

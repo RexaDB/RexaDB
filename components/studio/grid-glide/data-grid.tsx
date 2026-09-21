@@ -66,6 +66,7 @@ import {
   normalizeStudioForeignKey,
 } from "@/lib/db/foreign-key-utils";
 import { preventTextSelection, allowTextSelection } from "@/lib/prevent-text-selection";
+import { applyColumnDecorator } from "@/lib/dictionary/helpers";
 
 const HEADER_MENU_ZONE_WIDTH = 30;
 
@@ -229,6 +230,7 @@ export const DataGrid = React.memo(function DataGrid({
   foreignKeys = [],
   handleFKSelection,
   onNavigateToTable,
+  columnDecorators,
 }: DataGridProps) {
   const theme = useGlideGridTheme();
   const hoverColors = useGlideHoverColors();
@@ -871,6 +873,17 @@ export const DataGrid = React.memo(function DataGrid({
       else if (typeof value === "object") displayValue = JSON.stringify(value);
       else displayValue = String(value);
 
+      // Data-dictionary display decorators (Outerbase data-decorator
+      // parity): presentation only — editing and filtering still use the
+      // raw value, and masked cells copy the masked display, never raw.
+      let decoratedMasked = false;
+      const decorator = columnName ? columnDecorators?.[columnName] : undefined;
+      if (decorator && value !== null && value !== undefined) {
+        const decorated = applyColumnDecorator(value, decorator);
+        displayValue = decorated.display;
+        decoratedMasked = decorated.masked;
+      }
+
       const isPendingChange = !!pending;
       const originalValue = rowData[columnName];
       const discardChange = isPendingChange
@@ -962,7 +975,12 @@ export const DataGrid = React.memo(function DataGrid({
       return {
         kind: GridCellKind.Custom,
         data,
-        copyData: value === null || value === undefined ? "" : String(value),
+        copyData:
+          value === null || value === undefined
+            ? ""
+            : decoratedMasked
+              ? displayValue
+              : String(value),
         // FK cells never open Glide's own text-editor overlay — matches
         // the legacy grid, where double-clicking an FK cell always goes
         // through the FK picker (handleFKSelection, wired via
@@ -995,6 +1013,7 @@ export const DataGrid = React.memo(function DataGrid({
       rowSpacing,
       selectedCell,
       activeSelectionRects,
+      columnDecorators,
     ],
   );
 

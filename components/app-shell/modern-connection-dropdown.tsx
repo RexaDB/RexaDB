@@ -13,6 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProviderLogo } from "@/components/shared/provider-logo";
+import { openConnectionInNewWindow } from "@/lib/connections/open-connection-window";
+import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { getConnections } from "@/lib/api/actions-client";
 import { apiFetch } from "@/lib/api-base";
 import { detectConnectionDbType } from "@/lib/db/connection-type";
@@ -44,6 +46,7 @@ export function ModernConnectionDropdown({
   const [connections, setConnections] = useState<Connection[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [switchingToId, setSwitchingToId] = useState<number | null>(null);
+  const { openConnectionsInNewWindow } = useGlobalStudioSettings();
 
   useEffect(() => {
     let cancelled = false;
@@ -123,12 +126,23 @@ export function ModernConnectionDropdown({
         return;
       }
 
-      // Keep spinner until navigation unmounts this header.
+      // Keep spinner until navigation unmounts this header —
+      // unless each connection opens in its own window.
+      if (openConnectionsInNewWindow) {
+        try {
+          await openConnectionInNewWindow(conn.id);
+        } finally {
+          setSwitchingToId(null);
+          setMenuOpen(false);
+        }
+        return;
+      }
       router.push(`/studio/${conn.id}`);
     },
     [
       connection,
       onSelectConnection,
+      openConnectionsInNewWindow,
       router,
       shouldTestConnection,
       switchingToId,

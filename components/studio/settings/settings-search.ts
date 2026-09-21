@@ -43,6 +43,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "alternating-rows", section: "general", title: "Alternating Row Colors", description: "Apply alternating background colors to rows in data tables.", keywords: ["rows", "striped", "zebra", "table", "grid"] },
   { id: "pending-banner", section: "general", title: "Show Pending Changes Banner", description: "Display a banner above the data grid when there are unsaved changes.", keywords: ["pending", "unsaved", "banner", "changes", "dirty"] },
   { id: "restore-state", section: "general", title: "Restore App State", description: "Reopen tabs and restore your previous session on return.", keywords: ["restore", "session", "tabs", "reopen", "startup"] },
+  { id: "open-new-window", section: "general", title: "Open Connections in New Window", description: "Each connection opens in its own window instead of replacing the current one.", keywords: ["window", "new window", "connections", "open", "multi-window", "separate"] },
   { id: "autosave-queries", section: "general", title: "Auto-Save Executed Queries", description: "Automatically save every executed query as a snippet.", keywords: ["autosave", "auto-save", "snippets", "history", "queries"] },
   { id: "local-search-index", section: "general", title: "Local Search Index", description: "Cache universal search results in a local SQLite database.", keywords: ["search", "index", "cache", "sqlite", "local"] },
 

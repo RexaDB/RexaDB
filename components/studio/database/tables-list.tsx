@@ -88,6 +88,8 @@ interface TablesListProps {
   deleteTable?: TableActionHandler;
   exportData?: ExportDataHandler;
   viewTables?: string[];
+  /** table name -> description (data dictionary). Shown as a subtitle. */
+  tableDescriptions?: Record<string, string>;
 }
 
 export function TablesList({
@@ -112,6 +114,7 @@ export function TablesList({
   deleteTable,
   exportData,
   viewTables = [],
+  tableDescriptions = {},
 }: TablesListProps) {
   const [search, setSearch] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(
@@ -365,11 +368,21 @@ export function TablesList({
                         <span className="text-xs font-medium text-muted-foreground/60 truncate">
                           {selectedSchema}
                         </span>
-                        <div className="flex items-center gap-2">
-                          <ItemIcon className="w-3.5 h-3.5 text-primary/60" />
-                          <span className="text-xs font-bold text-foreground tracking-tight">
-                            {table}
-                          </span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ItemIcon className="w-3.5 h-3.5 text-primary/60 shrink-0" />
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold text-foreground tracking-tight truncate">
+                              {table}
+                            </span>
+                            {tableDescriptions[table] && (
+                              <span
+                                className="text-[11px] text-muted-foreground/70 truncate"
+                                title={tableDescriptions[table]}
+                              >
+                                {tableDescriptions[table]}
+                              </span>
+                            )}
+                          </div>
                           {(showDataApi || rlsEnabled === false) && (
                             <span className="flex items-center gap-1">
                               {showDataApi && (

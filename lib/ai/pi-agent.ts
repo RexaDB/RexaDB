@@ -305,8 +305,7 @@ export async function streamPiResponse(params: {
         break;
       }
       case "tool_execution_start": {
-        params.emit({ type: "step", message: event.toolName });
-        params.emit({ type: "tool_start", tool: event.toolName, command: JSON.stringify(event.args ?? {}), toolCallId: (event as any).toolCallId });
+        params.emit({ type: "tool_start", tool: "", command: JSON.stringify(event.args ?? {}), toolCallId: (event as any).toolCallId });
         break;
       }
       case "tool_execution_end": {

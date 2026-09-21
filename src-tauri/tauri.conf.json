@@ -40,7 +40,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/rexadb-server"],
+    "externalBin": [
+      "binaries/rexadb-server"
+    ],
     "resources": {
       "../resources/java-bridge/dist/bridge.jar": "bridge.jar",
       "../resources/java-bridge/dist/jre/": "jre/"

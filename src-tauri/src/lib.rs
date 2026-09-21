@@ -1,3 +1,4 @@
+mod dictionary;
 mod spacetimedb;
 
 use serde::{Deserialize, Serialize};
@@ -844,6 +845,12 @@ pub fn run() {
             settings_save_studio_settings,
             settings_get_keybindings,
             settings_save_keybindings,
+            dictionary::dictionary_get,
+            dictionary::dictionary_get_all,
+            dictionary::dictionary_set_table,
+            dictionary::dictionary_set_column,
+            dictionary::dictionary_set_decorator,
+            dictionary::dictionary_delete_scope,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

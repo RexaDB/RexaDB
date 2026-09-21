@@ -178,6 +178,7 @@ export const TAB_REGISTRY: {
   "database-enums": TabTypeConfig;
   "database-indexes": TabTypeConfig;
   "database-rls-policies": TabTypeConfig;
+  "database-catalog": TabTypeConfig;
   "database-sessions": TabTypeConfig;
   "database-locks": TabTypeConfig;
   "database-explain-plan": TabTypeConfig;
@@ -325,6 +326,7 @@ export const TAB_REGISTRY: {
           const match = opts.tab.id.match(/^workflow-(.+?)(?:::pane::.*)?$/);
           return match ? match[1] : undefined;
         })()}
+        connectionId={opts.studio.connection?.id}
       />
     ),
   },
@@ -565,6 +567,19 @@ export const TAB_REGISTRY: {
       return { id, type: "database-rls-policies", name: "RLS Policies" };
     },
     icon: "shield",
+    group: "database",
+  },
+
+  "database-catalog": {
+    type: "database-catalog",
+    viewMode: "database",
+    defaultName: "Data Catalog",
+    buildTabId: (meta) => `database-${(meta as { view?: string }).view ?? "catalog"}`,
+    createTab: (id, meta) => {
+      const m = meta as { view?: string };
+      return { id, type: "database-catalog", name: "Data Catalog" };
+    },
+    icon: "book-open",
     group: "database",
   },
 

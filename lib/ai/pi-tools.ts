@@ -44,6 +44,7 @@ export type PiToolContext = {
   defaultNamespace?: string;
   permissionMode?: "schema_only" | "schema_with_data";
   dashboardContext?: LightDashboardContext[];
+  workflowContext?: AgentWorkflowContext;
   emitStep: (message: string) => void;
   /** Exa web-search key (Settings → AI → Web search). Tools report a setup hint when missing. */
   exaApiKey?: string | null;
@@ -263,6 +264,50 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
             name: dashboard.name,
             widgetCount: dashboard.widgets.length,
           })),
+        });
+      },
+    }),
+    defineTool({
+      name: "list_workflows",
+      label: "List workflows",
+      description: "List workflows available in the current studio session, including their reference tokens.",
+      promptSnippet: "list_workflows - list workflows available in the current studio session",
+      parameters: Type.Object({}),
+      execute: async () => {
+        context.emitStep("Listing workflows");
+        return textResult({
+          workflows: workflowContext.existing.map((workflow) => ({
+            id: workflow.id,
+            ref: workflow.ref,
+            name: workflow.name,
+            nodeCount: workflow.nodes.length,
+          })),
+        });
+      },
+    }),
+    defineTool({
+      name: "create_workflow",
+      label: "Create workflow",
+      description: "Create a new workflow with a given name and optional starting nodes.",
+      promptSnippet: "create_workflow - create a new workflow with the specified name",
+      parameters: Type.Object({
+        name: Type.String({ description: "Workflow name" }),
+        description: Type.Optional(Type.String({ description: "Workflow description" })),
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Creating workflow "${params.name}"`);
+        const newWorkflow = {
+          id: `workflow-${Date.now()}`,
+          ref: `workflow.${params.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString(36)}`,
+          name: params.name,
+          description: params.description || "",
+          nodes: [],
+          edges: [],
+          createdAt: new Date().toISOString(),
+        };
+        return textResult({
+          workflow: newWorkflow,
+          message: `Workflow "${params.name}" created successfully. You can now add nodes to it using the workflow editor.`,
         });
       },
     }),

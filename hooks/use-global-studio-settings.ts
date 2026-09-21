@@ -50,6 +50,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   iconThemeId: string;
   customIconThemes: CustomIconTheme[];
   restoreAppState: boolean;
+  openConnectionsInNewWindow: boolean;
   schemaExplorer: boolean;
   databaseExplorer: boolean;
   tableExpansion: boolean;
@@ -114,6 +115,8 @@ export function useGlobalStudioSettings(persist = false) {
     [],
   );
   const [restoreAppState, setRestoreAppState] = useState<boolean>(true);
+  const [openConnectionsInNewWindow, setOpenConnectionsInNewWindow] =
+    useState<boolean>(false);
   const [schemaExplorer, setSchemaExplorer] = useState<boolean>(false);
   const [databaseExplorer, setDatabaseExplorer] = useState<boolean>(false);
   const [tableExpansion, setTableExpansion] = useState<boolean>(true);
@@ -206,6 +209,9 @@ export function useGlobalStudioSettings(persist = false) {
     }
     if (d.restoreAppState !== undefined) {
       setRestoreAppState(d.restoreAppState);
+    }
+    if (d.openConnectionsInNewWindow !== undefined) {
+      setOpenConnectionsInNewWindow(d.openConnectionsInNewWindow);
     }
     if (d.schemaExplorer !== undefined) {
       setSchemaExplorer(d.schemaExplorer);
@@ -360,6 +366,7 @@ export function useGlobalStudioSettings(persist = false) {
       iconThemeId,
       customIconThemes,
       restoreAppState,
+      openConnectionsInNewWindow,
       schemaExplorer,
       databaseExplorer,
       tableExpansion,
@@ -423,6 +430,7 @@ export function useGlobalStudioSettings(persist = false) {
     iconThemeId,
     customIconThemes,
     restoreAppState,
+    openConnectionsInNewWindow,
     schemaExplorer,
     databaseExplorer,
     tableExpansion,
@@ -533,6 +541,8 @@ export function useGlobalStudioSettings(persist = false) {
     setCustomIconThemes,
     restoreAppState,
     setRestoreAppState,
+    openConnectionsInNewWindow,
+    setOpenConnectionsInNewWindow,
     schemaExplorer,
     setSchemaExplorer,
     databaseExplorer,

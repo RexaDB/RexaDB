@@ -269,7 +269,9 @@ export function renderWorkflowInstructions() {
   });
 
   return [
-    "Workflow output rules:",
+    "Workflow creation and editing:",
+    "You can create new workflows using the create_workflow tool with a name and optional description. The tool will return a workflow reference that you can use to add nodes.",
+    "To list existing workflows, use the list_workflows tool.",
     "When the user asks to create or edit a workflow, respond with a single fenced ```workflow block.",
     "The opening ```workflow fence must start at the beginning of its own line.",
     "Put a blank line before the ```workflow fence and a blank line after the closing ``` fence.",
@@ -345,6 +347,7 @@ export function renderWorkflowContext(context: AgentWorkflowContext): string {
   }
 
   lines.push(
+    "To create a new workflow, use the create_workflow tool with a name and optional description. The tool will return a workflow reference that you can use to add nodes.",
     "To edit an existing workflow, include its `workflowId` and output the FULL new `nodes`/`edges` arrays (preserving unchanged nodes). Otherwise OMIT `workflowId` to create a new workflow.",
   );
 

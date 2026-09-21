@@ -1587,6 +1587,7 @@ function DatabasePanel({ studio }: { studio: any }) {
   const routineCatalog = pgCatalog || dbType === "mssql";
   const items: Array<{ label: string; view: string; tabType: string; show?: boolean }> = [
     { label: "Schema Diagram", view: "schema", tabType: "database-schema" },
+    { label: "Data Catalog", view: "catalog", tabType: "database-catalog" },
     {
       label: dbType === "mongodb" ? "Collections" : "Tables",
       view: "tables",

@@ -5,6 +5,7 @@ import { SqlEditor } from "./sql-editor";
 import { TableEditorView } from "./table-editor-view";
 import { SchemaDiagram } from "./database/schema-diagram";
 import { TablesList } from "./database/tables-list";
+import { DataCatalogView } from "./data-catalog-view";
 import { FunctionsList } from "./database/functions-list";
 import { ExtensionsList } from "./database/extensions-list";
 import { TriggersList } from "./database/triggers-list";
@@ -77,6 +78,7 @@ import {
   shouldUseVisibleTableStateForInactivePane,
 } from "@/lib/studio/table-loading";
 import { useStablePaneTabRenderOrder } from "@/hooks/use-stable-pane-tab-render-order";
+import { useDataDictionary } from "@/hooks/use-data-dictionary";
 import { logStudioDebug } from "@/lib/studio/studio-debug";
 import {
   getFirstPaneId,
@@ -668,6 +670,33 @@ export function StudioMainContent({
     ],
   );
 
+  // Data-dictionary display decorators for the open table (Rust backend via
+  // useDataDictionary). Keys in the scope are `schema.table.column`; the
+  // grid only knows column names, so filter to the current table here.
+  // Uses the direct `connection` prop as the single source of truth for the id.
+  const { scope: dictionaryScope } = useDataDictionary(connection?.id);
+  const tableColumnDecorators = useMemo(() => {
+    const out: Record<string, import("@/lib/dictionary/types").ColumnDecorator> = {};
+    if (!selectedSchema || !selectedTable) return out;
+    const prefix = `${selectedSchema}.${selectedTable}.`;
+    for (const [key, decorator] of Object.entries(dictionaryScope.decorators || {})) {
+      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = decorator;
+    }
+    return out;
+  }, [dictionaryScope, selectedSchema, selectedTable]);
+
+  // Data-dictionary table descriptions for the tables list (keyed by table
+  // name within the selected schema).
+  const tableDescriptionMap = useMemo(() => {
+    const out: Record<string, string> = {};
+    if (!selectedSchema) return out;
+    const prefix = `${selectedSchema}.`;
+    for (const [key, description] of Object.entries(dictionaryScope.tables || {})) {
+      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = description;
+    }
+    return out;
+  }, [dictionaryScope, selectedSchema]);
+
   const tableToolbarProps = {
     selectedRows,
     setSelectedRows,
@@ -799,6 +828,7 @@ export function StudioMainContent({
     onConsumeSearchValue: () => studio.setPendingSearchValue(null),
     showPaginationFooter: studio.dbType !== "spacetimedb",
     showAddColumn: studio.dbType !== "spacetimedb",
+    columnDecorators: tableColumnDecorators,
   };
 
   const sqlEditorGridProps = {
@@ -1139,6 +1169,7 @@ export function StudioMainContent({
   ):
     | "schema"
     | "tables"
+    | "catalog"
     | "functions"
     | "extensions"
     | "triggers"
@@ -1158,6 +1189,7 @@ export function StudioMainContent({
     const validViews = [
       "schema",
       "tables",
+      "catalog",
       "functions",
       "extensions",
       "triggers",
@@ -1176,6 +1208,7 @@ export function StudioMainContent({
       ? (view as
           | "schema"
           | "tables"
+          | "catalog"
           | "functions"
           | "extensions"
           | "triggers"
@@ -1321,8 +1354,33 @@ export function StudioMainContent({
                       deleteTable={studio.deleteTable}
                       exportData={studio.exportData}
                       viewTables={studio.viewTables}
+                      tableDescriptions={tableDescriptionMap}
                     />
                   )
+                ) : paneDatabaseView === "catalog" ? (
+                  <DataCatalogView
+                    connectionId={connection?.id ?? 0}
+                    connectionString={currentConnectionString}
+                    dbType={studio.dbType}
+                    schemas={schemas}
+                    selectedSchema={selectedSchema}
+                    onSchemaChange={setSelectedSchema}
+                    tables={tables}
+                    fetchColumns={async (schema, table) => {
+                      const { fetchTableStructure } = await import(
+                        "@/lib/api/actions-client"
+                      );
+                      const res = await fetchTableStructure(
+                        currentConnectionString,
+                        schema,
+                        table,
+                      );
+                      if (Array.isArray(res)) return res;
+                      const data = (res as any)?.data ?? (res as any)?.rows ?? [];
+                      return Array.isArray(data) ? data : [];
+                    }}
+                    onOpenTable={handleTableClick}
+                  />
                 ) : paneDatabaseView === "functions" ? (
                   <FunctionsList
                     functions={functions}
@@ -2012,6 +2070,8 @@ export function StudioMainContent({
           studio.setDatabaseView("explain-plan");
         } else if (itemData.type === "database-backup-restore") {
           studio.setDatabaseView("backup-restore");
+        } else if (itemData.type === "database-catalog") {
+          studio.setDatabaseView("catalog");
         }
         return;
       }

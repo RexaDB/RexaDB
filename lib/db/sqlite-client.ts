@@ -2,6 +2,11 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { quoteSqliteIdentifier, buildKeyConditions } from "./quote-identifier";
+import {
+  parseEdgeSqliteTarget,
+  createEdgeSqliteDriver,
+  getEdgeDatabaseLabel,
+} from "./edge-sqlite";
 
 type SqliteField = { name: string; dataTypeID: number; dataTypeName: string };
 
@@ -209,6 +214,8 @@ function resolveSqliteTarget(connectionString: string): SqliteTarget {
 }
 
 function getDatabaseLabel(connectionString: string) {
+  const edgeTarget = parseEdgeSqliteTarget(connectionString);
+  if (edgeTarget) return getEdgeDatabaseLabel(edgeTarget);
   const target = resolveSqliteTarget(connectionString);
   if (target.mode === "remote") {
     try {
@@ -356,6 +363,10 @@ async function createLibsqlDriver(target: SqliteTarget): Promise<SqliteDriver> {
 export async function createSqliteDriver(
   connectionString: string,
 ): Promise<SqliteDriver> {
+  const edgeTarget = parseEdgeSqliteTarget(connectionString);
+  if (edgeTarget) {
+    return createEdgeSqliteDriver(edgeTarget);
+  }
   const target = resolveSqliteTarget(connectionString);
   if (target.mode === "remote") {
     return await createLibsqlDriver(target);
