@@ -77,7 +77,9 @@ interface TableExportSubmenuProps {
   SubTrigger: React.ComponentType<any>;
   SubContent: React.ComponentType<any>;
   canExportSql: boolean;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
+  table: string;
+  selectedSchema: string;
   isDropdown?: boolean;
 }
 
@@ -88,12 +90,14 @@ function TableExportSubmenu({
   SubContent,
   canExportSql,
   onExport,
+  table,
+  selectedSchema,
   isDropdown,
 }: TableExportSubmenuProps) {
   const handleClick =
     (format: "csv" | "json" | "sql") => (e: React.MouseEvent) => {
       if (isDropdown) e.stopPropagation();
-      onExport(format);
+      onExport(format, table, selectedSchema);
     };
 
   return (
@@ -205,7 +209,7 @@ interface TableMenuExportDeleteProps extends TableActionProps {
   SubContent: React.ComponentType<any>;
   Separator: React.ComponentType<any>;
   canExportSql: boolean;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
   beforeExport?: React.ReactNode;
 }
 
@@ -237,6 +241,8 @@ function TableMenuExportDeleteItems(props: TableMenuExportDeleteProps) {
         SubContent={SubContent}
         canExportSql={canExportSql}
         onExport={onExport}
+        table={table}
+        selectedSchema={selectedSchema}
         isDropdown={isDropdown}
       />
       <Separator />
@@ -271,7 +277,7 @@ interface TableContextMenuItemsProps extends TableActionProps {
   handleCopyName: (...args: any[]) => void;
   handleCopyDefinition: (...args: any[]) => void;
   handleDuplicate: (...args: any[]) => void;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
   beforeExport?: React.ReactNode;
 }
 

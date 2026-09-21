@@ -7976,6 +7976,85 @@ END $$;`.trim();
     downloadFile(content, filename);
   }, [results, selectedRows, selectedTable, selectedSchema, quoteIdentifier, quoteTableRef]);
 
+  /**
+   * Export a specific table from its row menu. The shared `exportData`
+   * only exports the currently loaded tab's rows, so invoking it from a
+   * non-selected row would silently download the wrong table. When the
+   * menu's table is the loaded one this delegates to `exportData`
+   * (preserving row-selection filtering); otherwise it fetches that
+   * table's rows directly and downloads them under the correct filename.
+   */
+  const exportTableData = useCallback(async (
+    tableName: string | undefined,
+    schema: string | undefined,
+    format: 'json' | 'csv' | 'sql',
+  ) => {
+    if (!tableName || tableName === selectedTable) {
+      exportData(format);
+      return;
+    }
+    const targetSchema = schema || selectedSchema;
+    if (dbType === "redis" || dbType === "spacetimedb") {
+      toast.error("Export from the row menu is not supported for this database type.");
+      return;
+    }
+    try {
+      let rows: any[] = [];
+      if (dbType === "mongodb") {
+        const command = JSON.stringify({
+          operation: "find",
+          database: targetSchema,
+          collection: tableName,
+          filter: {},
+          limit: pageSize,
+          skip: 0,
+        });
+        const res = await runQuery(currentConnectionString, command);
+        if (!res.success || !res.data) {
+          toast.error(res.error || "Export failed.");
+          return;
+        }
+        rows = res.data.rows ?? [];
+      } else {
+        const ref = quoteTableRef(targetSchema, tableName);
+        const sql = dbType === "mssql"
+          ? `SELECT * FROM ${ref} ORDER BY (SELECT 1) OFFSET 0 ROWS FETCH NEXT ${pageSize} ROWS ONLY;`
+          : `SELECT * FROM ${ref} LIMIT ${pageSize};`;
+        const res = await runQuery(currentConnectionString, sql);
+        if (!res.success || !res.data) {
+          toast.error(res.error || "Export failed.");
+          return;
+        }
+        rows = res.data.rows ?? [];
+      }
+      if (rows.length === 0) {
+        toast.error("No data available to export.");
+        return;
+      }
+      let content = '';
+      const filename = `${tableName}.${format}`;
+      if (format === 'json') content = JSON.stringify(rows, null, 2);
+      else if (format === 'csv') {
+        const headers = Object.keys(rows[0] || {})
+          .map((key) => formatDelimitedValue(key, ','))
+          .join(',');
+        const csvRows = rows.map((r: any) =>
+          Object.values(r).map((v) => formatDelimitedValue(v, ',')).join(',')
+        ).join('\n');
+        content = `${headers}\n${csvRows}`;
+      } else if (format === 'sql') {
+        content = rows.map((r: any) => {
+          const cols = Object.keys(r).map((col) => quoteIdentifier(col)).join(', ');
+          const vals = Object.values(r).map((v) => formatSqlLiteral(v)).join(', ');
+          return `INSERT INTO ${quoteTableRef(targetSchema, tableName)} (${cols}) VALUES (${vals});`;
+        }).join('\n');
+      }
+      downloadFile(content, filename);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Export failed.");
+    }
+  }, [exportData, selectedTable, selectedSchema, dbType, pageSize, currentConnectionString, runQuery, quoteTableRef, quoteIdentifier]);
+
   const copyRowData = useCallback((row: any, format: 'json' | 'csv') => {
     let content = '';
     if (format === 'json') {
@@ -9108,6 +9187,7 @@ END $$;`.trim();
     toggleRowSelection,
     toggleAllSelection,
     exportData,
+    exportTableData,
     copyData,
     handleExportDatabaseBundle,
     handleImportDatabaseBundle,

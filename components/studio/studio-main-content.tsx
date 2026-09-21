@@ -1361,6 +1361,7 @@ export function StudioMainContent({
                       emptyTable={studio.emptyTable}
                       deleteTable={studio.deleteTable}
                       exportData={studio.exportData}
+                      exportTableData={studio.exportTableData}
                       viewTables={studio.viewTables}
                       tableDescriptions={tableDescriptionMap}
                     />

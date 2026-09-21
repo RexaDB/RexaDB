@@ -1392,7 +1392,7 @@ function TablesPanel({ studio }: { studio: any }) {
                     handleCopyName={(t) => void handleCopyItemName(t)}
                     handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
                     handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
-                    onExport={(format) => studio.exportData?.(format)}
+                    onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
                     setConfirmDialog={setConfirmDialog}
                     onEmpty={(t, s) => studio.emptyTable?.(t, s)}
                     onDelete={(t, s) => studio.deleteTable?.(t, s)}
@@ -1589,7 +1589,7 @@ function TablesPanel({ studio }: { studio: any }) {
                             handleCopyName={(t) => void handleCopyItemName(t)}
                             handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
                             handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
-                            onExport={(format) => studio.exportData?.(format)}
+                            onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
                             setConfirmDialog={setConfirmDialog}
                             onEmpty={(t, s) => studio.emptyTable?.(t, s)}
                             onDelete={(t, s) => studio.deleteTable?.(t, s)}

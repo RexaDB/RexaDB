@@ -91,6 +91,7 @@ function ExplorerTagRow({
   emptyTable,
   deleteTable,
   exportData,
+  exportTableData,
   setConfirmDialog,
   handleCopyItemName,
 }: {
@@ -117,6 +118,7 @@ function ExplorerTagRow({
   emptyTable?: TableActionHandler;
   deleteTable?: TableActionHandler;
   exportData?: ExportDataHandler;
+  exportTableData?: (table: string | undefined, schema: string | undefined, format: "csv" | "json" | "sql") => void;
   setConfirmDialog: (dialog: ConfirmDialogState) => void;
   handleCopyItemName: (name: string) => void;
 }) {
@@ -174,7 +176,9 @@ function ExplorerTagRow({
           handleCopyName={(t) => void handleCopyItemName(t)}
           handleCopyDefinition={(t, s) => copyTableSchema?.(t, s)}
           handleDuplicate={(t, s) => duplicateTable?.(t, s)}
-          onExport={(format) => exportData?.(format)}
+          onExport={(format, t, s) =>
+            exportTableData ? exportTableData(t, s, format) : exportData?.(format)
+          }
           setConfirmDialog={setConfirmDialog}
           onEmpty={(t, s) => emptyTable?.(t, s)}
           onDelete={(t, s) => deleteTable?.(t, s)}
@@ -294,6 +298,7 @@ interface TablesListProps {
   emptyTable?: TableActionHandler;
   deleteTable?: TableActionHandler;
   exportData?: ExportDataHandler;
+  exportTableData?: (table: string | undefined, schema: string | undefined, format: "csv" | "json" | "sql") => void;
   viewTables?: string[];
   /** table name -> description (data dictionary). Shown as a subtitle. */
   tableDescriptions?: Record<string, string>;
@@ -325,6 +330,7 @@ export function TablesList({
   emptyTable,
   deleteTable,
   exportData,
+  exportTableData,
   viewTables = [],
   tableDescriptions = {},
   addTag,
@@ -749,6 +755,7 @@ export function TablesList({
                                     emptyTable={emptyTable}
                                     deleteTable={deleteTable}
                                     exportData={exportData}
+                                    exportTableData={exportTableData}
                                     setConfirmDialog={setConfirmDialog}
                                     handleCopyItemName={handleCopyItemName}
                                   />
@@ -876,7 +883,9 @@ export function TablesList({
                         handleCopyName={(t) => void handleCopyItemName(t)}
                         handleCopyDefinition={(t, s) => copyTableSchema?.(t, s)}
                         handleDuplicate={(t, s) => duplicateTable?.(t, s)}
-                        onExport={(format) => exportData?.(format)}
+                        onExport={(format, t, s) =>
+            exportTableData ? exportTableData(t, s, format) : exportData?.(format)
+          }
                         setConfirmDialog={setConfirmDialog}
                         onEmpty={(t, s) => emptyTable?.(t, s)}
                         onDelete={(t, s) => deleteTable?.(t, s)}
