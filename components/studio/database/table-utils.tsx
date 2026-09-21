@@ -1,13 +1,7 @@
 "use client";
 
 import {
-  Tag,
-  Download,
-  Eraser,
-  Trash2,
   Check,
-  Copy,
-  Files,
 } from "@/lib/icon-theme/lucide-react";
 
 interface TagItem {
@@ -42,20 +36,19 @@ function TableTagsSubmenu({
 }: TableTagsSubmenuProps) {
   return (
     <Sub>
-      <SubTrigger className="text-xs">
-        <Tag className="mr-2 h-3.5 w-3.5" />
+      <SubTrigger>
         Tags
       </SubTrigger>
-      <SubContent className="w-48 bg-popover border-border shadow-2xl">
+      <SubContent className="w-48 shadow-2xl">
         {tags.length === 0 ? (
-          <Component className="text-xs disabled opacity-50">
+          <Component className="disabled opacity-50">
             No tags defined
           </Component>
         ) : (
           tags.map((tag) => (
             <Component
               key={tag.name}
-              className="text-xs flex items-center justify-between"
+              className="flex items-center justify-between"
               onClick={handleAction(() =>
                 onToggleTag(selectedSchema, table, tag.name),
               )}
@@ -84,7 +77,9 @@ interface TableExportSubmenuProps {
   SubTrigger: React.ComponentType<any>;
   SubContent: React.ComponentType<any>;
   canExportSql: boolean;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
+  table: string;
+  selectedSchema: string;
   isDropdown?: boolean;
 }
 
@@ -95,29 +90,30 @@ function TableExportSubmenu({
   SubContent,
   canExportSql,
   onExport,
+  table,
+  selectedSchema,
   isDropdown,
 }: TableExportSubmenuProps) {
   const handleClick =
     (format: "csv" | "json" | "sql") => (e: React.MouseEvent) => {
       if (isDropdown) e.stopPropagation();
-      onExport(format);
+      onExport(format, table, selectedSchema);
     };
 
   return (
     <Sub>
-      <SubTrigger className="text-xs">
-        <Download className="mr-2 h-3.5 w-3.5" />
+      <SubTrigger>
         Export Data
       </SubTrigger>
-      <SubContent className="bg-popover border-border shadow-2xl">
-        <Component className="text-xs" onClick={handleClick("csv")}>
+      <SubContent className="shadow-2xl">
+        <Component onClick={handleClick("csv")}>
           CSV
         </Component>
-        <Component className="text-xs" onClick={handleClick("json")}>
+        <Component onClick={handleClick("json")}>
           JSON
         </Component>
         {canExportSql && (
-          <Component className="text-xs" onClick={handleClick("sql")}>
+          <Component onClick={handleClick("sql")}>
             SQL
           </Component>
         )}
@@ -191,17 +187,15 @@ function TableEmptyDeleteItems({
   return (
     <>
       <Component
-        className="text-xs text-amber-500 focus:text-amber-500 focus:bg-amber-500/10"
+        className="text-amber-500 focus:text-amber-500 focus:bg-amber-500/10"
         onClick={handleEmpty}
       >
-        <Eraser className="mr-2 h-3.5 w-3.5" />
         {isMongo ? "Empty Collection" : "Truncate Table"}
       </Component>
       <Component
-        className="text-xs text-red-500 focus:text-red-500 focus:bg-red-500/10"
+        className="text-red-500 focus:text-red-500 focus:bg-red-500/10"
         onClick={handleDelete}
       >
-        <Trash2 className="mr-2 h-3.5 w-3.5" />
         {isMongo ? "Delete Collection" : "Delete Table"}
       </Component>
     </>
@@ -215,7 +209,7 @@ interface TableMenuExportDeleteProps extends TableActionProps {
   SubContent: React.ComponentType<any>;
   Separator: React.ComponentType<any>;
   canExportSql: boolean;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
   beforeExport?: React.ReactNode;
 }
 
@@ -247,6 +241,8 @@ function TableMenuExportDeleteItems(props: TableMenuExportDeleteProps) {
         SubContent={SubContent}
         canExportSql={canExportSql}
         onExport={onExport}
+        table={table}
+        selectedSchema={selectedSchema}
         isDropdown={isDropdown}
       />
       <Separator />
@@ -281,7 +277,7 @@ interface TableContextMenuItemsProps extends TableActionProps {
   handleCopyName: (...args: any[]) => void;
   handleCopyDefinition: (...args: any[]) => void;
   handleDuplicate: (...args: any[]) => void;
-  onExport: (format: "csv" | "json" | "sql") => void;
+  onExport: (format: "csv" | "json" | "sql", table?: string, schema?: string) => void;
   beforeExport?: React.ReactNode;
 }
 
@@ -315,8 +311,7 @@ export function TableContextMenuItems(props: TableContextMenuItemsProps) {
   } = props;
   return (
     <>
-      <Component className="text-xs" onClick={handleAction(handleCopyName)}>
-        <Copy className="mr-2 h-3.5 w-3.5" />
+      <Component onClick={handleAction(handleCopyName)}>
         Copy {itemNoun} Name
       </Component>
       <Separator />
@@ -334,14 +329,11 @@ export function TableContextMenuItems(props: TableContextMenuItemsProps) {
       />
       <Separator />
       <Component
-        className="text-xs"
         onClick={handleAction(handleCopyDefinition)}
       >
-        <Copy className="mr-2 h-3.5 w-3.5" />
         {copyDefinitionLabel}
       </Component>
-      <Component className="text-xs" onClick={handleAction(handleDuplicate)}>
-        <Files className="mr-2 h-3.5 w-3.5" />
+      <Component onClick={handleAction(handleDuplicate)}>
         {duplicateLabel}
       </Component>
       <TableMenuExportDeleteItems

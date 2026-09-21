@@ -23,6 +23,12 @@ function readCssVar(name: string, fallback: string): string {
   return parsed || fallback;
 }
 
+/** Unparsed computed value (raw hex/oklch/etc.) for color mixing. */
+function readRawCssVar(name: string): string {
+  if (typeof window === "undefined") return "";
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 /**
  * Theme CSS variables are applied to `document.documentElement` from a
  * `useEffect` (see `useGlobalAppTheme`, plus next-themes' own class
@@ -85,8 +91,23 @@ export function useGlideGridTheme(): Partial<GlideTheme> {
 
   return useMemo<Partial<GlideTheme>>(() => {
     const bgCell = readCssVar("--studio-bg", "#ffffff");
-    const bgHeader = readCssVar("--table-header-bg", "#f8fafc");
-    const borderColor = readCssVar("--studio-border", "#e2e8f0");
+    // Header background is a subtle mix of the grid border color toward the
+    // cell background — distinct from the cells but in the same family as
+    // the grid lines. Falls back to the legacy header token.
+    const legacyBgHeader = readCssVar("--table-header-bg", "#f8fafc");
+    const bgHeader =
+      mixBorderTowardBg(
+        readRawCssVar("--border") || readRawCssVar("--studio-border"),
+        readRawCssVar("--studio-bg"),
+        0.8,
+      ) ?? legacyBgHeader;
+    // Cell/row borders match the shell chrome (tab container + sidebar use
+    // `border-border`), so the canvas grid lines are the exact same color.
+    // Falls back to the legacy grid token when `--border` is unavailable.
+    const borderColor = readCssVar(
+      "--border",
+      readCssVar("--studio-border", "#e2e8f0"),
+    );
     const textDark = readCssVar("--studio-cell-text", "#1e293b");
     const textMedium = readCssVar("--studio-cell-muted", "#94a3b8");
     const rowHover = readCssVar("--studio-row-hover", "#f8fafc");
@@ -113,9 +134,17 @@ export function useGlideGridTheme(): Partial<GlideTheme> {
       // Keep the header stable when a cell in the column is focused —
       // otherwise selecting a cell visibly recolors the header.
       bgHeaderHasFocus: bgHeader,
-      bgHeaderHovered: rowHover,
       borderColor,
       horizontalBorderColor: borderColor,
+      // Header hover is derived from the grid border color mixed toward the
+      // header background — same tonal family as the grid lines and the
+      // cell hover, instead of the generic row-hover token.
+      bgHeaderHovered:
+        mixBorderTowardBg(
+          readRawCssVar("--border") || readRawCssVar("--studio-border"),
+          readRawCssVar("--table-header-bg") || readRawCssVar("--studio-bg"),
+          0.5,
+        ) ?? rowHover,
       fontFamily,
       textHeader: textDark,
       textHeaderSelected: textDark,
@@ -152,6 +181,34 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function parseHexRgb(hex: string): [number, number, number] | null {
+  const m = hex.replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(m)) return null;
+  return [
+    parseInt(m.slice(0, 2), 16),
+    parseInt(m.slice(2, 4), 16),
+    parseInt(m.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * Mix the grid border color toward the cell background so the per-cell
+ * hover lift is tone-matched to the grid lines instead of a fixed gray.
+ * Returns null when either side isn't a plain hex color (caller falls
+ * back to the legacy hardcoded hover).
+ */
+function mixBorderTowardBg(
+  borderHex: string,
+  bgHex: string,
+  amount: number,
+): string | null {
+  const border = parseHexRgb(borderHex);
+  const bg = parseHexRgb(bgHex);
+  if (!border || !bg) return null;
+  const mix = (b: number, g: number) => Math.round(b + (g - b) * amount);
+  return `rgb(${mix(border[0], bg[0])}, ${mix(border[1], bg[1])}, ${mix(border[2], bg[2])})`;
+}
+
 export interface GridHoverColors {
   /** Per-cell hover (always on) — matches legacy `bg-white/[0.03] dark:bg-[#24262b]`. */
   cellHoverColor: string;
@@ -170,11 +227,21 @@ export function useGlideHoverColors(): GridHoverColors {
     const isDark = resolvedTheme === "dark";
     const accentPurple = readCssVar("--studio-accent-purple", "#7c3aed");
     const rowHover = readCssVar("--studio-row-hover", isDark ? "#1f1f1f" : "#f8fafc");
+    // Per-cell hover is derived from the grid border color (same token as
+    // the shell chrome) mixed halfway toward the cell background, so the
+    // hover lift always sits in the same tonal family as the grid lines.
+    const borderRaw = readCssVar("--border", readCssVar("--studio-border", ""));
+    const bgRaw = readCssVar("--studio-bg", isDark ? "#111113" : "#ffffff");
 
     return {
-      cellHoverColor: isDark ? "#24262b" : "rgba(255, 255, 255, 0.03)",
+      cellHoverColor:
+        mixBorderTowardBg(borderRaw, bgRaw, 0.5) ??
+        (isDark ? "#24262b" : "rgba(255, 255, 255, 0.03)"),
       rowHoverColor: hexToRgba(accentPurple, 0.05),
-      columnHoverColor: rowHover,
+      // Column hover is a slightly stronger cut of the same border mix so
+      // it reads above the cell hover while staying in the same family.
+      columnHoverColor:
+        mixBorderTowardBg(borderRaw, bgRaw, 0.3) ?? rowHover,
     };
     // See useGlideGridTheme for why appliedTick is a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps

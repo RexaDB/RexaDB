@@ -90,7 +90,7 @@ export function PaginationFooter({
       : `${recordCount} ${recordCount === 1 ? "record" : "records"}`;
 
   return (
-    <div className="shrink-0 border-t border-studio-border bg-studio-bg/95 px-3 py-1.5">
+    <div className="shrink-0 border-t border-border bg-studio-bg/95 px-3 py-1.5">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <Button

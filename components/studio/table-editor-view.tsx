@@ -57,7 +57,7 @@ export function TableEditorView({ toolbarProps, gridProps, showPendingChangesBan
       
       {useSkeleton ? (
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="h-10 border-b border-studio-border bg-table-header-bg flex items-center px-4 gap-4">
+          <div className="h-10 border-b border-border bg-table-header-bg flex items-center px-4 gap-4">
             <Skeleton className="h-4 w-4 rounded" />
             <Skeleton className="h-4 w-24 rounded" />
             <Skeleton className="h-4 w-32 rounded" />

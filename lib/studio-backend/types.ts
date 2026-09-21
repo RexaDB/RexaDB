@@ -51,7 +51,7 @@ export interface Connection {
 }
 
 export type TableActionHandler = (table: string, schema: string) => void;
-export type ExportDataHandler = (format: "json" | "csv" | "sql") => void;
+export type ExportDataHandler = (format: "json" | "csv" | "sql", table?: string, schema?: string) => void;
 export type OpenSqlEditorHandler = (table?: string, schema?: string, initialQuery?: string) => void;
 
 interface ConnectionInput {

@@ -78,7 +78,7 @@ export function ToolbarGlobalActions({
         <Button
           variant="outline"
           size="sm"
-          className="font-normal"
+          className="font-normal dark:border-white/15 dark:bg-white/[0.02]"
           onClick={() => setIsInsertSheetOpen(true)}
           disabled={previewOnly}
         >
@@ -127,7 +127,7 @@ export function ToolbarGlobalActions({
           <Button
             variant="outline"
             size="sm"
-            className="rounded-r-none font-normal"
+            className="rounded-r-none font-normal dark:border-white/15 dark:bg-white/[0.02]"
             onClick={() => refreshCurrentTab()}
           >
             <RefreshCw
@@ -140,7 +140,7 @@ export function ToolbarGlobalActions({
               <Button
                 variant="outline"
                 size="sm"
-                className="-ml-px rounded-l-none border-l-0 border-transparent px-1 font-normal"
+                className="-ml-px rounded-l-none border-l-0 dark:border-white/15 dark:bg-white/[0.02] px-1 font-normal"
               >
                 <ChevronDown className="w-3 h-3" />
               </Button>
