@@ -45,6 +45,7 @@ import ApprovalCard from "@/components/studio/ai/approval-card";
 import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { useAiUser } from "@/hooks/use-ai-user";
 import { useResizeDrag } from "@/hooks/use-resize-drag";
 import { ResizeHandle } from "@/components/app-shell/resize-handle";
@@ -559,6 +560,8 @@ export function AiChatSheet({
     setActiveChatId(initialChatId);
   }, [isOpen, initialChatId, initialChatSelectToken, setActiveChatId]);
 
+  const confirm = useConfirm();
+
   const handleSendMessage = async () => {
     if (!message.trim()) return;
     const nextMessage = message;
@@ -567,6 +570,26 @@ export function AiChatSheet({
       currentProvider || Object.keys(settings?.providers || {})[0] || "openai";
     const model = currentModel || "";
     await sendMessage(nextMessage, provider, model);
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    const chat = chats.find((c) => c.id === chatId);
+    const ok = await confirm({
+      title: "Delete chat?",
+      description: chat
+        ? `"${chat.title}" and its conversation will be permanently removed. This cannot be undone.`
+        : "This chat and its conversation will be permanently removed. This cannot be undone.",
+      variant: "destructive",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
+    try {
+      await removeChat(chatId);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete chat.",
+      );
+    }
   };
 
   const handleMentionSelect = (item: {
@@ -621,17 +644,7 @@ export function AiChatSheet({
                 activeChatId={activeChatId}
                 chats={chats}
                 onDelete={(chatId) => {
-                  void (async () => {
-                    try {
-                      await removeChat(chatId);
-                    } catch (error) {
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : "Failed to delete chat.",
-                      );
-                    }
-                  })();
+                  void handleDeleteChat(chatId);
                 }}
                 onNewChat={startNewChat}
                 onSelect={setActiveChatId}

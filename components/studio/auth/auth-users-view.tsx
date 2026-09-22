@@ -33,16 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { runQuery } from "@/lib/api/actions-client";
 import { AuthDataGrid } from "./auth-data-grid";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
@@ -354,32 +345,14 @@ export function AuthUsersView({ connectionString, enabled }: AuthUsersViewProps)
       <div className="flex items-center justify-between h-9 border-t border-studio-border bg-studio-bg px-6 text-xs text-muted-foreground">
         {loading || error ? <span>Loading...</span> : <span>Total: {users.length} users</span>}
       </div>
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete {selectedRows.size} user{selectedRows.size === 1 ? "" : "s"}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. The users will be permanently removed from auth.users
-              and their sessions will be invalidated.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDeleteUsers();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Delete ${selectedRows.size} user${selectedRows.size === 1 ? "" : "s"}?`}
+        description="This action cannot be undone. The users will be permanently removed from auth.users and their sessions will be invalidated."
+        onConfirm={() => void handleDeleteUsers()}
+        loading={deleting}
+      />
     </div>
   );
 }

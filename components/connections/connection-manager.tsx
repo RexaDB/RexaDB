@@ -41,6 +41,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { Connection } from "@/lib/db/schema";
 
 import { detectConnectionDbType } from "@/lib/db/connection-type";
@@ -1286,6 +1287,9 @@ export function ConnectionManager({
   );
   const [folderPromptValue, setFolderPromptValue] = useState("");
   const [folderToManage, setFolderToManage] = useState<string | null>(null);
+  const [pendingDeleteConnId, setPendingDeleteConnId] = useState<number | null>(
+    null,
+  );
   const [deleteOption, setDeleteOption] = useState<
     "with-connections" | "keep-connections"
   >("keep-connections");
@@ -4377,17 +4381,19 @@ export function ConnectionManager({
         </Dialog>
 
         {/* Folder Delete Dialog */}
-        <Dialog
+        <DeleteConfirmDialog
           open={isFolderDeleteDialogOpen}
           onOpenChange={setIsFolderDeleteDialogOpen}
+          title={
+            folderToManage ? `Delete Folder: ${folderToManage}` : "Delete Folder"
+          }
+          description="How would you like to handle the connections inside this folder?"
+          onConfirm={() =>
+            folderToManage &&
+            handleDeleteFolder(folderToManage, deleteOption)
+          }
+          contentClassName="sm:max-w-[400px] bg-studio-bg border-studio-border"
         >
-          <DialogContent className="sm:max-w-[400px] bg-studio-bg border-studio-border">
-            <DialogHeader>
-              <DialogTitle>Delete Folder: {folderToManage}</DialogTitle>
-              <DialogDescription>
-                How would you like to handle the connections inside this folder?
-              </DialogDescription>
-            </DialogHeader>
             <div className="py-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <div
@@ -4430,25 +4436,21 @@ export function ConnectionManager({
                 </div>
               </div>
             </div>
-            <DialogFooter className="gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => setIsFolderDeleteDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() =>
-                  folderToManage &&
-                  handleDeleteFolder(folderToManage, deleteOption)
-                }
-              >
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        </DeleteConfirmDialog>
+
+        {/* Connection Delete Dialog */}
+        <DeleteConfirmDialog
+          open={pendingDeleteConnId !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingDeleteConnId(null);
+          }}
+          title="Delete Connection"
+          description={`Are you sure you want to delete "${connections.find((c) => c.id === pendingDeleteConnId)?.name ?? "this connection"}"? This action cannot be undone.`}
+          onConfirm={() => {
+            if (pendingDeleteConnId !== null) void handleDelete(pendingDeleteConnId);
+            setPendingDeleteConnId(null);
+          }}
+        />
 
         {/* Folder Add/Rename Prompt Dialog */}
         <Dialog open={isFolderPromptOpen} onOpenChange={setIsFolderPromptOpen}>
@@ -5039,7 +5041,7 @@ export function ConnectionManager({
                                               <DropdownMenuItem
                                                 onClick={(event) => {
                                                   event.stopPropagation();
-                                                  void handleDelete(conn.id);
+                                                  setPendingDeleteConnId(conn.id);
                                                 }}
                                                 className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                                               >
@@ -5280,7 +5282,7 @@ export function ConnectionManager({
                                                 <DropdownMenuItem
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    void handleDelete(conn.id);
+                                                    setPendingDeleteConnId(conn.id);
                                                   }}
                                                   className="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
                                                 >

@@ -49,16 +49,7 @@ import {
 } from "./rexa-cell-renderer";
 import { AddColumnSheet } from "../grid/add-column-sheet";
 import { EditColumnSheet } from "../grid/edit-column-sheet";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { ExternalLink, X } from "@/lib/icon-theme/lucide-react";
 import { fetchReferencedRecord, fetchTableForeignKeys } from "@/lib/api/actions-client";
 import {
@@ -1672,32 +1663,20 @@ export const DataGrid = React.memo(function DataGrid({
           />
         ) : null}
         {handleDeleteColumn && setColumnToDelete ? (
-          <AlertDialog
+          <DeleteConfirmDialog
             open={!!columnToDelete}
             onOpenChange={(open) => !open && setColumnToDelete(null)}
-          >
-            <AlertDialogContent className="bg-popover border-studio-border text-foreground">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                <AlertDialogDescription className="text-muted-foreground">
-                  This will permanently delete the column{" "}
-                  <span className="text-foreground font-medium">"{columnToDelete}"</span>{" "}
-                  and all its data. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel className="bg-transparent border-studio-border hover:bg-studio-row-hover hover:text-foreground">
-                  Cancel
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => columnToDelete && handleDeleteColumn(columnToDelete)}
-                  className="bg-red-600 hover:bg-red-700 text-white border-none"
-                >
-                  Delete Column
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            contentClassName="bg-popover border-studio-border text-foreground"
+            title="Are you sure?"
+            description={
+              <>
+                This will permanently delete the column{" "}
+                <span className="text-foreground font-medium">"{columnToDelete}"</span>{" "}
+                and all its data. This action cannot be undone.
+              </>
+            }
+            onConfirm={() => columnToDelete && handleDeleteColumn(columnToDelete)}
+          />
         ) : null}
         {contextMenu ? (
           <RexaContextMenu

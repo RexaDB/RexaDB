@@ -1,20 +1,5 @@
 import { getTableLabels } from "@/lib/studio/db-labels";
 
-export interface ConfirmDialogState {
-  open: boolean;
-  title: string;
-  description: string;
-  onConfirm: () => void;
-  variant?: "default" | "destructive";
-}
-
-export const DEFAULT_CONFIRM_DIALOG: ConfirmDialogState = {
-  open: false,
-  title: "",
-  description: "",
-  onConfirm: () => {},
-};
-
 export async function copyItemName(name: string, itemNoun: string) {
   try {
     await navigator.clipboard.writeText(name);

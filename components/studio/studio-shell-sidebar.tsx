@@ -34,16 +34,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import { getTabIcon } from "@/lib/studio/tab-registry";
 import { isPostgresCatalogDbType } from "@/lib/db/connection-type";
@@ -104,8 +94,6 @@ import { parseExtensionsSidebarView } from "@/lib/extensions/sidebar-view";
 import { useExtensions } from "@/lib/extensions/react";
 import { TableContextMenuItems } from "./database/table-utils";
 import {
-  ConfirmDialogState,
-  DEFAULT_CONFIRM_DIALOG,
   copyItemName,
   getTableDerivedValues,
 } from "@/lib/studio/table-utils";
@@ -671,7 +659,6 @@ function SidebarTableRow({
   tagsList,
   tableTagsMap,
   tagsForTable,
-  setConfirmDialog,
   handleCopyItemName,
 }: {
   table: string;
@@ -686,8 +673,6 @@ function SidebarTableRow({
   tagsList: Array<{ name: string; color: string }>;
   tableTagsMap: Record<string, string[]>;
   tagsForTable: (table: string) => string[];
-  confirmDialog?: unknown;
-  setConfirmDialog: (d: any) => void;
   handleCopyItemName: (name: string) => void;
 }) {
   const securityInfo = studio.tableSecurity?.[table];
@@ -749,7 +734,6 @@ function SidebarTableRow({
           handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
           handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
           onExport={(format) => studio.exportData?.(format)}
-          setConfirmDialog={setConfirmDialog}
           onEmpty={(t, s) => studio.emptyTable?.(t, s)}
           onDelete={(t, s) => studio.deleteTable?.(t, s)}
           beforeExport={<Separator />}
@@ -950,9 +934,6 @@ function TablesPanel({ studio }: { studio: any }) {
     indexes: true,
     enums: true,
   });
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(
-    DEFAULT_CONFIRM_DIALOG,
-  );
   // Tags-as-folders view state (persisted via studio.sidebarSortMode).
   const tagView = (studio.sidebarSortMode ?? "alphabetical") === "tags";
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
@@ -1054,40 +1035,6 @@ function TablesPanel({ studio }: { studio: any }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <AlertDialog
-        open={confirmDialog.open}
-        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
-      >
-        <AlertDialogContent className="bg-popover border-border text-foreground shadow-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-sm font-semibold">
-              {confirmDialog.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-sm text-muted-foreground">
-              {confirmDialog.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-9 text-xs border-border bg-transparent hover:bg-muted transition-colors">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                confirmDialog.onConfirm();
-                setConfirmDialog((prev) => ({ ...prev, open: false }));
-              }}
-              className={
-                confirmDialog.variant === "destructive"
-                  ? "bg-red-500 hover:bg-red-600 text-white border-none h-9 text-xs"
-                  : "bg-primary hover:bg-primary/90 text-white border-none h-9 text-xs"
-              }
-            >
-              Confirm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <div className="relative my-1">
         <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -1317,8 +1264,6 @@ function TablesPanel({ studio }: { studio: any }) {
                 tagsList={tagsList}
                 tableTagsMap={tableTagsMap}
                 tagsForTable={tagsForTable}
-                confirmDialog={confirmDialog}
-                setConfirmDialog={setConfirmDialog}
                 handleCopyItemName={handleCopyItemName}
               />
             )}
@@ -1393,7 +1338,6 @@ function TablesPanel({ studio }: { studio: any }) {
                     handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
                     handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
                     onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
-                    setConfirmDialog={setConfirmDialog}
                     onEmpty={(t, s) => studio.emptyTable?.(t, s)}
                     onDelete={(t, s) => studio.deleteTable?.(t, s)}
                     beforeExport={<Separator />}
@@ -1515,7 +1459,6 @@ function TablesPanel({ studio }: { studio: any }) {
                         tagsList={tagsList}
                         tableTagsMap={tableTagsMap}
                         tagsForTable={tagsForTable}
-                        setConfirmDialog={setConfirmDialog}
                         handleCopyItemName={handleCopyItemName}
                       />
                     )}
@@ -1590,7 +1533,6 @@ function TablesPanel({ studio }: { studio: any }) {
                             handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
                             handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
                             onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
-                            setConfirmDialog={setConfirmDialog}
                             onEmpty={(t, s) => studio.emptyTable?.(t, s)}
                             onDelete={(t, s) => studio.deleteTable?.(t, s)}
                             beforeExport={<Separator />}

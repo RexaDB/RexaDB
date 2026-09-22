@@ -60,13 +60,14 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               {options.description || "This action cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancel}>
+          <AlertDialogFooter className="border-0 bg-transparent -mx-0 -mb-0 p-0 pt-2">
+            <AlertDialogCancel variant="ghost" onClick={handleCancel}>
               {options.cancelText || "Cancel"}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirm}
-              className={options.variant === "destructive" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}
+              variant={options.variant === "destructive" ? "destructive" : "default"}
+              className={options.variant === "destructive" ? "bg-red-600 border-transparent text-white hover:bg-red-500 hover:text-white" : ""}
             >
               {options.confirmText || "Confirm"}
             </AlertDialogAction>

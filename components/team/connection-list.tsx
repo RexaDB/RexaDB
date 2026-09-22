@@ -22,16 +22,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { TeamListLayout, fetchTeamList } from "@/components/shared/team-list-utils";
 import { Database, Plus, Pencil, Trash2, Key, Shield, Users } from "@/lib/icon-theme/lucide-react";
 import { cn } from "@/lib/utils";
@@ -525,26 +516,13 @@ export function ConnectionList({ permissions }: { permissions?: Set<string> }) {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteConn} onOpenChange={() => setDeleteConn(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Connection</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete "{deleteConn?.name}"? This will
-              remove all associated access rules, saved queries, and logs.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={!!deleteConn}
+        onOpenChange={() => setDeleteConn(null)}
+        title="Delete Connection"
+        description={`Are you sure you want to delete "${deleteConn?.name}"? This will remove all associated access rules, saved queries, and logs.`}
+        onConfirm={() => void handleDelete()}
+      />
     </TeamListLayout>
   );
 }

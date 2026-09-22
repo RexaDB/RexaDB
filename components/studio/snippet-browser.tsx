@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/hooks/use-confirm";
 
 import { Snippet, Folder } from "@/lib/studio/types";
 import { CreateSnippetDialog, useSnippetActions } from "./snippet-common";
@@ -95,6 +96,34 @@ export function SnippetBrowser({
       onUpdateSnippet,
     });
 
+  const confirm = useConfirm();
+
+  const handleDeleteSnippet = async (snippet: Snippet) => {
+    const ok = await confirm({
+      title: "Delete snippet",
+      description: `Delete "${snippet.name}"? This cannot be undone.`,
+      variant: "destructive",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
+    onDeleteSnippet(snippet.id);
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    const folder = folders.find((f) => f.id === folderId);
+    const count = snippets.filter((s) => s.folderId === folderId).length;
+    const ok = await confirm({
+      title: "Delete folder",
+      description: folder
+        ? `Delete "${folder.name}"${count > 0 ? ` and remove its ${count} snippet${count === 1 ? "" : "s"} from the folder` : ""}? The snippets themselves will be kept.`
+        : "Delete this folder? Its snippets will be kept.",
+      variant: "destructive",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
+    onDeleteFolder(folderId);
+  };
+
   const filteredSnippets = snippets.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()),
   );
@@ -138,7 +167,7 @@ export function SnippetBrowser({
             </DropdownMenuItem>
             <DropdownMenuItem
               className="text-xs text-destructive"
-              onClick={() => onDeleteSnippet(snippet.id)}
+              onClick={() => void handleDeleteSnippet(snippet)}
             >
               Delete
             </DropdownMenuItem>
@@ -252,7 +281,7 @@ export function SnippetBrowser({
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-xs text-destructive"
-                          onClick={() => onDeleteFolder(folder.id)}
+                          onClick={() => void handleDeleteFolder(folder.id)}
                         >
                           Delete
                         </DropdownMenuItem>

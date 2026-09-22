@@ -21,16 +21,7 @@ import {
   Plus,
   Trash2,
 } from "@/lib/icon-theme/lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { DotmCircular12 } from "@/components/ui/dotm-circular-12";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import {
@@ -811,28 +802,18 @@ function ThreadsSidebar({
       </div>
 
       {/* Delete confirmation */}
-      <AlertDialog open={pendingDeleteId !== null} onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete thread?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDeleteThread
-                ? `"${pendingDeleteThread.title}" and its conversation will be permanently removed. This cannot be undone.`
-                : "This thread and its conversation will be permanently removed. This cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="none"
-              className="bg-destructive/90 hover:bg-destructive/90"
-              onClick={confirmDelete}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}
+        size="sm"
+        title="Delete thread?"
+        description={
+          pendingDeleteThread
+            ? `"${pendingDeleteThread.title}" and its conversation will be permanently removed. This cannot be undone.`
+            : "This thread and its conversation will be permanently removed. This cannot be undone."
+        }
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

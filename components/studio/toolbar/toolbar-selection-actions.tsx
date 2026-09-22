@@ -7,7 +7,6 @@ import {
   FileJson,
   FileText,
   Database as SqlIcon,
-  AlertCircle,
 } from "@/lib/icon-theme/solar-icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,17 +16,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 
 interface ToolbarSelectionActionsProps {
   selectedRows: Set<number>;
@@ -122,8 +111,12 @@ export function ToolbarSelectionActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
+      <DeleteConfirmDialog
+        title={`Delete ${selectedRows.size} rows?`}
+        description="Are you sure you want to delete the selected rows? This action cannot be undone."
+        onConfirm={handleDeleteRows}
+        confirmDisabled={deleteDisabled}
+        trigger={
           <Button
             variant="outline"
             size="sm"
@@ -137,32 +130,8 @@ export function ToolbarSelectionActions({
             )}
             Delete
           </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-500" />
-              <AlertDialogTitle>
-                Delete {selectedRows.size} rows?
-              </AlertDialogTitle>
-            </div>
-            <AlertDialogDescription>
-              Are you sure you want to delete the selected rows? This action
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={deleteDisabled}
-              onClick={handleDeleteRows}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        }
+      />
     </>
   );
 }

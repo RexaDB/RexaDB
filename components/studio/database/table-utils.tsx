@@ -3,6 +3,7 @@
 import {
   Check,
 } from "@/lib/icon-theme/lucide-react";
+import { useConfirm } from "@/hooks/use-confirm";
 
 interface TagItem {
   name: string;
@@ -122,20 +123,11 @@ function TableExportSubmenu({
   );
 }
 
-interface ConfirmDialogConfig {
-  open: boolean;
-  title: string;
-  description: string;
-  onConfirm: () => void;
-  variant: "destructive";
-}
-
 interface TableActionProps {
   table: string;
   selectedSchema: string;
   isMongo: boolean;
   isDropdown?: boolean;
-  setConfirmDialog: (dialog: ConfirmDialogConfig) => void;
   onEmpty: (table: string, schema: string) => void;
   onDelete: (table: string, schema: string) => void;
 }
@@ -150,38 +142,40 @@ function TableEmptyDeleteItems({
   selectedSchema,
   isMongo,
   isDropdown,
-  setConfirmDialog,
   onEmpty,
   onDelete,
 }: EmptyDeleteItemsProps) {
-  const handleEmpty = (e: React.MouseEvent) => {
+  const confirm = useConfirm();
+  const handleEmpty = async (e: React.MouseEvent) => {
     if (isDropdown) e.stopPropagation();
-    setConfirmDialog({
-      open: true,
+    const ok = await confirm({
       title: isMongo
         ? `Empty collection "${table}"?`
         : `Empty table "${table}"?`,
       description: isMongo
         ? "This will delete all documents in the collection. This action cannot be undone."
         : "This will delete all data in the table. This action cannot be undone.",
-      onConfirm: () => onEmpty(table, selectedSchema),
       variant: "destructive",
+      confirmText: "Delete",
     });
+    if (!ok) return;
+    onEmpty(table, selectedSchema);
   };
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleDelete = async (e: React.MouseEvent) => {
     if (isDropdown) e.stopPropagation();
-    setConfirmDialog({
-      open: true,
+    const ok = await confirm({
       title: isMongo
         ? `Delete collection "${table}"?`
         : `Delete table "${table}"?`,
       description: isMongo
         ? "Are you sure you want to delete this collection? This action cannot be undone."
         : "Are you sure you want to delete this table? This action cannot be undone.",
-      onConfirm: () => onDelete(table, selectedSchema),
       variant: "destructive",
+      confirmText: "Delete",
     });
+    if (!ok) return;
+    onDelete(table, selectedSchema);
   };
 
   return (
@@ -226,7 +220,6 @@ function TableMenuExportDeleteItems(props: TableMenuExportDeleteProps) {
     table,
     selectedSchema,
     isMongo,
-    setConfirmDialog,
     onEmpty,
     onDelete,
     beforeExport,
@@ -252,7 +245,6 @@ function TableMenuExportDeleteItems(props: TableMenuExportDeleteProps) {
         selectedSchema={selectedSchema}
         isMongo={isMongo}
         isDropdown={isDropdown}
-        setConfirmDialog={setConfirmDialog}
         onEmpty={onEmpty}
         onDelete={onDelete}
       />
@@ -304,7 +296,6 @@ export function TableContextMenuItems(props: TableContextMenuItemsProps) {
     handleCopyDefinition,
     handleDuplicate,
     onExport,
-    setConfirmDialog,
     onEmpty,
     onDelete,
     beforeExport,
@@ -348,7 +339,6 @@ export function TableContextMenuItems(props: TableContextMenuItemsProps) {
         table={table}
         selectedSchema={selectedSchema}
         isMongo={isMongo}
-        setConfirmDialog={setConfirmDialog}
         onEmpty={onEmpty}
         onDelete={onDelete}
         beforeExport={beforeExport}

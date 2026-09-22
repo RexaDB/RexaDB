@@ -16,16 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { TeamListLayout } from "@/components/shared/team-list-utils";
 import { Shield, Plus, Pencil, Trash2, Users } from "@/lib/icon-theme/lucide-react";
 import { cn } from "@/lib/utils";
@@ -289,26 +280,13 @@ export function RoleList({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteRole} onOpenChange={() => setDeleteRole(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Role</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete "{deleteRole?.name}"? This action
-              cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirmDialog
+        open={!!deleteRole}
+        onOpenChange={() => setDeleteRole(null)}
+        title="Delete Role"
+        description={`Are you sure you want to delete "${deleteRole?.name}"? This action cannot be undone.`}
+        onConfirm={() => void handleDelete()}
+      />
     </TeamListLayout>
   );
 }

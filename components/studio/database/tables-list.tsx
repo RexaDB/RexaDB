@@ -50,18 +50,6 @@ import {
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  ConfirmDialogState,
-  DEFAULT_CONFIRM_DIALOG,
   copyItemName,
   getTableDerivedValues,
 } from "@/lib/studio/table-utils";
@@ -92,7 +80,6 @@ function ExplorerTagRow({
   deleteTable,
   exportData,
   exportTableData,
-  setConfirmDialog,
   handleCopyItemName,
 }: {
   table: string;
@@ -119,7 +106,6 @@ function ExplorerTagRow({
   deleteTable?: TableActionHandler;
   exportData?: ExportDataHandler;
   exportTableData?: (table: string | undefined, schema: string | undefined, format: "csv" | "json" | "sql") => void;
-  setConfirmDialog: (dialog: ConfirmDialogState) => void;
   handleCopyItemName: (name: string) => void;
 }) {
   const assigned = tableTags[`${selectedSchema}.${table}`] ?? [];
@@ -179,7 +165,6 @@ function ExplorerTagRow({
           onExport={(format, t, s) =>
             exportTableData ? exportTableData(t, s, format) : exportData?.(format)
           }
-          setConfirmDialog={setConfirmDialog}
           onEmpty={(t, s) => emptyTable?.(t, s)}
           onDelete={(t, s) => deleteTable?.(t, s)}
           beforeExport={<Separator />}
@@ -340,9 +325,6 @@ export function TablesList({
   onSortModeChange,
 }: TablesListProps) {
   const [search, setSearch] = useState("");
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(
-    DEFAULT_CONFIRM_DIALOG,
-  );
   const [localTagView, setLocalTagView] = useState(false);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
@@ -412,40 +394,6 @@ export function TablesList({
 
   return (
     <div className="flex-1 flex flex-col bg-studio-bg overflow-hidden min-h-0">
-      <AlertDialog
-        open={confirmDialog.open}
-        onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}
-      >
-        <AlertDialogContent className="bg-popover border-border text-foreground shadow-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-sm font-semibold">
-              {confirmDialog.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-sm text-muted-foreground">
-              {confirmDialog.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-9 text-xs border-border bg-transparent hover:bg-muted transition-colors">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                confirmDialog.onConfirm();
-                setConfirmDialog((prev) => ({ ...prev, open: false }));
-              }}
-              className={
-                confirmDialog.variant === "destructive"
-                  ? "bg-red-500 hover:bg-red-600 text-white border-none h-9 text-xs"
-                  : "bg-primary hover:bg-primary/90 text-white border-none h-9 text-xs"
-              }
-            >
-              Confirm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 bg-studio-bg/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center gap-4">
@@ -756,7 +704,6 @@ export function TablesList({
                                     deleteTable={deleteTable}
                                     exportData={exportData}
                                     exportTableData={exportTableData}
-                                    setConfirmDialog={setConfirmDialog}
                                     handleCopyItemName={handleCopyItemName}
                                   />
                                 ))
@@ -807,7 +754,6 @@ export function TablesList({
                                 emptyTable={emptyTable}
                                 deleteTable={deleteTable}
                                 exportData={exportData}
-                                setConfirmDialog={setConfirmDialog}
                                 handleCopyItemName={handleCopyItemName}
                               />
                             ))
@@ -886,7 +832,6 @@ export function TablesList({
                         onExport={(format, t, s) =>
             exportTableData ? exportTableData(t, s, format) : exportData?.(format)
           }
-                        setConfirmDialog={setConfirmDialog}
                         onEmpty={(t, s) => emptyTable?.(t, s)}
                         onDelete={(t, s) => deleteTable?.(t, s)}
                         beforeExport={<Separator />}
