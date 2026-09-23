@@ -1,15 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { HardDrive, Plus, RefreshCw, Search } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyStatePresentational } from "@/components/studio/database/empty-state-presentational";
-import { runQuery } from "@/lib/api/actions-client";
-import { fetchStorageBuckets } from "@/lib/studio/storage-utils";
-import type { StorageBucket } from "@/lib/studio/storage-utils";
 import { formatBytes } from "@/lib/studio/storage-utils";
+import {
+  createStorageBucket,
+  useStorageBuckets,
+} from "@/components/studio/storage/storage-buckets-shared";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -25,34 +26,15 @@ import { Label } from "@/components/ui/label";
 export function StorageFilesView({ studio }: { studio: any }) {
   const connectionString: string =
     studio.currentConnectionString || studio.connection?.connectionString || "";
-  const [buckets, setBuckets] = useState<StorageBucket[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { buckets, loading, loadError, loadBuckets, notifyBucketsChanged } =
+    useStorageBuckets(connectionString, {
+      onError: (message) => toast.error(message),
+    });
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPublic, setNewPublic] = useState(false);
   const [creating, setCreating] = useState(false);
-
-  const loadBuckets = useCallback(async () => {
-    if (!connectionString) return;
-    setLoading(true);
-    const { buckets, error } = await fetchStorageBuckets(connectionString);
-    setBuckets(buckets);
-    setLoadError(error ?? null);
-    if (error) toast.error(error);
-    setLoading(false);
-  }, [connectionString]);
-
-  useEffect(() => {
-    void loadBuckets();
-  }, [loadBuckets]);
-
-  useEffect(() => {
-    const onRefresh = () => void loadBuckets();
-    window.addEventListener("studio:storage-buckets-changed", onRefresh);
-    return () => window.removeEventListener("studio:storage-buckets-changed", onRefresh);
-  }, [loadBuckets]);
 
   const filtered = buckets.filter((b) =>
     b.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -60,27 +42,14 @@ export function StorageFilesView({ studio }: { studio: any }) {
 
   async function handleCreate() {
     const name = newName.trim();
-    if (!name) {
-      toast.error("Bucket name is required.");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
-      toast.error("Use lowercase letters, numbers, dots, underscores, or hyphens.");
-      return;
-    }
     setCreating(true);
     try {
-      const res = await runQuery(
-        connectionString,
-        `INSERT INTO storage.buckets (id, name, public)
-         VALUES ('${name.replace(/'/g, "''")}', '${name.replace(/'/g, "''")}', ${newPublic})`,
-      );
-      if (res?.error) throw new Error(res.error);
+      await createStorageBucket(connectionString, name, newPublic);
       toast.success(`Bucket "${name}" created.`);
       setCreateOpen(false);
       setNewName("");
       setNewPublic(false);
-      window.dispatchEvent(new Event("studio:storage-buckets-changed"));
+      notifyBucketsChanged();
       await loadBuckets();
       studio.openStorageBucketTab?.(name);
     } catch (e) {

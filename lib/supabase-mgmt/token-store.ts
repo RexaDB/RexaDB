@@ -1,3 +1,10 @@
+import {
+  getSortedLocalAccounts,
+  readLocalAccounts,
+  removeLocalAccount,
+  writeLocalAccounts,
+} from "@/lib/mgmt/local-account-store";
+
 const LEGACY_TOKEN_KEY = "rexadb-supabase-mgmt-token";
 const ACCOUNTS_KEY = "rexadb-supabase-mgmt-accounts";
 
@@ -51,25 +58,11 @@ function decodeMgmtAccountMeta(token: string): {
 }
 
 function readRawAccounts(): SupabaseMgmtAccount[] | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
-  try {
-    const raw = window.localStorage.getItem(ACCOUNTS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    return parsed as SupabaseMgmtAccount[];
-  } catch {
-    return null;
-  }
+  return readLocalAccounts<SupabaseMgmtAccount>(ACCOUNTS_KEY);
 }
 
 function writeAccounts(accounts: SupabaseMgmtAccount[]): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
-  try {
-    window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-  } catch {
-    // ignore quota / security errors
-  }
+  writeLocalAccounts(ACCOUNTS_KEY, accounts);
 }
 
 function migrateLegacyToken(): void {
@@ -95,11 +88,7 @@ function migrateLegacyToken(): void {
 
 export function getMgmtAccounts(): SupabaseMgmtAccount[] {
   migrateLegacyToken();
-  const accounts = readRawAccounts();
-  if (!accounts) return [];
-  return accounts
-    .filter((a) => typeof a?.token === "string" && a.token.length > 0)
-    .sort((a, b) => a.createdAt - b.createdAt);
+  return getSortedLocalAccounts<SupabaseMgmtAccount>(ACCOUNTS_KEY);
 }
 
 // Returns the oldest-registered account's token (first in createdAt order),
@@ -130,9 +119,7 @@ export function addMgmtAccount(token: string): SupabaseMgmtAccount {
 
 export function removeMgmtAccount(id: string): void {
   const accounts = getMgmtAccounts();
-  const next = accounts.filter((a) => a.id !== id);
-  if (next.length === accounts.length) return;
-  writeAccounts(next);
+  removeLocalAccount(ACCOUNTS_KEY, accounts, id);
 }
 
 export function clearMgmtTokens(): void {

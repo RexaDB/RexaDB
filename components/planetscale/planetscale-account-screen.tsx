@@ -22,11 +22,16 @@ import {
 } from "@/components/ui/select";
 import type { PlanetscaleAccount } from "@/lib/planetscale/token-store";
 import { openExternalUrl } from "@/lib/desktop";
-import { ProviderAccountsHeader } from "@/components/shared/provider-accounts/header";
-import { AccountChips, type AccountChipItem } from "@/components/shared/provider-accounts/account-chips";
-import { ProviderEmptyState } from "@/components/shared/provider-accounts/empty-state";
-import { ProviderListToolbar } from "@/components/shared/provider-accounts/list-toolbar";
-import { ResourceRow } from "@/components/shared/provider-accounts/resource-row";
+import {
+  AccountChips,
+  ProviderAccountsHeader,
+  ProviderEmptyState,
+  ProviderListToolbar,
+  ResourceRow,
+  buildAccountChips,
+  filterByName,
+  type ProviderAccountScreenBaseProps,
+} from "@/components/shared/provider-accounts";
 import { toast } from "sonner";
 import {
   Database,
@@ -36,18 +41,8 @@ import {
   GitBranch,
 } from "@/lib/icon-theme/lucide-react";
 
-interface PlanetscaleAccountsScreenProps {
+interface PlanetscaleAccountsScreenProps extends ProviderAccountScreenBaseProps {
   accounts: PlanetscaleAccount[];
-  activeAccountId: string | null;
-  onSwitchAccount: (id: string) => void;
-  onRemoveAccount: (id: string) => void;
-  onAddAccount: () => void;
-  canAddAccount: boolean;
-  onBack?: () => void;
-  onConnectDatabase: (
-    payload: { name: string; connectionString: string; connectionType: string },
-    opts?: { silent?: boolean },
-  ) => Promise<{ success: boolean }>;
 }
 
 export function PlanetscaleAccountsScreen({
@@ -86,9 +81,7 @@ export function PlanetscaleAccountsScreen({
     requireOrgForResources: true,
   });
 
-  const filteredDatabases = databases.filter((d) =>
-    d.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredDatabases = filterByName(databases, search, (d) => [d.name]);
 
   const toggleDatabase = async (database: PlanetscaleDatabase) => {
     if (expandedDb === database.name) {
@@ -139,11 +132,7 @@ export function PlanetscaleAccountsScreen({
 
   const logo = <ProviderLogo type="planetscale" className="h-[22px] w-[22px]" />;
 
-  const accountChips: AccountChipItem[] = accounts.map((account) => ({
-    id: account.id,
-    label: accountLabel(account),
-    initial: accountLabel(account).slice(0, 1),
-  }));
+  const accountChips = buildAccountChips(accounts, accountLabel);
 
   return (
     <div className="mx-auto max-w-5xl">

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { getTabIcon } from "@/lib/studio/tab-registry";
 import { HardDrive, FolderOpen, Settings, Shield, Plus, RefreshCw } from "@/lib/icon-theme/lucide-react";
-import { runQuery } from "@/lib/api/actions-client";
-import { fetchStorageBuckets } from "@/lib/studio/storage-utils";
-import type { StorageBucket } from "@/lib/studio/storage-utils";
+import {
+  createStorageBucket,
+  useStorageBuckets,
+} from "@/components/studio/storage/storage-buckets-shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -26,33 +27,14 @@ const ROW =
  * Files lists buckets; Settings / Policies open their management tabs.
  */
 export function StoragePanel({ studio }: { studio: any }) {
-  const [buckets, setBuckets] = useState<StorageBucket[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const connectionString: string = studio.currentConnectionString || studio.connection?.connectionString || "";
-
-  const loadBuckets = useCallback(async () => {
-    if (!connectionString) return;
-    setLoading(true);
-    const { buckets, error } = await fetchStorageBuckets(connectionString);
-    setBuckets(buckets);
-    setLoadError(error ?? null);
-    if (error) console.warn("[storage] failed to list buckets:", error);
-    setLoading(false);
-  }, [connectionString]);
-
-  useEffect(() => {
-    void loadBuckets();
-  }, [loadBuckets]);
-
-  useEffect(() => {
-    const onRefresh = () => void loadBuckets();
-    window.addEventListener("studio:storage-buckets-changed", onRefresh);
-    return () => window.removeEventListener("studio:storage-buckets-changed", onRefresh);
-  }, [loadBuckets]);
+  const { buckets, loading, loadError, loadBuckets, notifyBucketsChanged } =
+    useStorageBuckets(connectionString, {
+      onError: (message) => console.warn("[storage] failed to list buckets:", message),
+    });
 
   const navItems: Array<{ label: string; tabType: string; fn?: () => void; icon: React.ReactNode }> = [
     {
@@ -77,27 +59,14 @@ export function StoragePanel({ studio }: { studio: any }) {
 
   async function handleCreate() {
     const name = newName.trim();
-    if (!name) {
-      toast.error("Bucket name is required.");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
-      toast.error("Use lowercase letters, numbers, dots, underscores, or hyphens.");
-      return;
-    }
     setCreating(true);
     try {
-      const res = await runQuery(
-        connectionString,
-        `INSERT INTO storage.buckets (id, name, public)
-         VALUES ('${name.replace(/'/g, "''")}', '${name.replace(/'/g, "''")}', false)`,
-      );
-      if (res?.error) throw new Error(res.error);
+      await createStorageBucket(connectionString, name, false);
       toast.success(`Bucket "${name}" created.`);
       setCreateOpen(false);
       setNewName("");
       await loadBuckets();
-      window.dispatchEvent(new Event("studio:storage-buckets-changed"));
+      notifyBucketsChanged();
       studio.openStorageBucketTab?.(name);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create bucket");

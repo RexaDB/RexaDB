@@ -1,5 +1,11 @@
 import { DEFAULT_SPACETIMEDB_CLOUD_HOST } from "./client";
 import { decodeSpacetimeDbIdentity } from "./identity";
+import {
+  filterSortLocalAccounts,
+  readLocalAccounts,
+  removeLocalAccount,
+  writeLocalAccounts,
+} from "@/lib/mgmt/local-account-store";
 
 const ACCOUNTS_KEY = "rexadb-spacetimedb-mgmt-accounts";
 
@@ -13,30 +19,8 @@ export interface SpacetimeDbMgmtAccount {
   createdAt: number;
 }
 
-function readRawAccounts(): SpacetimeDbMgmtAccount[] | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
-  try {
-    const raw = window.localStorage.getItem(ACCOUNTS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    return parsed as SpacetimeDbMgmtAccount[];
-  } catch {
-    return null;
-  }
-}
-
-function writeAccounts(accounts: SpacetimeDbMgmtAccount[]): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
-  try {
-    window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-  } catch {
-    // ignore quota / security errors
-  }
-}
-
 export function getSpacetimeDbMgmtAccounts(): SpacetimeDbMgmtAccount[] {
-  const accounts = readRawAccounts();
+  const accounts = readLocalAccounts<SpacetimeDbMgmtAccount>(ACCOUNTS_KEY);
   if (!accounts) return [];
   let changed = false;
   for (const account of accounts) {
@@ -52,10 +36,8 @@ export function getSpacetimeDbMgmtAccounts(): SpacetimeDbMgmtAccount[] {
       }
     }
   }
-  if (changed) writeAccounts(accounts);
-  return accounts
-    .filter((a) => typeof a?.token === "string" && a.token.length > 0)
-    .sort((a, b) => a.createdAt - b.createdAt);
+  if (changed) writeLocalAccounts(ACCOUNTS_KEY, accounts);
+  return filterSortLocalAccounts(accounts);
 }
 
 export function addSpacetimeDbMgmtAccount(
@@ -68,7 +50,7 @@ export function addSpacetimeDbMgmtAccount(
   if (existing) {
     if (opts?.host && existing.host !== opts.host) {
       existing.host = opts.host;
-      writeAccounts(accounts);
+      writeLocalAccounts(ACCOUNTS_KEY, accounts);
     }
     return existing;
   }
@@ -80,17 +62,15 @@ export function addSpacetimeDbMgmtAccount(
     host: opts?.host || DEFAULT_SPACETIMEDB_CLOUD_HOST,
     createdAt: Date.now(),
   };
-  writeAccounts([...accounts, account]);
+  writeLocalAccounts(ACCOUNTS_KEY, [...accounts, account]);
   return account;
 }
 
 export function removeSpacetimeDbMgmtAccount(id: string): void {
   const accounts = getSpacetimeDbMgmtAccounts();
-  const next = accounts.filter((a) => a.id !== id);
-  if (next.length === accounts.length) return;
-  writeAccounts(next);
+  removeLocalAccount(ACCOUNTS_KEY, accounts, id);
 }
 
 export function clearSpacetimeDbMgmtAccounts(): void {
-  writeAccounts([]);
+  writeLocalAccounts(ACCOUNTS_KEY, []);
 }

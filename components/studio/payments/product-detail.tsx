@@ -25,7 +25,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { currencySymbol } from "@/lib/supabase-paykit/currencies";
+import {
+  formatPlanPrice,
+  isPaidPlan,
+  planPriceLabel,
+  useCopyId,
+} from "@/components/studio/payments/paykit-shared";
 import type {
   PaykitFeatureDraft,
   PaykitPlanDraft,
@@ -54,25 +59,13 @@ export function ProductDetail({
   onAddFeature,
   onRemoveFeature,
 }: ProductDetailProps) {
-  const [copied, setCopied] = useState(false);
   const [addId, setAddId] = useState("");
 
-  const paid =
-    plan.priceAmount !== null &&
-    plan.priceAmount !== undefined &&
-    Number.isFinite(Number(plan.priceAmount));
-  const sym = currencySymbol(plan.priceCurrency);
-  const code = (plan.priceCurrency || "usd").toUpperCase();
+  const paid = isPaidPlan(plan);
+  const price = formatPlanPrice(plan);
+  const currencyCode = (plan.priceCurrency || "usd").toUpperCase();
 
-  const copyId = async () => {
-    try {
-      await navigator.clipboard.writeText(plan.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable — no-op
-    }
-  };
+  const [copied, copyId] = useCopyId(plan.id);
 
   return (
     <div className="flex flex-col gap-6">
@@ -106,16 +99,7 @@ export function ProductDetail({
               )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {paid ? (
-                <>
-                  {sym}
-                  {Number(plan.priceAmount).toFixed(2)} {code}
-                  <span className="mx-1.5">·</span>
-                  Per {plan.priceInterval === "year" ? "year" : "month"}
-                </>
-              ) : (
-                "Free"
-              )}
+              {planPriceLabel(plan)}
             </p>
           </div>
         </div>
@@ -171,11 +155,11 @@ export function ProductDetail({
                 <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_36px] items-center gap-2 px-3 py-2.5">
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-semibold tabular-nums">
-                      {paid ? `${sym}${Number(plan.priceAmount).toFixed(2)} ${code}` : "Free"}
+                      {price.main}
                     </span>
-                    {paid && (
+                    {price.sub && (
                       <span className="block truncate text-[11px] text-muted-foreground">
-                        Per {plan.priceInterval === "year" ? "year" : "month"}
+                        {price.sub}
                       </span>
                     )}
                   </span>
@@ -353,7 +337,7 @@ export function ProductDetail({
                 label="Billing"
                 value={paid ? (plan.priceInterval === "year" ? "Yearly" : "Monthly") : "—"}
               />
-              <DetailRow label="Currency" value={paid ? code : "—"} mono />
+              <DetailRow label="Currency" value={paid ? currencyCode : "—"} mono />
               <DetailRow label="Default" value={plan.default ? "Yes" : "No"} />
             </div>
           </section>
