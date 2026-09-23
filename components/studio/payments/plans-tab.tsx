@@ -9,15 +9,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Trash2, Copy, Package, MoreHorizontal, Pencil } from "lucide-react";
+import { Plus, Trash2, Copy, MoreHorizontal, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProductSheet } from "./product-sheet";
 import { ProductDetail } from "./product-detail";
+import {
+  PaykitProductIdentity,
+  formatPlanPrice as formatPrice,
+  isPaidPlan as isPaid,
+} from "@/components/studio/payments/paykit-shared";
 import type {
   PaykitDraftState,
   PaykitPlanDraft,
 } from "@/lib/supabase-paykit/types";
-import { currencySymbol } from "@/lib/supabase-paykit/currencies";
 
 interface PlansTabProps {
   drafts: PaykitDraftState;
@@ -25,26 +29,6 @@ interface PlansTabProps {
 }
 
 type PriceFilter = "all" | "paid" | "free";
-
-function isPaid(plan: PaykitPlanDraft): boolean {
-  return (
-    plan.priceAmount !== null &&
-    plan.priceAmount !== undefined &&
-    Number.isFinite(Number(plan.priceAmount))
-  );
-}
-
-/** Stripe-style price: "$29.00 USD" + "Per month", or "Free". */
-function formatPrice(plan: PaykitPlanDraft): { main: string; sub: string | null } {
-  if (!isPaid(plan)) {
-    return { main: "Free", sub: null };
-  }
-  const code = (plan.priceCurrency || "usd").toUpperCase();
-  return {
-    main: `${currencySymbol(plan.priceCurrency)}${Number(plan.priceAmount).toFixed(2)} ${code}`,
-    sub: plan.priceInterval === "year" ? "Per year" : "Per month",
-  };
-}
 
 export function PlansTab({ drafts, update }: PlansTabProps) {
   const [filter, setFilter] = useState<PriceFilter>("all");
@@ -244,19 +228,7 @@ export function PlansTab({ drafts, update }: PlansTabProps) {
                     }}
                     className="grid cursor-pointer grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_36px] items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/30"
                   >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-muted/30 text-muted-foreground">
-                        <Package className="size-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-semibold">
-                          {plan.name || plan.id || "New product"}
-                        </span>
-                        <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                          {plan.id || "no-id-yet"}
-                        </span>
-                      </span>
-                    </span>
+                    <PaykitProductIdentity name={plan.name} id={plan.id} />
                     <span className="min-w-0">
                       <span className="block truncate text-sm tabular-nums">
                         {price.main}

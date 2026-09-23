@@ -55,6 +55,34 @@ import {
 } from "@/lib/studio/table-utils";
 import { TableContextMenuItems } from "./table-utils";
 
+interface ExplorerTagRowProps {
+  table: string;
+  selectedSchema: string;
+  tableTags: Record<string, string[]>;
+  tags: Array<{ name: string; color: string }>;
+  colorByName: Map<string, string>;
+  tableDescriptions: Record<string, string>;
+  tableSecurity?: Record<string, { rlsEnabled: boolean; policyCount: number }>;
+  dataApiInstalled?: boolean;
+  viewTableSet: Set<string>;
+  isMongo: boolean;
+  canExportSql: boolean;
+  itemNoun: string;
+  openEditorLabel: string;
+  copyDefinitionLabel: string;
+  onTableClick: (table: string) => void;
+  onOpenSqlEditor?: (table: string, schema?: string) => void;
+  onViewSchema?: (table: string) => void;
+  toggleTableTag?: (schema: string, table: string, tag: string) => void;
+  copyTableSchema?: TableActionHandler;
+  duplicateTable?: TableActionHandler;
+  emptyTable?: TableActionHandler;
+  deleteTable?: TableActionHandler;
+  exportData?: ExportDataHandler;
+  exportTableData?: (table: string | undefined, schema: string | undefined, format: "csv" | "json" | "sql") => void;
+  handleCopyItemName: (name: string) => void;
+}
+
 function ExplorerTagRow({
   table,
   selectedSchema,
@@ -81,33 +109,7 @@ function ExplorerTagRow({
   exportData,
   exportTableData,
   handleCopyItemName,
-}: {
-  table: string;
-  selectedSchema: string;
-  tableTags: Record<string, string[]>;
-  tags: Array<{ name: string; color: string }>;
-  colorByName: Map<string, string>;
-  tableDescriptions: Record<string, string>;
-  tableSecurity?: Record<string, { rlsEnabled: boolean; policyCount: number }>;
-  dataApiInstalled?: boolean;
-  viewTableSet: Set<string>;
-  isMongo: boolean;
-  canExportSql: boolean;
-  itemNoun: string;
-  openEditorLabel: string;
-  copyDefinitionLabel: string;
-  onTableClick: (table: string) => void;
-  onOpenSqlEditor?: (table: string, schema?: string) => void;
-  onViewSchema?: (table: string) => void;
-  toggleTableTag?: (schema: string, table: string, tag: string) => void;
-  copyTableSchema?: TableActionHandler;
-  duplicateTable?: TableActionHandler;
-  emptyTable?: TableActionHandler;
-  deleteTable?: TableActionHandler;
-  exportData?: ExportDataHandler;
-  exportTableData?: (table: string | undefined, schema: string | undefined, format: "csv" | "json" | "sql") => void;
-  handleCopyItemName: (name: string) => void;
-}) {
+}: ExplorerTagRowProps) {
   const assigned = tableTags[`${selectedSchema}.${table}`] ?? [];
   const securityInfo = tableSecurity?.[table];
   const rlsEnabled = securityInfo?.rlsEnabled;
@@ -391,6 +393,37 @@ export function TablesList({
     addTag?.(name, newTagColor);
     setNewTagName("");
   }
+
+  const rowSharedProps: Omit<ExplorerTagRowProps, "table" | "key"> = {
+    selectedSchema,
+    tableTags,
+    tags,
+    colorByName,
+    tableDescriptions,
+    tableSecurity,
+    dataApiInstalled,
+    viewTableSet,
+    isMongo,
+    canExportSql,
+    itemNoun,
+    openEditorLabel,
+    copyDefinitionLabel,
+    onTableClick,
+    onOpenSqlEditor,
+    onViewSchema,
+    toggleTableTag,
+    copyTableSchema,
+    duplicateTable,
+    emptyTable,
+    deleteTable,
+    exportData,
+    exportTableData,
+    handleCopyItemName,
+  };
+
+  const renderExplorerRow = (table: string) => (
+    <ExplorerTagRow key={`${selectedSchema}.${table}`} table={table} {...rowSharedProps} />
+  );
 
   return (
     <div className="flex-1 flex flex-col bg-studio-bg overflow-hidden min-h-0">
@@ -677,36 +710,7 @@ export function TablesList({
                               {groupTables.length === 0 ? (
                                 <div className="px-11 py-2 text-[11px] text-muted-foreground/60">No tables in this folder</div>
                               ) : (
-                                groupTables.map((table) => (
-                                  <ExplorerTagRow
-                                    key={`${selectedSchema}.${table}`}
-                                    table={table}
-                                    selectedSchema={selectedSchema}
-                                    tableTags={tableTags}
-                                    tags={tags}
-                                    colorByName={colorByName}
-                                    tableDescriptions={tableDescriptions}
-                                    tableSecurity={tableSecurity}
-                                    dataApiInstalled={dataApiInstalled}
-                                    viewTableSet={viewTableSet}
-                                    isMongo={isMongo}
-                                    canExportSql={canExportSql}
-                                    itemNoun={itemNoun}
-                                    openEditorLabel={openEditorLabel}
-                                    copyDefinitionLabel={copyDefinitionLabel}
-                                    onTableClick={onTableClick}
-                                    onOpenSqlEditor={onOpenSqlEditor}
-                                    onViewSchema={onViewSchema}
-                                    toggleTableTag={toggleTableTag}
-                                    copyTableSchema={copyTableSchema}
-                                    duplicateTable={duplicateTable}
-                                    emptyTable={emptyTable}
-                                    deleteTable={deleteTable}
-                                    exportData={exportData}
-                                    exportTableData={exportTableData}
-                                    handleCopyItemName={handleCopyItemName}
-                                  />
-                                ))
+                                groupTables.map((table) => renderExplorerRow(table))
                               )}
                             </div>
                           )}
@@ -728,35 +732,7 @@ export function TablesList({
                           {untaggedTables.length === 0 ? (
                             <div className="px-11 py-2 text-[11px] text-muted-foreground/60">Everything is tagged</div>
                           ) : (
-                            untaggedTables.map((table) => (
-                              <ExplorerTagRow
-                                key={`${selectedSchema}.${table}`}
-                                table={table}
-                                selectedSchema={selectedSchema}
-                                tableTags={tableTags}
-                                tags={tags}
-                                colorByName={colorByName}
-                                tableDescriptions={tableDescriptions}
-                                tableSecurity={tableSecurity}
-                                dataApiInstalled={dataApiInstalled}
-                                viewTableSet={viewTableSet}
-                                isMongo={isMongo}
-                                canExportSql={canExportSql}
-                                itemNoun={itemNoun}
-                                openEditorLabel={openEditorLabel}
-                                copyDefinitionLabel={copyDefinitionLabel}
-                                onTableClick={onTableClick}
-                                onOpenSqlEditor={onOpenSqlEditor}
-                                onViewSchema={onViewSchema}
-                                toggleTableTag={toggleTableTag}
-                                copyTableSchema={copyTableSchema}
-                                duplicateTable={duplicateTable}
-                                emptyTable={emptyTable}
-                                deleteTable={deleteTable}
-                                exportData={exportData}
-                                handleCopyItemName={handleCopyItemName}
-                              />
-                            ))
+                            untaggedTables.map((table) => renderExplorerRow(table))
                           )}
                         </div>
                       )}
@@ -764,184 +740,7 @@ export function TablesList({
               </div>
             ) : (
               <>
-            {filteredTables.map((table) =>
-              (() => {
-                const securityInfo = tableSecurity?.[table];
-                const rlsEnabled = securityInfo?.rlsEnabled;
-                const showDataApi = Boolean(dataApiInstalled);
-                const isView = viewTableSet.has(table);
-                const ItemIcon = isView ? Eye : Table2;
-
-                const renderMenuItems = (
-                  Component: any,
-                  Sub: any,
-                  SubTrigger: any,
-                  SubContent: any,
-                  Separator: any,
-                  isDropdown = false,
-                ) => {
-                  const handleAction =
-                    (fn?: (t: string, s: string) => void) =>
-                    (e: React.MouseEvent) => {
-                      if (isDropdown) e.stopPropagation();
-                      fn?.(table, selectedSchema);
-                    };
-
-                  return (
-                    <>
-                      <Component
-                        onClick={handleAction((t) => onTableClick(t))}
-                      >
-                        Open {itemNoun}
-                      </Component>
-                      <Component
-                        onClick={handleAction((t, s) =>
-                          onOpenSqlEditor?.(t, s),
-                        )}
-                      >
-                        {openEditorLabel}
-                      </Component>
-                      <Component
-                        onClick={handleAction((t) => onViewSchema?.(t))}
-                      >
-                        View Schema
-                      </Component>
-                      <TableContextMenuItems
-                        Component={Component}
-                        Sub={Sub}
-                        SubTrigger={SubTrigger}
-                        SubContent={SubContent}
-                        Separator={Separator}
-                        itemNoun={itemNoun}
-                        copyDefinitionLabel={copyDefinitionLabel}
-                        duplicateLabel={`Duplicate ${itemNoun}`}
-                        isMongo={isMongo}
-                        canExportSql={canExportSql}
-                        isDropdown={isDropdown}
-                        table={table}
-                        selectedSchema={selectedSchema}
-                        tags={tags}
-                        tableTags={tableTags}
-                        handleAction={handleAction}
-                        onToggleTag={(s, t, tagName) =>
-                          toggleTableTag?.(s, t, tagName)
-                        }
-                        handleCopyName={(t) => void handleCopyItemName(t)}
-                        handleCopyDefinition={(t, s) => copyTableSchema?.(t, s)}
-                        handleDuplicate={(t, s) => duplicateTable?.(t, s)}
-                        onExport={(format, t, s) =>
-            exportTableData ? exportTableData(t, s, format) : exportData?.(format)
-          }
-                        onEmpty={(t, s) => emptyTable?.(t, s)}
-                        onDelete={(t, s) => deleteTable?.(t, s)}
-                        beforeExport={<Separator />}
-                      />
-                    </>
-                  );
-                };
-
-                return (
-                  <ContextMenu key={`${selectedSchema}.${table}`}>
-                    <ContextMenuTrigger>
-                      <div
-                        onClick={() => onTableClick(table)}
-                        className="grid grid-cols-[120px_1fr_200px_48px] items-center py-4 px-4 hover:bg-muted/20 transition-colors group cursor-pointer"
-                      >
-                        <span className="text-xs font-medium text-muted-foreground/60 truncate">
-                          {selectedSchema}
-                        </span>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <ItemIcon className="w-3.5 h-3.5 text-primary/60 shrink-0" />
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-xs font-bold text-foreground tracking-tight truncate">
-                              {table}
-                            </span>
-                            {(tableTags[`${selectedSchema}.${table}`] ?? []).length > 0 && (
-                              <span className="flex items-center gap-1 mt-0.5">
-                                {(tableTags[`${selectedSchema}.${table}`] ?? []).map((name) => (
-                                  <span
-                                    key={name}
-                                    title={name}
-                                    className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/30 px-1.5 py-px text-[10px] text-muted-foreground"
-                                  >
-                                    <span className="size-1.5 rounded-full" style={{ backgroundColor: colorByName.get(name) ?? "#94a3b8" }} />
-                                    {name}
-                                  </span>
-                                ))}
-                              </span>
-                            )}
-                            {tableDescriptions[table] && (
-                              <span
-                                className="text-[11px] text-muted-foreground/70 truncate"
-                                title={tableDescriptions[table]}
-                              >
-                                {tableDescriptions[table]}
-                              </span>
-                            )}
-                          </div>
-                          {(showDataApi || rlsEnabled === false) && (
-                            <span className="flex items-center gap-1">
-                              {showDataApi && (
-                                <span title="Accessible via Data API">
-                                  <Globe className="w-3.5 h-3.5 text-primary/70" />
-                                </span>
-                              )}
-                              {rlsEnabled === false && (
-                                <span title="RLS disabled">
-                                  <Unlock className="w-3.5 h-3.5 text-red-500/80" />
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs tracking-wider text-muted-foreground/40">
-                          {isView ? "View" : "Base Table"}
-                        </span>
-                        <div className="flex justify-end items-center gap-2">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              asChild
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
-                              >
-                                <MoreVertical className="w-3.5 h-3.5 text-muted-foreground" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              className="w-56"
-                            >
-                              {renderMenuItems(
-                                DropdownMenuItem,
-                                DropdownMenuSub,
-                                DropdownMenuSubTrigger,
-                                DropdownMenuSubContent,
-                                DropdownMenuSeparator,
-                                true,
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/20 group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                        </div>
-                      </div>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="w-56">
-                      {renderMenuItems(
-                        ContextMenuItem,
-                        ContextMenuSub,
-                        ContextMenuSubTrigger,
-                        ContextMenuSubContent,
-                        ContextMenuSeparator,
-                      )}
-                    </ContextMenuContent>
-                  </ContextMenu>
-                );
-              })(),
-            )}
+                {filteredTables.map((table) => renderExplorerRow(table))}
               </>
             )}
 

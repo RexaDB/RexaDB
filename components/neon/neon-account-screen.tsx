@@ -29,11 +29,16 @@ import {
 import { openExternalUrl } from "@/lib/desktop";
 import { isNeonSessionExpiredError } from "@/lib/neon-cli/errors";
 import { NeonInstallPrompt } from "@/components/neon/neon-install-prompt";
-import { ProviderAccountsHeader } from "@/components/shared/provider-accounts/header";
-import { AccountChips, type AccountChipItem } from "@/components/shared/provider-accounts/account-chips";
-import { ProviderEmptyState } from "@/components/shared/provider-accounts/empty-state";
-import { ProviderListToolbar } from "@/components/shared/provider-accounts/list-toolbar";
-import { ResourceRow } from "@/components/shared/provider-accounts/resource-row";
+import {
+  AccountChips,
+  ProviderAccountsHeader,
+  ProviderEmptyState,
+  ProviderListToolbar,
+  ResourceRow,
+  buildAccountChips,
+  filterByName,
+  type ProviderAccountScreenBaseProps,
+} from "@/components/shared/provider-accounts";
 import { toast } from "sonner";
 import {
   Database,
@@ -43,22 +48,12 @@ import {
   GitBranch,
 } from "@/lib/icon-theme/lucide-react";
 
-interface NeonAccountsScreenProps {
+interface NeonAccountsScreenProps extends ProviderAccountScreenBaseProps {
   accounts: NeonCliAccount[];
-  activeAccountId: string | null;
-  onSwitchAccount: (id: string) => void;
-  onRemoveAccount: (id: string) => void;
-  onAddAccount: () => void;
-  canAddAccount: boolean;
   existingConnectionStrings: string[];
   cliInstalled: boolean | null;
   checkingCli: boolean;
   onRecheckCli: () => void;
-  onBack?: () => void;
-  onConnectDatabase: (
-    payload: { name: string; connectionString: string; connectionType: string },
-    opts?: { silent?: boolean },
-  ) => Promise<{ success: boolean }>;
   /** Re-authenticates an existing profile in place after its session expired. */
   onReconnectAccount: (profileName: string) => void;
   /** Bumped by the parent after a successful (re)connect to retrigger loading. */
@@ -115,11 +110,7 @@ export function NeonAccountsScreen({
     reloadSignal,
   });
 
-  const filteredProjects = projects.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.id.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredProjects = filterByName(projects, search, (p) => [p.name, p.id]);
 
   const toggleProject = async (project: NeonProject) => {
     if (expandedProjectId === project.id) {
@@ -187,11 +178,7 @@ export function NeonAccountsScreen({
 
   const logo = <NeonLogo className="h-[22px] w-[22px]" />;
 
-  const accountChips: AccountChipItem[] = accounts.map((account) => ({
-    id: account.id,
-    label: accountLabel(account),
-    initial: accountLabel(account).slice(0, 1),
-  }));
+  const accountChips = buildAccountChips(accounts, accountLabel);
 
   return (
     <div className="mx-auto max-w-5xl">

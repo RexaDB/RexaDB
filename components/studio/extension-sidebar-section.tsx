@@ -7,6 +7,54 @@ import { ExtensionView } from "./extension-tree-view";
 import { ExtensionWebview } from "./extension-webview";
 import { cn } from "@/lib/utils";
 
+interface SidebarViewItem {
+  viewId: string;
+  name: string;
+  type: string;
+}
+
+function ExtensionSidebarViewItem({
+  view,
+  open,
+  onToggle,
+  onOpenTab,
+}: {
+  view: SidebarViewItem;
+  open: boolean;
+  onToggle: () => void;
+  onOpenTab: (viewId: string) => void;
+}) {
+  return (
+    <div>
+      <div className="group flex h-8 w-full items-center gap-1 px-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")} />
+          <span className="truncate">{view.name}</span>
+        </button>
+        {view.type === "webview" && (
+          <button
+            type="button"
+            title={`Open ${view.name} in a tab`}
+            onClick={() => onOpenTab(view.viewId)}
+            className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-white/10 hover:text-foreground group-hover:flex"
+          >
+            <ExternalLink className="size-3" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="min-h-16 pb-1">
+          <ExtensionView viewId={view.viewId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Standalone container sidebar (`extensions:<containerId>` rail target).
  *
@@ -83,33 +131,13 @@ export function ExtensionSidebarSection({
           {standaloneViews.map((view) => {
             const open = openViews[view.viewId] ?? true;
             return (
-              <div key={view.viewId}>
-                <div className="group flex h-8 w-full items-center gap-1 px-2">
-                  <button
-                    type="button"
-                    onClick={() => setOpenViews((p) => ({ ...p, [view.viewId]: !open }))}
-                    className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                  >
-                    <ChevronDown className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")} />
-                    <span className="truncate">{view.name}</span>
-                  </button>
-                  {view.type === "webview" && (
-                    <button
-                      type="button"
-                      title={`Open ${view.name} in a tab`}
-                      onClick={() => openTab(view.viewId)}
-                      className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-white/10 hover:text-foreground group-hover:flex"
-                    >
-                      <ExternalLink className="size-3" />
-                    </button>
-                  )}
-                </div>
-                {open && (
-                  <div className="min-h-16 pb-1">
-                    <ExtensionView viewId={view.viewId} />
-                  </div>
-                )}
-              </div>
+              <ExtensionSidebarViewItem
+                key={view.viewId}
+                view={view}
+                open={open}
+                onToggle={() => setOpenViews((p) => ({ ...p, [view.viewId]: !open }))}
+                onOpenTab={openTab}
+              />
             );
           })}
         </div>
@@ -145,33 +173,13 @@ export function ExtensionSidebarSection({
             {groupViews.map((view) => {
               const open = openViews[view.viewId] ?? true;
               return (
-                <div key={view.viewId}>
-                  <div className="group flex h-8 w-full items-center gap-1 px-2">
-                    <button
-                      type="button"
-                      onClick={() => setOpenViews((p) => ({ ...p, [view.viewId]: !open }))}
-                      className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                    >
-                      <ChevronDown className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")} />
-                      <span className="truncate">{view.name}</span>
-                    </button>
-                    {view.type === "webview" && (
-                      <button
-                        type="button"
-                        title={`Open ${view.name} in a tab`}
-                        onClick={() => openTab(view.viewId)}
-                        className="hidden size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-white/10 hover:text-foreground group-hover:flex"
-                      >
-                        <ExternalLink className="size-3" />
-                      </button>
-                    )}
-                  </div>
-                  {open && (
-                    <div className="min-h-16 pb-1">
-                      <ExtensionView viewId={view.viewId} />
-                    </div>
-                  )}
-                </div>
+                <ExtensionSidebarViewItem
+                  key={view.viewId}
+                  view={view}
+                  open={open}
+                  onToggle={() => setOpenViews((p) => ({ ...p, [view.viewId]: !open }))}
+                  onOpenTab={openTab}
+                />
               );
             })}
           </div>

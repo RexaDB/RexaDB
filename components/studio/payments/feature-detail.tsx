@@ -20,12 +20,15 @@ import {
   ChevronLeft,
   Copy,
   MoreHorizontal,
-  Package,
   Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
-import { currencySymbol } from "@/lib/supabase-paykit/currencies";
+import {
+  PaykitProductIdentity,
+  planPriceLabel as planPrice,
+  useCopyId,
+} from "@/components/studio/payments/paykit-shared";
 import type {
   PaykitFeatureDraft,
   PaykitPlanDraft,
@@ -41,19 +44,6 @@ interface FeatureDetailProps {
   onDetach: (planIndex: number) => void;
 }
 
-function planPrice(plan: PaykitPlanDraft): string {
-  if (
-    plan.priceAmount === null ||
-    plan.priceAmount === undefined ||
-    !Number.isFinite(Number(plan.priceAmount))
-  ) {
-    return "Free";
-  }
-  const code = (plan.priceCurrency || "usd").toUpperCase();
-  const per = plan.priceInterval === "year" ? "Per year" : "Per month";
-  return `${currencySymbol(plan.priceCurrency)}${Number(plan.priceAmount).toFixed(2)} ${code} · ${per}`;
-}
-
 export function FeatureDetail({
   feature,
   plans,
@@ -63,7 +53,6 @@ export function FeatureDetail({
   onAttach,
   onDetach,
 }: FeatureDetailProps) {
-  const [copied, setCopied] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [attachPlan, setAttachPlan] = useState("");
 
@@ -76,15 +65,7 @@ export function FeatureDetail({
     .map((plan, i) => ({ plan, i }))
     .filter(({ plan }) => !plan.includes.some((x) => x.featureId === feature.id));
 
-  const copyId = async () => {
-    try {
-      await navigator.clipboard.writeText(feature.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable — no-op
-    }
-  };
+  const [copied, copyId] = useCopyId(feature.id);
 
   return (
     <div className="flex flex-col gap-6">
@@ -205,19 +186,7 @@ export function FeatureDetail({
                         key={`${i}:${plan.id}`}
                         className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_36px] items-center gap-2 px-3 py-2.5"
                       >
-                        <span className="flex min-w-0 items-center gap-2.5">
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-muted/30 text-muted-foreground">
-                            <Package className="size-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold">
-                              {plan.name || plan.id || "New product"}
-                            </span>
-                            <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                              {plan.id || "no-id-yet"}
-                            </span>
-                          </span>
-                        </span>
+                        <PaykitProductIdentity name={plan.name} id={plan.id} />
                         <span className="truncate text-xs tabular-nums text-muted-foreground">
                           {planPrice(plan)}
                         </span>

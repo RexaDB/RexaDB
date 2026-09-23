@@ -149,19 +149,49 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", port: PORT });
 });
 
+// Shared helpers for the management-API proxies below (Supabase, PlanetScale,
+// SpacetimeDB). Each proxy forwards method/headers/body to the upstream host
+// and relays the upstream status + payload back to the browser caller.
+function buildProxyQueryString(query: Record<string, unknown>): string {
+  const keys = Object.keys(query ?? {});
+  if (keys.length === 0) return "";
+  return (
+    "?" +
+    new URLSearchParams(query as Record<string, string>).toString()
+  );
+}
+
+async function forwardProxiedResponse(
+  res: express.Response,
+  upstream: Response,
+) {
+  const text = await upstream.text();
+  res.status(upstream.status);
+  try {
+    res.json(JSON.parse(text));
+  } catch {
+    res.send(text);
+  }
+}
+
+function copyAuthHeaders(
+  req: express.Request,
+  headers: Record<string, string>,
+) {
+  if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+  if (req.headers["user-agent"]) headers["User-Agent"] = req.headers["user-agent"];
+}
+
 // Supabase Management API proxy (avoids CORS in the browser)
 app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
   try {
     const targetPath = (req.params as any)[0];
-    const qs = Object.keys(req.query).length
-      ? "?" + new URLSearchParams(req.query as Record<string, string>).toString()
-      : "";
+    const qs = buildProxyQueryString(req.query as Record<string, unknown>);
     const targetUrl = `https://api.supabase.com/${targetPath}${qs}`;
     const headers: Record<string, string> = {
       "User-Agent": "supabase-cli",
     };
-    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-    if (req.headers["user-agent"]) headers["User-Agent"] = req.headers["user-agent"];
+    copyAuthHeaders(req, headers);
     const fetchInit: RequestInit = {
       method: req.method,
       headers,
@@ -180,13 +210,7 @@ app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
       }
     }
     const upstream = await fetch(targetUrl, fetchInit);
-    const text = await upstream.text();
-    res.status(upstream.status);
-    try {
-      res.json(JSON.parse(text));
-    } catch {
-      res.send(text);
-    }
+    await forwardProxiedResponse(res, upstream);
   } catch (e: any) {
     res.status(502).json({ success: false, error: e.message });
   }
@@ -216,9 +240,7 @@ app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => create
 app.all("/api/planetscale/proxy/*", async (req, res) => {
   try {
     const targetPath = (req.params as any)[0];
-    const qs = Object.keys(req.query).length
-      ? "?" + new URLSearchParams(req.query as Record<string, string>).toString()
-      : "";
+    const qs = buildProxyQueryString(req.query as Record<string, unknown>);
     const targetUrl = `https://api.planetscale.com/${targetPath}${qs}`;
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -289,8 +311,7 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
     const headers: Record<string, string> = {
       "User-Agent": "spacetime-cli",
     };
-    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-    if (req.headers["user-agent"]) headers["User-Agent"] = req.headers["user-agent"];
+    copyAuthHeaders(req, headers);
     const hasBody =
       req.body &&
       typeof req.body === "object" &&
@@ -306,13 +327,7 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
       fetchInit.body = JSON.stringify(req.body);
     }
     const upstream = await fetch(targetUrl, fetchInit);
-    const text = await upstream.text();
-    res.status(upstream.status);
-    try {
-      res.json(JSON.parse(text));
-    } catch {
-      res.send(text);
-    }
+    await forwardProxiedResponse(res, upstream);
   } catch (e: any) {
     res.status(502).json({ success: false, error: e.message });
   }

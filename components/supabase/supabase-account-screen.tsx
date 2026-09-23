@@ -16,11 +16,14 @@ import {
 } from "@/lib/supabase-mgmt/register";
 import { openExternalUrl } from "@/lib/desktop";
 import type { Project, Organization } from "supabase-client-sdk";
-import { ProviderAccountsHeader } from "@/components/shared/provider-accounts/header";
-import { AccountChips, type AccountChipItem } from "@/components/shared/provider-accounts/account-chips";
-import { ProviderEmptyState } from "@/components/shared/provider-accounts/empty-state";
-import { ProviderListToolbar } from "@/components/shared/provider-accounts/list-toolbar";
-import { ResourceRow } from "@/components/shared/provider-accounts/resource-row";
+import {
+  AccountChips,
+  ProviderAccountsHeader,
+  ProviderEmptyState,
+  ProviderListToolbar,
+  ResourceRow,
+  buildAccountChips,
+} from "@/components/shared/provider-accounts";
 import { toast } from "sonner";
 import {
   Database,
@@ -237,11 +240,7 @@ export function SupabaseAccountsScreen({
 
   const logo = <SupabaseLogo className="h-[22px] w-[22px]" />;
 
-  const accountChips: AccountChipItem[] = accounts.map((account) => ({
-    id: account.id,
-    label: accountLabel(account),
-    initial: accountLabel(account).slice(0, 1),
-  }));
+  const accountChips = buildAccountChips(accounts, accountLabel);
 
   return (
     <div className="mx-auto max-w-5xl">
