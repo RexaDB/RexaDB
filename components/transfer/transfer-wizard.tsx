@@ -478,10 +478,10 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
             <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
               <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                Storage file contents copy between Supabase projects with management tokens and to/from Neon Object Storage (budgets apply); otherwise buckets + metadata migrate and contents are skipped with a warning.
-                Supabase auth users migrate with password hashes when readable; Neon Auth lives in neon_auth tables and migrates with the database.
-                Supabase storage.* and auth.* schemas have no counterpart on generic Postgres and are skipped with a warning.
-                Edge functions migrate sources with git-style compat diffs — review every hunk before deploying.
+                File contents copy when both sides allow it, otherwise metadata only.
+                Passwords migrate when readable, else reset required.
+                Supabase system schemas are skipped on generic Postgres.
+                Review edge-function diffs before deploying.
               </span>
             </div>
           </div>
