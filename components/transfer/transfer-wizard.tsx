@@ -40,13 +40,6 @@ interface TransferWizardProps {
 
 type WizardStep = "select-sources" | "select-options" | "confirm" | "transferring" | "complete" | "error";
 
-const STEPS: Array<{ id: WizardStep; label: string }> = [
-  { id: "select-sources", label: "Sources" },
-  { id: "select-options", label: "Components" },
-  { id: "confirm", label: "Confirm" },
-  { id: "transferring", label: "Transfer" },
-];
-
 const STEP_LABELS: Record<TransferStep, string> = {
   validating: "Validating connections",
   exporting_schema: "Exporting database",
@@ -286,20 +279,8 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     setIsTransferring(false);
   };
 
-  const stepIndex = STEPS.findIndex((s) => s.id === currentStep);
-  const wizardTasks: Task[] = STEPS.map((s, i) => ({
-    id: s.id,
-    label: s.label,
-    status:
-      currentStep === "complete" || i < stepIndex
-        ? "completed"
-        : currentStep === "error" && i === stepIndex
-          ? "failed"
-          : i === stepIndex
-            ? "in_progress"
-            : "pending",
-  }));
-
+  // Task capsules are transfer progress indicators only — they render
+  // while the transfer runs, never as a wizard stepper.
   const runSteps = useMemo(() => displaySteps(transferOptions), [transferOptions]);
   const runIndex = progress ? runSteps.indexOf(progress.currentStep) : -1;
   const runTasks: Task[] = runSteps.map((step, i) => ({
@@ -338,13 +319,15 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         <h2 className="text-2xl font-semibold tracking-tight">Transfer Project</h2>
       </div>
 
-      <div className="flex justify-center">
-        <TaskRows tasks={currentStep === "transferring" ? runTasks : wizardTasks} variant="Capsules" />
-      </div>
+      {currentStep === "transferring" && (
+        <div className="flex justify-center">
+          <TaskRows tasks={runTasks} variant="Capsules" />
+        </div>
+      )}
 
       <div className="px-1 py-2">
         {currentStep === "select-sources" && (
-          <div className="flex flex-col gap-3">
+          <div className="mx-auto flex w-full max-w-[440px] flex-col gap-3">
             <div className="rounded-[28px] border border-border bg-card p-4 shadow-sm">
               <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
               <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
