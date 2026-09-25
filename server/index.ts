@@ -456,6 +456,21 @@ app.post("/api/neon-cli/login", async (req, res) => {
     const forwardLine = (line: string) => {
       const trimmed = line.trim();
       if (!trimmed) return;
+      // The CLI dumps a V8 stack trace when auth fails (stack frames, Node
+      // version banner, module-internal file:// paths). That noise buries
+      // the actual cause, so drop it from the user-facing log — the kept
+      // `error:` / `error_description:` lines plus the friendly terminal
+      // message below carry everything actionable.
+      if (
+        /^\s*at\s/.test(line) ||
+        /^Node\.js v\d/i.test(trimmed) ||
+        /^throw new \w*Error/i.test(trimmed) ||
+        /AuthorizationResponseError/.test(trimmed) ||
+        /^file:\/\/\S+:\d+/.test(trimmed) ||
+        /oauth4webapi\/build|openid-client\/build|node_modules\/neon\/dist\//.test(trimmed)
+      ) {
+        return;
+      }
       const urlMatch = trimmed.match(/https?:\/\/\S+/);
       if (urlMatch) {
         send({ type: "open-url", url: urlMatch[0], message: trimmed });
