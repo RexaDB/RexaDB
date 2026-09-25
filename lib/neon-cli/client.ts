@@ -82,6 +82,33 @@ export interface NeonLoginEvent {
   success?: boolean;
 }
 
+export interface NeonAuthStatus {
+  profile: string;
+  valid: boolean;
+  email?: string;
+  userId?: string;
+  error?: string;
+}
+
+/**
+ * Checks which CLI profiles already hold a valid session (`neon me`),
+ * without triggering any browser flow. Used to offer Continue instead of
+ * forcing another OAuth dance when the user is already signed in.
+ */
+export async function getNeonAuthStatus(profiles: string[]): Promise<NeonAuthStatus[]> {
+  const res = await fetch(`${neonCliBase()}/auth-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profiles }),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || json?.success === false) {
+    throw new Error(json?.error || `neon-cli auth-status failed (${res.status})`);
+  }
+  const data = (json?.data ?? json) as NeonAuthStatus[];
+  return Array.isArray(data) ? data : [];
+}
+
 /**
  * Streams `neon auth --profile <name>` progress via SSE. Returns an abort
  * function; onEvent fires for each line the real CLI prints (including a

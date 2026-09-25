@@ -377,21 +377,24 @@ app.post("/api/neon-cli/detect", async (_req, res) => {
 
 const NEON_PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
-// Only one `neon auth` flow may run per CLI profile. Overlapping flows each
-// mint their own OAuth state/CSRF token plus a random localhost callback
-// port, so authorizing a stale browser tab fails with request_forbidden
-// (CSRF mismatch) or hits an already-dead callback server. Starting a new
-// login therefore kills any previous flow for the same profile first.
-const neonLoginChildren = new Map<string, import("child_process").ChildProcess>();
+// Only one interactive `neon auth` flow may run at a time, GLOBALLY — not
+// per profile. Every dialog attempt mints a fresh random profile, so a
+// per-profile guard never fires, and overlapping flows each hold their own
+// OAuth state/CSRF token plus a random localhost callback port. Authorizing
+// any but the newest tab then fails with request_forbidden (CSRF mismatch)
+// or hits an already-dead callback server. Starting a new login therefore
+// kills every previous flow first; the user can only meaningfully complete
+// one browser dance at a time anyway.
+const neonLoginChildren = new Set<import("child_process").ChildProcess>();
 
-function killNeonLogin(profile: string): void {
-  const prev = neonLoginChildren.get(profile);
-  if (!prev) return;
-  neonLoginChildren.delete(profile);
-  try {
-    if (!prev.killed && prev.exitCode === null) prev.kill("SIGTERM");
-  } catch {
-    // already gone — nothing to do
+function killAllNeonLogins(): void {
+  for (const proc of neonLoginChildren) {
+    neonLoginChildren.delete(proc);
+    try {
+      if (!proc.killed && proc.exitCode === null) proc.kill("SIGTERM");
+    } catch {
+      // already gone — nothing to do
+    }
   }
 }
 
@@ -437,14 +440,15 @@ app.post("/api/neon-cli/login", async (req, res) => {
 
   try {
     const { spawnNeonAuthLogin } = await import("../lib/neon-cli/cli-runner");
-    // Single-flight: a retry/reopen kills the previous flow for this
-    // profile so its stale browser tab can no longer collide with the new
-    // OAuth state (CSRF mismatch) or callback port.
-    killNeonLogin(profile);
+    // Single-flight: a retry/reopen kills every previous flow (each attempt
+    // uses a fresh profile, so anything narrower never fires) so a stale
+    // browser tab can no longer collide with new OAuth state (CSRF
+    // mismatch) or a dead callback port.
+    killAllNeonLogins();
     const child = spawnNeonAuthLogin(profile);
-    neonLoginChildren.set(profile, child);
+    neonLoginChildren.add(child);
     const forgetChild = () => {
-      if (neonLoginChildren.get(profile) === child) neonLoginChildren.delete(profile);
+      neonLoginChildren.delete(child);
     };
 
     req.on("close", () => {
@@ -514,8 +518,27 @@ app.post("/api/neon-cli/login", async (req, res) => {
   }
 });
 
-app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));
-app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
+// Non-interactive session check: reports which CLI profiles (if any)
+// already hold a valid session, so the dialog can offer Continue instead
+// of forcing another OAuth dance.
+app.post("/api/neon-cli/auth-status", async (req, res) => {
+  try {
+    const raw = req.body?.profiles;
+    const profiles = (Array.isArray(raw) ? raw : []).map((p) => String(p || "").trim()).filter(Boolean);
+    for (const profile of profiles) {
+      if (!NEON_PROFILE_NAME_RE.test(profile)) {
+        res.status(400).json({ success: false, error: "Invalid profile name" });
+        return;
+      }
+    }
+    const { neonAuthStatus } = await import("../lib/neon-cli/cli-runner");
+    res.json({ success: true, data: await neonAuthStatus(profiles) });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
 app.post("/api/neon-cli/branches", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonBranchesList(body.profile, body.projectId)));
 app.post("/api/neon-cli/databases", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonDatabasesList(body.profile, body.projectId, body.branchId)));
 app.post("/api/neon-cli/roles", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonRolesList(body.profile, body.projectId, body.branchId)));
