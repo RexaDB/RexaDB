@@ -539,15 +539,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                 This transfer modifies the destination database. Make sure you have backups before proceeding.
               </span>
             </div>
-
-            <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
-              <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                File contents copy when both sides allow it, otherwise metadata only.
-                Passwords migrate when readable, else reset required.
-                Supabase system schemas are skipped on generic Postgres.
-                Review edge-function diffs before deploying.
-              </span>
-            </div>
           </div>
         )}
 
