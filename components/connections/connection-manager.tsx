@@ -4762,7 +4762,16 @@ export function ConnectionManager({
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  <div className="ml-auto">
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={() => setConnectionScreen("transfer")}
+                      title="Migrate a project between providers (e.g. Supabase to Neon)"
+                      aria-label="Transfer project between providers"
+                      className="h-9 px-3 rounded-lg border border-border bg-background text-sm flex items-center gap-2 focus:outline-none"
+                    >
+                      <ArrowRightLeft className="w-4 h-4 text-muted-foreground/70" />
+                      Transfer
+                    </button>
                     {can("connections.create") && (
                       <button
                         onClick={() => {
