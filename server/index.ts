@@ -377,6 +377,44 @@ app.post("/api/neon-cli/detect", async (_req, res) => {
 
 const NEON_PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
+// Only one interactive `neon auth` flow may run at a time, GLOBALLY — not
+// per profile. Every dialog attempt mints a fresh random profile, so a
+// per-profile guard never fires, and overlapping flows each hold their own
+// OAuth state/CSRF token plus a random localhost callback port. Authorizing
+// any but the newest tab then fails with request_forbidden (CSRF mismatch)
+// or hits an already-dead callback server. Starting a new login therefore
+// kills every previous flow first; the user can only meaningfully complete
+// one browser dance at a time anyway.
+const neonLoginChildren = new Set<import("child_process").ChildProcess>();
+
+function killAllNeonLogins(): void {
+  for (const proc of neonLoginChildren) {
+    neonLoginChildren.delete(proc);
+    try {
+      if (!proc.killed && proc.exitCode === null) proc.kill("SIGTERM");
+    } catch {
+      // already gone — nothing to do
+    }
+  }
+}
+
+/** Translate raw `neon auth` stderr dumps into something users can act on. */
+function friendlyNeonAuthError(logTail: string, code: number | null): string {
+  if (/CSRF value from the token does not match/i.test(logTail)) {
+    return "This sign-in attempt expired — usually because an older Neon browser tab was authorized after a retry, or a previous attempt was cancelled. Close any older Neon sign-in tabs, keep this dialog open, and press Try again.";
+  }
+  if (/EADDRINUSE|address already in use/i.test(logTail)) {
+    return "Another Neon sign-in is already running. Close any other sign-in dialogs or browser tabs and try again.";
+  }
+  if (/ENOENT|command not found|not installed|spawn .* failed/i.test(logTail)) {
+    return "The Neon CLI is not installed or not on PATH. Install it (npm i -g neonctl) and try again.";
+  }
+  if (/cannot run interactive auth in ci/i.test(logTail)) {
+    return "The Neon CLI refused interactive sign-in. Restart the app normally (not in CI mode) and try again.";
+  }
+  return `Neon sign-in failed (neon auth exited with code ${code ?? "?"}). Check the log above for details and try again.`;
+}
+
 app.post("/api/neon-cli/login", async (req, res) => {
   const profile = String(req.body?.profile || "").trim();
   if (!NEON_PROFILE_NAME_RE.test(profile)) {
@@ -402,16 +440,41 @@ app.post("/api/neon-cli/login", async (req, res) => {
 
   try {
     const { spawnNeonAuthLogin } = await import("../lib/neon-cli/cli-runner");
+    // Single-flight: a retry/reopen kills every previous flow (each attempt
+    // uses a fresh profile, so anything narrower never fires) so a stale
+    // browser tab can no longer collide with new OAuth state (CSRF
+    // mismatch) or a dead callback port.
+    killAllNeonLogins();
     const child = spawnNeonAuthLogin(profile);
+    neonLoginChildren.add(child);
+    const forgetChild = () => {
+      neonLoginChildren.delete(child);
+    };
 
     req.on("close", () => {
       aborted = true;
+      forgetChild();
       try { child.kill("SIGTERM"); } catch {}
     });
 
     const forwardLine = (line: string) => {
       const trimmed = line.trim();
       if (!trimmed) return;
+      // The CLI dumps a V8 stack trace when auth fails (stack frames, Node
+      // version banner, module-internal file:// paths). That noise buries
+      // the actual cause, so drop it from the user-facing log — the kept
+      // `error:` / `error_description:` lines plus the friendly terminal
+      // message below carry everything actionable.
+      if (
+        /^\s*at\s/.test(line) ||
+        /^Node\.js v\d/i.test(trimmed) ||
+        /^throw new \w*Error/i.test(trimmed) ||
+        /AuthorizationResponseError/.test(trimmed) ||
+        /^file:\/\/\S+:\d+/.test(trimmed) ||
+        /oauth4webapi\/build|openid-client\/build|node_modules\/neon\/dist\//.test(trimmed)
+      ) {
+        return;
+      }
       const urlMatch = trimmed.match(/https?:\/\/\S+/);
       if (urlMatch) {
         send({ type: "open-url", url: urlMatch[0], message: trimmed });
@@ -421,9 +484,24 @@ app.post("/api/neon-cli/login", async (req, res) => {
     };
 
     let buffer = "";
+    // Complete output retained for error classification: `buffer` above
+    // only ever holds the trailing partial line (finished lines are
+    // consumed by forwardLine), so classifying from it sees almost nothing
+    // and every failure degrades to the generic message.
+    const fullLogLines: string[] = [];
+    const rememberLines = (text: string) => {
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        fullLogLines.push(trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed);
+      }
+      if (fullLogLines.length > 200) fullLogLines.splice(0, fullLogLines.length - 200);
+    };
     const onChunk = (chunk: Buffer) => {
       if (aborted) return;
-      buffer += chunk.toString();
+      const text = chunk.toString();
+      rememberLines(text);
+      buffer += text;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       for (const line of lines) forwardLine(line);
@@ -433,23 +511,48 @@ app.post("/api/neon-cli/login", async (req, res) => {
 
     child.on("close", (code) => {
       if (aborted) return;
-      if (buffer.trim()) forwardLine(buffer);
+      forgetChild();
+      if (buffer.trim()) {
+        rememberLines(buffer);
+        forwardLine(buffer);
+      }
       if (code === 0) {
         send({ type: "done", success: true });
       } else {
-        send({ type: "error", message: `neon auth exited with code ${code}` });
+        send({ type: "error", message: friendlyNeonAuthError(fullLogLines.join("\n"), code) });
       }
       finish();
     });
 
     child.on("error", (err) => {
       if (aborted || finished) return;
-      send({ type: "error", message: err.message });
+      forgetChild();
+      send({ type: "error", message: friendlyNeonAuthError(`${fullLogLines.join("\n")}\n${err.message}`, null) });
       finish();
     });
   } catch (e: any) {
     send({ type: "error", message: e.message });
     finish();
+  }
+});
+
+// Non-interactive session check: reports which CLI profiles (if any)
+// already hold a valid session, so the dialog can offer Continue instead
+// of forcing another OAuth dance.
+app.post("/api/neon-cli/auth-status", async (req, res) => {
+  try {
+    const raw = req.body?.profiles;
+    const profiles = (Array.isArray(raw) ? raw : []).map((p) => String(p || "").trim()).filter(Boolean);
+    for (const profile of profiles) {
+      if (!NEON_PROFILE_NAME_RE.test(profile)) {
+        res.status(400).json({ success: false, error: "Invalid profile name" });
+        return;
+      }
+    }
+    const { neonAuthStatus } = await import("../lib/neon-cli/cli-runner");
+    res.json({ success: true, data: await neonAuthStatus(profiles) });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 
