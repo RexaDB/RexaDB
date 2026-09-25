@@ -13,6 +13,12 @@ import type {
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import { runQuery } from "@/lib/api/actions-client";
+import {
+  applyDataSql,
+  escapeLiteral,
+  exportTableDataSql,
+  qualifiedTable,
+} from "../transfer-sql";
 import { fetchStorageBuckets, fetchStorageObjects } from "@/lib/studio/storage-utils";
 import { fetchAuthProviderConfigs } from "@/lib/studio/auth/fetch";
 import { isLikelySupabaseConnection } from "@/lib/db/supabase-helpers";
@@ -44,26 +50,41 @@ export class SupabaseAdapter implements ProviderAdapter {
     
     const tables: string[] = [];
     const rowCounts: Record<string, number> = {};
+    let dataSql = "";
     
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
-        const tableFullName = `${row.table_schema}.${row.table_name}`;
+        const tableSchema = String(row.table_schema);
+        const tableName = String(row.table_name);
+        const tableFullName = `${tableSchema}.${tableName}`;
         tables.push(tableFullName);
-        
+
         // Get row count for each table
         const countResult = await runQuery(
           connectionString,
-          `SELECT COUNT(*) as count FROM "${row.table_schema}"."${row.table_name}"`
+          `SELECT COUNT(*) as count FROM ${qualifiedTable(tableSchema, tableName)}`
         );
-        
+
         if (countResult.success && countResult.data?.rows?.[0]) {
           rowCounts[tableFullName] = Number(countResult.data.rows[0].count) || 0;
         }
+
+        // Export row data for reasonably-sized tables (schema still migrates
+        // for tables above the limit; see transfer-sql.MAX_DATA_EXPORT_ROWS).
+        const exported = await exportTableDataSql(
+          runQuery,
+          connectionString,
+          tableSchema,
+          tableName,
+          rowCounts[tableFullName] || 0,
+        );
+        dataSql += exported.sql;
       }
     }
     
     return {
       schemaSql,
+      dataSql: dataSql || undefined,
       tables,
       rowCounts,
     };
@@ -71,7 +92,20 @@ export class SupabaseAdapter implements ProviderAdapter {
   
   async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
+
+    // Schema apply is destructive (drops destination schemas first) and now
+    // runs transactionally — a failure rolls back instead of erasing data.
     await resetAndApplySql(connectionString, data.schemaSql);
+
+    // Then import row data if the export included any. Failures are surfaced
+    // (not swallowed) so the transfer reports them instead of fake success.
+    if (data.dataSql) {
+      const { applied, failed, errors } = await applyDataSql(runQuery, connectionString, data.dataSql);
+      void applied;
+      if (failed > 0) {
+        throw new Error(`Failed to import ${failed} data statement(s): ${errors.slice(0, 3).join(" | ")}`);
+      }
+    }
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {
@@ -117,20 +151,31 @@ export class SupabaseAdapter implements ProviderAdapter {
   }
   
   async importStorage(connectionString: string, data: StorageExport, options: TransferOptions): Promise<void> {
-    // Create buckets
+    // Create buckets. Values are literal-escaped (see transfer-sql) so source
+    // data cannot alter the SQL executed with destination privileges.
     for (const bucket of data.buckets) {
-      const createBucketQuery = `
-        INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-        VALUES ('${bucket.id}', '${bucket.name}', ${bucket.public}, ${bucket.file_size_limit || 'NULL'}, 
-                '${JSON.stringify(bucket.allowed_mime_types || []).replace(/'/g, "''")}')
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          public = EXCLUDED.public,
-          file_size_limit = EXCLUDED.file_size_limit,
-          allowed_mime_types = EXCLUDED.allowed_mime_types;
-      `;
-      
-      await runQuery(connectionString, createBucketQuery);
+      try {
+        const fileSizeLimit = bucket.file_size_limit === null ? 'NULL' : bucket.file_size_limit;
+        const allowedMimeTypes = escapeLiteral(JSON.stringify(bucket.allowed_mime_types || []));
+
+        const createBucketQuery = `
+          INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+          VALUES (${escapeLiteral(bucket.id)}, ${escapeLiteral(bucket.name)}, ${bucket.public},
+                  ${fileSizeLimit}, ${allowedMimeTypes})
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            public = EXCLUDED.public,
+            file_size_limit = EXCLUDED.file_size_limit,
+            allowed_mime_types = EXCLUDED.allowed_mime_types;
+        `;
+        
+        const result = await runQuery(connectionString, createBucketQuery);
+        if (!result.success) {
+          console.warn(`Failed to create bucket ${bucket.name}:`, result.error);
+        }
+      } catch (error) {
+        console.warn(`Failed to create bucket ${bucket.name}:`, error);
+      }
     }
     
     // Note: File content import would require Supabase storage API access
@@ -144,7 +189,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     const policies: AuthExport["policies"] = [];
     
     try {
-      // Export users from auth.users
+      // Export users from auth.users with warning about limitations
       const usersResult = await runQuery(
         connectionString,
         `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data 
@@ -162,6 +207,10 @@ export class SupabaseAdapter implements ProviderAdapter {
             updated_at: row.updated_at,
             raw_user_meta_data: row.raw_user_meta_data,
           });
+        }
+        // Warn if we hit the limit
+        if (usersResult.data.rows.length >= 1000) {
+          console.warn("Auth export limited to 1000 users. Consider paginating for larger datasets.");
         }
       }
     } catch (error) {
@@ -213,36 +262,48 @@ export class SupabaseAdapter implements ProviderAdapter {
   }
   
   async importAuth(connectionString: string, data: AuthExport, options: TransferOptions): Promise<void> {
-    // Import users
+    // Import users (metadata-only: passwords/identities cannot be migrated —
+    // the wizard confirm step discloses this limitation).
     for (const user of data.users) {
       try {
+        const emailConfirmed = user.email_confirmed_at ? escapeLiteral(user.email_confirmed_at) : 'NULL';
+        const escapedMeta = escapeLiteral(JSON.stringify(user.raw_user_meta_data || {}));
+
         const importUserQuery = `
           INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data)
-          VALUES ('${user.id}', '${user.email}', '${user.email_confirmed_at || 'NULL'}', 
-                  '${user.created_at}', '${user.updated_at}', 
-                  '${JSON.stringify(user.raw_user_meta_data || {}).replace(/'/g, "''")}')
+          VALUES (${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed},
+                  ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)},
+                  ${escapedMeta})
           ON CONFLICT (id) DO NOTHING;
         `;
         
-        await runQuery(connectionString, importUserQuery);
+        const result = await runQuery(connectionString, importUserQuery);
+        if (!result.success) {
+          console.warn(`Failed to import user ${user.id}:`, result.error);
+        }
       } catch (error) {
         console.warn(`Failed to import user ${user.id}:`, error);
       }
     }
     
-    // Import custom OAuth providers
+    // Import custom OAuth providers. Column names must match
+    // AuthProviderConfig (provider_type / client_secret) — writing to the
+    // legacy provider/secret columns fails and previously went unchecked.
     for (const provider of data.providers) {
       try {
         const importProviderQuery = `
-          INSERT INTO auth.custom_oauth_providers (id, name, provider, secret)
-          VALUES ('${provider.id}', '${provider.name}', '${provider.provider}', '${provider.secret}')
+          INSERT INTO auth.custom_oauth_providers (id, name, provider_type, client_secret)
+          VALUES (${escapeLiteral(provider.id)}, ${escapeLiteral(provider.name)}, ${escapeLiteral(provider.provider)}, ${escapeLiteral(provider.secret)})
           ON CONFLICT (id) DO UPDATE SET
             name = EXCLUDED.name,
-            provider = EXCLUDED.provider,
-            secret = EXCLUDED.secret;
+            provider_type = EXCLUDED.provider_type,
+            client_secret = EXCLUDED.client_secret;
         `;
         
-        await runQuery(connectionString, importProviderQuery);
+        const result = await runQuery(connectionString, importProviderQuery);
+        if (!result.success) {
+          console.warn(`Failed to import provider ${provider.id}:`, result.error);
+        }
       } catch (error) {
         console.warn(`Failed to import provider ${provider.id}:`, error);
       }

@@ -357,23 +357,31 @@ export class TransferService {
 }
 
 // Factory function to create service with adapters (server-side only)
-export function createTransferService(): TransferService {
+export async function createTransferService(): Promise<TransferService> {
   const service = new TransferService();
   
   // Dynamically import adapters only on server side
   if (typeof process !== 'undefined' && process.versions?.node) {
-    // These imports will only work on server side
-    import("./adapters/supabase-adapter").then(({ SupabaseAdapter }) => {
+    try {
+      const { SupabaseAdapter } = await import("./adapters/supabase-adapter");
       service.registerAdapter(new SupabaseAdapter());
-    }).catch(() => {});
+    } catch (error) {
+      console.warn("Failed to load Supabase adapter:", error);
+    }
     
-    import("./adapters/neon-adapter").then(({ NeonAdapter }) => {
+    try {
+      const { NeonAdapter } = await import("./adapters/neon-adapter");
       service.registerAdapter(new NeonAdapter());
-    }).catch(() => {});
+    } catch (error) {
+      console.warn("Failed to load Neon adapter:", error);
+    }
     
-    import("./adapters/postgres-adapter").then(({ PostgresAdapter }) => {
+    try {
+      const { PostgresAdapter } = await import("./adapters/postgres-adapter");
       service.registerAdapter(new PostgresAdapter());
-    }).catch(() => {});
+    } catch (error) {
+      console.warn("Failed to load Postgres adapter:", error);
+    }
   }
   
   return service;

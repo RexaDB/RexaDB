@@ -7,8 +7,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import {
   ArrowRight,
   ArrowLeft,
@@ -23,6 +23,7 @@ import {
   Upload,
   RefreshCw,
 } from "@/lib/icon-theme/lucide-react";
+import { startTransfer, exportTransferPackage } from "@/lib/transfer/transfer-client";
 import type {
   TransferOptions,
   TransferProgress,
@@ -83,53 +84,31 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     setError(null);
 
     try {
-      // Simulate transfer progress for demo purposes
-      const steps = [
-        "validating",
-        "exporting_schema",
-        "exporting_data",
-        "exporting_storage",
-        "exporting_auth",
-        "importing_schema",
-        "importing_data",
-        "importing_storage",
-        "importing_auth",
-        "complete"
-      ] as const;
-
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i];
-        const percentage = Math.round(((i + 1) / steps.length) * 100);
-        
-        setProgress({
-          currentStep: step,
-          totalSteps: steps.length,
-          currentStepIndex: i,
-          percentage,
-          message: `Processing: ${step.replace(/_/g, ' ')}`,
-        });
-
-        // Simulate processing time
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      // Mock successful transfer result
-      const mockStats = {
-        tablesTransferred: 5,
-        rowsTransferred: 1000,
-        storageBucketsTransferred: 2,
-        storageFilesTransferred: 50,
-        authUsersTransferred: 10,
-        authProvidersTransferred: 3,
-      };
+      const result = await startTransfer(
+        {
+          sourceConnectionString: source.connectionString,
+          sourceProvider: getProviderType(source.connectionType),
+          destinationConnectionString: destination.connectionString,
+          destinationProvider: getProviderType(destination.connectionType),
+          options: transferOptions,
+        },
+        (progress) => {
+          setProgress(progress);
+        }
+      );
 
       setTransferResult({
-        success: true,
-        stats: mockStats,
+        success: result.success,
+        stats: result.stats,
       });
 
-      setCurrentStep("complete");
-      onComplete?.({ success: true, stats: mockStats });
+      if (result.success) {
+        setCurrentStep("complete");
+        onComplete?.(result);
+      } else {
+        setError(result.error || "Transfer failed");
+        setCurrentStep("error");
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(errorMessage);
@@ -140,10 +119,43 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   }, [sourceConnectionId, destinationConnectionId, transferOptions, connections, onComplete]);
 
   const handleExportPackage = useCallback(async () => {
-    // Export functionality would be implemented via server API
-    // For now, show a message that this feature requires server-side implementation
-    setError("Export functionality requires server-side API implementation");
-    setCurrentStep("error");
+    const source = getSourceConnection();
+    if (!source) return;
+
+    setIsTransferring(true);
+    setError(null);
+    try {
+      // Build a real transfer package from the source via the server.
+      const result = await exportTransferPackage({
+        sourceConnectionString: source.connectionString,
+        sourceProvider: getProviderType(source.connectionType),
+        destinationConnectionString: "",
+        destinationProvider: "generic",
+        options: transferOptions,
+      });
+
+      if (!result.success || !result.packageJson) {
+        throw new Error(result.error || "Export failed");
+      }
+
+      // Create and download the file
+      const blob = new Blob([result.packageJson], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `transfer-package-${source.name}-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success("Transfer package exported successfully");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed");
+      setCurrentStep("error");
+    } finally {
+      setIsTransferring(false);
+    }
   }, [sourceConnectionId, transferOptions, connections]);
 
   const canProceed = () => {
@@ -354,6 +366,19 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                 <p className="text-sm mt-1 text-muted-foreground">
                   This transfer will modify the destination database. Make sure you have backups before proceeding.
                 </p>
+              </div>
+
+              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <span className="font-medium text-amber-800 dark:text-amber-200">Limitations</span>
+                </div>
+                <ul className="text-sm mt-2 text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                  <li>Storage files require API access and are not currently transferred</li>
+                  <li>Auth users are limited to 1000 and don't retain passwords/sign-in state</li>
+                  <li>Some providers (Neon, generic Postgres) don't support storage/auth transfer</li>
+                  <li>Database transfer is destructive - it drops and recreates schemas</li>
+                </ul>
               </div>
 
               <div className="space-y-2">

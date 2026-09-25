@@ -5855,6 +5855,7 @@ END $$;`.trim();
     table?: string;
     table_name?: string;
     function_name?: string;
+    action_statement?: string;
     activation?: string;
     timing?: string;
     events?: string[];
@@ -5873,10 +5874,24 @@ END $$;`.trim();
         : [];
     const events = rawEvents.map((e) => e.toUpperCase()).filter((e) => ["INSERT", "UPDATE", "DELETE", "TRUNCATE"].includes(e));
     const rawOrientation = String(t.orientation ?? "ROW").toUpperCase();
+    
+    // PostgreSQL uses action_statement for inline trigger functions, but some systems use function_name
+    // Try to extract function name from action_statement if function_name is not available
+    let functionName = "";
+    if (t.function_name) {
+      functionName = String(t.function_name).split(".").pop() ?? "";
+    } else if (t.action_statement) {
+      // Try to extract function name from EXECUTE FUNCTION statement
+      const functionMatch = t.action_statement.match(/EXECUTE FUNCTION\s+([^\s(]+)/i);
+      if (functionMatch) {
+        functionName = functionMatch[1].split(".").pop() ?? "";
+      }
+    }
+    
     return {
       name: t.name,
       table,
-      functionName: String(t.function_name ?? "").split(".").pop() ?? "",
+      functionName,
       events: events.length > 0 ? events : ["INSERT"],
       timing,
       orientation: rawOrientation === "STATEMENT" ? "STATEMENT" : "ROW",
@@ -5931,33 +5946,46 @@ END $$;`.trim();
     functionName: string
   ) => {
     // Postgres has no ALTER TRIGGER — an edit is DROP + CREATE.
+    // To avoid losing the trigger if CREATE fails, we use a transaction and temporary name
+    const tempName = `__temp_trigger_${Date.now()}`;
+    const createTempSql = `CREATE TRIGGER "${tempName}" ${timing} ${events.join(' OR ')} ON "${schema}"."${table}" FOR EACH ${orientation} EXECUTE FUNCTION ${functionName}();`;
     const dropSql = `DROP TRIGGER IF EXISTS "${oldTrigger.name}" ON "${oldTrigger.schema}"."${oldTrigger.table}";`;
-    const createSql = `CREATE TRIGGER "${name}" ${timing} ${events.join(' OR ')} ON "${schema}"."${table}" FOR EACH ${orientation} EXECUTE FUNCTION ${functionName}();`;
-    if (addReviewAction({ type: 'update_trigger', description: `Update trigger "${oldTrigger.schema}"."${oldTrigger.name}"`, sql: `${dropSql}\n${createSql}`, metadata: { oldTrigger, schema, table, name, events, timing, orientation, functionName } })) return;
+    const renameSql = `ALTER TRIGGER "${tempName}" ON "${schema}"."${table}" RENAME TO "${name}";`;
+    const cleanupSql = `DROP TRIGGER IF EXISTS "${tempName}" ON "${schema}"."${table}";`;
+    
+    // Transaction approach: create temp, drop old, rename temp, with rollback on failure
+    const transactionSql = `BEGIN;\n${createTempSql};\n${dropSql};\n${renameSql};\nCOMMIT;`;
+    
+    if (addReviewAction({ type: 'update_trigger', description: `Update trigger "${oldTrigger.schema}"."${oldTrigger.name}"`, sql: transactionSql, metadata: { oldTrigger, schema, table, name, events, timing, orientation, functionName } })) return;
     setIsCreatingTrigger(true);
     setError(null);
     try {
-      const dropRes = await runQueryWithLogging(dropSql);
-      if (!dropRes.success) {
-        setError(dropRes.error || "Failed to drop old trigger");
-        return;
-      }
-      const createRes = await createTrigger(currentConnectionString, schema, table, name, events, timing, orientation, functionName);
-      logQueryResult(createSql, createRes, Date.now());
-      if (createRes.success) {
+      const startTime = Date.now();
+      const res = await runQuery(currentConnectionString, transactionSql);
+      logQueryResult(transactionSql, res, startTime);
+      
+      if (res.success) {
         toast.success(`Trigger "${name}" updated successfully`);
         setTriggerFormState(null);
         await loadTriggers();
         switchAwayFromTab('create-trigger', 'database-triggers', 'triggers');
       } else {
-        setError(createRes.error || "Failed to update trigger");
+        // If transaction failed, try to clean up the temporary trigger
+        await runQuery(currentConnectionString, cleanupSql);
+        setError(res.error || "Failed to update trigger");
       }
     } catch (err) {
+      // If exception occurred, try to clean up the temporary trigger
+      try {
+        await runQuery(currentConnectionString, cleanupSql);
+      } catch (cleanupError) {
+        console.warn("Failed to clean up temporary trigger:", cleanupError);
+      }
       setError(err instanceof Error ? err.message : "Failed to update trigger");
     } finally {
       setIsCreatingTrigger(false);
     }
-  }, [addReviewAction, currentConnectionString, loadTriggers, runQueryWithLogging, switchAwayFromTab]);
+  }, [addReviewAction, currentConnectionString, loadTriggers, runQuery, switchAwayFromTab, logQueryResult]);
 
   const openCreateSchemaTab = useCallback(() => {
     openSimpleTab('create-schema', 'create-schema', 'New Schema', {

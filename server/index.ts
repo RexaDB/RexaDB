@@ -19,6 +19,7 @@ import {
   syncPaykitProducts,
 } from "./supabase-paykit";
 import { createStripeWebhookEndpoint } from "./stripe";
+import { handleTransferStart, handleTransferProgress, handleTransferExport } from "./transfer-api";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
@@ -233,6 +234,35 @@ app.post("/api/supabase-paykit/secrets", simplePostRoute((body) => setPaykitSecr
 // with URL + events pre-set; the secret key travels in the request body and
 // is never logged or stored.
 app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => createStripeWebhookEndpoint(body)));
+
+// Transfer API endpoints for project migration between providers
+app.post("/api/transfer/start", async (req, res) => {
+  try {
+    const result = await handleTransferStart(req.body);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get("/api/transfer/progress/:transferId", async (req, res) => {
+  try {
+    const progress = await handleTransferProgress(req.params.transferId);
+    res.json(progress);
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Export-only: builds a real transfer package from the source (no import).
+app.post("/api/transfer/export", async (req, res) => {
+  try {
+    const result = await handleTransferExport(req.body);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 // PlanetScale API proxy (avoids CORS in the browser). Used for browsing
 // orgs/databases/branches and minting branch passwords — never for query

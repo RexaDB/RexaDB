@@ -276,17 +276,41 @@ export async function resetAndApplySql(connectionString: string, fullSql: string
       ORDER BY schema_name;
     `);
 
+    const dropStatements: string[] = [];
     for (const row of existingSchemas.rows) {
       const schemaName = String(row.schema_name);
       if (isSupabase && isSupabaseExcludedSchema(schemaName)) {
         continue;
       }
       const schema = schemaName.replace(/"/g, "\"\"");
-      await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
+      dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
     }
+    dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
 
-    await client.query(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
-    await client.query(fullSql);
+    // Some dump outputs cannot run inside a transaction block
+    // (e.g. CREATE INDEX CONCURRENTLY, VACUUM). Only use the transactional
+    // path when the payload is transaction-safe; otherwise fall back to the
+    // legacy sequential apply and let errors propagate to the caller.
+    const nonTransactional = /(CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|^\s*VACUUM\b|^\s*CREATE\s+DATABASE\b|^\s*ALTER\s+SYSTEM\b)/im.test(fullSql);
+
+    if (!nonTransactional) {
+      await client.query("BEGIN;");
+      try {
+        for (const stmt of dropStatements) {
+          await client.query(stmt);
+        }
+        await client.query(fullSql);
+        await client.query("COMMIT;");
+      } catch (applyError) {
+        await client.query("ROLLBACK;").catch(() => {});
+        throw applyError;
+      }
+    } else {
+      for (const stmt of dropStatements) {
+        await client.query(stmt);
+      }
+      await client.query(fullSql);
+    }
   } finally {
     await client.end().catch(() => {});
   }
