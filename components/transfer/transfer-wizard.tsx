@@ -410,7 +410,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             </div>
 
             {unsupportedNotice && (
-              <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+              <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
                 <span className="break-words text-xs leading-relaxed text-amber-700 dark:text-amber-300">
                   {unsupportedNotice}
                 </span>
@@ -454,13 +454,13 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
               </div>
             </div>
 
-            <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+            <div className={cn(statusPill, "!rounded-2xl !border-destructive/30 !bg-destructive/5")}>
               <span className="break-words text-xs leading-relaxed text-destructive">
                 This transfer modifies the destination database. Make sure you have backups before proceeding.
               </span>
             </div>
 
-            <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+            <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
               <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
                 Storage migrates buckets + metadata only — file contents (Supabase Storage API, Neon Object Storage) are not copied.
                 Supabase auth users migrate with password hashes when readable; Neon Auth lives in neon_auth tables and migrates with the database.
@@ -503,7 +503,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             )}
 
             {transferResult?.warnings && transferResult.warnings.length > 0 && (
-              <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+              <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
                 <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
                   Completed with warnings: {transferResult.warnings.slice(0, 5).join(" ")}
                   {transferResult.warnings.length > 5 ? ` (+${transferResult.warnings.length - 5} more — see server log)` : ""}
@@ -514,7 +514,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         )}
 
         {currentStep === "error" && (
-          <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+          <div className={cn(statusPill, "!rounded-xl !border-destructive/30 !bg-destructive/5")}>
             <span className="break-words text-xs leading-relaxed text-destructive">
               {error || "An unknown error occurred"}
             </span>
