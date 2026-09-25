@@ -1425,6 +1425,9 @@ export function StudioMainContent({
                     triggers={triggers || []}
                     fetchingTriggers={fetchingTriggers}
                     onOpenCreateTriggerTab={studio.openCreateTriggerTab}
+                    onEditTrigger={(t) => studio.openEditTriggerTab(t)}
+                    onDuplicateTrigger={(t) => studio.openDuplicateTriggerTab(t)}
+                    onDeleteTrigger={(t) => studio.handleDeleteTrigger(t.schema, t.name)}
                     schemas={schemas}
                     selectedSchema={selectedSchema}
                     onSchemaChange={setSelectedSchema}
@@ -1628,10 +1631,16 @@ export function StudioMainContent({
                 />
               ) : paneViewMode === "create-trigger" ? (
                 <CreateTriggerView
+                  key={studio.triggerFormState ? `trigger-form-${studio.triggerFormState.nonce}` : "trigger-form-blank"}
                   connectionString={studio.currentConnectionString}
                   selectedSchema={selectedSchema}
                   onCreateTrigger={studio.handleCreateTrigger}
                   isCreating={studio.isCreatingTrigger}
+                  initialValues={studio.triggerFormState?.values}
+                  prefillNonce={studio.triggerFormState?.nonce}
+                  editContext={studio.triggerFormState?.editContext}
+                  onUpdateTrigger={studio.handleUpdateTrigger}
+                  onPrefillConsumed={studio.clearTriggerPrefill}
                 />
               ) : paneViewMode === "rls-policy-edit" ? (
                 <RlsPolicyEditorView

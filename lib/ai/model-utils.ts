@@ -22,16 +22,18 @@ export function useDiscoveredAgents() {
 }
 
 export function getConfiguredModels(settings: GlobalAiSettings | null, discoveredAgents: AcpPreset[]) {
-  const agents = discoveredAgents.map((a) => ({ model: a.name, provider: "external" as const, id: a.id }));
-  const llmModels = settings
-    ? Object.entries(settings.providers).flatMap(([provider, config]) => {
-        if (provider === "external") return [];
-        const usable = provider === "ollama" ? true : config.apiKey.trim().length > 0;
-        if (!usable) return [];
-        return config.models
-          .filter((m) => m.trim())
-          .map((model) => ({ model, provider: provider as string }));
-      })
-    : [];
+  const agents = (discoveredAgents ?? []).map((a) => ({ model: a.name, provider: "external" as const, id: a.id }));
+  const providers = settings?.providers && typeof settings.providers === "object" ? settings.providers : {};
+  const llmModels = Object.entries(providers).flatMap(([provider, config]) => {
+    if (provider === "external") return [];
+    if (!config || typeof config !== "object") return [];
+    const apiKey = typeof config.apiKey === "string" ? config.apiKey : "";
+    const usable = provider === "ollama" ? true : apiKey.trim().length > 0;
+    if (!usable) return [];
+    const models = Array.isArray(config.models) ? config.models : [];
+    return models
+      .filter((m) => typeof m === "string" && m.trim())
+      .map((model) => ({ model, provider: provider as string }));
+  });
   return { agents, llmModels };
 }

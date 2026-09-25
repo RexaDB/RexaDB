@@ -39,7 +39,7 @@ import {
   DbToolbarFilters,
 } from "./db-list-layout";
 
-interface Trigger {
+export interface Trigger {
   id: string;
   schema: string;
   name: string;
@@ -318,8 +318,8 @@ export function TriggersList({
                         <Button
                           variant="ghost"
                           className="text-sm font-medium p-0 hover:bg-transparent h-auto text-primary hover:text-primary/80 text-left"
-                          onClick={() => onEditTrigger?.(t)}
-                          title={t.name}
+                          onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
+                          title={isMssql ? "Editing MSSQL triggers coming soon" : t.name}
                         >
                           {t.name}
                         </Button>
@@ -381,14 +381,18 @@ export function TriggersList({
                             <DropdownMenuContent side="bottom" align="end" className="w-52">
                               <DropdownMenuItem
                                 className="space-x-2"
-                                onClick={() => onEditTrigger?.(t)}
+                                disabled={isMssql}
+                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                                onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
                               >
                                 <Edit2 size={14} />
                                 <p>Edit trigger</p>
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="space-x-2"
-                                onClick={() => onDuplicateTrigger?.(t)}
+                                disabled={isMssql}
+                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                                onClick={() => { if (!isMssql) onDuplicateTrigger?.(t); }}
                               >
                                 <Copy size={14} />
                                 <p>Duplicate trigger</p>
@@ -396,7 +400,9 @@ export function TriggersList({
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="space-x-2"
-                                onClick={() => onDeleteTrigger?.(t)}
+                                disabled={isMssql}
+                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                                onClick={() => { if (!isMssql) onDeleteTrigger?.(t); }}
                               >
                                 <Trash2 size={14} />
                                 <p>Delete trigger</p>

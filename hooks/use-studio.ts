@@ -32,6 +32,10 @@ import { buildShortcutCombo, getDefaultKeybindings, withMissingDefaultKeybinding
 import { generateActionId, executeSqlWithHistory } from "@/lib/studio/execute-with-review";
 import type { SettingsSectionId } from "@/components/studio/settings/settings-sidebar";
 import type { EditColumnPayload, AddColumnPayload } from "@/components/studio/grid/types";
+import type {
+  TriggerFormValues,
+  TriggerEditContext,
+} from "@/components/studio/create-trigger-view";
 import {
   Snippet, SnippetVersion, Folder, QueryHistory, UseStudioProps, SnippetExportData, DashboardExportData, Note,
   DashboardWidgetType, DashboardConditionOperator, DashboardConditionActionType, DashboardFolder, Dashboard,
@@ -1671,6 +1675,14 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [isCreatingTrigger, setIsCreatingTrigger] = useState(false);
   const [isCreatingSchema, setIsCreatingSchema] = useState(false);
   const [isCreatingDatabase, setIsCreatingDatabase] = useState(false);
+  // Prefill for the singleton create-trigger tab: duplicate opens it with the
+  // source trigger's values (name suffixed), edit opens it in update mode
+  // (drop + recreate on save, since Postgres has no ALTER TRIGGER).
+  const [triggerFormState, setTriggerFormState] = useState<{
+    nonce: number;
+    values: TriggerFormValues;
+    editContext: TriggerEditContext | null;
+  } | null>(null);
   const [isEditingEnum, setIsEditingEnum] = useState(false);
   const [editingEnumName, setEditingEnumName] = useState<string | null>(null);
   const [newEnumData, setNewEnumData] = useState<{
@@ -5381,6 +5393,7 @@ END $$;`.trim();
       fallbackError: "Failed to create trigger",
       setIsCreating: setIsCreatingTrigger,
       onSuccess: () => {
+        setTriggerFormState(null);
         loadTriggers();
         switchAwayFromTab('create-trigger', 'database-triggers', 'triggers');
       },
@@ -5827,11 +5840,124 @@ END $$;`.trim();
   }, [openTab, setSidebarView]);
 
   const openCreateTriggerTab = useCallback(() => {
+    // A blank New Trigger tab must never inherit a stale duplicate/edit prefill.
+    setTriggerFormState(null);
     openSimpleTab('create-trigger', 'create-trigger', 'New Trigger', {
       guard: { condition: !!createSupport.trigger, errorMsg: 'Create Trigger is supported only for PostgreSQL connections.' },
       schema: selectedSchema || 'public'
     });
   }, [openSimpleTab, createSupport.trigger, selectedSchema]);
+
+  /** Row shape from TriggersList (already normalized: table/activation/events filled). */
+  interface TriggerRow {
+    schema: string;
+    name: string;
+    table?: string;
+    table_name?: string;
+    function_name?: string;
+    activation?: string;
+    timing?: string;
+    events?: string[];
+    event?: string;
+    orientation?: string;
+  }
+
+  function triggerRowToFormValues(t: TriggerRow): TriggerFormValues {
+    const table = t.table ?? t.table_name ?? "";
+    const rawTiming = String(t.activation ?? t.timing ?? "BEFORE").toUpperCase();
+    const timing = rawTiming === "AFTER" || rawTiming === "INSTEAD OF" ? rawTiming : "BEFORE";
+    const rawEvents = Array.isArray(t.events)
+      ? t.events
+      : typeof t.event === "string"
+        ? t.event.split(",").map((e) => e.trim()).filter(Boolean)
+        : [];
+    const events = rawEvents.map((e) => e.toUpperCase()).filter((e) => ["INSERT", "UPDATE", "DELETE", "TRUNCATE"].includes(e));
+    const rawOrientation = String(t.orientation ?? "ROW").toUpperCase();
+    return {
+      name: t.name,
+      table,
+      functionName: String(t.function_name ?? "").split(".").pop() ?? "",
+      events: events.length > 0 ? events : ["INSERT"],
+      timing,
+      orientation: rawOrientation === "STATEMENT" ? "STATEMENT" : "ROW",
+    };
+  }
+
+  const openDuplicateTriggerTab = useCallback((trigger: TriggerRow) => {
+    if (!createSupport.trigger) {
+      toast.error('Duplicate Trigger is supported only for PostgreSQL connections.');
+      return;
+    }
+    const values = triggerRowToFormValues(trigger);
+    setTriggerFormState({
+      nonce: Date.now(),
+      values: { ...values, name: `${values.name}_copy` },
+      editContext: null,
+    });
+    openSimpleTab('create-trigger', 'create-trigger', 'New Trigger', {
+      schema: trigger.schema || selectedSchema || 'public'
+    });
+  }, [createSupport.trigger, openSimpleTab, selectedSchema]);
+
+  const openEditTriggerTab = useCallback((trigger: TriggerRow) => {
+    if (!createSupport.trigger) {
+      toast.error('Edit Trigger is supported only for PostgreSQL connections.');
+      return;
+    }
+    const values = triggerRowToFormValues(trigger);
+    setTriggerFormState({
+      nonce: Date.now(),
+      values,
+      editContext: { schema: trigger.schema, table: values.table, name: trigger.name },
+    });
+    openSimpleTab('create-trigger', 'create-trigger', 'Edit Trigger', {
+      schema: trigger.schema || selectedSchema || 'public'
+    });
+  }, [createSupport.trigger, openSimpleTab, selectedSchema]);
+
+  /** Duplicate prefills are one-shot; edit contexts persist until save / new tab. */
+  const clearTriggerPrefill = useCallback(() => {
+    setTriggerFormState((prev) => (prev && !prev.editContext ? null : prev));
+  }, []);
+
+  const handleUpdateTrigger = useCallback(async (
+    oldTrigger: TriggerEditContext,
+    schema: string,
+    table: string,
+    name: string,
+    events: string[],
+    timing: string,
+    orientation: string,
+    functionName: string
+  ) => {
+    // Postgres has no ALTER TRIGGER — an edit is DROP + CREATE.
+    const dropSql = `DROP TRIGGER IF EXISTS "${oldTrigger.name}" ON "${oldTrigger.schema}"."${oldTrigger.table}";`;
+    const createSql = `CREATE TRIGGER "${name}" ${timing} ${events.join(' OR ')} ON "${schema}"."${table}" FOR EACH ${orientation} EXECUTE FUNCTION ${functionName}();`;
+    if (addReviewAction({ type: 'update_trigger', description: `Update trigger "${oldTrigger.schema}"."${oldTrigger.name}"`, sql: `${dropSql}\n${createSql}`, metadata: { oldTrigger, schema, table, name, events, timing, orientation, functionName } })) return;
+    setIsCreatingTrigger(true);
+    setError(null);
+    try {
+      const dropRes = await runQueryWithLogging(dropSql);
+      if (!dropRes.success) {
+        setError(dropRes.error || "Failed to drop old trigger");
+        return;
+      }
+      const createRes = await createTrigger(currentConnectionString, schema, table, name, events, timing, orientation, functionName);
+      logQueryResult(createSql, createRes, Date.now());
+      if (createRes.success) {
+        toast.success(`Trigger "${name}" updated successfully`);
+        setTriggerFormState(null);
+        await loadTriggers();
+        switchAwayFromTab('create-trigger', 'database-triggers', 'triggers');
+      } else {
+        setError(createRes.error || "Failed to update trigger");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update trigger");
+    } finally {
+      setIsCreatingTrigger(false);
+    }
+  }, [addReviewAction, currentConnectionString, loadTriggers, runQueryWithLogging, switchAwayFromTab]);
 
   const openCreateSchemaTab = useCallback(() => {
     openSimpleTab('create-schema', 'create-schema', 'New Schema', {
@@ -9145,6 +9271,12 @@ END $$;`.trim();
     openCreateEnumTab,
     openCreateIndexTab,
     openCreateTriggerTab,
+    openEditTriggerTab,
+    openDuplicateTriggerTab,
+    handleUpdateTrigger,
+    handleDeleteTrigger,
+    triggerFormState,
+    clearTriggerPrefill,
     openCreateSchemaTab,
     openCreateDatabaseTab,
     openTab,

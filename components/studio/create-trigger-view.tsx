@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,6 +17,21 @@ import { Badge } from "@/components/ui/badge";
 import { TargetTableSelect } from "./target-table-select";
 import { CreateObjectShell } from "./create-object-common";
 
+export interface TriggerFormValues {
+  name: string;
+  table: string;
+  functionName: string;
+  events: string[];
+  timing: string;
+  orientation: string;
+}
+
+export interface TriggerEditContext {
+  schema: string;
+  table: string;
+  name: string;
+}
+
 interface CreateTriggerViewProps {
   connectionString: string;
   selectedSchema: string;
@@ -30,24 +45,51 @@ interface CreateTriggerViewProps {
     functionName: string,
   ) => Promise<void>;
   isCreating: boolean;
+  /** Prefill the form (duplicate / edit flows). Applied when `prefillNonce` changes and the form is still pristine. */
+  initialValues?: TriggerFormValues | null;
+  prefillNonce?: number;
+  /** When set, the form saves via `onUpdateTrigger` (drop + recreate) instead of create. */
+  editContext?: TriggerEditContext | null;
+  onUpdateTrigger?: (
+    oldTrigger: TriggerEditContext,
+    schema: string,
+    table: string,
+    name: string,
+    events: string[],
+    timing: string,
+    orientation: string,
+    functionName: string,
+  ) => Promise<void>;
+  /** Called after a prefill is applied (or skipped) so the caller can clear it. */
+  onPrefillConsumed?: () => void;
 }
+
+const DEFAULT_EVENTS = ["INSERT"];
+const DEFAULT_TIMING = "BEFORE";
+const DEFAULT_ORIENTATION = "ROW";
 
 export function CreateTriggerView({
   connectionString,
   selectedSchema,
   onCreateTrigger,
   isCreating,
+  initialValues,
+  prefillNonce,
+  editContext,
+  onUpdateTrigger,
+  onPrefillConsumed,
 }: CreateTriggerViewProps) {
   const [triggerName, setTriggerName] = useState("");
   const [selectedTable, setSelectedTable] = useState("");
   const [selectedFunction, setSelectedFunction] = useState("");
   const [tables, setTables] = useState<string[]>([]);
   const [functions, setFunctions] = useState<any[]>([]);
-  const [events, setEvents] = useState<string[]>(["INSERT"]);
-  const [timing, setTiming] = useState("BEFORE");
-  const [orientation, setOrientation] = useState("ROW");
+  const [events, setEvents] = useState<string[]>(DEFAULT_EVENTS);
+  const [timing, setTiming] = useState(DEFAULT_TIMING);
+  const [orientation, setOrientation] = useState(DEFAULT_ORIENTATION);
   const [loadingTables, setLoadingTables] = useState(false);
   const [loadingFunctions, setLoadingFunctions] = useState(false);
+  const appliedPrefillNonce = useRef<number | null>(null);
 
   const timingOptions = ["BEFORE", "AFTER", "INSTEAD OF"];
   const orientationOptions = ["ROW", "STATEMENT"];
@@ -92,6 +134,32 @@ export function CreateTriggerView({
     }
   }, [selectedTable, events]);
 
+  // Apply duplicate/edit prefill once per nonce. Duplicate prefills never
+  // clobber a form the user has already started typing in; edit prefills
+  // always win because the user explicitly chose that trigger to edit.
+  useEffect(() => {
+    if (!prefillNonce || appliedPrefillNonce.current === prefillNonce) return;
+    appliedPrefillNonce.current = prefillNonce;
+    const pristine =
+      triggerName === "" &&
+      selectedTable === "" &&
+      selectedFunction === "" &&
+      events.length === 1 &&
+      events[0] === DEFAULT_EVENTS[0] &&
+      timing === DEFAULT_TIMING &&
+      orientation === DEFAULT_ORIENTATION;
+    if ((pristine || editContext) && initialValues) {
+      setTriggerName(initialValues.name);
+      setSelectedTable(initialValues.table);
+      setSelectedFunction(initialValues.functionName);
+      setEvents(initialValues.events.length > 0 ? initialValues.events : DEFAULT_EVENTS);
+      setTiming(initialValues.timing || DEFAULT_TIMING);
+      setOrientation(initialValues.orientation || DEFAULT_ORIENTATION);
+    }
+    onPrefillConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillNonce, editContext]);
+
   const toggleEvent = (event: string) => {
     setEvents((prev) =>
       prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event],
@@ -106,6 +174,19 @@ export function CreateTriggerView({
       events.length === 0
     )
       return;
+    if (editContext && onUpdateTrigger) {
+      void onUpdateTrigger(
+        editContext,
+        selectedSchema,
+        selectedTable,
+        triggerName,
+        events,
+        timing,
+        orientation,
+        selectedFunction,
+      );
+      return;
+    }
     onCreateTrigger(
       selectedSchema,
       selectedTable,
@@ -119,8 +200,12 @@ export function CreateTriggerView({
 
   return (
     <CreateObjectShell
-      title="Create a new trigger"
-      description="Automate actions when data changes in"
+      title={editContext ? "Edit trigger" : "Create a new trigger"}
+      description={
+        editContext
+          ? `Update trigger "${editContext.name}" — saved as drop + recreate`
+          : "Automate actions when data changes in"
+      }
       schema={selectedSchema}
       isCreating={isCreating}
       submitDisabled={
@@ -130,7 +215,7 @@ export function CreateTriggerView({
         events.length === 0 ||
         isCreating
       }
-      submitLabel="Create Trigger"
+      submitLabel={editContext ? "Save Changes" : "Create Trigger"}
       onSubmit={handleSubmit}
     >
       {/* Left Column: Basic Config */}
