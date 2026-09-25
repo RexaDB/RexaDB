@@ -24,7 +24,10 @@ export function TransferProjectScreen({ connections, onBack, onComplete }: Trans
         if (!nextOpen) onBack();
       }}
     >
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent
+        className="max-h-[88vh] overflow-y-auto p-4 sm:max-w-[472px]"
+        overlayClassName="bg-black/40"
+      >
         <DialogTitle className="sr-only">Transfer Project</DialogTitle>
         <TransferWizard
           connections={connections.map(conn => ({
