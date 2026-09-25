@@ -377,6 +377,41 @@ app.post("/api/neon-cli/detect", async (_req, res) => {
 
 const NEON_PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
+// Only one `neon auth` flow may run per CLI profile. Overlapping flows each
+// mint their own OAuth state/CSRF token plus a random localhost callback
+// port, so authorizing a stale browser tab fails with request_forbidden
+// (CSRF mismatch) or hits an already-dead callback server. Starting a new
+// login therefore kills any previous flow for the same profile first.
+const neonLoginChildren = new Map<string, import("child_process").ChildProcess>();
+
+function killNeonLogin(profile: string): void {
+  const prev = neonLoginChildren.get(profile);
+  if (!prev) return;
+  neonLoginChildren.delete(profile);
+  try {
+    if (!prev.killed && prev.exitCode === null) prev.kill("SIGTERM");
+  } catch {
+    // already gone — nothing to do
+  }
+}
+
+/** Translate raw `neon auth` stderr dumps into something users can act on. */
+function friendlyNeonAuthError(logTail: string, code: number | null): string {
+  if (/CSRF value from the token does not match/i.test(logTail)) {
+    return "This sign-in attempt expired — usually because an older Neon browser tab was authorized after a retry, or a previous attempt was cancelled. Close any older Neon sign-in tabs, keep this dialog open, and press Try again.";
+  }
+  if (/EADDRINUSE|address already in use/i.test(logTail)) {
+    return "Another Neon sign-in is already running. Close any other sign-in dialogs or browser tabs and try again.";
+  }
+  if (/ENOENT|command not found|not installed|spawn .* failed/i.test(logTail)) {
+    return "The Neon CLI is not installed or not on PATH. Install it (npm i -g neonctl) and try again.";
+  }
+  if (/cannot run interactive auth in ci/i.test(logTail)) {
+    return "The Neon CLI refused interactive sign-in. Restart the app normally (not in CI mode) and try again.";
+  }
+  return `Neon sign-in failed (neon auth exited with code ${code ?? "?"}). Check the log above for details and try again.`;
+}
+
 app.post("/api/neon-cli/login", async (req, res) => {
   const profile = String(req.body?.profile || "").trim();
   if (!NEON_PROFILE_NAME_RE.test(profile)) {
@@ -402,10 +437,19 @@ app.post("/api/neon-cli/login", async (req, res) => {
 
   try {
     const { spawnNeonAuthLogin } = await import("../lib/neon-cli/cli-runner");
+    // Single-flight: a retry/reopen kills the previous flow for this
+    // profile so its stale browser tab can no longer collide with the new
+    // OAuth state (CSRF mismatch) or callback port.
+    killNeonLogin(profile);
     const child = spawnNeonAuthLogin(profile);
+    neonLoginChildren.set(profile, child);
+    const forgetChild = () => {
+      if (neonLoginChildren.get(profile) === child) neonLoginChildren.delete(profile);
+    };
 
     req.on("close", () => {
       aborted = true;
+      forgetChild();
       try { child.kill("SIGTERM"); } catch {}
     });
 
@@ -433,18 +477,20 @@ app.post("/api/neon-cli/login", async (req, res) => {
 
     child.on("close", (code) => {
       if (aborted) return;
+      forgetChild();
       if (buffer.trim()) forwardLine(buffer);
       if (code === 0) {
         send({ type: "done", success: true });
       } else {
-        send({ type: "error", message: `neon auth exited with code ${code}` });
+        send({ type: "error", message: friendlyNeonAuthError(buffer, code) });
       }
       finish();
     });
 
     child.on("error", (err) => {
       if (aborted || finished) return;
-      send({ type: "error", message: err.message });
+      forgetChild();
+      send({ type: "error", message: friendlyNeonAuthError(`${buffer}\n${err.message}`, null) });
       finish();
     });
   } catch (e: any) {
