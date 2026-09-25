@@ -102,17 +102,24 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
   // Before forcing another OAuth dance, check whether the CLI already
   // holds a valid session (e.g. signed in via terminal, or a previous
   // RexaDB login). If so, offer Continue instead of re-authenticating.
+  // Generation-guarded: a slow check from a previous open must never
+  // overwrite a newer session or start a login that kills the current
+  // OAuth flow via single-flight.
+  const checkGenRef = useRef(0);
   const checkExistingSession = useCallback(async () => {
+    const gen = ++checkGenRef.current;
     setStatus("checking");
     setFatalError(null);
     setExistingSession(null);
+    const alive = () => openRef.current && checkGenRef.current === gen;
     try {
       const candidates = reconnectProfile
         ? [reconnectProfile]
         : [...getNeonCliAccounts().map((a) => a.profileName), "DEFAULT"];
       const statuses = await getNeonAuthStatus(candidates);
+      if (!alive()) return;
       const usable = statuses.find((s) => s.valid);
-      if (usable && openRef.current) {
+      if (usable) {
         setExistingSession(usable);
         setStatus("signed-in");
         return;
@@ -120,12 +127,13 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
     } catch {
       // status check is best-effort — fall through to a fresh login
     }
-    if (openRef.current) start();
+    if (alive()) start();
   }, [reconnectProfile, start]);
 
   useEffect(() => {
     if (open && status === "idle") void checkExistingSession();
     if (!open) {
+      checkGenRef.current++;
       abortRef.current?.abort();
       abortRef.current = null;
       profileRef.current = "";

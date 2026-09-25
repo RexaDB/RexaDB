@@ -282,7 +282,13 @@ export interface NeonAuthStatus {
  */
 export async function neonAuthStatus(profiles: string[]): Promise<NeonAuthStatus[]> {
   const found = locateNeonCli();
-  const unique = [...new Set(profiles.map((p) => String(p || "").trim()).filter(Boolean))].slice(0, 10);
+  // Dedupe, but always reserve a slot for DEFAULT: the dialog appends it
+  // after stored accounts (terminal sign-ins live there), and a naive
+  // take-first-10 would silently drop it once ten accounts are stored.
+  const deduped = [...new Set(profiles.map((p) => String(p || "").trim()).filter(Boolean))];
+  const unique = deduped.includes("DEFAULT")
+    ? ["DEFAULT", ...deduped.filter((p) => p !== "DEFAULT").slice(0, 9)]
+    : deduped.slice(0, 10);
   if (!found) {
     return unique.map((profile) => ({
       profile,

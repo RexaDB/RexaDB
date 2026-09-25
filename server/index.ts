@@ -484,9 +484,24 @@ app.post("/api/neon-cli/login", async (req, res) => {
     };
 
     let buffer = "";
+    // Complete output retained for error classification: `buffer` above
+    // only ever holds the trailing partial line (finished lines are
+    // consumed by forwardLine), so classifying from it sees almost nothing
+    // and every failure degrades to the generic message.
+    const fullLogLines: string[] = [];
+    const rememberLines = (text: string) => {
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        fullLogLines.push(trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed);
+      }
+      if (fullLogLines.length > 200) fullLogLines.splice(0, fullLogLines.length - 200);
+    };
     const onChunk = (chunk: Buffer) => {
       if (aborted) return;
-      buffer += chunk.toString();
+      const text = chunk.toString();
+      rememberLines(text);
+      buffer += text;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       for (const line of lines) forwardLine(line);
@@ -497,11 +512,14 @@ app.post("/api/neon-cli/login", async (req, res) => {
     child.on("close", (code) => {
       if (aborted) return;
       forgetChild();
-      if (buffer.trim()) forwardLine(buffer);
+      if (buffer.trim()) {
+        rememberLines(buffer);
+        forwardLine(buffer);
+      }
       if (code === 0) {
         send({ type: "done", success: true });
       } else {
-        send({ type: "error", message: friendlyNeonAuthError(buffer, code) });
+        send({ type: "error", message: friendlyNeonAuthError(fullLogLines.join("\n"), code) });
       }
       finish();
     });
@@ -509,7 +527,7 @@ app.post("/api/neon-cli/login", async (req, res) => {
     child.on("error", (err) => {
       if (aborted || finished) return;
       forgetChild();
-      send({ type: "error", message: friendlyNeonAuthError(`${buffer}\n${err.message}`, null) });
+      send({ type: "error", message: friendlyNeonAuthError(`${fullLogLines.join("\n")}\n${err.message}`, null) });
       finish();
     });
   } catch (e: any) {
@@ -538,7 +556,8 @@ app.post("/api/neon-cli/auth-status", async (req, res) => {
   }
 });
 
-app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
+app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));
+app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
 app.post("/api/neon-cli/branches", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonBranchesList(body.profile, body.projectId)));
 app.post("/api/neon-cli/databases", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonDatabasesList(body.profile, body.projectId, body.branchId)));
 app.post("/api/neon-cli/roles", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonRolesList(body.profile, body.projectId, body.branchId)));
