@@ -100,32 +100,26 @@ export class NeonAdapter implements ProviderAdapter {
     await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql);
   }
   
-  // Neon doesn't have built-in storage like Supabase, but users might use external storage
+  // Neon doesn't have built-in storage like Supabase. There is intentionally
+  // NO importStorage: the service reports exported storage as skipped with a
+  // user-visible warning instead of silently discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
-    // Neon doesn't have built-in storage, return empty
-    console.warn("Neon storage export: Neon doesn't have built-in storage, skipping storage transfer");
-    return { buckets: [], files: [] };
+    return {
+      buckets: [],
+      files: [],
+      warnings: ["Neon has no built-in storage: storage transfer selected, but there is nothing to export."],
+    };
   }
-  
-  async importStorage?(connectionString: string, data: StorageExport, options: TransferOptions): Promise<void> {
-    // Neon doesn't have built-in storage, but we could create tables to simulate it
-    if (data.buckets.length > 0 || data.files.length > 0) {
-      console.warn(`Neon storage import: ${data.buckets.length} buckets and ${data.files.length} files were not transferred because Neon doesn't have built-in storage`);
-    }
-  }
-  
-  // Neon doesn't have built-in auth like Supabase
+
+  // Neon doesn't have built-in auth like Supabase. There is intentionally
+  // NO importAuth — see importStorage note above.
   async exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport> {
-    // Neon doesn't have built-in auth, return empty
-    console.warn("Neon auth export: Neon doesn't have built-in auth, skipping auth transfer");
-    return { users: [], providers: [], policies: [] };
-  }
-  
-  async importAuth?(connectionString: string, data: AuthExport, options: TransferOptions): Promise<void> {
-    // Neon doesn't have built-in auth, but we could create tables to simulate it
-    if (data.users.length > 0 || data.providers.length > 0) {
-      console.warn(`Neon auth import: ${data.users.length} users and ${data.providers.length} providers were not transferred because Neon doesn't have built-in auth`);
-    }
+    return {
+      users: [],
+      providers: [],
+      policies: [],
+      warnings: ["Neon has no built-in auth: auth transfer selected, but there is nothing to export."],
+    };
   }
   
   async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {

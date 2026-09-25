@@ -86,6 +86,8 @@ export interface StorageExport {
     contentBase64?: string;
     size?: number;
   }>;
+  /** Non-fatal storage notes (e.g. file contents not migrated). */
+  warnings?: string[];
 }
 
 export interface AuthExport {
@@ -96,12 +98,33 @@ export interface AuthExport {
     created_at: string;
     updated_at: string;
     raw_user_meta_data?: Record<string, unknown>;
+    /**
+     * bcrypt hash from auth.users. Present only when the source connection
+     * can read it; restoring it on a compatible destination preserves
+     * password sign-in. Absent → users migrate metadata-only and must
+     * reset passwords (reported in warnings, never silently).
+     */
+    encrypted_password?: string;
   }>;
   providers: Array<{
     id: string;
     name: string;
     provider: string;
     secret: string;
+  }>;
+  /**
+   * auth.identities rows (email/oauth account links). Restored alongside
+   * users so imported accounts keep their sign-in capability on
+   * destinations with a compatible auth schema.
+   */
+  identities?: Array<{
+    id: string;
+    user_id: string;
+    provider: string;
+    provider_id?: string;
+    identity_data?: Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
   }>;
   policies?: Array<{
     id: string;
@@ -110,6 +133,8 @@ export interface AuthExport {
     table: string;
     definition: string;
   }>;
+  /** Non-fatal auth export/import notes surfaced to users. */
+  warnings?: string[];
 }
 
 export interface SettingsExport {
@@ -150,20 +175,29 @@ export interface TransferResult {
 
 export interface ProviderAdapter {
   type: ProviderType;
-  
+
   validateConnection(connectionString: string): Promise<boolean>;
-  
+
   exportDatabase(connectionString: string, options: TransferOptions): Promise<DatabaseExport>;
-  importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void>;
-  
+  importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void>;
+
   exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport>;
-  importStorage?(connectionString: string, data: StorageExport, options: TransferOptions): Promise<void>;
-  
+  importStorage?(connectionString: string, data: StorageExport, options: TransferOptions): Promise<ImportOutcome | void>;
+
   exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport>;
-  importAuth?(connectionString: string, data: AuthExport, options: TransferOptions): Promise<void>;
-  
+  importAuth?(connectionString: string, data: AuthExport, options: TransferOptions): Promise<ImportOutcome | void>;
+
   exportSettings?(connectionString: string, options: TransferOptions): Promise<SettingsExport>;
-  importSettings?(connectionString: string, data: SettingsExport, options: TransferOptions): Promise<void>;
-  
+  importSettings?(connectionString: string, data: SettingsExport, options: TransferOptions): Promise<ImportOutcome | void>;
+
   getProjectInfo?(connectionString: string): Promise<{ name: string; id: string }>;
+}
+
+/**
+ * What an import step reports. Import methods that cannot do the work
+ * (unsupported destination) are simply ABSENT — the service turns that
+ * into a user-visible warning instead of counting exports as transferred.
+ */
+export interface ImportOutcome {
+  warnings?: string[];
 }

@@ -366,11 +366,76 @@ function splitChunkName(name: string): { schema: string; table: string } {
 
 /** Remove full-line `--` comments; returns "" when nothing executable remains. */
 export function stripCommentLines(sql: string): string {
-  return sql
-    .split("\n")
-    .filter((line) => !/^\s*--/.test(line))
-    .join("\n")
-    .trim();
+  // Quote-aware: a line starting with `--` INSIDE a multiline string literal
+  // is data, not a comment. Track quote state across lines so such lines
+  // are preserved verbatim.
+  const lines = sql.split("\n");
+  let inSingle = false;
+  let inDouble = false;
+  let dollarTag: string | null = null;
+  const kept: string[] = [];
+
+  const startsDollarQuote = (s: string, pos: number): string | null => {
+    const m = /^\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$/.exec(s.slice(pos));
+    return m ? m[0] : null;
+  };
+
+  for (const line of lines) {
+    const isCommentLine = !inSingle && !inDouble && dollarTag === null && /^\s*--/.test(line);
+    // Advance quote state through the whole line so multiline literals
+    // spanning later lines are tracked correctly.
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      const next = line[i + 1];
+      if (dollarTag !== null) {
+        if (line.startsWith(dollarTag, i)) {
+          i += dollarTag.length;
+          dollarTag = null;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      if (inSingle) {
+        if (ch === "'" && next === "'") i += 2;
+        else {
+          if (ch === "'") inSingle = false;
+          i++;
+        }
+        continue;
+      }
+      if (inDouble) {
+        if (ch === '"' && next === '"') i += 2;
+        else {
+          if (ch === '"') inDouble = false;
+          i++;
+        }
+        continue;
+      }
+      if (ch === "'") {
+        inSingle = true;
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = true;
+        i++;
+        continue;
+      }
+      if (ch === "$") {
+        const tag = startsDollarQuote(line, i);
+        if (tag) {
+          dollarTag = tag;
+          i += tag.length;
+          continue;
+        }
+      }
+      i++;
+    }
+    if (!isCommentLine) kept.push(line);
+  }
+  return kept.join("\n").trim();
 }
 
 export function parseDataChunks(dataSql: string): DataChunk[] {
@@ -378,7 +443,12 @@ export function parseDataChunks(dataSql: string): DataChunk[] {
   let current: { schema: string; table: string; parts: string[] } | null = null;
   const flush = () => {
     if (current && current.parts.length > 0) {
-      chunks.push({ schema: current.schema, table: current.table, sql: current.parts.join("\n") });
+      // Parts are individual statements WITHOUT trailing semicolons (the
+      // splitter consumes them). Re-terminate each one: sending multiple
+      // INSERTs as a single query without separators is a syntax error
+      // that would roll back the whole import transaction.
+      const terminated = current.parts.map((p) => (p.endsWith(";") ? p : `${p};`));
+      chunks.push({ schema: current.schema, table: current.table, sql: terminated.join("\n") });
     }
     current = null;
   };

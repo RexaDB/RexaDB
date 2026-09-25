@@ -103,28 +103,26 @@ export class PostgresAdapter implements ProviderAdapter {
     }
   }
   
-  // Generic Postgres doesn't have built-in storage
+  // Generic Postgres has no built-in storage. There is intentionally NO
+  // importStorage: the service reports exported storage as skipped with a
+  // user-visible warning instead of silently discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
-    console.warn("Postgres storage export: generic Postgres has no built-in storage, skipping storage transfer");
-    return { buckets: [], files: [] };
+    return {
+      buckets: [],
+      files: [],
+      warnings: ["Generic Postgres has no built-in storage: storage transfer selected, but there is nothing to export."],
+    };
   }
 
-  async importStorage?(connectionString: string, data: StorageExport, options: TransferOptions): Promise<void> {
-    if (data.buckets.length > 0 || data.files.length > 0) {
-      console.warn(`Postgres storage import: ${data.buckets.length} buckets and ${data.files.length} files were not transferred because generic Postgres has no built-in storage`);
-    }
-  }
-
-  // Generic Postgres doesn't have built-in auth like Supabase
+  // Generic Postgres has no built-in auth like Supabase. There is
+  // intentionally NO importAuth — see importStorage note above.
   async exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport> {
-    console.warn("Postgres auth export: generic Postgres has no built-in auth, skipping auth transfer");
-    return { users: [], providers: [], policies: [] };
-  }
-
-  async importAuth?(connectionString: string, data: AuthExport, options: TransferOptions): Promise<void> {
-    if (data.users.length > 0 || data.providers.length > 0) {
-      console.warn(`Postgres auth import: ${data.users.length} users and ${data.providers.length} providers were not transferred because generic Postgres has no built-in auth`);
-    }
+    return {
+      users: [],
+      providers: [],
+      policies: [],
+      warnings: ["Generic Postgres has no built-in auth: auth transfer selected, but there is nothing to export."],
+    };
   }
   
   async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {

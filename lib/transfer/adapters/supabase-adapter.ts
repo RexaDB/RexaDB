@@ -10,6 +10,7 @@ import type {
   StorageExport,
   AuthExport,
   SettingsExport,
+  ImportOutcome,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import {
@@ -144,12 +145,19 @@ export class SupabaseAdapter implements ProviderAdapter {
         allowed_mime_types: b.allowed_mime_types,
       })),
       files,
+      warnings:
+        files.length > 0
+          ? [
+              `Storage export is metadata-only: ${files.length} file(s) recorded without contents (object bytes are not reachable over SQL). File contents will NOT migrate.`,
+            ]
+          : [],
     };
   }
   
-  async importStorage(connectionString: string, data: StorageExport, options: TransferOptions): Promise<void> {
+  async importStorage(connectionString: string, data: StorageExport, options: TransferOptions) {
     // Create buckets. Values are literal-escaped (see transfer-sql) so source
     // data cannot alter the SQL executed with destination privileges.
+    const warnings: string[] = [];
     for (const bucket of data.buckets) {
       try {
         const fileSizeLimit = bucket.file_size_limit === null ? 'NULL' : bucket.file_size_limit;
@@ -165,53 +173,119 @@ export class SupabaseAdapter implements ProviderAdapter {
             file_size_limit = EXCLUDED.file_size_limit,
             allowed_mime_types = EXCLUDED.allowed_mime_types;
         `;
-        
+
         const result = await serverTransferQuery(connectionString, createBucketQuery);
         if (!result.success) {
-          console.warn(`Failed to create bucket ${bucket.name}:`, result.error);
+          warnings.push(`Failed to create bucket ${bucket.name}: ${String(result.error ?? "unknown error")}`);
         }
       } catch (error) {
-        console.warn(`Failed to create bucket ${bucket.name}:`, error);
+        warnings.push(`Failed to create bucket ${bucket.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    
-    // Note: File content import would require Supabase storage API access
-    // This is a placeholder for the metadata import
-    console.log(`Storage import: ${data.files.length} files metadata imported (content requires API access)`);
+
+    // File CONTENTS cannot migrate over SQL: object bytes live in the
+    // Storage backend (S3/disk), not in Postgres, and the transfer holds no
+    // Storage API credentials. Buckets + metadata migrate; contents do not —
+    // reported as a warning, never silently counted as transferred.
+    if (data.files.length > 0) {
+      warnings.push(
+        `${data.files.length} file(s) across ${data.buckets.length} bucket(s) migrated metadata-only: file contents require Storage API access and were NOT copied. Re-upload contents or copy the underlying bucket store manually.`,
+      );
+    }
+    return { warnings };
   }
   
   async exportAuth(connectionString: string, options: TransferOptions): Promise<AuthExport> {
     const users: AuthExport["users"] = [];
     const providers: AuthExport["providers"] = [];
     const policies: AuthExport["policies"] = [];
-    
-    try {
-      // Export users from auth.users with warning about limitations
-      const usersResult = await serverTransferQuery(
-        connectionString,
-        `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data 
-         FROM auth.users 
-         LIMIT 1000`
-      );
-      
-      if (usersResult.success && usersResult.data?.rows) {
-        for (const row of usersResult.data.rows) {
-          users.push({
-            id: String(row.id),
-            email: String(row.email),
-            email_confirmed_at: row.email_confirmed_at != null ? String(row.email_confirmed_at) : undefined,
-            created_at: String(row.created_at),
-            updated_at: String(row.updated_at),
-            raw_user_meta_data: (row.raw_user_meta_data ?? {}) as Record<string, unknown>,
-          });
+    const identities: NonNullable<AuthExport["identities"]> = [];
+    const warnings: string[] = [];
+
+    // Paginated fetch: no silent 1000-user cap. Stable ORDER BY id paging.
+    const fetchAll = async (baseSelect: string, batch = 1000, maxBatches = 200) => {
+      const all: Record<string, unknown>[] = [];
+      for (let page = 0; page < maxBatches; page++) {
+        const res = await serverTransferQuery(
+          connectionString,
+          `${baseSelect} ORDER BY id LIMIT ${batch} OFFSET ${page * batch}`,
+        );
+        if (!res.success) {
+          return { rows: all, ok: all.length > 0, error: String(res.error ?? "query failed") };
         }
-        // Warn if we hit the limit
-        if (usersResult.data.rows.length >= 1000) {
-          console.warn("Auth export limited to 1000 users. Consider paginating for larger datasets.");
+        const rows = res.data?.rows ?? [];
+        all.push(...rows);
+        if (rows.length < batch) return { rows: all, ok: true as const, error: undefined as string | undefined };
+      }
+      return { rows: all, ok: true as const, error: undefined as string | undefined, truncated: true };
+    };
+
+    try {
+      // encrypted_password is readable by privileged roles; when it is not,
+      // fall back to metadata-only export and warn (users must reset passwords).
+      const withPassword = await fetchAll(
+        `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data, encrypted_password FROM auth.users`,
+      );
+      let rows = withPassword.rows;
+      let passwordless = false;
+      if (!withPassword.ok) {
+        const fallback = await fetchAll(
+          `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data FROM auth.users`,
+        );
+        rows = fallback.rows;
+        passwordless = true;
+        if (!fallback.ok) {
+          warnings.push(`Auth user export incomplete: ${fallback.error}`);
+        } else {
+          warnings.push(
+            "Password hashes are not readable with this connection: users migrate metadata-only and must reset passwords to sign in.",
+          );
         }
       }
+      for (const row of rows) {
+        users.push({
+          id: String(row.id),
+          email: String(row.email),
+          email_confirmed_at: row.email_confirmed_at != null ? String(row.email_confirmed_at) : undefined,
+          created_at: String(row.created_at),
+          updated_at: String(row.updated_at),
+          raw_user_meta_data: (row.raw_user_meta_data ?? {}) as Record<string, unknown>,
+          ...(!passwordless && row.encrypted_password != null
+            ? { encrypted_password: String(row.encrypted_password) }
+            : {}),
+        });
+      }
+      if ((withPassword as { truncated?: boolean }).truncated) {
+        warnings.push("Auth export hit the 200,000-user safety cap; remaining users were not exported.");
+      }
     } catch (error) {
-      console.warn("Failed to export auth users:", error);
+      const msg = `Failed to export auth users: ${error instanceof Error ? error.message : String(error)}`;
+      console.warn(msg);
+      warnings.push(msg);
+    }
+
+    try {
+      // Identity links (email/oauth) so imported accounts keep sign-in capability.
+      const idRes = await fetchAll(
+        `SELECT id, user_id, provider, provider_id, identity_data, created_at, updated_at FROM auth.identities`,
+        2000,
+      );
+      for (const row of idRes.rows) {
+        identities.push({
+          id: String(row.id),
+          user_id: String(row.user_id),
+          provider: String(row.provider),
+          provider_id: row.provider_id != null ? String(row.provider_id) : undefined,
+          identity_data: (row.identity_data ?? {}) as Record<string, unknown>,
+          created_at: row.created_at != null ? String(row.created_at) : undefined,
+          updated_at: row.updated_at != null ? String(row.updated_at) : undefined,
+        });
+      }
+      if (!idRes.ok) warnings.push(`Auth identity export incomplete: ${idRes.error}`);
+    } catch (error) {
+      const msg = `Failed to export auth identities: ${error instanceof Error ? error.message : String(error)}`;
+      console.warn(msg);
+      warnings.push(msg);
     }
     
     try {
@@ -258,34 +332,84 @@ export class SupabaseAdapter implements ProviderAdapter {
       console.warn("Failed to export RLS policies:", error);
     }
     
-    return { users, providers, policies };
+    return { users, providers, policies, identities, warnings };
   }
-  
-  async importAuth(connectionString: string, data: AuthExport, options: TransferOptions): Promise<void> {
-    // Import users (metadata-only: passwords/identities cannot be migrated —
-    // the wizard confirm step discloses this limitation).
+
+  async importAuth(connectionString: string, data: AuthExport, options: TransferOptions): Promise<ImportOutcome | void> {
+    const warnings: string[] = [];
+    let usersOk = 0;
+    let identitiesOk = 0;
+
+    // Import users WITH password hashes when the export carried them, so
+    // password sign-in keeps working on destinations with a compatible auth
+    // schema. Users without hashes migrate metadata-only (must reset passwords).
     for (const user of data.users) {
       try {
         const emailConfirmed = user.email_confirmed_at ? escapeLiteral(user.email_confirmed_at) : 'NULL';
         const escapedMeta = escapeLiteral(JSON.stringify(user.raw_user_meta_data || {}));
+        const passwordCol = user.encrypted_password != null ? `, encrypted_password` : ``;
+        const passwordVal = user.encrypted_password != null ? `, ${escapeLiteral(user.encrypted_password)}` : ``;
 
         const importUserQuery = `
-          INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data)
+          INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data${passwordCol})
           VALUES (${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed},
                   ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)},
-                  ${escapedMeta})
+                  ${escapedMeta}${passwordVal})
           ON CONFLICT (id) DO NOTHING;
         `;
-        
+
         const result = await serverTransferQuery(connectionString, importUserQuery);
         if (!result.success) {
-          console.warn(`Failed to import user ${user.id}:`, result.error);
+          // Hash column may not exist/be writable on this destination — retry metadata-only.
+          if (user.encrypted_password != null) {
+            const retry = await serverTransferQuery(
+              connectionString,
+              `INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data)
+               VALUES (${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed},
+                       ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)},
+                       ${escapedMeta})
+               ON CONFLICT (id) DO NOTHING;`,
+            );
+            if (retry.success) {
+              usersOk++;
+              warnings.push(`User ${user.email} migrated without password hash (destination rejected it); password reset required.`);
+              continue;
+            }
+          }
+          warnings.push(`Failed to import user ${user.email}: ${String(result.error ?? "unknown error")}`);
+        } else {
+          usersOk++;
         }
       } catch (error) {
-        console.warn(`Failed to import user ${user.id}:`, error);
+        warnings.push(`Failed to import user ${user.email}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    
+
+    // Identity links restore sign-in capability for the imported users.
+    for (const identity of data.identities ?? []) {
+      try {
+        const created = identity.created_at ? escapeLiteral(identity.created_at) : "NOW()";
+        const updated = identity.updated_at ? escapeLiteral(identity.updated_at) : "NOW()";
+        const result = await serverTransferQuery(
+          connectionString,
+          `INSERT INTO auth.identities (id, user_id, provider, provider_id, identity_data, created_at, updated_at)
+           VALUES (${escapeLiteral(identity.id)}, ${escapeLiteral(identity.user_id)}, ${escapeLiteral(identity.provider)},
+                   ${identity.provider_id != null ? escapeLiteral(identity.provider_id) : "NULL"},
+                   ${escapeLiteral(JSON.stringify(identity.identity_data ?? {}))},
+                   ${created}, ${updated})
+           ON CONFLICT (id) DO NOTHING;`,
+        );
+        if (result.success) identitiesOk++;
+        else warnings.push(`Failed to import identity for user ${identity.user_id}: ${String(result.error ?? "unknown error")}`);
+      } catch (error) {
+        warnings.push(`Failed to import identity for user ${identity.user_id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (data.users.length > 0) {
+      console.log(`Auth import: ${usersOk}/${data.users.length} users, ${identitiesOk}/${data.identities?.length ?? 0} identities restored.`);
+    }
+
     // Import custom OAuth providers. Column names must match
     // AuthProviderConfig (provider_type / client_secret) — writing to the
     // legacy provider/secret columns fails and previously went unchecked.
@@ -299,18 +423,17 @@ export class SupabaseAdapter implements ProviderAdapter {
             provider_type = EXCLUDED.provider_type,
             client_secret = EXCLUDED.client_secret;
         `;
-        
+
         const result = await serverTransferQuery(connectionString, importProviderQuery);
         if (!result.success) {
-          console.warn(`Failed to import provider ${provider.id}:`, result.error);
+          warnings.push(`Failed to import provider ${provider.name}: ${String(result.error ?? "unknown error")}`);
         }
       } catch (error) {
-        console.warn(`Failed to import provider ${provider.id}:`, error);
+        warnings.push(`Failed to import provider ${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    
-    // Note: RLS policies would need more sophisticated import logic
-    console.log(`Auth import: ${data.users.length} users, ${data.providers.length} providers imported`);
+
+    return { warnings };
   }
   
   async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {

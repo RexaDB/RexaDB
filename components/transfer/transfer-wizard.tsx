@@ -37,7 +37,7 @@ interface TransferWizardProps {
     connectionString: string;
     connectionType: string;
   }>;
-  onComplete?: (result: { success: boolean; stats?: Record<string, number> }) => void;
+  onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[] }) => void;
   onCancel?: () => void;
 }
 
@@ -58,6 +58,21 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const [error, setError] = useState<string | null>(null);
   const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[] } | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
+
+  // Completion is user-acknowledged: the complete step (stats + warnings)
+  // stays mounted until Done is clicked. Auto-firing onComplete here used
+  // to unmount the wizard before warnings could be read.
+  const handleDone = useCallback(() => {
+    if (transferResult?.success && onComplete) {
+      onComplete({
+        success: true,
+        stats: transferResult.stats,
+        warnings: transferResult.warnings,
+      });
+    } else {
+      onCancel?.();
+    }
+  }, [transferResult, onComplete, onCancel]);
 
   const getProviderType = (connectionType: string): ProviderType => {
     if (connectionType.includes("supabase")) return "supabase";
@@ -105,7 +120,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
       if (result.success) {
         setCurrentStep("complete");
-        onComplete?.(result);
       } else {
         setError(result.error || "Transfer failed");
         setCurrentStep("error");
@@ -282,6 +296,39 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
           {currentStep === "select-options" && (
             <div className="space-y-4">
               <h3 className="text-lg font-semibold">Select Transfer Components</h3>
+
+              {(() => {
+                const destProvider = getDestinationConnection()
+                  ? getProviderType(getDestinationConnection()!.connectionType)
+                  : null;
+                const needsNotice =
+                  destProvider &&
+                  destProvider !== "supabase" &&
+                  (transferOptions.includeStorage || transferOptions.includeAuth);
+                if (!needsNotice) return null;
+                return (
+                  <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-600" />
+                      <span className="font-medium text-amber-800 dark:text-amber-200">
+                        Destination limitation
+                      </span>
+                    </div>
+                    <p className="text-sm mt-1 text-amber-700 dark:text-amber-300">
+                      {destProvider === "generic"
+                        ? "The destination provider was not recognized"
+                        : `A ${destProvider} destination`} has no built-in storage or auth:{" "}
+                      {[
+                        transferOptions.includeStorage ? "storage buckets/files" : null,
+                        transferOptions.includeAuth ? "auth users/providers" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" and ")}{" "}
+                      will be skipped with a warning, not transferred. Uncheck them or pick a Supabase destination for a complete migration.
+                    </p>
+                  </div>
+                );
+              })()}
               
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
@@ -375,10 +422,10 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                   <span className="font-medium text-amber-800 dark:text-amber-200">Limitations</span>
                 </div>
                 <ul className="text-sm mt-2 text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
-                  <li>Storage files require API access and are not currently transferred</li>
-                  <li>Auth users are limited to 1000 and don't retain passwords/sign-in state</li>
-                  <li>Some providers (Neon, generic Postgres) don't support storage/auth transfer</li>
-                  <li>Database transfer is destructive - it drops and recreates schemas</li>
+                  <li>Storage migrates buckets + metadata only — file contents require Storage API access and are not copied</li>
+                  <li>Auth users migrate with password hashes when readable; otherwise they must reset passwords. OAuth sign-ins need matching provider config on the destination</li>
+                  <li>Neon / generic Postgres destinations have no storage or auth — those components are skipped with a warning</li>
+                  <li>Database transfer is destructive - it drops and recreates schemas (inside one transaction: failure rolls back)</li>
                 </ul>
               </div>
 
@@ -533,7 +580,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             )}
 
             {currentStep === "complete" && (
-              <Button onClick={onCancel} className="gap-2">
+              <Button onClick={handleDone} className="gap-2">
                 Done
               </Button>
             )}

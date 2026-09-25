@@ -110,4 +110,48 @@ describe("TransferService", () => {
     // The service should handle the options correctly
     expect(transferService).toBeDefined();
   });
+
+  it("warns instead of silently discarding storage the destination cannot import", async () => {
+    const withStorage = stubAdapter("supabase");
+    withStorage.exportStorage = async () => ({
+      buckets: [{ id: "b", name: "b", public: true, file_size_limit: null, allowed_mime_types: null }],
+      files: [{ bucketId: "b", path: "a.txt", metadata: {} }],
+    });
+    // neon stub has no importStorage/importAuth (mirrors the real adapters): unsupported.
+    const svc = new TransferService();
+    svc.registerAdapter(withStorage);
+    svc.registerAdapter(stubAdapter("neon"));
+
+    const result = await svc.transferProject(
+      { provider: "supabase", connectionString: "src" },
+      { provider: "neon", connectionString: "dst" },
+      { includeDatabase: false, includeStorage: true, includeAuth: false, includeSettings: false },
+    );
+    expect(result.success).toBe(true);
+    expect(result.warnings?.join(" ")).toContain("Storage not transferred");
+  });
+
+  it("counts only exported rows in stats, never skipped source rows", async () => {
+    const svc = new TransferService();
+    const src = stubAdapter("postgres");
+    src.exportDatabase = async () => ({
+      schemaSql: "",
+      tables: ["public.big"],
+      rowCounts: { "public.big": 50000 },
+      exportedRowCounts: { "public.big": 0 },
+      warnings: ["Skipping data export for public.big (50000 rows exceeds limit of 10000); schema migrates, data does not."],
+    });
+    // NOTE: src must be registered last — same provider key overwrites.
+    svc.registerAdapter(stubAdapter("postgres"));
+    svc.registerAdapter(src);
+
+    const result = await svc.transferProject(
+      { provider: "postgres", connectionString: "src" },
+      { provider: "postgres", connectionString: "dst" },
+      { includeDatabase: true, includeStorage: false, includeAuth: false, includeSettings: false },
+    );
+    expect(result.success).toBe(true);
+    expect(result.stats?.rowsTransferred).toBe(0);
+    expect(result.warnings?.join(" ")).toContain("exceeds limit");
+  });
 });

@@ -177,4 +177,19 @@ describe("transfer-sql", () => {
       "INSERT INTO t VALUES (1);",
     );
   });
+
+  it("keeps -- lines that live inside multiline string values", () => {
+    const sql = `INSERT INTO "t" ("body") VALUES ('line one\n-- not a comment\nline three');`;
+    expect(stripCommentLines(sql)).toBe(sql);
+  });
+
+  it("terminates every chunk statement so multi-row tables execute", () => {
+    const chunks = parseDataChunks(
+      `-- Data for public.notes (2 rows)\nINSERT INTO "public"."notes" ("id") VALUES (1);\nINSERT INTO "public"."notes" ("id") VALUES (2);`,
+    );
+    expect(chunks).toHaveLength(1);
+    // each INSERT carries its own terminator — sent as one query, both run
+    expect(chunks[0].sql).toContain("VALUES (1);");
+    expect(chunks[0].sql).toContain("VALUES (2);");
+  });
 });

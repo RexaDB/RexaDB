@@ -86,10 +86,10 @@ export class TransferService {
       const package_ = await this.exportFromSource(sourceAdapter, source, options, steps, totalSteps);
       
       // Import to destination
-      await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
+      const importWarnings = await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
 
       const stats = this.calculateStats(package_);
-      const warnings = this.collectWarnings(package_);
+      const warnings = [...this.collectWarnings(package_), ...importWarnings];
       
       await this.updateProgress(options, {
         currentStep: "complete",
@@ -195,7 +195,9 @@ export class TransferService {
   }
   
   /**
-   * Import all data to destination provider
+   * Import all data to destination provider. Returns user-visible warnings,
+   * including components the destination cannot support (never silently
+   * dropped: unsupported selections are reported, not counted as done).
    */
   private async importToDestination(
     adapter: ProviderAdapter,
@@ -204,9 +206,10 @@ export class TransferService {
     options: TransferOptions,
     steps: TransferStep[],
     totalSteps: number
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const warnings: string[] = [];
     let stepIndex = Math.floor(totalSteps / 2); // Start from middle for import steps
-    
+
     // Import database
     if (package_.database && options.includeDatabase) {
       await this.updateProgress(options, {
@@ -216,52 +219,80 @@ export class TransferService {
         percentage: Math.round((stepIndex / totalSteps) * 100),
         message: "Importing database schema...",
       });
-      
-      await adapter.importDatabase(destination.connectionString, package_.database, options);
+
+      const outcome = await adapter.importDatabase(destination.connectionString, package_.database, options);
+      if (outcome?.warnings) warnings.push(...outcome.warnings);
       stepIndex++;
     }
-    
+
     // Import storage
-    if (package_.storage && options.includeStorage && adapter.importStorage) {
-      await this.updateProgress(options, {
-        currentStep: "importing_storage",
-        totalSteps,
-        currentStepIndex: stepIndex,
-        percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Importing storage buckets and files...",
-      });
-      
-      await adapter.importStorage(destination.connectionString, package_.storage, options);
-      stepIndex++;
+    if (package_.storage && options.includeStorage) {
+      const bucketCount = package_.storage.buckets.length;
+      const fileCount = package_.storage.files.length;
+      if (adapter.importStorage) {
+        await this.updateProgress(options, {
+          currentStep: "importing_storage",
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: "Importing storage buckets and files...",
+        });
+
+        const outcome = await adapter.importStorage(destination.connectionString, package_.storage, options);
+        if (outcome?.warnings) warnings.push(...outcome.warnings);
+        stepIndex++;
+      } else if (bucketCount > 0 || fileCount > 0) {
+        warnings.push(
+          `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no storage support — they were skipped, not imported.`,
+        );
+      }
     }
-    
+
     // Import auth
-    if (package_.auth && options.includeAuth && adapter.importAuth) {
-      await this.updateProgress(options, {
-        currentStep: "importing_auth",
-        totalSteps,
-        currentStepIndex: stepIndex,
-        percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Importing authentication data...",
-      });
-      
-      await adapter.importAuth(destination.connectionString, package_.auth, options);
-      stepIndex++;
+    if (package_.auth && options.includeAuth) {
+      const userCount = package_.auth.users.length;
+      const providerCount = package_.auth.providers.length;
+      if (adapter.importAuth) {
+        await this.updateProgress(options, {
+          currentStep: "importing_auth",
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: "Importing authentication data...",
+        });
+
+        const outcome = await adapter.importAuth(destination.connectionString, package_.auth, options);
+        if (outcome?.warnings) warnings.push(...outcome.warnings);
+        stepIndex++;
+      } else if (userCount > 0 || providerCount > 0) {
+        warnings.push(
+          `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no auth support — they were skipped, not imported.`,
+        );
+      }
     }
-    
+
     // Import settings
-    if (package_.settings && options.includeSettings && adapter.importSettings) {
-      await this.updateProgress(options, {
-        currentStep: "importing_settings",
-        totalSteps,
-        currentStepIndex: stepIndex,
-        percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Importing project settings...",
-      });
-      
-      await adapter.importSettings(destination.connectionString, package_.settings, options);
-      stepIndex++;
+    if (package_.settings && options.includeSettings) {
+      if (adapter.importSettings) {
+        await this.updateProgress(options, {
+          currentStep: "importing_settings",
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: "Importing project settings...",
+        });
+
+        const outcome = await adapter.importSettings(destination.connectionString, package_.settings, options);
+        if (outcome?.warnings) warnings.push(...outcome.warnings);
+        stepIndex++;
+      } else {
+        warnings.push(
+          `Settings not transferred: the ${destination.provider} destination has no settings import support.`,
+        );
+      }
     }
+
+    return warnings;
   }
   
   /**
@@ -308,12 +339,15 @@ export class TransferService {
   }
 
   /**
-   * Collect non-fatal export notes (skipped/failed tables) so the UI can
-   * disclose them instead of reporting a clean success.
+   * Collect non-fatal export notes (skipped/failed tables, partial auth or
+   * storage exports) so the UI can disclose them instead of reporting a
+   * clean success.
    */
   private collectWarnings(package_: TransferPackage): string[] {
     const warnings: string[] = [];
     if (package_.database?.warnings) warnings.push(...package_.database.warnings);
+    if (package_.storage?.warnings) warnings.push(...package_.storage.warnings);
+    if (package_.auth?.warnings) warnings.push(...package_.auth.warnings);
     return warnings;
   }
   
