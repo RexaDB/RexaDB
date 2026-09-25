@@ -38,6 +38,7 @@ function newProfileName(): string {
 export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnectProfile }: NeonLoginDialogProps) {
   const [status, setStatus] = useState<"idle" | "running" | "error">("idle");
   const [lines, setLines] = useState<string[]>([]);
+  const [fatalError, setFatalError] = useState<string | null>(null);
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
   const abortRef = useRef<{ abort: () => void } | null>(null);
   const profileRef = useRef<string>("");
@@ -52,6 +53,7 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
     const profile = reconnectProfile || newProfileName();
     profileRef.current = profile;
     setLines([]);
+    setFatalError(null);
     setLoginUrl(null);
     setStatus("running");
 
@@ -75,9 +77,11 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
         return;
       }
       if (event.type === "error") {
+        const message = event.message || "Login failed.";
         setStatus("error");
-        setLines((prev) => [...prev, event.message || "Login failed."]);
-        toast.error(event.message || "Neon login failed.");
+        setFatalError(message);
+        setLines((prev) => [...prev, message]);
+        toast.error(message);
       }
     });
   }, [onLoginComplete, onOpenChange, reconnectProfile, isReconnect]);
@@ -89,6 +93,7 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
       abortRef.current = null;
       setStatus("idle");
       setLines([]);
+      setFatalError(null);
       setLoginUrl(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,6 +122,18 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
         </DialogHeader>
 
         <div className="space-y-3 pt-1">
+          {status === "running" && (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Keep this dialog open until the browser tab finishes — closing it
+              cancels the sign-in. If you retried, authorize in the newest tab
+              and close any older Neon tabs first.
+            </p>
+          )}
+          {fatalError && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-xs leading-relaxed text-destructive">
+              {fatalError}
+            </div>
+          )}
           {loginUrl && (
             <button
               type="button"
