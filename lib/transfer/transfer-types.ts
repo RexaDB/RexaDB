@@ -163,14 +163,16 @@ export interface TransferResult {
   package?: TransferPackage;
   error?: string;
   warnings?: string[];
-  stats?: {
-    tablesTransferred: number;
-    rowsTransferred: number;
-    storageBucketsTransferred: number;
-    storageFilesTransferred: number;
-    authUsersTransferred: number;
-    authProvidersTransferred: number;
-  };
+  stats?: TransferStats;
+}
+
+export interface TransferStats {
+  tablesTransferred: number;
+  rowsTransferred: number;
+  storageBucketsTransferred: number;
+  storageFilesTransferred: number;
+  authUsersTransferred: number;
+  authProvidersTransferred: number;
 }
 
 export interface ProviderAdapter {
@@ -197,7 +199,10 @@ export interface ProviderAdapter {
  * What an import step reports. Import methods that cannot do the work
  * (unsupported destination) are simply ABSENT — the service turns that
  * into a user-visible warning instead of counting exports as transferred.
+ * Reported stats OVERRIDE the export-based completion counts so skipped
+ * or failed items are never displayed as transferred.
  */
 export interface ImportOutcome {
   warnings?: string[];
+  stats?: Partial<TransferStats>;
 }

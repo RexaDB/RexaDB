@@ -158,6 +158,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     // Create buckets. Values are literal-escaped (see transfer-sql) so source
     // data cannot alter the SQL executed with destination privileges.
     const warnings: string[] = [];
+    let bucketsOk = 0;
     for (const bucket of data.buckets) {
       try {
         const fileSizeLimit = bucket.file_size_limit === null ? 'NULL' : bucket.file_size_limit;
@@ -177,6 +178,8 @@ export class SupabaseAdapter implements ProviderAdapter {
         const result = await serverTransferQuery(connectionString, createBucketQuery);
         if (!result.success) {
           warnings.push(`Failed to create bucket ${bucket.name}: ${String(result.error ?? "unknown error")}`);
+        } else {
+          bucketsOk++;
         }
       } catch (error) {
         warnings.push(`Failed to create bucket ${bucket.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -186,13 +189,13 @@ export class SupabaseAdapter implements ProviderAdapter {
     // File CONTENTS cannot migrate over SQL: object bytes live in the
     // Storage backend (S3/disk), not in Postgres, and the transfer holds no
     // Storage API credentials. Buckets + metadata migrate; contents do not —
-    // reported as a warning, never silently counted as transferred.
+    // reported as a warning, and files counted as 0 transferred, never silently.
     if (data.files.length > 0) {
       warnings.push(
         `${data.files.length} file(s) across ${data.buckets.length} bucket(s) migrated metadata-only: file contents require Storage API access and were NOT copied. Re-upload contents or copy the underlying bucket store manually.`,
       );
     }
-    return { warnings };
+    return { warnings, stats: { storageBucketsTransferred: bucketsOk, storageFilesTransferred: 0 } };
   }
   
   async exportAuth(connectionString: string, options: TransferOptions): Promise<AuthExport> {
@@ -203,6 +206,8 @@ export class SupabaseAdapter implements ProviderAdapter {
     const warnings: string[] = [];
 
     // Paginated fetch: no silent 1000-user cap. Stable ORDER BY id paging.
+    // A failed page is NEVER reported as complete: partial rows are kept
+    // but flagged, so missing accounts/links are always disclosed.
     const fetchAll = async (baseSelect: string, batch = 1000, maxBatches = 200) => {
       const all: Record<string, unknown>[] = [];
       for (let page = 0; page < maxBatches; page++) {
@@ -211,13 +216,13 @@ export class SupabaseAdapter implements ProviderAdapter {
           `${baseSelect} ORDER BY id LIMIT ${batch} OFFSET ${page * batch}`,
         );
         if (!res.success) {
-          return { rows: all, ok: all.length > 0, error: String(res.error ?? "query failed") };
+          return { rows: all, complete: false, error: String(res.error ?? "query failed") };
         }
         const rows = res.data?.rows ?? [];
         all.push(...rows);
-        if (rows.length < batch) return { rows: all, ok: true as const, error: undefined as string | undefined };
+        if (rows.length < batch) return { rows: all, complete: true, error: undefined as string | undefined };
       }
-      return { rows: all, ok: true as const, error: undefined as string | undefined, truncated: true };
+      return { rows: all, complete: false, error: "safety cap reached" };
     };
 
     try {
@@ -228,19 +233,27 @@ export class SupabaseAdapter implements ProviderAdapter {
       );
       let rows = withPassword.rows;
       let passwordless = false;
-      if (!withPassword.ok) {
+      if (!withPassword.complete && rows.length === 0) {
+        // Total failure (e.g. column not readable): retry metadata-only.
         const fallback = await fetchAll(
           `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data FROM auth.users`,
         );
         rows = fallback.rows;
         passwordless = true;
-        if (!fallback.ok) {
-          warnings.push(`Auth user export incomplete: ${fallback.error}`);
+        if (!fallback.complete) {
+          warnings.push(`Auth user export incomplete after ${rows.length} user(s): ${fallback.error}`);
         } else {
           warnings.push(
             "Password hashes are not readable with this connection: users migrate metadata-only and must reset passwords to sign in.",
           );
         }
+      } else if (!withPassword.complete) {
+        // Partial failure mid-pagination: keep what we have, disclose the rest.
+        warnings.push(
+          withPassword.error === "safety cap reached"
+            ? "Auth export hit the 200,000-user safety cap; remaining users were not exported."
+            : `Auth user export incomplete after ${rows.length} user(s): ${withPassword.error}; remaining accounts were omitted.`,
+        );
       }
       for (const row of rows) {
         users.push({
@@ -254,9 +267,6 @@ export class SupabaseAdapter implements ProviderAdapter {
             ? { encrypted_password: String(row.encrypted_password) }
             : {}),
         });
-      }
-      if ((withPassword as { truncated?: boolean }).truncated) {
-        warnings.push("Auth export hit the 200,000-user safety cap; remaining users were not exported.");
       }
     } catch (error) {
       const msg = `Failed to export auth users: ${error instanceof Error ? error.message : String(error)}`;
@@ -281,7 +291,11 @@ export class SupabaseAdapter implements ProviderAdapter {
           updated_at: row.updated_at != null ? String(row.updated_at) : undefined,
         });
       }
-      if (!idRes.ok) warnings.push(`Auth identity export incomplete: ${idRes.error}`);
+      if (!idRes.complete) {
+        warnings.push(
+          `Auth identity export incomplete after ${idRes.rows.length} identit(ies): ${idRes.error}; some sign-in links were omitted.`,
+        );
+      }
     } catch (error) {
       const msg = `Failed to export auth identities: ${error instanceof Error ? error.message : String(error)}`;
       console.warn(msg);
@@ -337,8 +351,13 @@ export class SupabaseAdapter implements ProviderAdapter {
 
   async importAuth(connectionString: string, data: AuthExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const warnings: string[] = [];
+    // User ids this run can vouch for: actually inserted now, or verified
+    // to be the SAME account (matching email) on a retry. Identities are
+    // linked ONLY for these — never onto a colliding foreign account.
+    const vouchedUserIds = new Set<string>();
     let usersOk = 0;
     let identitiesOk = 0;
+    let providersOk = 0;
 
     // Import users WITH password hashes when the export carried them, so
     // password sign-in keeps working on destinations with a compatible auth
@@ -350,43 +369,86 @@ export class SupabaseAdapter implements ProviderAdapter {
         const passwordCol = user.encrypted_password != null ? `, encrypted_password` : ``;
         const passwordVal = user.encrypted_password != null ? `, ${escapeLiteral(user.encrypted_password)}` : ``;
 
-        const importUserQuery = `
-          INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data${passwordCol})
-          VALUES (${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed},
-                  ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)},
-                  ${escapedMeta}${passwordVal})
-          ON CONFLICT (id) DO NOTHING;
-        `;
+        const baseColumns = `id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data${passwordCol}`;
+        const baseValues = `${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed}, ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)}, ${escapedMeta}${passwordVal}`;
 
-        const result = await serverTransferQuery(connectionString, importUserQuery);
-        if (!result.success) {
-          // Hash column may not exist/be writable on this destination — retry metadata-only.
-          if (user.encrypted_password != null) {
-            const retry = await serverTransferQuery(
-              connectionString,
-              `INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data)
-               VALUES (${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed},
-                       ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)},
-                       ${escapedMeta})
-               ON CONFLICT (id) DO NOTHING;`,
-            );
-            if (retry.success) {
-              usersOk++;
-              warnings.push(`User ${user.email} migrated without password hash (destination rejected it); password reset required.`);
-              continue;
-            }
+        const confirmImport = async (withPassword: boolean): Promise<boolean> => {
+          const columns = withPassword
+            ? baseColumns
+            : `id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data`;
+          const values = withPassword
+            ? baseValues
+            : `${escapeLiteral(user.id)}, ${escapeLiteral(user.email)}, ${emailConfirmed}, ${escapeLiteral(user.created_at)}, ${escapeLiteral(user.updated_at)}, ${escapedMeta}`;
+          const res = await serverTransferQuery(
+            connectionString,
+            `INSERT INTO auth.users (${columns})
+             VALUES (${values})
+             ON CONFLICT (id) DO NOTHING
+             RETURNING id;`,
+          );
+          if (!res.success) {
+            // Genuine failures throw so the caller reports them with detail;
+            // conflicts (no RETURNING row) fall through to the check below.
+            throw new Error(String(res.error ?? "unknown error"));
           }
-          warnings.push(`Failed to import user ${user.email}: ${String(result.error ?? "unknown error")}`);
-        } else {
-          usersOk++;
+          if ((res.data?.rows ?? []).length > 0) {
+            vouchedUserIds.add(user.id);
+            return true;
+          }
+          // ID already exists on destination: only vouch when it is the SAME
+          // account (matching email, e.g. a resumed/repeated transfer).
+          // Otherwise the source identity must NOT be linked onto it.
+          const existing = await serverTransferQuery(
+            connectionString,
+            `SELECT email FROM auth.users WHERE id = ${escapeLiteral(user.id)} LIMIT 1;`,
+          );
+          const existingEmail = existing.success ? String(existing.data?.rows?.[0]?.email ?? "") : "";
+          if (existingEmail && existingEmail.toLowerCase() === user.email.toLowerCase()) {
+            vouchedUserIds.add(user.id);
+            return true;
+          }
+          warnings.push(
+            `User ${user.email} not imported: id ${user.id} already belongs to a different destination account (${existingEmail || "unknown"}); skipped to avoid hijacking it.`,
+          );
+          return false;
+        };
+
+        let imported = false;
+        try {
+          imported = await confirmImport(true);
+        } catch (firstError) {
+          // Genuine failure (e.g. hash column missing/unwritable) — retry
+          // metadata-only when a hash was included; collisions were already
+          // reported inside confirmImport and never reach here.
+          if (user.encrypted_password != null) {
+            try {
+              imported = await confirmImport(false);
+              if (imported) {
+                warnings.push(`User ${user.email} migrated without password hash (destination rejected it); password reset required.`);
+              }
+            } catch (retryError) {
+              warnings.push(`Failed to import user ${user.email}: ${retryError instanceof Error ? retryError.message : String(retryError)}`);
+            }
+          } else {
+            warnings.push(`Failed to import user ${user.email}: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+          }
         }
+        if (imported) usersOk++;
       } catch (error) {
         warnings.push(`Failed to import user ${user.email}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    // Identity links restore sign-in capability for the imported users.
+    // Identity links restore sign-in capability — but ONLY for vouched
+    // users. Linking a source identity onto an unvouched (foreign)
+    // destination account would hand the source identity access to it.
     for (const identity of data.identities ?? []) {
+      if (!vouchedUserIds.has(identity.user_id)) {
+        warnings.push(
+          `Identity for user ${identity.user_id} not linked: its account was not imported by this transfer.`,
+        );
+        continue;
+      }
       try {
         const created = identity.created_at ? escapeLiteral(identity.created_at) : "NOW()";
         const updated = identity.updated_at ? escapeLiteral(identity.updated_at) : "NOW()";
@@ -427,13 +489,15 @@ export class SupabaseAdapter implements ProviderAdapter {
         const result = await serverTransferQuery(connectionString, importProviderQuery);
         if (!result.success) {
           warnings.push(`Failed to import provider ${provider.name}: ${String(result.error ?? "unknown error")}`);
+        } else {
+          providersOk++;
         }
       } catch (error) {
         warnings.push(`Failed to import provider ${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    return { warnings };
+    return { warnings, stats: { authUsersTransferred: usersOk, authProvidersTransferred: providersOk } };
   }
   
   async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {

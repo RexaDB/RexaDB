@@ -11,6 +11,7 @@ import type {
   TransferProgress,
   TransferPackage,
   TransferResult,
+  TransferStats,
   ProviderAdapter,
   TransferStep,
 } from "./transfer-types";
@@ -86,9 +87,12 @@ export class TransferService {
       const package_ = await this.exportFromSource(sourceAdapter, source, options, steps, totalSteps);
       
       // Import to destination
-      const importWarnings = await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
+      const { warnings: importWarnings, stats: importStats } = await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
 
-      const stats = this.calculateStats(package_);
+      // Completion counts reflect IMPORT outcomes, not exports: import
+      // stats override the export-based numbers so skipped/failed items
+      // are never displayed as transferred.
+      const stats = { ...this.calculateStats(package_), ...importStats };
       const warnings = [...this.collectWarnings(package_), ...importWarnings];
       
       await this.updateProgress(options, {
@@ -195,9 +199,9 @@ export class TransferService {
   }
   
   /**
-   * Import all data to destination provider. Returns user-visible warnings,
-   * including components the destination cannot support (never silently
-   * dropped: unsupported selections are reported, not counted as done).
+   * Import all data to destination provider. Returns user-visible warnings
+   * plus the ACTUAL import counts, which override export-based stats —
+   * skipped or failed items are never displayed as transferred.
    */
   private async importToDestination(
     adapter: ProviderAdapter,
@@ -206,8 +210,9 @@ export class TransferService {
     options: TransferOptions,
     steps: TransferStep[],
     totalSteps: number
-  ): Promise<string[]> {
+  ): Promise<{ warnings: string[]; stats: Partial<TransferStats> }> {
     const warnings: string[] = [];
+    const stats: Partial<TransferStats> = {};
     let stepIndex = Math.floor(totalSteps / 2); // Start from middle for import steps
 
     // Import database
@@ -220,8 +225,12 @@ export class TransferService {
         message: "Importing database schema...",
       });
 
+      // Database import is fully transactional (resetAndApplySql): success
+      // means every exported row landed, so export counts stand. Any
+      // failure throws and fails the whole transfer — never partial.
       const outcome = await adapter.importDatabase(destination.connectionString, package_.database, options);
       if (outcome?.warnings) warnings.push(...outcome.warnings);
+      if (outcome?.stats) Object.assign(stats, outcome.stats);
       stepIndex++;
     }
 
@@ -240,11 +249,14 @@ export class TransferService {
 
         const outcome = await adapter.importStorage(destination.connectionString, package_.storage, options);
         if (outcome?.warnings) warnings.push(...outcome.warnings);
+        if (outcome?.stats) Object.assign(stats, outcome.stats);
         stepIndex++;
       } else if (bucketCount > 0 || fileCount > 0) {
         warnings.push(
           `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no storage support — they were skipped, not imported.`,
         );
+        stats.storageBucketsTransferred = 0;
+        stats.storageFilesTransferred = 0;
       }
     }
 
@@ -263,11 +275,14 @@ export class TransferService {
 
         const outcome = await adapter.importAuth(destination.connectionString, package_.auth, options);
         if (outcome?.warnings) warnings.push(...outcome.warnings);
+        if (outcome?.stats) Object.assign(stats, outcome.stats);
         stepIndex++;
       } else if (userCount > 0 || providerCount > 0) {
         warnings.push(
           `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no auth support — they were skipped, not imported.`,
         );
+        stats.authUsersTransferred = 0;
+        stats.authProvidersTransferred = 0;
       }
     }
 
@@ -284,6 +299,7 @@ export class TransferService {
 
         const outcome = await adapter.importSettings(destination.connectionString, package_.settings, options);
         if (outcome?.warnings) warnings.push(...outcome.warnings);
+        if (outcome?.stats) Object.assign(stats, outcome.stats);
         stepIndex++;
       } else {
         warnings.push(
@@ -292,7 +308,7 @@ export class TransferService {
       }
     }
 
-    return warnings;
+    return { warnings, stats };
   }
   
   /**

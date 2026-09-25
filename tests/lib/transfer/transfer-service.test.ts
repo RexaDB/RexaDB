@@ -129,6 +129,9 @@ describe("TransferService", () => {
     );
     expect(result.success).toBe(true);
     expect(result.warnings?.join(" ")).toContain("Storage not transferred");
+    // Skipped components count as 0 transferred, never as exported.
+    expect(result.stats?.storageBucketsTransferred).toBe(0);
+    expect(result.stats?.storageFilesTransferred).toBe(0);
   });
 
   it("counts only exported rows in stats, never skipped source rows", async () => {

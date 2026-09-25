@@ -382,8 +382,12 @@ export function stripCommentLines(sql: string): string {
 
   for (const line of lines) {
     const isCommentLine = !inSingle && !inDouble && dollarTag === null && /^\s*--/.test(line);
+    if (isCommentLine) continue;
     // Advance quote state through the whole line so multiline literals
-    // spanning later lines are tracked correctly.
+    // spanning later lines are tracked correctly. (Comment lines are
+    // skipped BEFORE scanning: a quote inside a comment — e.g. an
+    // apostrophe in a `-- Data for ...` marker — must not toggle string
+    // state and corrupt how following value lines are read.)
     let i = 0;
     while (i < line.length) {
       const ch = line[i];

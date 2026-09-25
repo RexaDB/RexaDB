@@ -183,6 +183,13 @@ describe("transfer-sql", () => {
     expect(stripCommentLines(sql)).toBe(sql);
   });
 
+  it("ignores quotes inside comment lines when tracking strings", () => {
+    // An apostrophe in a marker must not toggle string state: the following
+    // multiline value's -- line is data and must survive.
+    const sql = `-- Data for public.o'brien (1 rows)\nINSERT INTO "t" ("body") VALUES ('a\n-- kept\nb');`;
+    expect(stripCommentLines(sql)).toBe(`INSERT INTO "t" ("body") VALUES ('a\n-- kept\nb');`);
+  });
+
   it("terminates every chunk statement so multi-row tables execute", () => {
     const chunks = parseDataChunks(
       `-- Data for public.notes (2 rows)\nINSERT INTO "public"."notes" ("id") VALUES (1);\nINSERT INTO "public"."notes" ("id") VALUES (2);`,
