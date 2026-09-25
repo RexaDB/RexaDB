@@ -100,25 +100,27 @@ export class NeonAdapter implements ProviderAdapter {
     await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql);
   }
   
-  // Neon doesn't have built-in storage like Supabase. There is intentionally
-  // NO importStorage: the service reports exported storage as skipped with a
+  // Neon Object Storage holds bytes outside Postgres, so there is nothing
+  // SQL-reachable to export here. There is intentionally NO importStorage:
+  // the service reports Supabase-shaped storage as skipped with a
   // user-visible warning instead of silently discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
     return {
       buckets: [],
       files: [],
-      warnings: ["Neon has no built-in storage: storage transfer selected, but there is nothing to export."],
+      warnings: ["Neon Object Storage is not reachable over SQL: no storage metadata to export."],
     };
   }
 
-  // Neon doesn't have built-in auth like Supabase. There is intentionally
-  // NO importAuth — see importStorage note above.
+  // Neon Auth lives in neon_auth tables and migrates with the database
+  // transfer — not through the Supabase-shaped auth component. There is
+  // intentionally NO importAuth — see importStorage note above.
   async exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport> {
     return {
       users: [],
       providers: [],
       policies: [],
-      warnings: ["Neon has no built-in auth: auth transfer selected, but there is nothing to export."],
+      warnings: ["Neon Auth migrates with the database transfer (neon_auth tables); the Supabase-shaped auth export is empty."],
     };
   }
   

@@ -3,30 +3,22 @@
 import { useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  ArrowRight,
-  ArrowLeft,
+  ArrowRightLeft,
   Database,
   HardDrive,
   Shield,
   Settings,
   Loader2,
-  CheckCircle2,
-  AlertCircle,
-  AlertTriangle,
-  Download,
-  RefreshCw,
-  ChevronRight,
   Check,
-  Circle,
-  XCircle,
+  Download,
 } from "@/lib/icon-theme/lucide-react";
+import TaskRows from "@/components/studio/ai/task-rows";
+import type { Task } from "@/lib/ai/task-types";
 import { startTransfer, exportTransferPackage } from "@/lib/transfer/transfer-client";
 import type {
   TransferOptions,
@@ -91,19 +83,19 @@ const COMPONENTS: Array<{
     key: "includeDatabase",
     icon: Database,
     label: "Database schema & data",
-    description: "Tables, schemas and row data up to the per-table cap.",
+    description: "Tables, schemas and row data up to the per-table cap — including Neon Auth's neon_auth tables.",
   },
   {
     key: "includeStorage",
     icon: HardDrive,
     label: "Storage buckets & files",
-    description: "Buckets plus file metadata. File contents never migrate over SQL.",
+    description: "Supabase buckets plus file metadata. File contents never migrate over SQL.",
   },
   {
     key: "includeAuth",
     icon: Shield,
     label: "Authentication users & providers",
-    description: "Users with password hashes when readable, identity links and OAuth providers.",
+    description: "Supabase GoTrue users with password hashes when readable, identity links and OAuth providers.",
   },
   {
     key: "includeSettings",
@@ -112,6 +104,12 @@ const COMPONENTS: Array<{
     description: "Project-level settings snapshot.",
   },
 ];
+
+const pillButton =
+  "h-11 flex-1 rounded-full border border-border bg-card px-8 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50";
+
+const statusPill =
+  "mx-auto mt-5 flex w-full max-w-[440px] items-center justify-center rounded-full border border-border bg-card px-8 py-3 text-center shadow-sm";
 
 export function TransferWizard({ connections, onComplete, onCancel }: TransferWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>("select-sources");
@@ -149,10 +147,11 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     if (!destProvider || destProvider === "supabase") return null;
     const parts = [
       transferOptions.includeStorage ? "storage buckets/files" : null,
-      transferOptions.includeAuth ? "auth users/providers" : null,
+      transferOptions.includeAuth ? "GoTrue users/providers" : null,
     ].filter(Boolean);
     if (parts.length === 0) return null;
-    return `${destProvider === "generic" ? "The destination provider was not recognized" : `A ${destProvider} destination`} has no built-in storage or auth: ${parts.join(" and ")} will be skipped with a warning, not transferred.`;
+    const destName = destProvider === "generic" ? "This destination" : `A ${destProvider} destination`;
+    return `${destName} has no Supabase-compatible storage or auth schemas: ${parts.join(" and ")} will be skipped with a warning, not transferred. Ordinary tables — including Neon Auth's neon_auth tables — migrate with the database.`;
   }, [destProvider, transferOptions.includeStorage, transferOptions.includeAuth]);
 
   // Completion is user-acknowledged: the complete step (stats + warnings)
@@ -287,9 +286,34 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     setIsTransferring(false);
   };
 
-  const activeStepIndex = STEPS.findIndex((s) => s.id === currentStep);
+  const stepIndex = STEPS.findIndex((s) => s.id === currentStep);
+  const wizardTasks: Task[] = STEPS.map((s, i) => ({
+    id: s.id,
+    label: s.label,
+    status:
+      currentStep === "complete" || i < stepIndex
+        ? "completed"
+        : currentStep === "error" && i === stepIndex
+          ? "failed"
+          : i === stepIndex
+            ? "in_progress"
+            : "pending",
+  }));
+
   const runSteps = useMemo(() => displaySteps(transferOptions), [transferOptions]);
   const runIndex = progress ? runSteps.indexOf(progress.currentStep) : -1;
+  const runTasks: Task[] = runSteps.map((step, i) => ({
+    id: step,
+    label: STEP_LABELS[step],
+    status:
+      progress?.currentStep === "complete" || runIndex > i
+        ? "completed"
+        : progress?.error && i === runIndex
+          ? "failed"
+          : i === runIndex
+            ? "in_progress"
+            : "pending",
+  }));
 
   const stats = transferResult?.stats;
   const statCards = stats
@@ -303,87 +327,32 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       ]
     : [];
 
+  const showNav = currentStep === "select-sources" || currentStep === "select-options" || currentStep === "confirm";
+
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 overflow-y-auto p-4 md:p-6">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-semibold tracking-tight">Transfer Project</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Migrate database, storage, auth and settings between providers.
-          </p>
-        </div>
-        {currentStep === "select-options" && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 shrink-0 gap-1.5 text-xs"
-            disabled={isTransferring || !sourceConnectionId}
-            onClick={() => void handleExportPackage()}
-          >
-            <Download className="size-3.5 shrink-0" />
-            Export package
-          </Button>
-        )}
+    <div className="mx-auto my-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
+      <div className="flex items-center justify-center gap-3">
+        <span className="flex size-9 items-center justify-center rounded-full border border-border bg-card shadow-sm">
+          <ArrowRightLeft className="size-4 text-foreground" />
+        </span>
+        <h2 className="text-2xl font-semibold tracking-tight">Transfer Project</h2>
       </div>
 
-      {/* Slim stepper */}
-      <div className="flex items-center gap-1 text-[11px]">
-        {STEPS.map((step, i) => {
-          const done = currentStep === "complete" || currentStep === "error" || i < activeStepIndex;
-          const active = i === activeStepIndex && currentStep !== "complete" && currentStep !== "error";
-          return (
-            <span key={step.id} className="flex items-center gap-1">
-              {i > 0 && <ChevronRight className="size-3 text-muted-foreground/50" />}
-              <span
-                className={cn(
-                  "flex items-center gap-1 rounded-full px-2 py-0.5",
-                  active && "bg-muted font-medium text-foreground",
-                  done && "text-muted-foreground",
-                  !done && !active && "text-muted-foreground/50",
-                )}
-              >
-                {done ? <Check className="size-3" /> : null}
-                {step.label}
-              </span>
-            </span>
-          );
-        })}
+      <div className="flex justify-center">
+        <TaskRows tasks={currentStep === "transferring" ? runTasks : wizardTasks} variant="Capsules" />
       </div>
 
-      {currentStep === "select-sources" && (
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
-          <div className="rounded-xl border border-studio-border/60 p-3">
-            <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
-            <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Select source database" />
-              </SelectTrigger>
-              <SelectContent>
-                {connections.map((conn) => (
-                  <SelectItem key={conn.id} value={conn.id} className="text-xs">
-                    <span className="flex items-center gap-2">
-                      <Database className="size-3.5 shrink-0 text-muted-foreground" />
-                      {conn.name}
-                      <Badge variant="outline" className="ml-1 font-mono text-[10px]">{conn.connectionType}</Badge>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <ArrowRight className="mx-auto size-4 shrink-0 rotate-90 text-muted-foreground/50 md:rotate-0" />
-
-          <div className="rounded-xl border border-studio-border/60 p-3">
-            <div className="mb-1.5 text-xs font-medium text-muted-foreground">Destination</div>
-            <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Select destination database" />
-              </SelectTrigger>
-              <SelectContent>
-                {connections
-                  .filter((c) => c.id !== sourceConnectionId)
-                  .map((conn) => (
+      <div className="px-1 py-2">
+        {currentStep === "select-sources" && (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
+              <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Select source database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((conn) => (
                     <SelectItem key={conn.id} value={conn.id} className="text-xs">
                       <span className="flex items-center gap-2">
                         <Database className="size-3.5 shrink-0 text-muted-foreground" />
@@ -392,243 +361,230 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                       </span>
                     </SelectItem>
                   ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {sourceConnectionId && destinationConnectionId && sourceConnectionId === destinationConnectionId && (
-            <div className="flex gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs md:col-span-3">
-              <AlertTriangle className="mt-px size-4 shrink-0 text-destructive" />
-              <span>Source and destination cannot be the same connection.</span>
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </div>
-      )}
 
-      {currentStep === "select-options" && (
-        <div className="flex flex-col gap-3">
-          <div className="overflow-hidden rounded-xl border border-studio-border/60">
-            {COMPONENTS.map((c, i) => (
-              <label
-                key={c.key}
-                htmlFor={`transfer-${c.key}`}
-                className={cn(
-                  "flex cursor-pointer items-start gap-3 px-3 py-2.5 hover:bg-muted/20",
-                  i > 0 && "border-t border-studio-border/40",
-                )}
-              >
-                <Checkbox
-                  id={`transfer-${c.key}`}
-                  checked={transferOptions[c.key]}
-                  onCheckedChange={(checked) =>
-                    setTransferOptions({ ...transferOptions, [c.key]: Boolean(checked) })
-                  }
-                  className="mt-0.5"
-                />
-                <c.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{c.label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{c.description}</span>
+            <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Destination</div>
+              <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Select destination database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections
+                    .filter((c) => c.id !== sourceConnectionId)
+                    .map((conn) => (
+                      <SelectItem key={conn.id} value={conn.id} className="text-xs">
+                        <span className="flex items-center gap-2">
+                          <Database className="size-3.5 shrink-0 text-muted-foreground" />
+                          {conn.name}
+                          <Badge variant="outline" className="ml-1 font-mono text-[10px]">{conn.connectionType}</Badge>
+                        </span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {sourceConnectionId && destinationConnectionId && sourceConnectionId === destinationConnectionId && (
+              <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+                <span className="break-words text-xs leading-relaxed text-destructive">
+                  Source and destination cannot be the same connection.
                 </span>
-              </label>
-            ))}
-          </div>
-
-          {unsupportedNotice && (
-            <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-              <AlertTriangle className="mt-px size-4 shrink-0 text-amber-600" />
-              <span className="text-amber-800 dark:text-amber-200">{unsupportedNotice}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {currentStep === "confirm" && (
-        <div className="flex flex-col gap-3">
-          <div className="overflow-hidden rounded-xl border border-studio-border/60">
-            <div className="flex items-center justify-between border-b border-studio-border/40 px-3 py-2">
-              <span className="text-xs text-muted-foreground">Source</span>
-              <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
-            </div>
-            <div className="flex items-center justify-between border-b border-studio-border/40 px-3 py-2">
-              <span className="text-xs text-muted-foreground">Destination</span>
-              <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2 px-3 py-2">
-              <span className="shrink-0 text-xs text-muted-foreground">Components</span>
-              <span className="flex flex-wrap justify-end gap-1">
-                {transferOptions.includeDatabase && <Badge variant="secondary" className="text-[10px]">Database</Badge>}
-                {transferOptions.includeStorage && <Badge variant="secondary" className="text-[10px]">Storage</Badge>}
-                {transferOptions.includeAuth && <Badge variant="secondary" className="text-[10px]">Auth</Badge>}
-                {transferOptions.includeSettings && <Badge variant="secondary" className="text-[10px]">Settings</Badge>}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs">
-            <AlertTriangle className="mt-px size-4 shrink-0 text-destructive" />
-            <span>
-              This transfer modifies the destination database — schemas are dropped and recreated inside one
-              transaction, so a failure rolls back. Still, make sure you have backups before proceeding.
-            </span>
-          </div>
-
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-            <div className="font-medium text-amber-800 dark:text-amber-200">Limitations</div>
-            <ul className="mt-1.5 list-inside list-disc space-y-1 text-amber-700 dark:text-amber-300">
-              <li>Storage migrates buckets + metadata only — file contents require Storage API access and are not copied.</li>
-              <li>Auth users migrate with password hashes when readable; otherwise they must reset passwords. OAuth sign-ins need matching provider config.</li>
-              <li>Neon / generic Postgres destinations have no storage or auth — those components are skipped with a warning.</li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {currentStep === "transferring" && (
-        <div className="flex flex-col gap-3">
-          <div className="rounded-xl border border-studio-border/60 p-3">
-            <div className="flex items-center gap-2">
-              {isTransferring ? (
-                <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
-              ) : (
-                <CheckCircle2 className="size-4 shrink-0 text-green-500" />
-              )}
-              <span className="text-sm font-medium">{progress?.message || "Preparing transfer..."}</span>
-            </div>
-            {progress && (
-              <div className="mt-2.5">
-                <Progress value={progress.percentage} className="h-1.5" />
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  Step {progress.currentStepIndex + 1} of {progress.totalSteps}
-                </div>
               </div>
             )}
           </div>
+        )}
 
-          <div className="overflow-hidden rounded-xl border border-studio-border/60">
-            {runSteps.map((step, i) => {
-              const failed = Boolean(progress?.error) && i === runIndex;
-              const done = runIndex > i || progress?.currentStep === "complete";
-              const active = i === runIndex && !done && !failed;
-              return (
-                <div
-                  key={step}
+        {currentStep === "select-options" && (
+          <div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              {COMPONENTS.map((c, i) => (
+                <label
+                  key={c.key}
+                  htmlFor={`transfer-${c.key}`}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-2 text-xs",
-                    i > 0 && "border-t border-studio-border/40",
-                    active ? "text-foreground" : "text-muted-foreground",
+                    "flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-muted/20",
+                    i > 0 && "border-t border-border/60",
                   )}
                 >
-                  {failed ? (
-                    <XCircle className="size-3.5 shrink-0 text-destructive" />
-                  ) : done ? (
-                    <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />
-                  ) : active ? (
-                    <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
-                  ) : (
-                    <Circle className="size-3.5 shrink-0 opacity-40" />
-                  )}
-                  <span>{STEP_LABELS[step]}</span>
-                  <span className="ml-auto font-mono text-[10px] opacity-60">{step}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {progress?.error && (
-            <div className="flex gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs">
-              <AlertTriangle className="mt-px size-4 shrink-0 text-destructive" />
-              <span className="break-words">{progress.error}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {currentStep === "complete" && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="size-5 shrink-0 text-green-500" />
-            <h3 className="text-sm font-semibold">Transfer completed</h3>
-          </div>
-
-          {statCards.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-              {statCards.map((s) => (
-                <div key={s.label} className="rounded-xl border border-studio-border/60 px-3 py-2.5">
-                  <div className="text-xl font-semibold tracking-tight">{s.value}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{s.label}</div>
-                </div>
+                  <Checkbox
+                    id={`transfer-${c.key}`}
+                    checked={transferOptions[c.key]}
+                    onCheckedChange={(checked) =>
+                      setTransferOptions({ ...transferOptions, [c.key]: Boolean(checked) })
+                    }
+                    className="mt-0.5"
+                  />
+                  <c.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{c.label}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{c.description}</span>
+                  </span>
+                </label>
               ))}
             </div>
-          )}
 
-          {transferResult?.warnings && transferResult.warnings.length > 0 && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-              <div className="font-medium text-amber-800 dark:text-amber-200">Completed with warnings</div>
-              <ul className="mt-1.5 list-inside list-disc space-y-1 text-amber-700 dark:text-amber-300">
-                {transferResult.warnings.slice(0, 10).map((w, i) => (
-                  <li key={i} className="break-words">{w}</li>
-                ))}
-                {transferResult.warnings.length > 10 && (
-                  <li>…and {transferResult.warnings.length - 10} more (see server log)</li>
-                )}
-              </ul>
+            {unsupportedNotice && (
+              <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+                <span className="break-words text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                  {unsupportedNotice}
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 gap-1.5 rounded-full text-xs"
+                disabled={isTransferring || !sourceConnectionId}
+                onClick={() => void handleExportPackage()}
+              >
+                <Download className="size-3.5 shrink-0" />
+                Export package only
+              </Button>
             </div>
-          )}
-        </div>
-      )}
-
-      {currentStep === "error" && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="size-5 shrink-0" />
-            <h3 className="text-sm font-semibold">Transfer failed</h3>
           </div>
-          <div className="flex gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs">
-            <AlertTriangle className="mt-px size-4 shrink-0 text-destructive" />
-            <span className="break-words">{error || "An unknown error occurred"}</span>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Footer nav */}
-      <div className="flex items-center justify-between border-t border-studio-border/60 pt-3">
-        <div>
-          {(currentStep === "select-options" || currentStep === "confirm") && (
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={prevStep}>
-              <ArrowLeft className="size-3.5" />
-              Back
-            </Button>
-          )}
-          {currentStep === "error" && (
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={resetWizard}>
-              <RefreshCw className="size-3.5" />
-              Start over
-            </Button>
-          )}
-        </div>
-        <div>
-          {(currentStep === "select-sources" || currentStep === "select-options" || currentStep === "confirm") && (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!canProceed() || isTransferring} onClick={nextStep}>
-              {currentStep === "confirm" ? (
-                <>
-                  <RefreshCw className="size-3.5" />
-                  Start transfer
-                </>
+        {currentStep === "confirm" && (
+          <div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Source</span>
+                <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
+              </div>
+              <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Destination</span>
+                <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+                <span className="shrink-0 text-xs text-muted-foreground">Components</span>
+                <span className="flex flex-wrap justify-end gap-1">
+                  {transferOptions.includeDatabase && <Badge variant="secondary" className="rounded-full text-[10px]">Database</Badge>}
+                  {transferOptions.includeStorage && <Badge variant="secondary" className="rounded-full text-[10px]">Storage</Badge>}
+                  {transferOptions.includeAuth && <Badge variant="secondary" className="rounded-full text-[10px]">Auth</Badge>}
+                  {transferOptions.includeSettings && <Badge variant="secondary" className="rounded-full text-[10px]">Settings</Badge>}
+                </span>
+              </div>
+            </div>
+
+            <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+              <span className="break-words text-xs leading-relaxed text-destructive">
+                This transfer modifies the destination database. Make sure you have backups before proceeding.
+              </span>
+            </div>
+
+            <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+              <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                Storage migrates buckets + metadata only — file contents (Supabase Storage API, Neon Object Storage) are not copied.
+                Supabase auth users migrate with password hashes when readable; Neon Auth lives in neon_auth tables and migrates with the database.
+                Supabase storage.* and auth.* schemas have no counterpart on Neon / generic Postgres and are skipped with a warning.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {currentStep === "transferring" && (
+          <>
+            {(progress?.message || progress?.error) && (
+              <div className={cn(statusPill, progress?.error && "!border-destructive/30 !bg-destructive/5")}>
+                <span className={cn("break-words text-xs leading-relaxed", progress?.error ? "text-destructive" : "text-muted-foreground")}>
+                  {progress?.error ?? `${progress?.message}${progress ? ` — ${progress.percentage}%` : ""}`}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+
+        {currentStep === "complete" && (
+          <div className="flex flex-col gap-5">
+            <div className={cn(statusPill, "!border-green-500/30 !bg-green-500/10")}>
+              <span className="flex items-center gap-2 text-xs font-medium text-green-600 dark:text-green-400">
+                <Check className="size-4" />
+                Transfer completed
+              </span>
+            </div>
+
+            {statCards.length > 0 && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {statCards.map((s) => (
+                  <div key={s.label} className="rounded-xl border border-border bg-card px-3 py-2.5 text-center shadow-sm">
+                    <div className="text-xl font-semibold tracking-tight">{s.value}</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {transferResult?.warnings && transferResult.warnings.length > 0 && (
+              <div className={cn(statusPill, "!border-amber-500/30 !bg-amber-500/10")}>
+                <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                  Completed with warnings: {transferResult.warnings.slice(0, 5).join(" ")}
+                  {transferResult.warnings.length > 5 ? ` (+${transferResult.warnings.length - 5} more — see server log)` : ""}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentStep === "error" && (
+          <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+            <span className="break-words text-xs leading-relaxed text-destructive">
+              {error || "An unknown error occurred"}
+            </span>
+          </div>
+        )}
+
+        {showNav && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            {currentStep !== "select-sources" ? (
+              <Button className={pillButton} onClick={prevStep}>
+                Back
+              </Button>
+            ) : (
+              <Button className={pillButton} onClick={() => onCancel?.()}>
+                Cancel
+              </Button>
+            )}
+            <Button className={pillButton} disabled={!canProceed() || isTransferring} onClick={nextStep}>
+              {isTransferring ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : currentStep === "confirm" ? (
+                "Start transfer"
               ) : (
-                <>
-                  Next
-                  <ArrowRight className="size-3.5" />
-                </>
+                "Next"
               )}
             </Button>
-          )}
-          {currentStep === "complete" && (
-            <Button size="sm" className="h-8 text-xs" onClick={handleDone}>
+          </div>
+        )}
+
+        {currentStep === "transferring" && !isTransferring && !progress?.error && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={() => onCancel?.()}>
+              Close
+            </Button>
+          </div>
+        )}
+
+        {currentStep === "complete" && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={handleDone}>
+              <Check className="size-4" />
               Done
             </Button>
-          )}
-        </div>
+          </div>
+        )}
+
+        {currentStep === "error" && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={resetWizard}>
+              Start over
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

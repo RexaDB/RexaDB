@@ -253,7 +253,7 @@ export class TransferService {
         stepIndex++;
       } else if (bucketCount > 0 || fileCount > 0) {
         warnings.push(
-          `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no storage support — they were skipped, not imported.`,
+          `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no Supabase-compatible storage schema — they were skipped, not imported. Ordinary tables migrate with the database transfer.`,
         );
         stats.storageBucketsTransferred = 0;
         stats.storageFilesTransferred = 0;
@@ -279,7 +279,7 @@ export class TransferService {
         stepIndex++;
       } else if (userCount > 0 || providerCount > 0) {
         warnings.push(
-          `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no auth support — they were skipped, not imported.`,
+          `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no GoTrue-compatible auth schema — they were skipped, not imported. Neon Auth lives in neon_auth tables and migrates with the database transfer.`,
         );
         stats.authUsersTransferred = 0;
         stats.authProvidersTransferred = 0;

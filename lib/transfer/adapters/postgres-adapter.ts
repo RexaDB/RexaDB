@@ -103,25 +103,26 @@ export class PostgresAdapter implements ProviderAdapter {
     }
   }
   
-  // Generic Postgres has no built-in storage. There is intentionally NO
-  // importStorage: the service reports exported storage as skipped with a
-  // user-visible warning instead of silently discarding it.
+  // Generic Postgres exposes no Supabase-compatible storage over SQL.
+  // There is intentionally NO importStorage: the service reports exported
+  // storage as skipped with a user-visible warning instead of silently
+  // discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
     return {
       buckets: [],
       files: [],
-      warnings: ["Generic Postgres has no built-in storage: storage transfer selected, but there is nothing to export."],
+      warnings: ["Generic Postgres exposes no Supabase-compatible storage over SQL: nothing to export."],
     };
   }
 
-  // Generic Postgres has no built-in auth like Supabase. There is
+  // Generic Postgres has no GoTrue-compatible auth schema. There is
   // intentionally NO importAuth — see importStorage note above.
   async exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport> {
     return {
       users: [],
       providers: [],
       policies: [],
-      warnings: ["Generic Postgres has no built-in auth: auth transfer selected, but there is nothing to export."],
+      warnings: ["Generic Postgres has no GoTrue-compatible auth schema: nothing to export."],
     };
   }
   
