@@ -9,7 +9,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  ArrowRightLeft,
   Database,
   HardDrive,
   Shield,
@@ -352,9 +351,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   return (
     <div className="flex w-full flex-col gap-6">
       <div className="flex items-center justify-center gap-3">
-        <span className="flex size-9 items-center justify-center rounded-full border border-border bg-card shadow-sm">
-          <ArrowRightLeft className="size-4 text-foreground" />
-        </span>
         <h2 className="text-2xl font-semibold tracking-tight">Transfer Project</h2>
       </div>
 
@@ -532,12 +528,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                   </ul>
                 </TooltipProvider>
               </div>
-            </div>
-
-            <div className={cn(statusPill, "!rounded-2xl !border-destructive/30 !bg-destructive/5")}>
-              <span className="break-words text-xs leading-relaxed text-destructive">
-                This transfer modifies the destination database. Make sure you have backups before proceeding.
-              </span>
             </div>
           </div>
         )}
