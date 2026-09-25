@@ -169,6 +169,7 @@ export function useGlobalAppTheme(persist = false) {
                 typeof theme.id === "string" &&
                 typeof theme.name === "string" &&
                 (theme.base === "light" || theme.base === "dark") &&
+                !!theme.colors &&
                 typeof theme.colors === "object"
               );
             }
@@ -265,6 +266,7 @@ export function useGlobalAppTheme(persist = false) {
                 typeof theme.id === "string" &&
                 typeof theme.name === "string" &&
                 (theme.base === "light" || theme.base === "dark") &&
+                !!theme.colors &&
                 typeof theme.colors === "object",
             );
           }

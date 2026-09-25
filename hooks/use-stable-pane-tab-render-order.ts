@@ -25,14 +25,20 @@ function arePaneOrdersEqual(
 }
 
 export function useStablePaneTabRenderOrder<T extends PaneTabLike>(
-  paneTabsById: Record<string, T[]>
+  paneTabsById: Record<string, T[]> | null | undefined
 ): Record<string, T[]> {
   const [stableTabOrderByPane, setStableTabOrderByPane] = useState<Record<string, string[]>>({});
 
+  const safePaneTabsById: Record<string, T[]> = useMemo(
+    () => (paneTabsById && typeof paneTabsById === "object" ? paneTabsById : {}),
+    [paneTabsById],
+  );
+
   const nextTabOrderByPane = useMemo(() => {
     return Object.fromEntries(
-      Object.entries(paneTabsById).map(([paneId, tabs]) => {
-        const currentIds = tabs.map((tab) => tab.id);
+      Object.entries(safePaneTabsById).map(([paneId, tabs]) => {
+        const safeTabs = Array.isArray(tabs) ? tabs : [];
+        const currentIds = safeTabs.map((tab) => tab.id);
         const currentIdSet = new Set(currentIds);
         const previousIds = stableTabOrderByPane[paneId] ?? [];
         const keptIds = previousIds.filter((id) => currentIdSet.has(id));
@@ -42,7 +48,7 @@ export function useStablePaneTabRenderOrder<T extends PaneTabLike>(
         return [paneId, [...keptIds, ...addedIds]];
       })
     );
-  }, [paneTabsById, stableTabOrderByPane]);
+  }, [safePaneTabsById, stableTabOrderByPane]);
 
   useEffect(() => {
     if (arePaneOrdersEqual(stableTabOrderByPane, nextTabOrderByPane)) return;
@@ -51,8 +57,9 @@ export function useStablePaneTabRenderOrder<T extends PaneTabLike>(
 
   return useMemo(() => {
     return Object.fromEntries(
-      Object.entries(paneTabsById).map(([paneId, tabs]) => {
-        const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
+      Object.entries(safePaneTabsById).map(([paneId, tabs]) => {
+        const safeTabs = Array.isArray(tabs) ? tabs : [];
+        const tabsById = new Map(safeTabs.map((tab) => [tab.id, tab]));
         const orderedTabs = (nextTabOrderByPane[paneId] ?? [])
           .map((tabId) => tabsById.get(tabId))
           .filter((tab): tab is T => Boolean(tab));
@@ -60,5 +67,5 @@ export function useStablePaneTabRenderOrder<T extends PaneTabLike>(
         return [paneId, orderedTabs];
       })
     );
-  }, [nextTabOrderByPane, paneTabsById]);
+  }, [nextTabOrderByPane, safePaneTabsById]);
 }

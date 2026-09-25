@@ -11,15 +11,19 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    const digest = typeof error.digest === "string" ? error.digest : String(error.digest ?? "");
     logAppError({
       errorType: "react-root-error",
-      message: error.message,
+      message: error.message ?? String(error),
       stack: error.stack ?? null,
       url: typeof window !== "undefined" ? window.location.href : null,
-      componentStack: null,
-      metadata: { digest: error.digest },
-      appVersion: null,
-      os: null,
+      componentStack: (error as Error & { componentStack?: string }).componentStack ?? digest ?? null,
+      metadata: { digest: digest || null },
+      appVersion:
+        typeof window !== "undefined"
+          ? (window as unknown as { __REXA_APP_VERSION?: string }).__REXA_APP_VERSION ?? null
+          : null,
+      os: typeof navigator !== "undefined" ? navigator.platform ?? null : null,
     });
   }, [error]);
 

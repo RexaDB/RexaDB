@@ -33,10 +33,10 @@ export function useAppSettings(planCode = "free") {
     getKeybindingsFile()
       .then((res) => {
         if (cancelled) return;
-        if (res?.success && res.data) {
+        if (res?.success && res.data && typeof res.data === "object" && !Array.isArray(res.data)) {
           setKeybindings(
             normalizeKeybindingsForPlatform(
-              withMissingDefaultKeybindings(res.data),
+              withMissingDefaultKeybindings(res.data as Record<string, any>),
             ),
           );
         }

@@ -57,7 +57,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
   const modelCount = useMemo(
     () =>
       Object.values(settings?.providers || {}).reduce(
-        (sum, provider) => sum + provider.models.length,
+        (sum, provider) => sum + (Array.isArray(provider?.models) ? provider.models.length : 0),
         0,
       ),
     [settings],
@@ -66,7 +66,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
   const providerCount = useMemo(
     () =>
       Object.entries(settings?.providers || {}).filter(
-        ([p, c]) => (p === "ollama" || c.apiKey.trim()) && c.models.length > 0,
+        ([p, c]) => !!c && (p === "ollama" || String(c.apiKey ?? "").trim()) && Array.isArray(c.models) && c.models.length > 0,
       ).length,
     [settings],
   );

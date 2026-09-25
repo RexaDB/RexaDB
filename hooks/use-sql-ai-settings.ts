@@ -4,10 +4,13 @@ import { getGlobalAiSettings, type GlobalAiSettings } from "@/lib/api/actions-cl
 import { subscribeGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 
 function hasAnyConfiguredModels(settings: GlobalAiSettings | null): boolean {
-  if (!settings) return false;
-  return Object.entries(settings.providers).some(
-    ([p, c]) => c.models.length > 0 && (p === "ollama" || c.apiKey.trim().length > 0),
-  );
+  if (!settings || !settings.providers || typeof settings.providers !== "object") return false;
+  return Object.entries(settings.providers).some(([p, c]) => {
+    if (!c || typeof c !== "object") return false;
+    const models = Array.isArray(c.models) ? c.models : [];
+    const apiKey = typeof c.apiKey === "string" ? c.apiKey : "";
+    return models.length > 0 && (p === "ollama" || apiKey.trim().length > 0);
+  });
 }
 
 export function useSqlAiSettings() {

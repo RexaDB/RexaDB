@@ -145,11 +145,12 @@ export function describeBinding(
 }
 
 export function getKeybindingCombo(
-  keybindings: Record<string, Keybinding>,
+  keybindings: Record<string, Keybinding> | null | undefined,
   actionType: string
 ): string | null {
+  if (!keybindings || typeof keybindings !== "object") return null;
   for (const [combo, binding] of Object.entries(keybindings)) {
-    if (binding.type === actionType) return combo;
+    if (binding?.type === actionType) return combo;
   }
   return null;
 }
@@ -163,10 +164,10 @@ export function getDefaultKeybindings(platform?: ShortcutPlatform): Record<strin
 }
 
 export function withMissingDefaultKeybindings(
-  source: Record<string, Keybinding>,
+  source: Record<string, Keybinding> | null | undefined,
   platform?: ShortcutPlatform
 ): Record<string, Keybinding> {
-  const result: Record<string, Keybinding> = { ...source };
+  const result: Record<string, Keybinding> = { ...(source && typeof source === "object" ? source : {}) };
 
   // Migrate legacy defaults: on macOS the tab-nav shortcuts were
   // previously stored as Ctrl+Tab / Ctrl+Shift+Tab; they should now
@@ -331,11 +332,13 @@ function normalizeComboForPlatform(combo: string, platform?: ShortcutPlatform): 
 }
 
 export function normalizeKeybindingsForPlatform(
-  bindings: Record<string, Keybinding>,
+  bindings: Record<string, Keybinding> | null | undefined,
   platform?: ShortcutPlatform
 ): Record<string, Keybinding> {
   const result: Record<string, Keybinding> = {};
+  if (!bindings || typeof bindings !== "object") return result;
   for (const [combo, binding] of Object.entries(bindings)) {
+    if (!binding || typeof binding !== "object") continue;
     const normalizedCombo = normalizeComboForPlatform(combo, platform);
     if (result[normalizedCombo]) continue;
     result[normalizedCombo] = {

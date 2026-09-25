@@ -1,5 +1,5 @@
 import { resolvePaymentsConnection } from "@/lib/supabase-paykit/supabase-ref";
-import { runQuery } from "@/lib/api/actions-client";
+import { transferQuery } from "@/lib/transfer/transfer-sql";
 
 /** Storage is available on supabase-mgmt and direct Postgres-to-Supabase connections. */
 export function shouldShowStorage(
@@ -236,7 +236,7 @@ async function tryQueries(
   let lastError: string | undefined;
   for (const sql of queries) {
     try {
-      const res: any = await runQuery(connectionString, sql);
+      const res: any = await transferQuery(connectionString, sql);
       // /api/sql/run returns { success, data: { rows, ... } } — rows live
       // under `data`, not at the top level.
       if (res?.success === false || res?.error) {

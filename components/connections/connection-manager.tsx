@@ -140,6 +140,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { FederatedConnectionForm } from "@/components/federated/federated-connection-form";
 import { getFederatedDraftError } from "@/components/federated/federated-connection-utils";
+import { TransferProjectScreen } from "@/components/transfer/transfer-project-screen";
 
 import { JdbcDatabasePickerScreen } from "@/components/studio/jdbc-picker-screen";
 import { DriverInstallPrompt } from "@/components/studio/jdbc-driver-install-prompt";
@@ -244,7 +245,8 @@ type ConnectionScreen =
   | "spacetimedb"
   | "spacetimedb-account"
   | "neon-cli"
-  | "planetscale-account";
+  | "planetscale-account"
+  | "transfer";
 
 type PlanCode = "free" | "pro" | "team" | "enterprise" | "otl";
 type PlanEntitlements = {
@@ -5441,6 +5443,12 @@ export function ConnectionManager({
               connections={connections}
               onBack={() => setConnectionScreen("list")}
             />
+          ) : connectionScreen === "transfer" ? (
+            <TransferProjectScreen
+              connections={connections}
+              onBack={() => setConnectionScreen("list")}
+              onComplete={() => setConnectionScreen("list")}
+            />
           ) : connectionScreen === "settings" ? (
             <Dialog
               open={true}
@@ -6990,6 +6998,15 @@ export function ConnectionManager({
             className="gap-2 focus:bg-muted/50"
           >
             <ArrowRightLeft className="w-4 h-4" /> Compare Schemas
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              setConnectionScreen("transfer");
+              setManageMenuOpen(false);
+            }}
+            className="gap-2 focus:bg-muted/50"
+          >
+            <ArrowRightLeft className="w-4 h-4" /> Transfer Project
           </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border/60" />
           <DropdownMenuItem
