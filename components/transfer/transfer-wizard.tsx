@@ -449,23 +449,25 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
         {currentStep === "confirm" && (
           <div className="flex flex-col gap-3">
-            <div className={cn(statusPill, "!mt-0 !justify-between !rounded-2xl")}>
-              <span className="text-xs text-muted-foreground">Source</span>
-              <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
-            </div>
-            <div className={cn(statusPill, "!mt-0 !justify-between !rounded-2xl")}>
-              <span className="text-xs text-muted-foreground">Destination</span>
-              <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
-            </div>
-            <div className={cn(statusPill, "!mt-0 !justify-between !gap-3 !rounded-2xl")}>
-              <span className="shrink-0 text-xs text-muted-foreground">Components</span>
-              <span className="flex flex-wrap justify-end gap-1">
-                {transferOptions.includeDatabase && <Badge variant="secondary" className="rounded-full text-[10px]">Database</Badge>}
-                {transferOptions.includeStorage && <Badge variant="secondary" className="rounded-full text-[10px]">Storage</Badge>}
-                {transferOptions.includeAuth && <Badge variant="secondary" className="rounded-full text-[10px]">Auth</Badge>}
-                {transferOptions.includeSettings && <Badge variant="secondary" className="rounded-full text-[10px]">Settings</Badge>}
-                {transferOptions.includeEdgeFunctions && <Badge variant="secondary" className="rounded-full text-[10px]">Edge functions</Badge>}
-              </span>
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Source</span>
+                <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Destination</span>
+                <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2.5">
+                <span className="shrink-0 text-xs text-muted-foreground">Components</span>
+                <span className="flex flex-wrap justify-end gap-1">
+                  {transferOptions.includeDatabase && <Badge variant="secondary" className="rounded-full text-[10px]">Database</Badge>}
+                  {transferOptions.includeStorage && <Badge variant="secondary" className="rounded-full text-[10px]">Storage</Badge>}
+                  {transferOptions.includeAuth && <Badge variant="secondary" className="rounded-full text-[10px]">Auth</Badge>}
+                  {transferOptions.includeSettings && <Badge variant="secondary" className="rounded-full text-[10px]">Settings</Badge>}
+                  {transferOptions.includeEdgeFunctions && <Badge variant="secondary" className="rounded-full text-[10px]">Edge functions</Badge>}
+                </span>
+              </div>
             </div>
 
             <div className={cn(statusPill, "!rounded-2xl !border-destructive/30 !bg-destructive/5")}>
