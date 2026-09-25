@@ -10,6 +10,7 @@ import type {
   StorageExport,
   AuthExport,
   SettingsExport,
+  FunctionsExport,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import { exportTableDataSql, qualifiedTable } from "../transfer-sql";
@@ -123,6 +124,13 @@ export class PostgresAdapter implements ProviderAdapter {
       providers: [],
       policies: [],
       warnings: ["Generic Postgres has no GoTrue-compatible auth schema: nothing to export."],
+    };
+  }
+
+  async exportFunctions?(connectionString: string, options: TransferOptions): Promise<FunctionsExport> {
+    return {
+      functions: [],
+      warnings: ["Generic Postgres has no edge-functions platform: nothing to export."],
     };
   }
   

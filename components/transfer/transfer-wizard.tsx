@@ -147,14 +147,16 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   }, [destinationConnectionId, connections]);
 
   const unsupportedNotice = useMemo(() => {
-    if (!destProvider || destProvider === "supabase") return null;
+    // Supabase and Neon both transfer storage bytes and auth rows. Only
+    // generic Postgres lacks Supabase-compatible storage/auth schemas.
+    if (!destProvider || destProvider === "supabase" || destProvider === "neon") return null;
     const parts = [
       transferOptions.includeStorage ? "storage buckets/files" : null,
       transferOptions.includeAuth ? "GoTrue users/providers" : null,
     ].filter(Boolean);
     if (parts.length === 0) return null;
     const destName = destProvider === "generic" ? "This destination" : `A ${destProvider} destination`;
-    return `${destName} has no Supabase-compatible storage or auth schemas: ${parts.join(" and ")} will be skipped with a warning, not transferred. Ordinary tables — including Neon Auth's neon_auth tables — migrate with the database.`;
+    return `${destName} has no Supabase-compatible storage or auth schemas: ${parts.join(" and ")} will be skipped with a warning, not transferred. Ordinary tables migrate with the database.`;
   }, [destProvider, transferOptions.includeStorage, transferOptions.includeAuth]);
 
   // Completion is user-acknowledged: the complete step (stats + warnings)
@@ -476,9 +478,9 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
             <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
               <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                Storage file contents copy only between Supabase projects with management tokens (budgets apply); otherwise buckets + metadata migrate and contents are skipped with a warning.
+                Storage file contents copy between Supabase projects with management tokens and to/from Neon Object Storage (budgets apply); otherwise buckets + metadata migrate and contents are skipped with a warning.
                 Supabase auth users migrate with password hashes when readable; Neon Auth lives in neon_auth tables and migrates with the database.
-                Supabase storage.* and auth.* schemas have no counterpart on Neon / generic Postgres and are skipped with a warning.
+                Supabase storage.* and auth.* schemas have no counterpart on generic Postgres and are skipped with a warning.
                 Edge functions migrate sources with git-style compat diffs — review every hunk before deploying.
               </span>
             </div>

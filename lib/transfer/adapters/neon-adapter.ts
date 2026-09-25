@@ -16,6 +16,15 @@ import type {
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import { escapeIdent, escapeLiteral, exportTableDataSql, qualifiedTable } from "../transfer-sql";
 import { serverTransferQuery } from "../transfer-server-query";
+import { MAX_STORAGE_TOTAL_BYTES } from "../supabase-api";
+import {
+  downloadNeonObject,
+  ensureNeonBucket,
+  listNeonBuckets,
+  listNeonObjects,
+  sanitizeBucketName,
+  uploadNeonObject,
+} from "../neon-storage";
 import { resolveEffectiveConnectionString } from "@/lib/db/neon-cli-client";
 import { parseNeonCliConnectionString } from "@/lib/neon-cli/pointer";
 import { buildCompatDiffs } from "../function-compat";
@@ -175,11 +184,87 @@ export class NeonAdapter implements ProviderAdapter {
   // the service reports Supabase-shaped storage as skipped with a
   // user-visible warning instead of silently discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
+    const warnings: string[] = [];
+    const listed = await listNeonBuckets(connectionString);
+    if ("error" in listed) {
+      return { buckets: [], files: [], warnings: [`Failed to list Neon buckets: ${listed.error}`] };
+    }
+    const buckets = listed.buckets;
+    const files: StorageExport["files"] = [];
+    let totalBytes = 0;
+    for (const bucket of buckets) {
+      const objects = await listNeonObjects(connectionString, bucket.name);
+      if ("error" in objects) {
+        warnings.push(`Failed to list objects for bucket ${bucket.name}: ${objects.error}`);
+        continue;
+      }
+      for (const key of objects.keys) {
+        const entry: StorageExport["files"][number] = { bucketId: bucket.name, path: key, metadata: {} };
+        if (totalBytes >= MAX_STORAGE_TOTAL_BYTES) {
+          warnings.push(`Storage byte budget exceeded: ${key} and remaining files migrate metadata-only.`);
+        } else {
+          const dl = await downloadNeonObject(connectionString, bucket.name, key);
+          if ("bytes" in dl) {
+            totalBytes += dl.bytes.length;
+            entry.contentBase64 = dl.bytes.toString("base64");
+            entry.size = dl.bytes.length;
+          } else {
+            warnings.push(`Could not download ${bucket.name}/${key}: ${dl.error} (listed, contents skipped).`);
+          }
+        }
+        files.push(entry);
+      }
+    }
+    if (buckets.length === 0) warnings.push("No Neon Object Storage buckets found on this branch.");
     return {
-      buckets: [],
-      files: [],
-      warnings: ["Neon Object Storage is not reachable over SQL: no storage metadata to export."],
+      buckets: buckets.map((b) => ({
+        id: b.name,
+        name: b.name,
+        public: b.accessLevel === "public_read",
+        file_size_limit: null,
+        allowed_mime_types: null,
+      })),
+      files,
+      warnings,
     };
+  }
+
+  async importStorage?(connectionString: string, data: StorageExport, options: TransferOptions) {
+    // Supabase buckets land in Neon Object Storage: sanitize names to S3
+    // rules, create buckets (public stays public), upload carried bytes.
+    const warnings: string[] = [];
+    let bucketsOk = 0;
+    let filesOk = 0;
+    const nameMap = new Map<string, string>();
+    for (const bucket of data.buckets) {
+      const { name: destName, renamed } = sanitizeBucketName(bucket.name);
+      nameMap.set(bucket.id, destName);
+      if (renamed) warnings.push(`Bucket ${bucket.name} renamed to ${destName} (S3 naming rules).`);
+      const created = await ensureNeonBucket(connectionString, destName, bucket.public);
+      if ("ok" in created) bucketsOk++;
+      else warnings.push(`Failed to create bucket ${destName}: ${created.error}`);
+    }
+    const withBytes = data.files.filter((f) => f.contentBase64);
+    const metadataOnly = data.files.length - withBytes.length;
+    for (const file of withBytes) {
+      const destBucket = nameMap.get(file.bucketId) ?? sanitizeBucketName(file.bucketId).name;
+      try {
+        const bytes = Buffer.from(file.contentBase64 as string, "base64");
+        const meta = (file.metadata ?? {}) as Record<string, unknown>;
+        const contentType = typeof meta.mimetype === "string" ? meta.mimetype : undefined;
+        const up = await uploadNeonObject(connectionString, destBucket, file.path, bytes, contentType);
+        if ("ok" in up) filesOk++;
+        else warnings.push(`Failed to upload ${destBucket}/${file.path}: ${up.error} (bucket migrated, contents skipped).`);
+      } catch (error) {
+        warnings.push(`Failed to upload ${destBucket}/${file.path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (metadataOnly > 0) {
+      warnings.push(
+        `${metadataOnly} file(s) migrated metadata-only: contents were not in the export and were NOT copied.`,
+      );
+    }
+    return { warnings, stats: { storageBucketsTransferred: bucketsOk, storageFilesTransferred: filesOk } };
   }
 
   // Neon Auth lives in neon_auth tables (migrating with the database
