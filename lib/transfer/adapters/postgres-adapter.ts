@@ -12,15 +12,15 @@ import type {
   SettingsExport,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
-import { runQuery } from "@/lib/api/actions-client";
-import { applyDataSql, exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { serverTransferQuery } from "../transfer-server-query";
 
 export class PostgresAdapter implements ProviderAdapter {
   type = "postgres" as const;
   
   async validateConnection(connectionString: string): Promise<boolean> {
     try {
-      const result = await runQuery(connectionString, "SELECT 1");
+      const result = await serverTransferQuery(connectionString, "SELECT 1");
       return result.success;
     } catch {
       return false;
@@ -28,10 +28,10 @@ export class PostgresAdapter implements ProviderAdapter {
   }
   
   async exportDatabase(connectionString: string, options: TransferOptions): Promise<DatabaseExport> {
-    const schemaSql = await runPgDumpSchemaOnly(connectionString, runQuery);
-    
+    const schemaSql = await runPgDumpSchemaOnly(connectionString, serverTransferQuery);
+
     // Get table list and row counts
-    const tablesResult = await runQuery(
+    const tablesResult = await serverTransferQuery(
       connectionString,
       `SELECT table_name, table_schema 
        FROM information_schema.tables 
@@ -39,11 +39,13 @@ export class PostgresAdapter implements ProviderAdapter {
          AND table_type = 'BASE TABLE'
        ORDER BY table_schema, table_name`
     );
-    
+
     const tables: string[] = [];
     const rowCounts: Record<string, number> = {};
+    const exportedRowCounts: Record<string, number> = {};
+    const warnings: string[] = [];
     let dataSql = "";
-    
+
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
@@ -52,7 +54,7 @@ export class PostgresAdapter implements ProviderAdapter {
         tables.push(tableFullName);
 
         // Get row count for each table
-        const countResult = await runQuery(
+        const countResult = await serverTransferQuery(
           connectionString,
           `SELECT COUNT(*) as count FROM ${qualifiedTable(tableSchema, tableName)}`
         );
@@ -61,42 +63,40 @@ export class PostgresAdapter implements ProviderAdapter {
           rowCounts[tableFullName] = Number(countResult.data.rows[0].count) || 0;
         }
 
-        // Export row data for reasonably-sized tables (see transfer-sql).
+        // Export row data for reasonably-sized tables; the rest migrate
+        // schema-only and are reported so stats stay honest.
         const exported = await exportTableDataSql(
-          runQuery,
+          serverTransferQuery,
           connectionString,
           tableSchema,
           tableName,
           rowCounts[tableFullName] || 0,
         );
         dataSql += exported.sql;
+        exportedRowCounts[tableFullName] = exported.exportedRows;
+        if (exported.message) warnings.push(exported.message);
       }
     }
-    
+
     return {
       schemaSql,
       dataSql: dataSql || undefined,
       tables,
       rowCounts,
+      exportedRowCounts,
+      warnings,
     };
   }
-  
+
   async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
 
     // Destructive by design (drops + recreates destination schemas — the
     // wizard confirm step requires an explicit backup acknowledgement) and
-    // transactional: a schema-apply failure rolls back instead of erasing.
+    // fully transactional including FK-ordered row data: any failure rolls
+    // back instead of leaving a partial destination.
     try {
-      await resetAndApplySql(connectionString, data.schemaSql);
-
-      // Row data: surface failures instead of silently succeeding.
-      if (data.dataSql) {
-        const { failed, errors } = await applyDataSql(runQuery, connectionString, data.dataSql);
-        if (failed > 0) {
-          throw new Error(`Failed to import ${failed} data statement(s): ${errors.slice(0, 3).join(" | ")}`);
-        }
-      }
+      await resetAndApplySql(connectionString, data.schemaSql, data.dataSql);
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -132,7 +132,7 @@ export class PostgresAdapter implements ProviderAdapter {
     
     try {
       // Get some basic Postgres settings
-      const settingsResult = await runQuery(
+      const settingsResult = await serverTransferQuery(
         connectionString,
         `SELECT name, setting FROM pg_settings 
          WHERE name IN ('server_version', 'timezone', 'standard_conforming_strings') 
@@ -141,7 +141,7 @@ export class PostgresAdapter implements ProviderAdapter {
       
       if (settingsResult.success && settingsResult.data?.rows) {
         for (const row of settingsResult.data.rows) {
-          projectSettings[row.name] = row.setting;
+          projectSettings[String(row.name)] = row.setting;
         }
       }
     } catch (error) {
@@ -168,9 +168,10 @@ export class PostgresAdapter implements ProviderAdapter {
     } catch {
       // Fallback
       try {
-        const result = await runQuery(connectionString, "SELECT current_database()");
+        const result = await serverTransferQuery(connectionString, "SELECT current_database()");
         if (result.success && result.data?.rows?.[0]) {
-          return { name: result.data.rows[0].current_database, id: result.data.rows[0].current_database };
+          const dbName = String(result.data.rows[0].current_database);
+          return { name: dbName, id: dbName };
         }
       } catch {
         // Ignore error

@@ -56,7 +56,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   });
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number> } | null>(null);
+  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[] } | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
 
   const getProviderType = (connectionType: string): ProviderType => {
@@ -100,6 +100,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       setTransferResult({
         success: result.success,
         stats: result.stats,
+        warnings: result.warnings,
       });
 
       if (result.success) {
@@ -444,6 +445,23 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                 <CheckCircle2 className="h-8 w-8" />
                 <h3 className="text-xl font-semibold">Transfer Completed Successfully!</h3>
               </div>
+
+              {transferResult?.warnings && transferResult.warnings.length > 0 && (
+                <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium text-amber-800 dark:text-amber-200">Completed with warnings</span>
+                  </div>
+                  <ul className="text-sm mt-2 text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                    {transferResult.warnings.slice(0, 10).map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                    {transferResult.warnings.length > 10 && (
+                      <li>…and {transferResult.warnings.length - 10} more (see console)</li>
+                    )}
+                  </ul>
+                </div>
+              )}
 
               {transferResult?.stats && (
                 <div className="grid grid-cols-2 gap-4">

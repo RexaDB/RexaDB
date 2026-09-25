@@ -4,6 +4,7 @@
  */
 
 import type { TransferOptions, TransferProgress } from "./transfer-types";
+import { API_BASE } from "@/lib/api-base";
 
 export interface TransferApiRequest {
   sourceConnectionString: string;
@@ -17,17 +18,19 @@ export interface TransferApiResponse {
   success: boolean;
   error?: string;
   stats?: Record<string, number>;
+  warnings?: string[];
   transferId?: string;
 }
 
 export interface TransferJobStatus extends TransferProgress {
   done: boolean;
-  result?: { success: boolean; stats?: Record<string, number>; error?: string };
+  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string };
 }
 
-const API_BASE = typeof window !== 'undefined' && window.location 
-  ? `${window.location.protocol}//${window.location.host}` 
-  : 'http://localhost:3000';
+// Transfer endpoints live on the Express sidecar (same as every other
+// /api/* route), not on the frontend origin — which in dev is the Next
+// server and in the packaged app is the webview. Neither routes
+// /api/transfer/*, so window.location-based URLs can never reach them.
 
 export async function startTransfer(
   request: TransferApiRequest,
@@ -56,6 +59,7 @@ export async function startTransfer(
         return {
           success: finalStatus.result.success,
           stats: finalStatus.result.stats,
+          warnings: finalStatus.result.warnings,
           error: finalStatus.result.error,
           transferId: result.transferId,
         };

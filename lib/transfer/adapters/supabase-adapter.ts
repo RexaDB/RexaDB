@@ -12,13 +12,12 @@ import type {
   SettingsExport,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
-import { runQuery } from "@/lib/api/actions-client";
 import {
-  applyDataSql,
   escapeLiteral,
   exportTableDataSql,
   qualifiedTable,
 } from "../transfer-sql";
+import { serverTransferQuery } from "../transfer-server-query";
 import { fetchStorageBuckets, fetchStorageObjects } from "@/lib/studio/storage-utils";
 import { fetchAuthProviderConfigs } from "@/lib/studio/auth/fetch";
 import { isLikelySupabaseConnection } from "@/lib/db/supabase-helpers";
@@ -28,7 +27,7 @@ export class SupabaseAdapter implements ProviderAdapter {
   
   async validateConnection(connectionString: string): Promise<boolean> {
     try {
-      const result = await runQuery(connectionString, "SELECT 1");
+      const result = await serverTransferQuery(connectionString, "SELECT 1");
       return result.success;
     } catch {
       return false;
@@ -36,10 +35,10 @@ export class SupabaseAdapter implements ProviderAdapter {
   }
   
   async exportDatabase(connectionString: string, options: TransferOptions): Promise<DatabaseExport> {
-    const schemaSql = await runPgDumpSchemaOnly(connectionString, runQuery);
-    
+    const schemaSql = await runPgDumpSchemaOnly(connectionString, serverTransferQuery);
+
     // Get table list and row counts
-    const tablesResult = await runQuery(
+    const tablesResult = await serverTransferQuery(
       connectionString,
       `SELECT table_name, table_schema 
        FROM information_schema.tables 
@@ -47,11 +46,13 @@ export class SupabaseAdapter implements ProviderAdapter {
          AND table_type = 'BASE TABLE'
        ORDER BY table_schema, table_name`
     );
-    
+
     const tables: string[] = [];
     const rowCounts: Record<string, number> = {};
+    const exportedRowCounts: Record<string, number> = {};
+    const warnings: string[] = [];
     let dataSql = "";
-    
+
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
@@ -60,7 +61,7 @@ export class SupabaseAdapter implements ProviderAdapter {
         tables.push(tableFullName);
 
         // Get row count for each table
-        const countResult = await runQuery(
+        const countResult = await serverTransferQuery(
           connectionString,
           `SELECT COUNT(*) as count FROM ${qualifiedTable(tableSchema, tableName)}`
         );
@@ -69,43 +70,39 @@ export class SupabaseAdapter implements ProviderAdapter {
           rowCounts[tableFullName] = Number(countResult.data.rows[0].count) || 0;
         }
 
-        // Export row data for reasonably-sized tables (schema still migrates
-        // for tables above the limit; see transfer-sql.MAX_DATA_EXPORT_ROWS).
+        // Export row data for reasonably-sized tables. Tables above the cap
+        // or failed reads migrate schema-only and are reported in warnings
+        // so stats never claim rows that were not exported.
         const exported = await exportTableDataSql(
-          runQuery,
+          serverTransferQuery,
           connectionString,
           tableSchema,
           tableName,
           rowCounts[tableFullName] || 0,
         );
         dataSql += exported.sql;
+        exportedRowCounts[tableFullName] = exported.exportedRows;
+        if (exported.message) warnings.push(exported.message);
       }
     }
-    
+
     return {
       schemaSql,
       dataSql: dataSql || undefined,
       tables,
       rowCounts,
+      exportedRowCounts,
+      warnings,
     };
   }
-  
+
   async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
 
-    // Schema apply is destructive (drops destination schemas first) and now
-    // runs transactionally — a failure rolls back instead of erasing data.
-    await resetAndApplySql(connectionString, data.schemaSql);
-
-    // Then import row data if the export included any. Failures are surfaced
-    // (not swallowed) so the transfer reports them instead of fake success.
-    if (data.dataSql) {
-      const { applied, failed, errors } = await applyDataSql(runQuery, connectionString, data.dataSql);
-      void applied;
-      if (failed > 0) {
-        throw new Error(`Failed to import ${failed} data statement(s): ${errors.slice(0, 3).join(" | ")}`);
-      }
-    }
+    // Single transaction (drops + schema + row data, FK-ordered): a failure
+    // rolls everything back, so the destination is never left partially
+    // populated. Errors propagate so the transfer reports failure honestly.
+    await resetAndApplySql(connectionString, data.schemaSql, data.dataSql);
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {
@@ -169,7 +166,7 @@ export class SupabaseAdapter implements ProviderAdapter {
             allowed_mime_types = EXCLUDED.allowed_mime_types;
         `;
         
-        const result = await runQuery(connectionString, createBucketQuery);
+        const result = await serverTransferQuery(connectionString, createBucketQuery);
         if (!result.success) {
           console.warn(`Failed to create bucket ${bucket.name}:`, result.error);
         }
@@ -190,7 +187,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     
     try {
       // Export users from auth.users with warning about limitations
-      const usersResult = await runQuery(
+      const usersResult = await serverTransferQuery(
         connectionString,
         `SELECT id, email, email_confirmed_at, created_at, updated_at, raw_user_meta_data 
          FROM auth.users 
@@ -200,12 +197,12 @@ export class SupabaseAdapter implements ProviderAdapter {
       if (usersResult.success && usersResult.data?.rows) {
         for (const row of usersResult.data.rows) {
           users.push({
-            id: row.id,
-            email: row.email,
-            email_confirmed_at: row.email_confirmed_at,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            raw_user_meta_data: row.raw_user_meta_data,
+            id: String(row.id),
+            email: String(row.email),
+            email_confirmed_at: row.email_confirmed_at != null ? String(row.email_confirmed_at) : undefined,
+            created_at: String(row.created_at),
+            updated_at: String(row.updated_at),
+            raw_user_meta_data: (row.raw_user_meta_data ?? {}) as Record<string, unknown>,
           });
         }
         // Warn if we hit the limit
@@ -235,7 +232,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     
     try {
       // Export RLS policies
-      const policiesResult = await runQuery(
+      const policiesResult = await serverTransferQuery(
         connectionString,
         `SELECT schemaname as schema, tablename as table, policyname as name, pg_get_expr(qual, schemaname||'.'||tablename) as definition
          FROM pg_policies
@@ -245,12 +242,15 @@ export class SupabaseAdapter implements ProviderAdapter {
       
       if (policiesResult.success && policiesResult.data?.rows) {
         for (const row of policiesResult.data.rows) {
+          const schema = String(row.schema);
+          const table = String(row.table);
+          const name = String(row.name);
           policies.push({
-            id: `${row.schema}.${row.table}.${row.name}`,
-            name: row.name,
-            schema: row.schema,
-            table: row.table,
-            definition: row.definition,
+            id: `${schema}.${table}.${name}`,
+            name,
+            schema,
+            table,
+            definition: String(row.definition),
           });
         }
       }
@@ -277,7 +277,7 @@ export class SupabaseAdapter implements ProviderAdapter {
           ON CONFLICT (id) DO NOTHING;
         `;
         
-        const result = await runQuery(connectionString, importUserQuery);
+        const result = await serverTransferQuery(connectionString, importUserQuery);
         if (!result.success) {
           console.warn(`Failed to import user ${user.id}:`, result.error);
         }
@@ -300,7 +300,7 @@ export class SupabaseAdapter implements ProviderAdapter {
             client_secret = EXCLUDED.client_secret;
         `;
         
-        const result = await runQuery(connectionString, importProviderQuery);
+        const result = await serverTransferQuery(connectionString, importProviderQuery);
         if (!result.success) {
           console.warn(`Failed to import provider ${provider.id}:`, result.error);
         }
@@ -318,7 +318,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     
     try {
       // Export various project settings that might be stored in the database
-      const settingsResult = await runQuery(
+      const settingsResult = await serverTransferQuery(
         connectionString,
         `SELECT * FROM public.settings LIMIT 1`
       );
@@ -356,9 +356,10 @@ export class SupabaseAdapter implements ProviderAdapter {
     
     // Fallback to database name
     try {
-      const result = await runQuery(connectionString, "SELECT current_database()");
+      const result = await serverTransferQuery(connectionString, "SELECT current_database()");
       if (result.success && result.data?.rows?.[0]) {
-        return { name: result.data.rows[0].current_database, id: result.data.rows[0].current_database };
+        const dbName = String(result.data.rows[0].current_database);
+        return { name: dbName, id: dbName };
       }
     } catch {
       // Ignore error

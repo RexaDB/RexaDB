@@ -77,7 +77,7 @@ function splitForeignKeysFromSchemaSql(schemaSql: string): { schemaWithoutForeig
 
 async function getFullSqlSnapshot(
   connectionString: string,
-  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows: any[] }; error?: string }>
+  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
 ) {
   if (!isPostgresConnection(connectionString)) {
     return { success: false, error: "SQL snapshot export is supported only for PostgreSQL connections." };
@@ -119,7 +119,7 @@ function stripRexaDbParams(connectionString: string) {
 
 async function getAllowedSchemasForDump(
   connectionString: string,
-  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows: any[] }; error?: string }>
+  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
 ) {
   const res = await runQuery(
     connectionString,
@@ -132,7 +132,7 @@ async function getAllowedSchemasForDump(
   );
   if (!res.success || !res.data) return [];
   const isSupabase = isLikelySupabaseConnection(connectionString);
-  return res.data.rows
+  return (res.data.rows ?? [])
     .map((row: any) => String(row.schema_name || "").trim())
     .filter(Boolean)
     .filter((schema) => !isSupabase || !isSupabaseExcludedSchema(schema));
@@ -176,7 +176,7 @@ function applySupabaseDumpTransforms(input: string, excludedSchemasPattern: stri
 
 export async function runPgDumpSchemaOnly(
   connectionString: string,
-  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows: any[] }; error?: string }>
+  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
 ) {
   const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
   connectionString = await resolveEffectiveConnectionString(connectionString);
@@ -245,7 +245,11 @@ export async function runPgDumpSchemaOnly(
   }
 }
 
-export async function resetAndApplySql(connectionString: string, fullSql: string) {
+export async function resetAndApplySql(
+  connectionString: string,
+  fullSql: string,
+  dataSql?: string,
+) {
   if (!isPostgresConnection(connectionString)) {
     throw new Error("SQL import is supported only for PostgreSQL connections.");
   }
@@ -287,29 +291,83 @@ export async function resetAndApplySql(connectionString: string, fullSql: string
     }
     dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
 
+    // Row-data chunks, ordered so referenced (parent) tables load first.
+    // FK edges are read from the destination AFTER the schema is applied,
+    // so ordering reflects the schema being installed — not the source.
+    // Everything (drops + schema + data) runs in ONE transaction: any
+    // failure rolls back instead of leaving a partially populated database.
+    const { parseDataChunks, orderChunksByDependency } = await import(
+      "@/lib/transfer/transfer-sql"
+    );
+    const chunks = dataSql ? parseDataChunks(dataSql) : [];
+
     // Some dump outputs cannot run inside a transaction block
     // (e.g. CREATE INDEX CONCURRENTLY, VACUUM). Only use the transactional
     // path when the payload is transaction-safe; otherwise fall back to the
     // legacy sequential apply and let errors propagate to the caller.
-    const nonTransactional = /(CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|^\s*VACUUM\b|^\s*CREATE\s+DATABASE\b|^\s*ALTER\s+SYSTEM\b)/im.test(fullSql);
+    const nonTransactional = /(CREATE\s+(UNIQUE\s+)?INDEX\s+CONCURRENTLY|^\s*VACUUM\b|^\s*CREATE\s+DATABASE\b|^\s*ALTER\s+SYSTEM\b)/im.test(
+      `${fullSql}\n${dataSql ?? ""}`,
+    );
+
+    const applyAll = async () => {
+      for (const stmt of dropStatements) {
+        await client.query(stmt);
+      }
+      await client.query(fullSql);
+      if (chunks.length === 0) return;
+
+      const fkRes = await client.query(`
+        SELECT tc.table_schema AS schema,
+               tc.table_name AS tbl,
+               ccu.table_schema AS ref_schema,
+               ccu.table_name AS ref_table
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY';
+      `);
+      const seen = new Set<string>();
+      const deps: Array<{ schema: string; table: string; refSchema: string; refTable: string }> = [];
+      for (const row of fkRes.rows) {
+        const dep = {
+          schema: String(row.schema),
+          table: String(row.tbl),
+          refSchema: String(row.ref_schema),
+          refTable: String(row.ref_table),
+        };
+        const k = `${dep.schema}.${dep.table}->${dep.refSchema}.${dep.refTable}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          deps.push(dep);
+        }
+      }
+      const ordered = orderChunksByDependency(chunks, deps);
+      for (const chunk of ordered) {
+        try {
+          await client.query(chunk.sql);
+        } catch (chunkError) {
+          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+          throw new Error(
+            `Data import failed for ${where}: ${chunkError instanceof Error ? chunkError.message : String(chunkError)}`,
+          );
+        }
+      }
+    };
 
     if (!nonTransactional) {
       await client.query("BEGIN;");
       try {
-        for (const stmt of dropStatements) {
-          await client.query(stmt);
-        }
-        await client.query(fullSql);
+        await applyAll();
         await client.query("COMMIT;");
       } catch (applyError) {
         await client.query("ROLLBACK;").catch(() => {});
         throw applyError;
       }
     } else {
-      for (const stmt of dropStatements) {
-        await client.query(stmt);
-      }
-      await client.query(fullSql);
+      await applyAll();
     }
   } finally {
     await client.end().catch(() => {});
@@ -319,7 +377,7 @@ export async function resetAndApplySql(connectionString: string, fullSql: string
 export async function exportDatabaseBundle(
   connectionString: string,
   format: "sql" | "json" | "csv",
-  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows: any[] }; error?: string }>
+  runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
 ) {
   if (!isPostgresConnection(connectionString)) {
     return { success: false, error: "Database bundle export is currently supported only for PostgreSQL connections." };

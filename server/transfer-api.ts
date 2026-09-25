@@ -5,6 +5,9 @@
  */
 
 import { createTransferService } from "@/lib/transfer/transfer-service";
+// Side-effect import: registers the server query implementation for
+// dual-use modules (storage-utils, auth/fetch). Server-only file — safe.
+import "@/lib/transfer/transfer-server-query";
 import type {
   TransferApiRequest,
   TransferApiResponse,
@@ -15,7 +18,7 @@ import type { TransferProgress } from "@/lib/transfer/transfer-types";
 type TransferJob = {
   progress: TransferProgress;
   done: boolean;
-  result?: { success: boolean; stats?: Record<string, number>; error?: string };
+  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string };
   updatedAt: number;
 };
 
@@ -93,6 +96,7 @@ async function executeTransfer(transferId: string, request: TransferApiRequest):
     job.result = {
       success: result.success,
       stats: result.stats as Record<string, number> | undefined,
+      warnings: result.warnings,
       error: result.error,
     };
     if (result.success) {

@@ -87,8 +87,9 @@ export class TransferService {
       
       // Import to destination
       await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
-      
+
       const stats = this.calculateStats(package_);
+      const warnings = this.collectWarnings(package_);
       
       await this.updateProgress(options, {
         currentStep: "complete",
@@ -98,8 +99,8 @@ export class TransferService {
         message: "Transfer completed successfully",
         details: stats,
       });
-      
-      return { success: true, package: package_, stats };
+
+      return { success: true, package: package_, stats, warnings: warnings.length > 0 ? warnings : undefined };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.updateProgress(options, {
@@ -290,17 +291,30 @@ export class TransferService {
   }
   
   /**
-   * Calculate transfer statistics
+   * Calculate transfer statistics from rows actually exported — never from
+   * source row counts, which would claim rows that were skipped or failed.
    */
   private calculateStats(package_: TransferPackage) {
+    const exported = package_.database?.exportedRowCounts;
+    const counts = exported ?? package_.database?.rowCounts;
     return {
       tablesTransferred: package_.database?.tables.length || 0,
-      rowsTransferred: Object.values(package_.database?.rowCounts || {}).reduce((a, b) => a + b, 0),
+      rowsTransferred: Object.values(counts || {}).reduce((a, b) => a + b, 0),
       storageBucketsTransferred: package_.storage?.buckets.length || 0,
       storageFilesTransferred: package_.storage?.files.length || 0,
       authUsersTransferred: package_.auth?.users.length || 0,
       authProvidersTransferred: package_.auth?.providers.length || 0,
     };
+  }
+
+  /**
+   * Collect non-fatal export notes (skipped/failed tables) so the UI can
+   * disclose them instead of reporting a clean success.
+   */
+  private collectWarnings(package_: TransferPackage): string[] {
+    const warnings: string[] = [];
+    if (package_.database?.warnings) warnings.push(...package_.database.warnings);
+    return warnings;
   }
   
   /**

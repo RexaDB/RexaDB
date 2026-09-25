@@ -12,8 +12,8 @@ import type {
   SettingsExport,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
-import { runQuery } from "@/lib/api/actions-client";
-import { applyDataSql, exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { serverTransferQuery } from "../transfer-server-query";
 import { resolveEffectiveConnectionString } from "@/lib/db/neon-cli-client";
 
 export class NeonAdapter implements ProviderAdapter {
@@ -22,7 +22,7 @@ export class NeonAdapter implements ProviderAdapter {
   async validateConnection(connectionString: string): Promise<boolean> {
     try {
       const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
-      const result = await runQuery(effectiveConnectionString, "SELECT 1");
+      const result = await serverTransferQuery(effectiveConnectionString, "SELECT 1");
       return result.success;
     } catch {
       return false;
@@ -31,10 +31,10 @@ export class NeonAdapter implements ProviderAdapter {
   
   async exportDatabase(connectionString: string, options: TransferOptions): Promise<DatabaseExport> {
     const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
-    const schemaSql = await runPgDumpSchemaOnly(effectiveConnectionString, runQuery);
-    
+    const schemaSql = await runPgDumpSchemaOnly(effectiveConnectionString, serverTransferQuery);
+
     // Get table list and row counts
-    const tablesResult = await runQuery(
+    const tablesResult = await serverTransferQuery(
       effectiveConnectionString,
       `SELECT table_name, table_schema 
        FROM information_schema.tables 
@@ -42,11 +42,13 @@ export class NeonAdapter implements ProviderAdapter {
          AND table_type = 'BASE TABLE'
        ORDER BY table_schema, table_name`
     );
-    
+
     const tables: string[] = [];
     const rowCounts: Record<string, number> = {};
+    const exportedRowCounts: Record<string, number> = {};
+    const warnings: string[] = [];
     let dataSql = "";
-    
+
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
@@ -55,7 +57,7 @@ export class NeonAdapter implements ProviderAdapter {
         tables.push(tableFullName);
 
         // Get row count for each table
-        const countResult = await runQuery(
+        const countResult = await serverTransferQuery(
           effectiveConnectionString,
           `SELECT COUNT(*) as count FROM ${qualifiedTable(tableSchema, tableName)}`
         );
@@ -64,40 +66,38 @@ export class NeonAdapter implements ProviderAdapter {
           rowCounts[tableFullName] = Number(countResult.data.rows[0].count) || 0;
         }
 
-        // Export row data for reasonably-sized tables (see transfer-sql).
+        // Export row data for reasonably-sized tables; the rest migrate
+        // schema-only and are reported so stats stay honest.
         const exported = await exportTableDataSql(
-          runQuery,
+          serverTransferQuery,
           effectiveConnectionString,
           tableSchema,
           tableName,
           rowCounts[tableFullName] || 0,
         );
         dataSql += exported.sql;
+        exportedRowCounts[tableFullName] = exported.exportedRows;
+        if (exported.message) warnings.push(exported.message);
       }
     }
-    
+
     return {
       schemaSql,
       dataSql: dataSql || undefined,
       tables,
       rowCounts,
+      exportedRowCounts,
+      warnings,
     };
   }
-  
+
   async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
     const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
 
-    // Schema apply is destructive and transactional (rolls back on failure).
-    await resetAndApplySql(effectiveConnectionString, data.schemaSql);
-
-    // Row data: surface failures instead of silently succeeding.
-    if (data.dataSql) {
-      const { failed, errors } = await applyDataSql(runQuery, effectiveConnectionString, data.dataSql);
-      if (failed > 0) {
-        throw new Error(`Failed to import ${failed} data statement(s): ${errors.slice(0, 3).join(" | ")}`);
-      }
-    }
+    // Single transaction (drops + schema + FK-ordered row data): failure
+    // rolls everything back instead of leaving a partial destination.
+    await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql);
   }
   
   // Neon doesn't have built-in storage like Supabase, but users might use external storage
@@ -134,14 +134,14 @@ export class NeonAdapter implements ProviderAdapter {
     
     try {
       // Try to get any Neon-specific settings
-      const settingsResult = await runQuery(
+      const settingsResult = await serverTransferQuery(
         effectiveConnectionString,
         `SELECT * FROM pg_settings WHERE name LIKE '%neon%' LIMIT 10`
       );
       
       if (settingsResult.success && settingsResult.data?.rows) {
         for (const row of settingsResult.data.rows) {
-          projectSettings[row.name] = row.setting;
+          projectSettings[String(row.name)] = row.setting;
         }
       }
     } catch (error) {
@@ -177,9 +177,10 @@ export class NeonAdapter implements ProviderAdapter {
       }
       
       // Fallback to database name
-      const result = await runQuery(effectiveConnectionString, "SELECT current_database()");
+      const result = await serverTransferQuery(effectiveConnectionString, "SELECT current_database()");
       if (result.success && result.data?.rows?.[0]) {
-        return { name: result.data.rows[0].current_database, id: result.data.rows[0].current_database };
+        const dbName = String(result.data.rows[0].current_database);
+        return { name: dbName, id: dbName };
       }
     } catch {
       // Ignore error

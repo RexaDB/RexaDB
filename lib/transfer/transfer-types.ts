@@ -61,6 +61,14 @@ export interface DatabaseExport {
   dataSql?: string;
   tables: string[];
   rowCounts: Record<string, number>;
+  /**
+   * Rows actually exported per table (excludes tables skipped by the row
+   * cap or failed reads). Stats must be computed from this when present —
+   * rowCounts reflects the source, not what reached the destination.
+   */
+  exportedRowCounts?: Record<string, number>;
+  /** Non-fatal export notes (skipped tables, failed reads) surfaced to users. */
+  warnings?: string[];
 }
 
 export interface StorageExport {

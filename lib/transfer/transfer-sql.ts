@@ -17,6 +17,44 @@ export type QueryFn = (
   sql: string,
 ) => Promise<QueryFnResult>;
 
+/**
+ * Environment-aware query runner for transfer code.
+ *
+ * Dual-use modules (`storage-utils`, `auth/fetch`) run in BOTH the browser
+ * and the server process, so this function cannot reference server-only
+ * modules directly — that would drag pg drivers into client bundles.
+ * Instead the server implementation is injected via
+ * `registerTransferQuery()` (see `transfer-server-query`, imported by the
+ * server-only adapters). In the browser the HTTP client is used.
+ */
+let serverQueryImpl: QueryFn | null = null;
+
+export function registerTransferQuery(fn: QueryFn): void {
+  serverQueryImpl = fn;
+}
+
+export async function transferQuery(
+  connectionString: string,
+  sql: string,
+): Promise<QueryFnResult> {
+  if (typeof window !== "undefined") {
+    const { runQuery } = await import("@/lib/api/actions-client");
+    const res = (await runQuery(connectionString, sql)) as unknown as QueryFnResult;
+    return {
+      success: !!res?.success,
+      data: res?.data,
+      error: res?.error,
+    };
+  }
+  if (!serverQueryImpl) {
+    throw new Error(
+      "transferQuery() used server-side before the server query implementation was registered " +
+        "(import @/lib/transfer/transfer-server-query in server entry points).",
+    );
+  }
+  return serverQueryImpl(connectionString, sql);
+}
+
 /** Quote a Postgres identifier (schema / table / column name from source data). */
 export function escapeIdent(value: string): string {
   return `"${String(value).replace(/"/g, '""')}"`;
@@ -29,8 +67,75 @@ export function escapeLiteral(value: string): string {
 
 /** Render a JS value as a SQL literal for INSERT statements. */
 export function formatSqlValue(val: unknown): string {
+  return formatValueWithType(val, undefined);
+}
+
+function isBufferLike(val: unknown): { hex: string } | null {
+  // Real Node Buffer
+  if (
+    typeof val === "object" &&
+    val !== null &&
+    typeof (val as { toString?: unknown }).toString === "function" &&
+    (val as { constructor?: { name?: string } }).constructor?.name === "Buffer"
+  ) {
+    try {
+      const hex = (val as unknown as { toString: (enc: string) => string }).toString("hex");
+      if (/^[0-9a-fA-F]*$/.test(hex)) return { hex: hex.toLowerCase() };
+    } catch {
+      return null;
+    }
+  }
+  // Buffer serialized through JSON: { type: "Buffer", data: [...] }
+  if (typeof val === "object" && val !== null) {
+    const obj = val as { type?: unknown; data?: unknown };
+    if (obj.type === "Buffer" && Array.isArray(obj.data)) {
+      try {
+        const bytes = Uint8Array.from(obj.data as ArrayLike<number>);
+        let hex = "";
+        for (const b of bytes) hex += (b & 0xff).toString(16).padStart(2, "0");
+        return { hex };
+      } catch {
+        return null;
+      }
+    }
+    if (val instanceof Uint8Array) {
+      let hex = "";
+      for (const b of val) hex += (b & 0xff).toString(16).padStart(2, "0");
+      return { hex };
+    }
+  }
+  return null;
+}
+
+/**
+ * Render a value knowing its Postgres column type (udt_name, e.g. bytea,
+ * _text, _int4). Arrays become ARRAY[...] with an explicit cast so they
+ * coerce to the destination column type; bytea accepts Buffer values,
+ * hex strings, or plain text (backslash-safe).
+ */
+export function formatValueWithType(val: unknown, udtName?: string): string {
   if (val === null || val === undefined) return "NULL";
-  if (typeof val === "string") return escapeLiteral(val);
+
+  if (Array.isArray(val)) {
+    const elemType = udtName && udtName.startsWith("_") ? udtName.slice(1) : null;
+    const cast = elemType ? `::${elemType}[]` : "";
+    if (val.length === 0) return elemType ? `ARRAY[]${cast}` : "'{}'";
+    return `ARRAY[${val.map((v) => formatValueWithType(v)).join(",")}]${cast}`;
+  }
+
+  const buf = isBufferLike(val);
+  if (buf) return `${escapeLiteral(`\\x${buf.hex}`)}::bytea`;
+
+  if (typeof val === "string") {
+    if (udtName === "bytea") {
+      // Hex strings (how some drivers serialize bytea) restore exactly;
+      // plain text is made backslash-safe for the bytea escape parser.
+      if (/^\\x[0-9a-fA-F]*$/.test(val)) return `${escapeLiteral(val)}::bytea`;
+      return escapeLiteral(val.replace(/\\/g, "\\\\"));
+    }
+    return escapeLiteral(val);
+  }
+
   if (typeof val === "boolean") return val ? "TRUE" : "FALSE";
   if (typeof val === "number") {
     return Number.isFinite(val) ? String(val) : "NULL";
@@ -39,14 +144,7 @@ export function formatSqlValue(val: unknown): string {
   if (val instanceof Date) {
     return Number.isNaN(val.getTime()) ? "NULL" : escapeLiteral(val.toISOString());
   }
-  if (
-    typeof Buffer !== "undefined" &&
-    typeof (Buffer as unknown as { isBuffer?: (v: unknown) => boolean }).isBuffer === "function" &&
-    (Buffer as unknown as { isBuffer: (v: unknown) => boolean }).isBuffer(val)
-  ) {
-    return escapeLiteral(`\\x${(val as unknown as { toString: (enc: string) => string }).toString("hex")}`);
-  }
-  // JSON / arrays / objects / unknown driver types
+  // JSON / objects / unknown driver types
   try {
     return escapeLiteral(JSON.stringify(val));
   } catch {
@@ -175,53 +273,191 @@ export function splitSqlStatements(sql: string): string[] {
 /** Tables larger than this are skipped for row-data export (schema still migrates). */
 export const MAX_DATA_EXPORT_ROWS = 10_000;
 
+export type TableDataExport = {
+  sql: string;
+  exportedRows: number;
+  status: "ok" | "empty" | "skipped" | "failed";
+  message?: string;
+};
+
+async function fetchColumnTypes(
+  query: QueryFn,
+  connectionString: string,
+  schema: string,
+  table: string,
+): Promise<Record<string, string>> {
+  try {
+    const res = await query(
+      connectionString,
+      `SELECT column_name, udt_name FROM information_schema.columns WHERE table_schema = ${escapeLiteral(schema)} AND table_name = ${escapeLiteral(table)}`,
+    );
+    const map: Record<string, string> = {};
+    for (const row of res.success ? (res.data?.rows ?? []) : []) {
+      if (typeof row.column_name === "string" && typeof row.udt_name === "string") {
+        map[row.column_name] = row.udt_name;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function exportTableDataSql(
   query: QueryFn,
   connectionString: string,
   schema: string,
   table: string,
   rowCount: number,
-): Promise<{ sql: string; exportedRows: number }> {
-  if (rowCount <= 0 || rowCount >= MAX_DATA_EXPORT_ROWS) {
-    if (rowCount >= MAX_DATA_EXPORT_ROWS) {
-      console.warn(
-        `Skipping data export for ${schema}.${table} (${rowCount} rows exceeds limit of ${MAX_DATA_EXPORT_ROWS})`,
-      );
-    }
-    return { sql: "", exportedRows: 0 };
+): Promise<TableDataExport> {
+  if (rowCount <= 0) return { sql: "", exportedRows: 0, status: "empty" };
+  if (rowCount >= MAX_DATA_EXPORT_ROWS) {
+    const message = `Skipping data export for ${schema}.${table} (${rowCount} rows exceeds limit of ${MAX_DATA_EXPORT_ROWS}); schema migrates, data does not.`;
+    console.warn(message);
+    return { sql: "", exportedRows: 0, status: "skipped", message };
   }
   try {
-    const dataResult = await query(
-      connectionString,
-      `SELECT * FROM ${qualifiedTable(schema, table)}`,
-    );
+    const [dataResult, columnTypes] = await Promise.all([
+      query(connectionString, `SELECT * FROM ${qualifiedTable(schema, table)}`),
+      fetchColumnTypes(query, connectionString, schema, table),
+    ]);
     const rows = dataResult.success ? (dataResult.data?.rows ?? []) : [];
     if (!dataResult.success || rows.length === 0) {
       if (!dataResult.success) {
-        console.warn(`Failed to export data for ${schema}.${table}:`, dataResult.error);
+        const message = `Failed to export data for ${schema}.${table}: ${String(dataResult.error ?? "unknown error")}`;
+        console.warn(message);
+        return { sql: "", exportedRows: 0, status: "failed", message };
       }
-      return { sql: "", exportedRows: 0 };
+      return { sql: "", exportedRows: 0, status: "empty" };
     }
     const columns = Object.keys(rows[0]);
     const target = qualifiedTable(schema, table);
     const colList = columns.map(escapeIdent).join(", ");
     const lines = rows.map(
       (row) =>
-        `INSERT INTO ${target} (${colList}) VALUES (${columns.map((c) => formatSqlValue(row[c])).join(", ")});`,
+        `INSERT INTO ${target} (${colList}) VALUES (${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")});`,
     );
     return {
       sql: `-- Data for ${schema}.${table} (${rows.length} rows)\n${lines.join("\n")}\n`,
       exportedRows: rows.length,
+      status: "ok",
     };
   } catch (error) {
-    console.warn(`Failed to export data for ${schema}.${table}:`, error);
-    return { sql: "", exportedRows: 0 };
+    const message = `Failed to export data for ${schema}.${table}: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(message);
+    return { sql: "", exportedRows: 0, status: "failed", message };
   }
 }
 
 /**
- * Apply a dataSql bundle statement-by-statement. Returns the count of failed
- * statements so callers can surface it instead of silently succeeding.
+ * A per-table slice of a dataSql bundle, parsed from `-- Data for
+ * schema.table (N rows)` marker lines. Unmarked statements (legacy
+ * bundles) form a single chunk with empty schema/table.
+ */
+export type DataChunk = { schema: string; table: string; sql: string };
+
+const CHUNK_MARKER_RE = /^-- Data for\s+(.+?)(?:\s+\(\d+\s+rows\))?\s*$/;
+
+function splitChunkName(name: string): { schema: string; table: string } {
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return { schema: "", table: name };
+  return { schema: name.slice(0, dot), table: name.slice(dot + 1) };
+}
+
+/** Remove full-line `--` comments; returns "" when nothing executable remains. */
+export function stripCommentLines(sql: string): string {
+  return sql
+    .split("\n")
+    .filter((line) => !/^\s*--/.test(line))
+    .join("\n")
+    .trim();
+}
+
+export function parseDataChunks(dataSql: string): DataChunk[] {
+  const chunks: DataChunk[] = [];
+  let current: { schema: string; table: string; parts: string[] } | null = null;
+  const flush = () => {
+    if (current && current.parts.length > 0) {
+      chunks.push({ schema: current.schema, table: current.table, sql: current.parts.join("\n") });
+    }
+    current = null;
+  };
+  for (const stmt of splitSqlStatements(dataSql)) {
+    const lines = stmt.split("\n");
+    const markerLine = lines.find((l) => CHUNK_MARKER_RE.test(l.trim()));
+    const executable = stripCommentLines(stmt);
+    if (markerLine) {
+      const name = CHUNK_MARKER_RE.exec(markerLine.trim())?.[1] ?? "";
+      flush();
+      const { schema, table } = splitChunkName(name);
+      current = { schema, table, parts: [] };
+      if (executable) current.parts.push(executable);
+    } else {
+      if (!executable) continue;
+      if (!current) current = { schema: "", table: "", parts: [] };
+      current.parts.push(executable);
+    }
+  }
+  flush();
+  return chunks;
+}
+
+export type TableDependency = { schema: string; table: string; refSchema: string; refTable: string };
+
+/**
+ * Order chunks so referenced (parent) tables load first (Kahn's
+ * algorithm). Chunks with unknown/no dependencies keep export order.
+ * Self-references and cycles never block: involved chunks fall back to
+ * export order rather than being dropped.
+ */
+export function orderChunksByDependency(
+  chunks: DataChunk[],
+  deps: TableDependency[],
+): DataChunk[] {
+  const key = (s: string, t: string) => `${s}.${t}`;
+  const indexByKey = new Map<string, number>();
+  chunks.forEach((c, i) => {
+    const k = key(c.schema, c.table);
+    if (!indexByKey.has(k)) indexByKey.set(k, i);
+  });
+
+  const incoming = new Map<number, Set<number>>();
+  chunks.forEach((_, i) => incoming.set(i, new Set()));
+  for (const d of deps) {
+    const from = indexByKey.get(key(d.schema, d.table));
+    const to = indexByKey.get(key(d.refSchema, d.refTable));
+    if (from === undefined || to === undefined || from === to) continue;
+    // `from` depends on `to`: `to` must come first.
+    incoming.get(from)?.add(to);
+  }
+
+  const ordered: DataChunk[] = [];
+  const remaining = new Set(chunks.map((_, i) => i));
+  // Stable: among ready chunks prefer export order.
+  while (remaining.size > 0) {
+    const ready = [...remaining].filter((i) => {
+      for (const dep of incoming.get(i) ?? []) {
+        if (remaining.has(dep)) return false;
+      }
+      return true;
+    });
+    if (ready.length === 0) {
+      // Cycle: emit the earliest remaining chunk to make progress.
+      ready.push(Math.min(...remaining));
+    }
+    ready.sort((a, b) => a - b);
+    const next = ready[0];
+    remaining.delete(next);
+    ordered.push(chunks[next]);
+  }
+  return ordered;
+}
+
+/**
+ * Apply a dataSql bundle statement-by-statement. Comment-only lines are
+ * stripped per statement (never discarded whole statements), so marker
+ * headers cannot eat the first INSERT of a table. Returns failure counts
+ * so callers surface them instead of silently succeeding.
  */
 export async function applyDataSql(
   query: QueryFn,
@@ -232,10 +468,10 @@ export async function applyDataSql(
   let failed = 0;
   const errors: string[] = [];
   for (const statement of splitSqlStatements(dataSql)) {
-    // Skip pure comment lines that survived splitting
-    if (/^--/.test(statement)) continue;
+    const executable = stripCommentLines(statement);
+    if (!executable) continue;
     try {
-      const result = await query(connectionString, statement);
+      const result = await query(connectionString, executable);
       if (result.success) {
         applied++;
       } else {
