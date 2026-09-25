@@ -176,7 +176,7 @@ export class NeonAdapter implements ProviderAdapter {
 
     // Single transaction (drops + schema + FK-ordered row data): failure
     // rolls everything back instead of leaving a partial destination.
-    await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql);
+    await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql, serverTransferQuery);
   }
   
   // Neon Object Storage holds bytes outside Postgres, so there is nothing

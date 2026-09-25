@@ -97,7 +97,7 @@ export class PostgresAdapter implements ProviderAdapter {
     // fully transactional including FK-ordered row data: any failure rolls
     // back instead of leaving a partial destination.
     try {
-      await resetAndApplySql(connectionString, data.schemaSql, data.dataSql);
+      await resetAndApplySql(connectionString, data.schemaSql, data.dataSql, serverTransferQuery);
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);

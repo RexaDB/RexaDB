@@ -174,6 +174,14 @@ function applySupabaseDumpTransforms(input: string, excludedSchemasPattern: stri
   return output;
 }
 
+/** pg_dump / pg clients need a directly-dialable Postgres DSN. Pointers
+ * like supabase-mgmt:// (API-routed SQL) are not dialable — those go
+ * through the SQL-native dump/apply paths instead of failing obscurely. */
+export function isDirectDialablePostgres(connectionString: string): boolean {
+  const stripped = stripRexaDbParams(connectionString);
+  return stripped.startsWith("postgres://") || stripped.startsWith("postgresql://");
+}
+
 export async function runPgDumpSchemaOnly(
   connectionString: string,
   runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
@@ -183,6 +191,21 @@ export async function runPgDumpSchemaOnly(
   const schemas = await getAllowedSchemasForDump(connectionString, runQuery);
   if (schemas.length === 0) {
     throw new Error("No accessible schemas found to export.");
+  }
+
+  // Non-dialable connections (supabase-mgmt://, ...): pg_dump cannot
+  // connect, so build equivalent DDL straight out of pg_catalog.
+  if (!isDirectDialablePostgres(connectionString)) {
+    const { buildSchemaDumpViaSql } = await import("@/lib/transfer/schema-dump-sql");
+    const { sql, warnings } = await buildSchemaDumpViaSql(runQuery, connectionString, schemas);
+    const header = [
+      `-- Schema dump generated via SQL introspection (pg_dump cannot dial this connection type).`,
+      ...warnings.map((w) => `-- NOTE: ${w}`),
+    ].join("\n");
+    if (!sql.trim()) {
+      throw new Error(`SQL schema dump produced no statements. ${warnings.join(" ")}`);
+    }
+    return `${header}\n${sql}`;
   }
 
   const { execFile } = await import("child_process");
@@ -249,6 +272,7 @@ export async function resetAndApplySql(
   connectionString: string,
   fullSql: string,
   dataSql?: string,
+  queryFn?: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>,
 ) {
   if (!isPostgresConnection(connectionString)) {
     throw new Error("SQL import is supported only for PostgreSQL connections.");
@@ -256,6 +280,39 @@ export async function resetAndApplySql(
 
   const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
   connectionString = await resolveEffectiveConnectionString(connectionString);
+
+  // Non-dialable connections (supabase-mgmt://, ...): no pg-client and no
+  // cross-statement transaction is possible — apply statement by statement
+  // through the query path. Mid-apply failures can leave a partial
+  // destination; errors say so explicitly.
+  if (!isDirectDialablePostgres(connectionString)) {
+    if (!queryFn) {
+      throw new Error("This destination is not directly reachable: pass a query function for SQL-statement apply.");
+    }
+    const { applyTransferViaQuery } = await import("@/lib/transfer/schema-dump-sql");
+    const isSupabase = isLikelySupabaseConnection(connectionString);
+    const existingSchemas = await queryFn(
+      connectionString,
+      `SELECT schema_name
+       FROM information_schema.schemata
+       WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'public')
+         AND schema_name NOT LIKE 'pg_%'
+       ORDER BY schema_name;`,
+    );
+    if (!existingSchemas.success) {
+      throw new Error(`Could not list destination schemas: ${String(existingSchemas.error ?? "unknown error")}`);
+    }
+    const dropStatements: string[] = [];
+    for (const row of existingSchemas.data?.rows ?? []) {
+      const schemaName = String((row as Record<string, unknown>).schema_name);
+      if (isSupabase && isSupabaseExcludedSchema(schemaName)) continue;
+      const schema = schemaName.replace(/"/g, "\"\"");
+      dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
+    }
+    dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
+    await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql);
+    return;
+  }
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
 
