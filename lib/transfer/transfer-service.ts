@@ -190,11 +190,25 @@ export class TransferService {
         percentage: Math.round((stepIndex / totalSteps) * 100),
         message: "Exporting project settings...",
       });
-      
+
       package_.settings = await adapter.exportSettings(source.connectionString, options);
       stepIndex++;
     }
-    
+
+    // Export edge functions
+    if (options.includeEdgeFunctions && adapter.exportFunctions) {
+      await this.updateProgress(options, {
+        currentStep: "exporting_functions",
+        totalSteps,
+        currentStepIndex: stepIndex,
+        percentage: Math.round((stepIndex / totalSteps) * 100),
+        message: "Exporting edge functions...",
+      });
+
+      package_.functions = await adapter.exportFunctions(source.connectionString, options);
+      stepIndex++;
+    }
+
     return package_;
   }
   
@@ -308,6 +322,30 @@ export class TransferService {
       }
     }
 
+    // Import edge functions
+    if (package_.functions && options.includeEdgeFunctions) {
+      const fnCount = package_.functions.functions.length;
+      if (adapter.importFunctions) {
+        await this.updateProgress(options, {
+          currentStep: "importing_functions",
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: "Importing edge functions...",
+        });
+
+        const outcome = await adapter.importFunctions(destination.connectionString, package_.functions, options);
+        if (outcome?.warnings) warnings.push(...outcome.warnings);
+        if (outcome?.stats) Object.assign(stats, outcome.stats);
+        stepIndex++;
+      } else if (fnCount > 0) {
+        warnings.push(
+          `Edge functions not transferred: ${fnCount} function(s) exported, but the ${destination.provider} destination has no functions import support — sources preserved in the package; deploy manually.`,
+        );
+        stats.functionsTransferred = 0;
+      }
+    }
+
     return { warnings, stats };
   }
   
@@ -316,23 +354,27 @@ export class TransferService {
    */
   private buildTransferSteps(options: TransferOptions): TransferStep[] {
     const steps: TransferStep[] = ["validating"];
-    
+
     if (options.includeDatabase) {
       steps.push("exporting_schema", "exporting_data", "importing_schema", "importing_data");
     }
-    
+
     if (options.includeStorage) {
       steps.push("exporting_storage", "importing_storage");
     }
-    
+
     if (options.includeAuth) {
       steps.push("exporting_auth", "importing_auth");
     }
-    
+
     if (options.includeSettings) {
       steps.push("exporting_settings", "importing_settings");
     }
-    
+
+    if (options.includeEdgeFunctions) {
+      steps.push("exporting_functions", "importing_functions");
+    }
+
     steps.push("finalizing", "complete");
     return steps;
   }
@@ -351,6 +393,7 @@ export class TransferService {
       storageFilesTransferred: package_.storage?.files.length || 0,
       authUsersTransferred: package_.auth?.users.length || 0,
       authProvidersTransferred: package_.auth?.providers.length || 0,
+      functionsTransferred: package_.functions?.functions.length || 0,
     };
   }
 
@@ -364,6 +407,7 @@ export class TransferService {
     if (package_.database?.warnings) warnings.push(...package_.database.warnings);
     if (package_.storage?.warnings) warnings.push(...package_.storage.warnings);
     if (package_.auth?.warnings) warnings.push(...package_.auth.warnings);
+    if (package_.functions?.warnings) warnings.push(...package_.functions.warnings);
     return warnings;
   }
   

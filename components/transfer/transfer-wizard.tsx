@@ -16,10 +16,11 @@ import {
   Loader2,
   Check,
   Download,
+  Zap,
 } from "@/lib/icon-theme/lucide-react";
 import TaskRows from "@/components/studio/ai/task-rows";
 import type { Task } from "@/lib/ai/task-types";
-import { startTransfer, exportTransferPackage } from "@/lib/transfer/transfer-client";
+import { startTransfer, exportTransferPackage, type FunctionDiffView } from "@/lib/transfer/transfer-client";
 import type {
   TransferOptions,
   TransferProgress,
@@ -34,7 +35,7 @@ interface TransferWizardProps {
     connectionString: string;
     connectionType: string;
   }>;
-  onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[] }) => void;
+  onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] }) => void;
   onCancel?: () => void;
 }
 
@@ -52,6 +53,8 @@ const STEP_LABELS: Record<TransferStep, string> = {
   importing_storage: "Importing storage",
   importing_auth: "Importing auth",
   importing_settings: "Importing settings",
+  exporting_functions: "Exporting edge functions",
+  importing_functions: "Importing edge functions",
   finalizing: "Finalizing",
   complete: "Complete",
 };
@@ -67,7 +70,7 @@ function displaySteps(options: TransferOptions): TransferStep[] {
 }
 
 const COMPONENTS: Array<{
-  key: "includeDatabase" | "includeStorage" | "includeAuth" | "includeSettings";
+  key: "includeDatabase" | "includeStorage" | "includeAuth" | "includeSettings" | "includeEdgeFunctions";
   icon: typeof Database;
   label: string;
   description: string;
@@ -96,6 +99,12 @@ const COMPONENTS: Array<{
     label: "Project settings",
     description: "Project-level settings snapshot.",
   },
+  {
+    key: "includeEdgeFunctions",
+    icon: Zap,
+    label: "Edge functions",
+    description: "Sources migrate with git-style compat diffs for the target runtime. Review before deploying.",
+  },
 ];
 
 const pillButton =
@@ -113,11 +122,12 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     includeStorage: true,
     includeAuth: true,
     includeSettings: true,
+    includeEdgeFunctions: true,
     batchSize: 100,
   });
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[] } | null>(null);
+  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] } | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
 
   const getProviderType = (connectionType: string): ProviderType => {
@@ -156,6 +166,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         success: true,
         stats: transferResult.stats,
         warnings: transferResult.warnings,
+        functionDiffs: transferResult.functionDiffs,
       });
     } else {
       onCancel?.();
@@ -194,6 +205,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         success: result.success,
         stats: result.stats,
         warnings: result.warnings,
+        functionDiffs: result.functionDiffs,
       });
 
       if (result.success) {
@@ -305,6 +317,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         { label: "Storage files", value: stats.storageFilesTransferred },
         { label: "Auth users", value: stats.authUsersTransferred },
         { label: "Auth providers", value: stats.authProvidersTransferred },
+        { label: "Edge functions", value: stats.functionsTransferred },
       ]
     : [];
 
@@ -450,6 +463,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                   {transferOptions.includeStorage && <Badge variant="secondary" className="rounded-full text-[10px]">Storage</Badge>}
                   {transferOptions.includeAuth && <Badge variant="secondary" className="rounded-full text-[10px]">Auth</Badge>}
                   {transferOptions.includeSettings && <Badge variant="secondary" className="rounded-full text-[10px]">Settings</Badge>}
+                  {transferOptions.includeEdgeFunctions && <Badge variant="secondary" className="rounded-full text-[10px]">Edge functions</Badge>}
                 </span>
               </div>
             </div>
@@ -462,9 +476,10 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
             <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
               <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                Storage migrates buckets + metadata only — file contents (Supabase Storage API, Neon Object Storage) are not copied.
+                Storage file contents copy only between Supabase projects with management tokens (budgets apply); otherwise buckets + metadata migrate and contents are skipped with a warning.
                 Supabase auth users migrate with password hashes when readable; Neon Auth lives in neon_auth tables and migrates with the database.
                 Supabase storage.* and auth.* schemas have no counterpart on Neon / generic Postgres and are skipped with a warning.
+                Edge functions migrate sources with git-style compat diffs — review every hunk before deploying.
               </span>
             </div>
           </div>
@@ -508,6 +523,31 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                   Completed with warnings: {transferResult.warnings.slice(0, 5).join(" ")}
                   {transferResult.warnings.length > 5 ? ` (+${transferResult.warnings.length - 5} more — see server log)` : ""}
                 </span>
+              </div>
+            )}
+
+            {transferResult?.functionDiffs && transferResult.functionDiffs.length > 0 && (
+              <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+                <div className="border-b border-border/60 px-4 py-2.5 text-xs font-medium">
+                  Runtime compat diffs — review before deploying
+                </div>
+                {transferResult.functionDiffs.slice(0, 10).map((d, i) => (
+                  <details key={`${d.slug}-${d.targetProvider}-${i}`} className="border-b border-border/40 px-4 py-2.5 last:border-0">
+                    <summary className="cursor-pointer text-xs font-medium">
+                      {d.slug} <span className="text-muted-foreground">→ {d.targetProvider}</span>
+                    </summary>
+                    {d.notes.length > 0 && (
+                      <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-[11px] text-muted-foreground">
+                        {d.notes.map((n, j) => (
+                          <li key={j}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <pre className="mt-2 overflow-x-auto rounded-xl bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
+                      {d.diff}
+                    </pre>
+                  </details>
+                ))}
               </div>
             )}
           </div>

@@ -48,11 +48,13 @@ export type TransferStep =
   | "exporting_storage"
   | "exporting_auth"
   | "exporting_settings"
+  | "exporting_functions"
   | "importing_schema"
   | "importing_data"
   | "importing_storage"
   | "importing_auth"
   | "importing_settings"
+  | "importing_functions"
   | "finalizing"
   | "complete";
 
@@ -155,7 +157,39 @@ export interface TransferPackage {
   storage?: StorageExport;
   auth?: AuthExport;
   settings?: SettingsExport;
+  functions?: FunctionsExport;
   metadata?: Record<string, unknown>;
+}
+
+export interface FunctionFile {
+  path: string;
+  content: string;
+}
+
+/**
+ * Mechanical port of a function's sources toward another runtime, shown
+ * git-style. NEVER auto-deployed blindly: runtime APIs differ (Deno vs
+ * Node), so every diff ships with a REVIEW note and must be eyeballed.
+ */
+export interface FunctionCompatDiff {
+  targetProvider: ProviderType;
+  diff: string;
+  transformedFiles: FunctionFile[];
+  /** Human-readable list of transformations applied + remaining TODOs. */
+  notes: string[];
+}
+
+export interface FunctionsExport {
+  functions: Array<{
+    slug: string;
+    provider: ProviderType;
+    verifyJwt?: boolean;
+    files: FunctionFile[];
+    /** Compat ports toward each OTHER supported provider (git-style diffs). */
+    diffs: FunctionCompatDiff[];
+  }>;
+  /** Non-fatal function export/import notes surfaced to users. */
+  warnings?: string[];
 }
 
 export interface TransferResult {
@@ -173,6 +207,7 @@ export interface TransferStats {
   storageFilesTransferred: number;
   authUsersTransferred: number;
   authProvidersTransferred: number;
+  functionsTransferred: number;
 }
 
 export interface ProviderAdapter {
@@ -191,6 +226,9 @@ export interface ProviderAdapter {
 
   exportSettings?(connectionString: string, options: TransferOptions): Promise<SettingsExport>;
   importSettings?(connectionString: string, data: SettingsExport, options: TransferOptions): Promise<ImportOutcome | void>;
+
+  exportFunctions?(connectionString: string, options: TransferOptions): Promise<FunctionsExport>;
+  importFunctions?(connectionString: string, data: FunctionsExport, options: TransferOptions): Promise<ImportOutcome | void>;
 
   getProjectInfo?(connectionString: string): Promise<{ name: string; id: string }>;
 }

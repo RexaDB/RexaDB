@@ -18,7 +18,13 @@ import type { TransferProgress } from "@/lib/transfer/transfer-types";
 type TransferJob = {
   progress: TransferProgress;
   done: boolean;
-  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string };
+  result?: {
+    success: boolean;
+    stats?: Record<string, number>;
+    warnings?: string[];
+    error?: string;
+    functionDiffs?: Array<{ slug: string; targetProvider: string; diff: string; notes: string[] }>;
+  };
   updatedAt: number;
 };
 
@@ -98,6 +104,15 @@ async function executeTransfer(transferId: string, request: TransferApiRequest):
       stats: result.stats as Record<string, number> | undefined,
       warnings: result.warnings,
       error: result.error,
+      // Compat diffs for the UI (truncated per diff so polling stays light).
+      functionDiffs: result.package?.functions?.functions.flatMap((fn) =>
+        fn.diffs.map((d) => ({
+          slug: fn.slug,
+          targetProvider: d.targetProvider,
+          diff: d.diff.length > 6000 ? `${d.diff.slice(0, 6000)}\n… (truncated — full diff in exported package)` : d.diff,
+          notes: d.notes,
+        })),
+      ),
     };
     if (result.success) {
       job.progress = {

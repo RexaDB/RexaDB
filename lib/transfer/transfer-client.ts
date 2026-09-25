@@ -14,17 +14,25 @@ export interface TransferApiRequest {
   options: TransferOptions;
 }
 
+export interface FunctionDiffView {
+  slug: string;
+  targetProvider: string;
+  diff: string;
+  notes: string[];
+}
+
 export interface TransferApiResponse {
   success: boolean;
   error?: string;
   stats?: Record<string, number>;
   warnings?: string[];
   transferId?: string;
+  functionDiffs?: FunctionDiffView[];
 }
 
 export interface TransferJobStatus extends TransferProgress {
   done: boolean;
-  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string };
+  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string; functionDiffs?: FunctionDiffView[] };
 }
 
 // Transfer endpoints live on the Express sidecar (same as every other
@@ -62,6 +70,7 @@ export async function startTransfer(
           warnings: finalStatus.result.warnings,
           error: finalStatus.result.error,
           transferId: result.transferId,
+          functionDiffs: finalStatus.result.functionDiffs,
         };
       }
       return { success: false, error: "Transfer progress lost before completion", transferId: result.transferId };
