@@ -9,8 +9,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { streamNeonLogin, type NeonLoginEvent } from "@/lib/neon-cli/client";
-import { addNeonCliAccount, type NeonCliAccount } from "@/lib/neon-cli/profile-store";
+import { streamNeonLogin, getNeonAuthStatus, type NeonLoginEvent, type NeonAuthStatus } from "@/lib/neon-cli/client";
+import { addNeonCliAccount, getNeonCliAccounts, type NeonCliAccount } from "@/lib/neon-cli/profile-store";
 import { openExternalUrl } from "@/lib/desktop";
 import { toast } from "sonner";
 import { Loader2, ExternalLink } from "@/lib/icon-theme/lucide-react";
@@ -36,9 +36,10 @@ function newProfileName(): string {
 }
 
 export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnectProfile }: NeonLoginDialogProps) {
-  const [status, setStatus] = useState<"idle" | "running" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "checking" | "signed-in" | "running" | "error">("idle");
   const [lines, setLines] = useState<string[]>([]);
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const [existingSession, setExistingSession] = useState<NeonAuthStatus | null>(null);
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
   const abortRef = useRef<{ abort: () => void } | null>(null);
   const profileRef = useRef<string>("");
@@ -50,10 +51,17 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
   }, [lines]);
 
   const start = useCallback(() => {
-    const profile = reconnectProfile || newProfileName();
-    profileRef.current = profile;
+    // One profile per dialog session (reconnect reuses its own): every
+    // attempt used to mint a fresh random profile, littering
+    // credentials.rexadb-*.json files and defeating single-flight —
+    // overlapping flows then raced each other's OAuth state/CSRF.
+    if (!profileRef.current) {
+      profileRef.current = reconnectProfile || newProfileName();
+    }
+    const profile = profileRef.current;
     setLines([]);
     setFatalError(null);
+    setExistingSession(null);
     setLoginUrl(null);
     setStatus("running");
 
@@ -86,18 +94,61 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
     });
   }, [onLoginComplete, onOpenChange, reconnectProfile, isReconnect]);
 
+  const openRef = useRef(open);
   useEffect(() => {
-    if (open && status === "idle") start();
+    openRef.current = open;
+  }, [open]);
+
+  // Before forcing another OAuth dance, check whether the CLI already
+  // holds a valid session (e.g. signed in via terminal, or a previous
+  // RexaDB login). If so, offer Continue instead of re-authenticating.
+  const checkExistingSession = useCallback(async () => {
+    setStatus("checking");
+    setFatalError(null);
+    setExistingSession(null);
+    try {
+      const candidates = reconnectProfile
+        ? [reconnectProfile]
+        : [...getNeonCliAccounts().map((a) => a.profileName), "DEFAULT"];
+      const statuses = await getNeonAuthStatus(candidates);
+      const usable = statuses.find((s) => s.valid);
+      if (usable && openRef.current) {
+        setExistingSession(usable);
+        setStatus("signed-in");
+        return;
+      }
+    } catch {
+      // status check is best-effort — fall through to a fresh login
+    }
+    if (openRef.current) start();
+  }, [reconnectProfile, start]);
+
+  useEffect(() => {
+    if (open && status === "idle") void checkExistingSession();
     if (!open) {
       abortRef.current?.abort();
       abortRef.current = null;
+      profileRef.current = "";
       setStatus("idle");
-      setLines([]);
       setFatalError(null);
+      setExistingSession(null);
+      setLines([]);
       setLoginUrl(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const handleContinueSession = useCallback(() => {
+    if (!existingSession) return;
+    const account = addNeonCliAccount(
+      existingSession.profile,
+      existingSession.email ?? null,
+    );
+    toast.success(`Continuing as ${existingSession.email ?? existingSession.profile}.`);
+    onLoginComplete(account);
+    onOpenChange(false);
+    setStatus("idle");
+  }, [existingSession, onLoginComplete, onOpenChange]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -116,12 +167,48 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
             {isReconnect ? "Reconnect to Neon" : "Sign in with Neon CLI"}
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            RexaDB launched the real Neon CLI to handle this — a browser
-            window opened to Neon's own sign-in page.
+            {status === "signed-in"
+              ? "A valid Neon CLI session was found — continue with it or sign in fresh."
+              : "RexaDB launched the real Neon CLI to handle this — a browser window opened to Neon's own sign-in page."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 pt-1">
+          {status === "checking" && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Checking for an existing Neon sign-in...
+            </div>
+          )}
+
+          {status === "signed-in" && existingSession && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-studio-border/60 bg-background/70 px-3 py-2.5 text-xs">
+                <div className="font-medium text-foreground">
+                  Already signed in{existingSession.email ? ` as ${existingSession.email}` : ""}
+                </div>
+                <div className="mt-0.5 text-muted-foreground">
+                  Neon CLI profile “{existingSession.profile}” holds a valid session — no browser dance needed.
+                </div>
+              </div>
+              <Button
+                onClick={handleContinueSession}
+                className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Continue{existingSession.email ? ` as ${existingSession.email}` : ""}
+              </Button>
+              <button
+                type="button"
+                onClick={start}
+                className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+              >
+                Use a different account instead
+              </button>
+            </div>
+          )}
+
+          {(status === "running" || status === "error") && (
+            <>
           {status === "running" && (
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               Keep this dialog open until the browser tab finishes — closing it
@@ -166,6 +253,8 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
             >
               Try again
             </Button>
+          )}
+            </>
           )}
         </div>
       </DialogContent>

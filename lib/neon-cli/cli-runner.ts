@@ -265,3 +265,81 @@ export function spawnNeonAuthLogin(profileName: string): ChildProcess {
   proc.on("error", () => {});
   return proc;
 }
+
+export interface NeonAuthStatus {
+  profile: string;
+  valid: boolean;
+  email?: string;
+  userId?: string;
+  error?: string;
+}
+
+/**
+ * Non-interactive session check: `neon me --profile <name> -o json`.
+ * CI mode is set so an expired session fails fast instead of popping an
+ * unprompted login browser mid-check. Never throws — each profile resolves
+ * to a status object.
+ */
+export async function neonAuthStatus(profiles: string[]): Promise<NeonAuthStatus[]> {
+  const found = locateNeonCli();
+  const unique = [...new Set(profiles.map((p) => String(p || "").trim()).filter(Boolean))].slice(0, 10);
+  if (!found) {
+    return unique.map((profile) => ({
+      profile,
+      valid: false,
+      error: "neon CLI is not installed or not on PATH.",
+    }));
+  }
+  const check = (profile: string): Promise<NeonAuthStatus> =>
+    new Promise((resolve) => {
+      let done = false;
+      const finish = (result: NeonAuthStatus) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      let stdout = "";
+      let stderr = "";
+      const proc = spawn(found.path, ["me", "--profile", profile, "-o", "json"], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, CI: "true" },
+      });
+      const timer = setTimeout(() => {
+        try {
+          proc.kill("SIGTERM");
+        } catch {}
+        finish({ profile, valid: false, error: "timed out" });
+      }, 12000);
+      proc.stdin?.end();
+      proc.stdout?.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr?.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      proc.on("error", (err) => {
+        finish({ profile, valid: false, error: err.message });
+      });
+      proc.on("close", (code) => {
+        if (code !== 0) {
+          const detail = stderr.trim().split("\n").pop() || `exited with code ${code ?? "?"}`;
+          finish({ profile, valid: false, error: detail.slice(0, 300) });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout) as { email?: unknown; id?: unknown };
+          const email = typeof parsed.email === "string" ? parsed.email : undefined;
+          const userId = typeof parsed.id === "string" ? parsed.id : undefined;
+          if (!email && !userId) {
+            finish({ profile, valid: false, error: "unexpected response" });
+            return;
+          }
+          finish({ profile, valid: true, email, userId });
+        } catch {
+          finish({ profile, valid: false, error: "could not parse response" });
+        }
+      });
+    });
+  return Promise.all(unique.map(check));
+}
