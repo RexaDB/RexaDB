@@ -330,7 +330,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const showNav = currentStep === "select-sources" || currentStep === "select-options" || currentStep === "confirm";
 
   return (
-    <div className="mx-auto my-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex items-center justify-center gap-3">
         <span className="flex size-9 items-center justify-center rounded-full border border-border bg-card shadow-sm">
           <ArrowRightLeft className="size-4 text-foreground" />
@@ -345,10 +345,10 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       <div className="px-1 py-2">
         {currentStep === "select-sources" && (
           <div className="flex flex-col gap-3">
-            <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+            <div className="rounded-[28px] border border-border bg-card p-4 shadow-sm">
               <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
               <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-8 rounded-full text-xs">
                   <SelectValue placeholder="Select source database" />
                 </SelectTrigger>
                 <SelectContent>
@@ -365,10 +365,10 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
               </Select>
             </div>
 
-            <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
+            <div className="rounded-[28px] border border-border bg-card p-4 shadow-sm">
               <div className="mb-1.5 text-xs font-medium text-muted-foreground">Destination</div>
               <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-8 rounded-full text-xs">
                   <SelectValue placeholder="Select destination database" />
                 </SelectTrigger>
                 <SelectContent>
@@ -399,7 +399,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
         {currentStep === "select-options" && (
           <div className="flex flex-col gap-3">
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
               {COMPONENTS.map((c, i) => (
                 <label
                   key={c.key}
@@ -451,7 +451,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
         {currentStep === "confirm" && (
           <div className="flex flex-col gap-3">
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
               <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
                 <span className="text-xs text-muted-foreground">Source</span>
                 <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
@@ -511,7 +511,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             {statCards.length > 0 && (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {statCards.map((s) => (
-                  <div key={s.label} className="rounded-xl border border-border bg-card px-3 py-2.5 text-center shadow-sm">
+                  <div key={s.label} className="rounded-full border border-border bg-card px-3 py-2.5 text-center shadow-sm">
                     <div className="text-xl font-semibold tracking-tight">{s.value}</div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground">{s.label}</div>
                   </div>
