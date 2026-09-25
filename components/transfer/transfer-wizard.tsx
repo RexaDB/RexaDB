@@ -343,7 +343,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       <div className="px-1 py-2">
         {currentStep === "select-sources" && (
           <div className="mx-auto flex w-full max-w-[440px] flex-col gap-3">
-            <div className="rounded-[28px] border border-border bg-card p-4 shadow-sm">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
               <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
               <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
                 <SelectTrigger className="h-8 rounded-full text-xs">
@@ -363,7 +363,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
               </Select>
             </div>
 
-            <div className="rounded-[28px] border border-border bg-card p-4 shadow-sm">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
               <div className="mb-1.5 text-xs font-medium text-muted-foreground">Destination</div>
               <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
                 <SelectTrigger className="h-8 rounded-full text-xs">
@@ -397,7 +397,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
         {currentStep === "select-options" && (
           <div className="flex flex-col gap-3">
-            <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
               {COMPONENTS.map((c, i) => (
                 <label
                   key={c.key}
@@ -527,7 +527,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             )}
 
             {transferResult?.functionDiffs && transferResult.functionDiffs.length > 0 && (
-              <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-sm">
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                 <div className="border-b border-border/60 px-4 py-2.5 text-xs font-medium">
                   Runtime compat diffs — review before deploying
                 </div>
