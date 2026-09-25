@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -109,6 +110,29 @@ const COMPONENTS: Array<{
 
 const pillButton =
   "h-11 flex-1 rounded-full border border-border bg-card px-8 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50";
+
+function ConfirmComponentRow({ icon, label, warning }: { icon: React.ReactNode; label: string; warning: string }) {
+  return (
+    <li className="flex items-center gap-2 py-1 text-xs">
+      {icon}
+      <span className="font-medium">{label}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label} caveats`}
+            className="flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-amber-500/50 text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+          >
+            ?
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px] text-xs">
+          {warning}
+        </TooltipContent>
+      </Tooltip>
+    </li>
+  );
+}
 
 const statusPill =
   "mx-auto mt-5 flex w-full max-w-[440px] items-center justify-center rounded-full border border-border bg-card px-8 py-3 text-center shadow-sm";
@@ -458,15 +482,55 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                 <span className="text-xs text-muted-foreground">Destination</span>
                 <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
               </div>
-              <div className="flex items-center justify-between gap-3 border-t border-border/60 px-4 py-2.5">
-                <span className="shrink-0 text-xs text-muted-foreground">Components</span>
-                <span className="flex flex-wrap justify-end gap-1">
-                  {transferOptions.includeDatabase && <Badge variant="secondary" className="rounded-full text-[10px]">Database</Badge>}
-                  {transferOptions.includeStorage && <Badge variant="secondary" className="rounded-full text-[10px]">Storage</Badge>}
-                  {transferOptions.includeAuth && <Badge variant="secondary" className="rounded-full text-[10px]">Auth</Badge>}
-                  {transferOptions.includeSettings && <Badge variant="secondary" className="rounded-full text-[10px]">Settings</Badge>}
-                  {transferOptions.includeEdgeFunctions && <Badge variant="secondary" className="rounded-full text-[10px]">Edge functions</Badge>}
-                </span>
+              <div className="flex flex-col gap-1 border-t border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Components</span>
+                <TooltipProvider delayDuration={150}>
+                  <ul className="flex flex-col">
+                    {transferOptions.includeDatabase && (
+                      <ConfirmComponentRow
+                        icon={<Database className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Database"
+                        warning="Schemas are dropped and recreated inside one transaction — a failure rolls back. Row data migrates up to the per-table cap."
+                      />
+                    )}
+                    {transferOptions.includeStorage && (
+                      <ConfirmComponentRow
+                        icon={<HardDrive className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Storage"
+                        warning={
+                          destProvider !== null && destProvider !== "supabase" && destProvider !== "neon"
+                            ? "Skipped on this destination: no Supabase-compatible storage schema."
+                            : "Buckets + metadata migrate. File contents copy when both sides allow it, otherwise skipped with a warning."
+                        }
+                      />
+                    )}
+                    {transferOptions.includeAuth && (
+                      <ConfirmComponentRow
+                        icon={<Shield className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Auth"
+                        warning={
+                          destProvider !== null && destProvider !== "supabase" && destProvider !== "neon"
+                            ? "Skipped on this destination: no GoTrue-compatible auth schema."
+                            : "Passwords migrate when readable, else reset required. OAuth providers need matching config on the destination."
+                        }
+                      />
+                    )}
+                    {transferOptions.includeSettings && (
+                      <ConfirmComponentRow
+                        icon={<Settings className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Settings"
+                        warning="Project settings snapshot migrates as-is."
+                      />
+                    )}
+                    {transferOptions.includeEdgeFunctions && (
+                      <ConfirmComponentRow
+                        icon={<Zap className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Edge functions"
+                        warning="Sources migrate with git-style compat diffs — review every hunk before deploying."
+                      />
+                    )}
+                  </ul>
+                </TooltipProvider>
               </div>
             </div>
 
