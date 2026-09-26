@@ -8,7 +8,7 @@
  * emitting ALL tables first, then ALL constraints as ALTER TABLEs.
  */
 
-import { escapeIdent, escapeLiteral, orderChunksByDependency, parseDataChunks, splitSqlStatements, stripCommentLines } from "./transfer-sql";
+import { escapeIdent, escapeLiteral, isProgrammableStatement, orderChunksByDependency, parseDataChunks, splitSqlStatements, stripCommentLines } from "./transfer-sql";
 import type { QueryFn, TableDependency } from "./transfer-sql";
 type Rows = Record<string, unknown>[];
 
@@ -20,6 +20,53 @@ async function select(query: QueryFn, conn: string, sql: string): Promise<Rows> 
 
 function ident(value: unknown): string {
   return escapeIdent(String(value ?? ""));
+}
+
+/**
+ * Parse a Postgres array literal (e.g. `{public,"role,with,comma"}`) as
+ * returned for name[] columns through JSON-based query endpoints, which
+ * serialize arrays as strings instead of JS arrays.
+ */
+export function parsePgArrayLiteral(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== "string") return [];
+  const s = value.trim();
+  if (!s.startsWith("{") || !s.endsWith("}")) return s ? [s] : [];
+  const inner = s.slice(1, -1);
+  if (inner.trim() === "") return [];
+  const out: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let i = 0;
+  while (i < inner.length) {
+    const ch = inner[i];
+    if (inQuotes) {
+      if (ch === "\\" && i + 1 < inner.length) {
+        current += inner[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      current += ch;
+      i++;
+    } else if (ch === '"') {
+      inQuotes = true;
+      i++;
+    } else if (ch === ",") {
+      out.push(current);
+      current = "";
+      i++;
+    } else {
+      current += ch;
+      i++;
+    }
+  }
+  out.push(current);
+  return out;
 }
 
 export async function buildSchemaDumpViaSql(
@@ -75,7 +122,9 @@ export async function buildSchemaDumpViaSql(
       warnings.push(`Sequences unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    // Tables.
+    // Tables (skip partitions: they are physical slices of a partitioned
+    // parent, not standalone tables — re-creating them would duplicate data
+    // on load and drop partitioning).
     try {
       const cols = await select(
         query,
@@ -89,7 +138,7 @@ export async function buildSchemaDumpViaSql(
          JOIN pg_namespace n ON n.oid = c.relnamespace
          LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
          WHERE n.nspname = ${lit} AND c.relkind IN ('r', 'p')
-           AND a.attnum > 0 AND NOT a.attisdropped
+           AND a.attnum > 0 AND NOT a.attisdropped AND NOT c.relispartition
          ORDER BY c.relname, a.attnum`,
       );
       const byTable = new Map<string, Rows>();
@@ -139,16 +188,28 @@ export async function buildSchemaDumpViaSql(
 
     for (const contype of ["u", "c", "f"] as const) {
       try {
+        // Referenced schemas included: pg_get_constraintdef text is only
+        // valid on the destination when every schema it names migrates too.
+        // Constraints pointing at excluded schemas (Supabase auth.*, ...)
+        // are skipped with an explicit warning instead of failing the import.
         const rows = await select(
           query,
           connectionString,
-          `SELECT c.relname AS table_name, con.conname AS name, pg_get_constraintdef(con.oid) AS def
+          `SELECT c.relname AS table_name, con.conname AS name, pg_get_constraintdef(con.oid) AS def,
+                  (SELECT n2.nspname FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid = c2.relnamespace WHERE c2.oid = con.confrelid) AS ref_schema
            FROM pg_constraint con
            JOIN pg_class c ON c.oid = con.conrelid
            JOIN pg_namespace n ON n.oid = con.connamespace
            WHERE n.nspname = ${lit} AND con.contype = '${contype}'`,
         );
         for (const row of rows) {
+          const refSchema = row.ref_schema != null ? String(row.ref_schema) : null;
+          if (refSchema && !schemas.includes(refSchema)) {
+            warnings.push(
+              `Constraint ${schema}.${String(row.table_name)}.${String(row.name)} references excluded schema "${refSchema}" — skipped; enforce it manually if needed.`,
+            );
+            continue;
+          }
           emit(`ALTER TABLE ${ident(schema)}.${ident(row.table_name)} ADD CONSTRAINT ${ident(row.name)} ${String(row.def)}`);
         }
       } catch (error) {
@@ -251,7 +312,7 @@ export async function buildSchemaDumpViaSql(
       );
       const cmdMap: Record<string, string> = { r: "SELECT", a: "INSERT", w: "UPDATE", d: "DELETE", "*": "ALL" };
       for (const row of policies) {
-        const roles = (row.roles as unknown[] ?? []).map(String);
+        const roles = parsePgArrayLiteral(row.roles);
         const toClause = roles.length === 0 ? "PUBLIC" : roles.map((r) => (r === "public" ? "PUBLIC" : ident(r))).join(", ");
         let stmt = `CREATE POLICY ${ident(row.name)} ON ${ident(schema)}.${ident(row.table_name)}`;
         if (row.permissive === false || row.permissive === "f") stmt += " AS RESTRICTIVE";
@@ -296,6 +357,21 @@ export async function applyTransferViaQuery(
   for (const stmt of splitSqlStatements(schemaSql)) {
     const executable = stripCommentLines(stmt);
     if (!executable) continue;
+    if (isProgrammableStatement(executable)) {
+      // Best-effort with one retry (ordering): failures warn, never throw.
+      // Structural failures below still abort — the destination may then be
+      // partial, which the error text discloses.
+      let res = await query(connectionString, executable);
+      if (!res.success) res = await query(connectionString, executable);
+      if (!res.success) {
+        warnings.push(
+          `Skipped programmable object (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
+        );
+      } else {
+        applied++;
+      }
+      continue;
+    }
     const res = await query(connectionString, executable);
     if (!res.success) {
       throw new Error(

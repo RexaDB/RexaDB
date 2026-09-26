@@ -350,6 +350,19 @@ export async function exportTableDataSql(
 }
 
 /**
+ * Programmable objects (functions, triggers, policies, views) can fail for
+ * ordering reasons that have nothing to do with the transfer itself — e.g.
+ * an overloaded SQL function calling a variant created later. Callers apply
+ * these best-effort (savepoint + warning) instead of aborting the whole
+ * import. Classification is conservative: a false positive only softens
+ * failure semantics, never skips the statement.
+ */
+export function isProgrammableStatement(executableSql: string): boolean {
+  return /^\s*CREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER|POLICY|VIEW|MATERIALIZED\s+VIEW)\b/i.test(
+    executableSql,
+  );
+}
+/**
  * A per-table slice of a dataSql bundle, parsed from `-- Data for
  * schema.table (N rows)` marker lines. Unmarked statements (legacy
  * bundles) form a single chunk with empty schema/table.
@@ -364,8 +377,7 @@ function splitChunkName(name: string): { schema: string; table: string } {
   return { schema: name.slice(0, dot), table: name.slice(dot + 1) };
 }
 
-/** Remove full-line `--` comments; returns "" when nothing executable remains. */
-export function stripCommentLines(sql: string): string {
+/** Remove full-line `--` comments; returns "" when nothing executable remains. */export function stripCommentLines(sql: string): string {
   // Quote-aware: a line starting with `--` INSIDE a multiline string literal
   // is data, not a comment. Track quote state across lines so such lines
   // are preserved verbatim.

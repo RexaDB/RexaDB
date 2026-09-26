@@ -310,8 +310,8 @@ export async function resetAndApplySql(
       dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
     }
     dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
-    await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql);
-    return;
+    const applied = await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql);
+    return { warnings: applied.warnings };
   }
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
@@ -351,12 +351,29 @@ export async function resetAndApplySql(
     // Row-data chunks, ordered so referenced (parent) tables load first.
     // FK edges are read from the destination AFTER the schema is applied,
     // so ordering reflects the schema being installed — not the source.
-    // Everything (drops + schema + data) runs in ONE transaction: any
-    // failure rolls back instead of leaving a partially populated database.
-    const { parseDataChunks, orderChunksByDependency } = await import(
-      "@/lib/transfer/transfer-sql"
-    );
+    // Drops + structural schema + data run in ONE transaction: any failure
+    // there rolls back instead of leaving a partial database. Programmable
+    // objects (functions, triggers, policies, views) apply best-effort via
+    // savepoints: ordering issues (e.g. an overloaded SQL function calling
+    // a variant created later) warn instead of killing the transfer.
+    const {
+      parseDataChunks,
+      orderChunksByDependency,
+      splitSqlStatements,
+      stripCommentLines,
+      isProgrammableStatement,
+    } = await import("@/lib/transfer/transfer-sql");
     const chunks = dataSql ? parseDataChunks(dataSql) : [];
+    const warnings: string[] = [];
+    const shortStmt = (stmt: string) => stmt.replace(/\s+/g, " ").trim().slice(0, 160);
+
+    const structural: string[] = [];
+    const programmable: string[] = [];
+    for (const stmt of splitSqlStatements(fullSql)) {
+      const executable = stripCommentLines(stmt);
+      if (!executable) continue;
+      (isProgrammableStatement(executable) ? programmable : structural).push(executable);
+    }
 
     // Some dump outputs cannot run inside a transaction block
     // (e.g. CREATE INDEX CONCURRENTLY, VACUUM). Only use the transactional
@@ -366,11 +383,53 @@ export async function resetAndApplySql(
       `${fullSql}\n${dataSql ?? ""}`,
     );
 
-    const applyAll = async () => {
+    const applyAll = async (inTxn: boolean) => {
       for (const stmt of dropStatements) {
         await client.query(stmt);
       }
-      await client.query(fullSql);
+      for (const stmt of structural) {
+        await client.query(stmt);
+      }
+
+      // Programmable objects: savepoint each (retry once for ordering),
+      // failures become warnings — never a full rollback.
+      const attempt = async (stmt: string): Promise<Error | null> => {
+        if (!inTxn) {
+          try {
+            await client.query(stmt);
+            return null;
+          } catch (e) {
+            return e instanceof Error ? e : new Error(String(e));
+          }
+        }
+        await client.query("SAVEPOINT transfer_prog");
+        try {
+          await client.query(stmt);
+          await client.query("RELEASE SAVEPOINT transfer_prog");
+          return null;
+        } catch (e) {
+          try {
+            await client.query("ROLLBACK TO SAVEPOINT transfer_prog");
+          } catch {}
+          try {
+            await client.query("RELEASE SAVEPOINT transfer_prog");
+          } catch {}
+          return e instanceof Error ? e : new Error(String(e));
+        }
+      };
+      const failed: Array<{ stmt: string; error: Error }> = [];
+      for (const stmt of programmable) {
+        const err = await attempt(stmt);
+        if (err) failed.push({ stmt, error: err });
+      }
+      const stillFailed: Array<{ stmt: string; error: Error }> = [];
+      for (const { stmt } of failed) {
+        const err = await attempt(stmt);
+        if (err) stillFailed.push({ stmt, error: err });
+      }
+      for (const { stmt, error } of stillFailed) {
+        warnings.push(`Skipped programmable object (${error.message.slice(0, 200)}): ${shortStmt(stmt)}`);
+      }
       if (chunks.length === 0) return;
 
       const fkRes = await client.query(`
@@ -417,15 +476,16 @@ export async function resetAndApplySql(
     if (!nonTransactional) {
       await client.query("BEGIN;");
       try {
-        await applyAll();
+        await applyAll(true);
         await client.query("COMMIT;");
       } catch (applyError) {
         await client.query("ROLLBACK;").catch(() => {});
         throw applyError;
       }
     } else {
-      await applyAll();
+      await applyAll(false);
     }
+    return { warnings };
   } finally {
     await client.end().catch(() => {});
   }

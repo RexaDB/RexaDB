@@ -121,8 +121,9 @@ export class SupabaseAdapter implements ProviderAdapter {
     // Single transaction (drops + schema + row data, FK-ordered): a failure
     // rolls everything back, so the destination is never left partially
     // populated. Errors propagate so the transfer reports failure honestly.
-    await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
-    if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
+    const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
+    if (allWarnings.length > 0) return { warnings: allWarnings };
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {

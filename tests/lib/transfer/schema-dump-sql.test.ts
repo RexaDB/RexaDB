@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { applyTransferViaQuery, buildSchemaDumpViaSql, sanitizeExtensionsForDestination } from "@/lib/transfer/schema-dump-sql";
+import { isProgrammableStatement } from "@/lib/transfer/transfer-sql";
 import type { QueryFn } from "@/lib/transfer/transfer-sql";
 
 function mockQuery(
@@ -109,8 +110,7 @@ describe("applyTransferViaQuery", () => {
   });
 });
 
-describe("sanitizeExtensionsForDestination", () => {
-  it("keeps creatable extensions and comments out rejected ones", async () => {
+describe("sanitizeExtensionsForDestination", () => {  it("keeps creatable extensions and comments out rejected ones", async () => {
     const query = (async (_conn: string, sql: string) => {
       if (sql.includes("pg_cron")) return { success: false, error: "can only create extension in database postgres" };
       if (sql.includes("supabase_vault")) return { success: false, error: 'extension "supabase_vault" is not in the allowed extensions list' };
@@ -128,5 +128,44 @@ describe("sanitizeExtensionsForDestination", () => {
     expect(warnings.join(" ")).toContain("pg_cron");
     expect(warnings.join(" ")).toContain("supabase_vault");
     expect(warnings).toHaveLength(2);
+  });
+});
+
+describe("isProgrammableStatement", () => {
+  it("classifies functions, triggers, policies and views", async () => {
+    const { isProgrammableStatement: isP } = await import("@/lib/transfer/transfer-sql");
+    expect(isP).toBe(isProgrammableStatement);
+    expect(isProgrammableStatement("CREATE OR REPLACE FUNCTION f() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql")).toBe(true);
+    expect(isProgrammableStatement("CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW EXECUTE FUNCTION f()")).toBe(true);
+    expect(isProgrammableStatement("CREATE POLICY p ON x FOR SELECT TO public USING (true)")).toBe(true);
+    expect(isProgrammableStatement("CREATE OR REPLACE VIEW v AS SELECT 1")).toBe(true);
+    expect(isProgrammableStatement('CREATE TABLE "x" ("id" integer)')).toBe(false);
+    expect(isProgrammableStatement('ALTER TABLE "x" ADD CONSTRAINT c PRIMARY KEY ("id")')).toBe(false);
+    expect(isProgrammableStatement("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")).toBe(false);
+  });
+});
+
+describe("applyTransferViaQuery programmable tolerance", () => {
+  it("warns on failing functions but throws on failing tables", async () => {
+    const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("CREATE OR REPLACE FUNCTION bad")) return { success: false, error: "function does not exist" };
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
+    // failing function -> warnings, no throw
+    const ok = await applyTransferViaQuery(
+      query,
+      "conn",
+      [],
+      'CREATE TABLE "public"."t" ("id" integer);\nCREATE OR REPLACE FUNCTION bad() RETURNS void AS $$ SELECT missing_fn(); $$ LANGUAGE sql;',
+    );
+    expect(ok.warnings.join(" ")).toContain("Skipped programmable object");
+    // failing table -> throws
+    const badTable = (async (_conn: string, sql: string) => {
+      if (sql.includes("CREATE TABLE")) return { success: false, error: "denied" };
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
+    await expect(
+      applyTransferViaQuery(badTable, "conn", [], 'CREATE TABLE "public"."t" ("id" integer);'),
+    ).rejects.toThrow(/PARTIALLY/);
   });
 });

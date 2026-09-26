@@ -181,8 +181,9 @@ export class NeonAdapter implements ProviderAdapter {
 
     // Single transaction (drops + schema + FK-ordered row data): failure
     // rolls everything back instead of leaving a partial destination.
-    await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery);
-    if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
+    const applied = await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
+    if (allWarnings.length > 0) return { warnings: allWarnings };
   }
   
   // Neon Object Storage holds bytes outside Postgres, so there is nothing

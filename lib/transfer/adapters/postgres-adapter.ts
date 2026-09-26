@@ -100,8 +100,9 @@ export class PostgresAdapter implements ProviderAdapter {
     try {
       const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
       const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
-      await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
-      if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
+      const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+      const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
+      if (allWarnings.length > 0) return { warnings: allWarnings };
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);
