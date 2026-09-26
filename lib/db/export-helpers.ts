@@ -362,6 +362,8 @@ export async function resetAndApplySql(
       splitSqlStatements,
       stripCommentLines,
       isProgrammableStatement,
+      applyRowsResiliently,
+      shortStatement,
     } = await import("@/lib/transfer/transfer-sql");
     const chunks = dataSql ? parseDataChunks(dataSql) : [];
     const warnings: string[] = [];
@@ -495,15 +497,44 @@ export async function resetAndApplySql(
       };
       for (const c of triggerTables) await disableTrigger(c, false);
       try {
+        // Per-row savepoints: one bad row must not abort its siblings
+        // (which previously cascaded as "current transaction is aborted"
+        // for every later statement, hiding the real error). Persistent
+        // row failures become warnings with statement context.
+        let failedRows = 0;
         for (const chunk of ordered) {
-          try {
-            await client.query(chunk.sql);
-          } catch (chunkError) {
-            const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
-            throw new Error(
-              `Data import failed for ${where}: ${chunkError instanceof Error ? chunkError.message : String(chunkError)}`,
-            );
+          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+          const statements: string[] = [];
+          for (const stmt of splitSqlStatements(chunk.sql)) {
+            const executable = stripCommentLines(stmt);
+            if (executable) statements.push(executable);
           }
+          const exec = async (sql: string): Promise<void> => {
+            await client.query("SAVEPOINT transfer_row");
+            try {
+              await client.query(sql);
+              await client.query("RELEASE SAVEPOINT transfer_row");
+            } catch (e) {
+              try {
+                await client.query("ROLLBACK TO SAVEPOINT transfer_row");
+              } catch {}
+              try {
+                await client.query("RELEASE SAVEPOINT transfer_row");
+              } catch {}
+              throw e;
+            }
+          };
+          const { failed } = await applyRowsResiliently(exec, statements);
+          for (const f of failed.slice(0, 20)) {
+            warnings.push(`Row skipped in ${where} (${f.error.slice(0, 200)}): ${shortStatement(f.statement)}`);
+          }
+          if (failed.length > 20) {
+            warnings.push(`…and ${failed.length - 20} more skipped rows in ${where}.`);
+          }
+          failedRows += failed.length;
+        }
+        if (failedRows > 0) {
+          warnings.push(`${failedRows} row(s) could not be imported and were skipped — see warnings above.`);
         }
       } finally {
         for (const c of triggerTables) await disableTrigger(c, true);

@@ -363,6 +363,48 @@ export function isProgrammableStatement(executableSql: string): boolean {
   );
 }
 /**
+ * Apply row INSERTs resiliently: each statement runs isolated so one bad
+ * row can neither abort its siblings nor poison the surrounding
+ * transaction (which previously surfaced as a wave of "current
+ * transaction is aborted" hiding the real error). Failed statements get
+ * ONE retry at the end (self-referencing FKs resolve once parents land);
+ * persistent failures are returned for warnings — skipped, never silent.
+ */
+export async function applyRowsResiliently(
+  exec: (sql: string) => Promise<void>,
+  statements: string[],
+): Promise<{ applied: number; failed: Array<{ statement: string; error: string }> }> {
+  let applied = 0;
+  const failed: Array<{ statement: string; error: string }> = [];
+  const attempt = async (stmt: string): Promise<string | null> => {
+    try {
+      await exec(stmt);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  };
+  const pending = [...statements];
+  for (const stmt of pending) {
+    const err = await attempt(stmt);
+    if (err === null) applied++;
+    else failed.push({ statement: stmt, error: err });
+  }
+  // Retry pass for ordering-dependent rows.
+  const stillFailed: Array<{ statement: string; error: string }> = [];
+  for (const { statement } of failed) {
+    const err = await attempt(statement);
+    if (err === null) applied++;
+    else stillFailed.push({ statement, error: err });
+  }
+  return { applied, failed: stillFailed };
+}
+
+/** One-line preview for warnings/errors. */
+export function shortStatement(stmt: string, max = 160): string {
+  return stmt.replace(/\s+/g, " ").trim().slice(0, max);
+}
+/**
  * A per-table slice of a dataSql bundle, parsed from `-- Data for
  * schema.table (N rows)` marker lines. Unmarked statements (legacy
  * bundles) form a single chunk with empty schema/table.

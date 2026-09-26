@@ -200,3 +200,31 @@ describe("transfer-sql", () => {
     expect(chunks[0].sql).toContain("VALUES (2);");
   });
 });
+
+describe("applyRowsResiliently", () => {
+  it("isolates bad rows, retries once, then reports survivors", async () => {
+    const attempts = new Map<string, number>();
+    const exec = async (sql: string) => {
+      const n = (attempts.get(sql) ?? 0) + 1;
+      attempts.set(sql, n);
+      // always-bad row fails every attempt; flaky row succeeds on retry
+      if (sql.includes("flaky") && n < 2) throw new Error("fk violation");
+      if (sql.includes("bad")) throw new Error("check violation");
+    };
+    const { applyRowsResiliently: apply } = await import("@/lib/transfer/transfer-sql");
+    const { applied, failed } = await apply(exec, [
+      "INSERT good",
+      "INSERT flaky",
+      "INSERT bad",
+    ]);
+    expect(applied).toBe(2);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].statement).toContain("bad");
+    expect(failed[0].error).toContain("check violation");
+  });
+
+  it("shortStatement condenses whitespace", async () => {
+    const { shortStatement } = await import("@/lib/transfer/transfer-sql");
+    expect(shortStatement("INSERT  INTO\n  t  VALUES (1);")).toBe("INSERT INTO t VALUES (1);");
+  });
+});

@@ -8,7 +8,7 @@
  * emitting ALL tables first, then ALL constraints as ALTER TABLEs.
  */
 
-import { escapeIdent, escapeLiteral, isProgrammableStatement, orderChunksByDependency, parseDataChunks, splitSqlStatements, stripCommentLines } from "./transfer-sql";
+import { applyRowsResiliently, escapeIdent, escapeLiteral, isProgrammableStatement, orderChunksByDependency, parseDataChunks, shortStatement, splitSqlStatements, stripCommentLines } from "./transfer-sql";
 import type { QueryFn, TableDependency } from "./transfer-sql";
 type Rows = Record<string, unknown>[];
 
@@ -516,14 +516,34 @@ export async function applyTransferViaQuery(
     await alterTriggers(false);
     try {
       for (const chunk of orderedChunks) {
-        const res = await query(connectionString, chunk.sql);
-        if (!res.success) {
-          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+        const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+        // Fast path: whole chunk in one call. On failure, fall back to
+        // per-row so one bad row neither kills its siblings nor masks the
+        // real error behind "transaction is aborted"-style cascades.
+        const whole = await query(connectionString, chunk.sql);
+        if (whole.success) {
+          applied++;
+          continue;
+        }
+        const statements: string[] = [];
+        for (const stmt of splitSqlStatements(chunk.sql)) {
+          const executable = stripCommentLines(stmt);
+          if (executable) statements.push(executable);
+        }
+        if (statements.length <= 1) {
           throw new Error(
-            `Data import failed for ${where} (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+            `Data import failed for ${where} (destination may be PARTIALLY modified — no transaction support over this connection): ${String(whole.error ?? "unknown error")}`,
           );
         }
-        applied++;
+        const { applied: rowApplied, failed } = await applyRowsResiliently(async (sql) => {
+          const r = await query(connectionString, sql);
+          if (!r.success) throw new Error(String(r.error ?? "unknown error"));
+        }, statements);
+        applied += rowApplied;
+        for (const f of failed.slice(0, 20)) {
+          warnings.push(`Row skipped in ${where} (${f.error.slice(0, 200)}): ${shortStatement(f.statement)}`);
+        }
+        if (failed.length > 20) warnings.push(`…and ${failed.length - 20} more skipped rows in ${where}.`);
       }
     } finally {
       const enableError = await alterTriggers(true);
