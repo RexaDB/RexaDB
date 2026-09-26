@@ -170,13 +170,19 @@ export class NeonAdapter implements ProviderAdapter {
     };
   }
 
-  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
+  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
+    const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
     const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
+
+    // Probe extensions first (see supabase adapter): rejected ones become
+    // warnings instead of rolling back the whole import.
+    const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, effectiveConnectionString, data.schemaSql);
 
     // Single transaction (drops + schema + FK-ordered row data): failure
     // rolls everything back instead of leaving a partial destination.
-    await resetAndApplySql(effectiveConnectionString, data.schemaSql, data.dataSql, serverTransferQuery);
+    await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
   }
   
   // Neon Object Storage holds bytes outside Postgres, so there is nothing

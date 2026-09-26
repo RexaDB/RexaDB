@@ -10,7 +10,6 @@
 
 import { escapeIdent, escapeLiteral, orderChunksByDependency, parseDataChunks, splitSqlStatements, stripCommentLines } from "./transfer-sql";
 import type { QueryFn, TableDependency } from "./transfer-sql";
-
 type Rows = Record<string, unknown>[];
 
 async function select(query: QueryFn, conn: string, sql: string): Promise<Rows> {
@@ -352,4 +351,45 @@ export async function applyTransferViaQuery(
   }
 
   return { appliedStatements: applied, warnings };
+}
+
+/**
+ * Probe every CREATE EXTENSION statement against the destination BEFORE
+ * the transactional import: platforms reject some extensions outright
+ * (Neon: pg_cron only in the `postgres` database; supabase_vault not
+ * allow-listed at all), and one rejected statement would roll back the
+ * ENTIRE transfer. Un-creatable extensions are commented out with the
+ * reason recorded — everything else still imports atomically.
+ */
+export async function sanitizeExtensionsForDestination(
+  query: QueryFn,
+  connectionString: string,
+  schemaSql: string,
+): Promise<{ sql: string; warnings: string[] }> {
+  const warnings: string[] = [];
+  const kept: string[] = [];
+  for (const stmt of splitSqlStatements(schemaSql)) {
+    const executable = stripCommentLines(stmt);
+    if (!executable) {
+      kept.push(stmt);
+      continue;
+    }
+    const extMatch = /^\s*CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?("?(?:[^"\s;]+)"?)/i.exec(executable);
+    if (!extMatch) {
+      kept.push(stmt);
+      continue;
+    }
+    const extName = extMatch[1].replace(/^"|"$/g, "");
+    const probe = await query(connectionString, executable);
+    if (probe.success) {
+      kept.push(stmt);
+    } else {
+      const reason = String(probe.error ?? "not supported").slice(0, 200);
+      warnings.push(
+        `Extension "${extName}" skipped: destination rejected it (${reason}). Objects depending on it may fail — enable it manually if needed.`,
+      );
+      kept.push(`-- SKIPPED EXTENSION (destination rejected: ${reason}):\n-- ${executable.split("\n").join("\n-- ")}`);
+    }
+  }
+  return { sql: kept.join("\n"), warnings };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { applyTransferViaQuery, buildSchemaDumpViaSql } from "@/lib/transfer/schema-dump-sql";
+import { applyTransferViaQuery, buildSchemaDumpViaSql, sanitizeExtensionsForDestination } from "@/lib/transfer/schema-dump-sql";
 import type { QueryFn } from "@/lib/transfer/transfer-sql";
 
 function mockQuery(
@@ -106,5 +106,27 @@ describe("applyTransferViaQuery", () => {
     await expect(
       applyTransferViaQuery(query, "conn", [], 'CREATE TABLE "public"."t" ("id" integer);'),
     ).rejects.toThrow(/PARTIALLY/);
+  });
+});
+
+describe("sanitizeExtensionsForDestination", () => {
+  it("keeps creatable extensions and comments out rejected ones", async () => {
+    const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("pg_cron")) return { success: false, error: "can only create extension in database postgres" };
+      if (sql.includes("supabase_vault")) return { success: false, error: 'extension "supabase_vault" is not in the allowed extensions list' };
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
+    const { sql, warnings } = await sanitizeExtensionsForDestination(
+      query,
+      "conn",
+      'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\nCREATE EXTENSION IF NOT EXISTS "pg_cron";\nCREATE EXTENSION IF NOT EXISTS "supabase_vault";\nCREATE TABLE "public"."t" ("id" integer);',
+    );
+    expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+    expect(sql).toContain('CREATE TABLE "public"."t"');
+    expect(sql).not.toMatch(/^CREATE EXTENSION IF NOT EXISTS "pg_cron"/m);
+    expect(sql).toContain("-- SKIPPED EXTENSION");
+    expect(warnings.join(" ")).toContain("pg_cron");
+    expect(warnings.join(" ")).toContain("supabase_vault");
+    expect(warnings).toHaveLength(2);
   });
 });

@@ -11,6 +11,7 @@ import type {
   AuthExport,
   SettingsExport,
   FunctionsExport,
+  ImportOutcome,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import { exportTableDataSql, qualifiedTable } from "../transfer-sql";
@@ -89,7 +90,7 @@ export class PostgresAdapter implements ProviderAdapter {
     };
   }
 
-  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
+  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
 
     // Destructive by design (drops + recreates destination schemas — the
@@ -97,7 +98,10 @@ export class PostgresAdapter implements ProviderAdapter {
     // fully transactional including FK-ordered row data: any failure rolls
     // back instead of leaving a partial destination.
     try {
-      await resetAndApplySql(connectionString, data.schemaSql, data.dataSql, serverTransferQuery);
+      const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
+      const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
+      await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+      if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);

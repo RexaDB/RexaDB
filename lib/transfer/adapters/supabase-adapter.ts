@@ -108,13 +108,21 @@ export class SupabaseAdapter implements ProviderAdapter {
     };
   }
 
-  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
+  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
+    const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
+
+    // Probe extensions first: destinations reject some outright (Neon:
+    // pg_cron only in `postgres`, supabase_vault unlisted) and one bad
+    // CREATE EXTENSION would roll back the whole import. Rejected ones
+    // become warnings; everything else still imports atomically.
+    const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
 
     // Single transaction (drops + schema + row data, FK-ordered): a failure
     // rolls everything back, so the destination is never left partially
     // populated. Errors propagate so the transfer reports failure honestly.
-    await resetAndApplySql(connectionString, data.schemaSql, data.dataSql, serverTransferQuery);
+    await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    if (sanitized.warnings.length > 0) return { warnings: sanitized.warnings };
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {
