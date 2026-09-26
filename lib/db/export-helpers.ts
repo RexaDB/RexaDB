@@ -469,16 +469,46 @@ export async function resetAndApplySql(
         }
       }
       const ordered = orderChunksByDependency(chunks, deps);
-      for (const chunk of ordered) {
+      // Row-level triggers (membership auto-grants, audit writers, ...)
+      // fire per INSERT and write derived rows that violate FKs mid-load
+      // or duplicate migrated data. Disable them for the load; the
+      // transaction restores everything on rollback, and we re-enable
+      // before commit. Best-effort: without TRIGGER privilege we proceed
+      // undisabled and surface any resulting error honestly.
+      const triggerTables = [...new Map(
+        ordered.filter((c) => c.schema && c.table).map((c) => [`${c.schema}.${c.table}`, c] as const),
+      ).values()];
+      const disableTrigger = async (c: { schema: string; table: string }, enable: boolean) => {
         try {
-          await client.query(chunk.sql);
-        } catch (chunkError) {
-          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
-          throw new Error(
-            `Data import failed for ${where}: ${chunkError instanceof Error ? chunkError.message : String(chunkError)}`,
+          await client.query(
+            `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER ALL`,
           );
+        } catch (e) {
+          if (!enable) {
+            warnings.push(
+              `Could not disable triggers on ${c.schema}.${c.table} (${e instanceof Error ? e.message : String(e)}); row triggers stay live during import.`,
+            );
+          } else {
+            throw e;
+          }
         }
+      };
+      for (const c of triggerTables) await disableTrigger(c, false);
+      try {
+        for (const chunk of ordered) {
+          try {
+            await client.query(chunk.sql);
+          } catch (chunkError) {
+            const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+            throw new Error(
+              `Data import failed for ${where}: ${chunkError instanceof Error ? chunkError.message : String(chunkError)}`,
+            );
+          }
+        }
+      } finally {
+        for (const c of triggerTables) await disableTrigger(c, true);
       }
+      warnings.push("Row triggers were disabled during data import and re-enabled after; derived rows come from migrated data, not trigger side effects.");
     };
 
     if (!nonTransactional) {

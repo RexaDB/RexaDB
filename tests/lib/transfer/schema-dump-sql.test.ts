@@ -92,7 +92,7 @@ describe("applyTransferViaQuery", () => {
       'CREATE TABLE "public"."t" ("id" integer);',
       dataSql,
     );
-    expect(warnings).toEqual([]);
+    expect(warnings.join(" ")).toContain("triggers were disabled");
     expect(appliedStatements).toBe(1 + 1 + 2);
     const stmts = seen.join("\n");
     // parents load before children despite export order

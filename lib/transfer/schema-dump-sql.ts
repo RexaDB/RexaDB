@@ -492,15 +492,46 @@ export async function applyTransferViaQuery(
     } else {
       warnings.push(`FK ordering unavailable (${String(fkRes.error ?? "query failed")}); data loads in export order.`);
     }
-    for (const chunk of orderChunksByDependency(chunks, deps)) {
-      const res = await query(connectionString, chunk.sql);
-      if (!res.success) {
-        const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
-        throw new Error(
-          `Data import failed for ${where} (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+    const orderedChunks = orderChunksByDependency(chunks, deps);
+    // Same trigger rationale as the pg-client path (see export-helpers):
+    // disable per-table triggers for the load, re-enable after — with an
+    // explicit re-enable on failure since there is no transaction here.
+    const triggerTables = [...new Map(
+      orderedChunks.filter((c) => c.schema && c.table).map((c) => [`${c.schema}.${c.table}`, c] as const),
+    ).values()];
+    const alterTriggers = async (enable: boolean): Promise<string | null> => {
+      for (const c of triggerTables) {
+        const res = await query(
+          connectionString,
+          `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER ALL`,
         );
+        if (!res.success) {
+          const msg = `Could not ${enable ? "re-enable" : "disable"} triggers on ${c.schema}.${c.table}: ${String(res.error ?? "unknown error")}`;
+          if (!enable) warnings.push(`${msg}; row triggers stay live during import.`);
+          else return msg;
+        }
       }
-      applied++;
+      return null;
+    };
+    await alterTriggers(false);
+    try {
+      for (const chunk of orderedChunks) {
+        const res = await query(connectionString, chunk.sql);
+        if (!res.success) {
+          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+          throw new Error(
+            `Data import failed for ${where} (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+          );
+        }
+        applied++;
+      }
+    } finally {
+      const enableError = await alterTriggers(true);
+      if (enableError) {
+        warnings.push(`${enableError} — triggers may still be disabled; re-enable them manually.`);
+      } else if (triggerTables.length > 0) {
+        warnings.push("Row triggers were disabled during data import and re-enabled after; derived rows come from migrated data, not trigger side effects.");
+      }
     }
   }
 
