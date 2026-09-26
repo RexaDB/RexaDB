@@ -444,6 +444,14 @@ export async function sanitizeExtensionsForDestination(
 ): Promise<{ sql: string; warnings: string[] }> {
   const warnings: string[] = [];
   const kept: string[] = [];
+  // The splitter consumes statement terminators, so every kept code chunk
+  // must be re-terminated on rejoin — otherwise consecutive statements
+  // fuse into one and the destination reports a syntax error at the
+  // second CREATE. (Pure comment blocks need no terminator.)
+  const reterminate = (chunk: string): string => {
+    if (!stripCommentLines(chunk)) return chunk;
+    return chunk.trimEnd().endsWith(";") ? chunk : `${chunk};`;
+  };
   for (const stmt of splitSqlStatements(schemaSql)) {
     const executable = stripCommentLines(stmt);
     if (!executable) {
@@ -452,13 +460,13 @@ export async function sanitizeExtensionsForDestination(
     }
     const extMatch = /^\s*CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?("?(?:[^"\s;]+)"?)/i.exec(executable);
     if (!extMatch) {
-      kept.push(stmt);
+      kept.push(reterminate(stmt));
       continue;
     }
     const extName = extMatch[1].replace(/^"|"$/g, "");
     const probe = await query(connectionString, executable);
     if (probe.success) {
-      kept.push(stmt);
+      kept.push(reterminate(stmt));
     } else {
       const reason = String(probe.error ?? "not supported").slice(0, 200);
       warnings.push(

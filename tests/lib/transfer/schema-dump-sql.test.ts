@@ -129,6 +129,21 @@ describe("sanitizeExtensionsForDestination", () => {  it("keeps creatable extens
     expect(warnings.join(" ")).toContain("supabase_vault");
     expect(warnings).toHaveLength(2);
   });
+
+  it("re-terminates kept statements so they never fuse", async () => {
+    const query = (async () => ({ success: true, data: { rows: [] } })) as QueryFn;
+    const { sql } = await sanitizeExtensionsForDestination(
+      query,
+      "conn",
+      'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\nCREATE SCHEMA IF NOT EXISTS "public";',
+    );
+    // every code statement ends with its own terminator
+    const { splitSqlStatements } = await import("@/lib/transfer/transfer-sql");
+    const parts = splitSqlStatements(sql);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toContain("uuid-ossp");
+    expect(parts[1]).toContain("CREATE SCHEMA");
+  });
 });
 
 describe("isProgrammableStatement", () => {
