@@ -32,7 +32,7 @@ import {
   uploadStorageObject,
 } from "../supabase-api";
 import { buildCompatDiffs } from "../function-compat";
-import { isLikelySupabaseConnection } from "@/lib/db/supabase-helpers";
+import { isLikelySupabaseConnection, isSupabaseExcludedSchema } from "@/lib/db/supabase-helpers";
 
 export class SupabaseAdapter implements ProviderAdapter {
   type = "supabase" as const;
@@ -66,10 +66,21 @@ export class SupabaseAdapter implements ProviderAdapter {
     let dataSql = "";
 
     if (tablesResult.success && tablesResult.data?.rows) {
+      const skippedSystem = new Set<string>();
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
         const tableName = String(row.table_name);
         const tableFullName = `${tableSchema}.${tableName}`;
+
+        // Data must cover exactly the schemas the schema dump covers.
+        // System schemas (cron, vault, realtime, ...) migrate via dedicated
+        // components or not at all — exporting their rows would fail the
+        // import against tables that were never created.
+        if (isSupabaseExcludedSchema(tableSchema)) {
+          skippedSystem.add(tableSchema);
+          exportedRowCounts[tableFullName] = 0;
+          continue;
+        }
         tables.push(tableFullName);
 
         // Get row count for each table
@@ -95,6 +106,11 @@ export class SupabaseAdapter implements ProviderAdapter {
         dataSql += exported.sql;
         exportedRowCounts[tableFullName] = exported.exportedRows;
         if (exported.message) warnings.push(exported.message);
+      }
+      if (skippedSystem.size > 0) {
+        warnings.push(
+          `Skipped row data for Supabase system schemas (${[...skippedSystem].sort().join(", ")}): managed outside the transfer — schema is not migrated, so rows would have nowhere to land.`,
+        );
       }
     }
 
