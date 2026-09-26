@@ -209,13 +209,17 @@ export async function buildSchemaDumpViaSql(
         byTable.get(t)?.push(row);
       }
       for (const [table, columns] of byTable) {
+        // IF NOT EXISTS: drops-first design means a hit here is always an
+        // anomaly (double execution, leftover state) — proceeding lets the
+        // subsequent constraint/data steps validate shape honestly instead
+        // of dying on the first table.
         const defs = columns.map((c) => {
           let def = `${ident(c.column_name)} ${String(c.data_type)}`;
           if (c.default_value != null && String(c.default_value) !== "") def += ` DEFAULT ${String(c.default_value)}`;
           if (c.not_null === true || c.not_null === "t" || c.not_null === "true") def += " NOT NULL";
           return def;
         });
-        emit(`CREATE TABLE ${ident(schema)}.${ident(table)} (\n  ${defs.join(",\n  ")}\n)`);
+        emit(`CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident(table)} (\n  ${defs.join(",\n  ")}\n)`);
       }
     } catch (error) {
       warnings.push(`Tables unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
@@ -290,7 +294,16 @@ export async function buildSchemaDumpViaSql(
          WHERE n.nspname = ${lit} AND NOT i.indisprimary
            AND i.indexrelid NOT IN (SELECT conindid FROM pg_constraint WHERE conindid <> 0)`,
       );
-      for (const row of rows) emit(String(row.def));
+      for (const row of rows) {
+        const def = String(row.def);
+        // Same IF NOT EXISTS rationale as CREATE TABLE above.
+        emit(
+          def.replace(
+            /^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+)/i,
+            (prefix: string) => (/\bIF\s+NOT\s+EXISTS\b/i.test(def) ? prefix : `${prefix}IF NOT EXISTS `),
+          ),
+        );
+      }
     } catch (error) {
       warnings.push(`Indexes unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -53,7 +53,7 @@ describe("buildSchemaDumpViaSql", () => {
     });
     const { sql, warnings } = await buildSchemaDumpViaSql(query, "supabase-mgmt://x?token=y", ["public"]);
     expect(sql).toContain('CREATE SCHEMA IF NOT EXISTS "public"');
-    expect(sql).toContain('CREATE TABLE "public"."users"');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS "public"."users"');
     expect(sql).toContain('"id" uuid DEFAULT gen_random_uuid() NOT NULL');
     expect(sql).toContain('ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id")');
     expect(sql).toContain('ADD CONSTRAINT "posts_user_id_fkey" FOREIGN KEY (user_id) REFERENCES public.users(id)');
@@ -122,7 +122,7 @@ describe("sanitizeExtensionsForDestination", () => {  it("keeps creatable extens
       'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";\nCREATE EXTENSION IF NOT EXISTS "pg_cron";\nCREATE EXTENSION IF NOT EXISTS "supabase_vault";\nCREATE TABLE "public"."t" ("id" integer);',
     );
     expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-    expect(sql).toContain('CREATE TABLE "public"."t"');
+    expect(sql).toContain('CREATE TABLE "public"."t" ("id" integer);');
     expect(sql).not.toMatch(/^CREATE EXTENSION IF NOT EXISTS "pg_cron"/m);
     expect(sql).toContain("-- SKIPPED EXTENSION");
     expect(warnings.join(" ")).toContain("pg_cron");
