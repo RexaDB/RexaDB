@@ -385,10 +385,18 @@ export async function resetAndApplySql(
 
     const applyAll = async (inTxn: boolean) => {
       for (const stmt of dropStatements) {
-        await client.query(stmt);
+        try {
+          await client.query(stmt);
+        } catch (e) {
+          throw new Error(`Drop failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       for (const stmt of structural) {
-        await client.query(stmt);
+        try {
+          await client.query(stmt);
+        } catch (e) {
+          throw new Error(`Schema apply failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
 
       // Programmable objects: savepoint each (retry once for ordering),
