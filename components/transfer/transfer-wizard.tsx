@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -152,6 +152,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const [error, setError] = useState<string | null>(null);
   const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] } | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
+  const transferringRef = useRef(false);
 
   const getProviderType = (connectionType: string): ProviderType => {
     if (connectionType.includes("supabase")) return "supabase";
@@ -199,12 +200,18 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   }, [transferResult, onComplete, onCancel]);
 
   const handleStartTransfer = useCallback(async () => {
+    // Ref guard (not state): rapid double-clicks land in the same tick
+    // before setIsTransferring re-renders, spawning two concurrent
+    // transfers whose imports collide mid-destination ("already exists").
+    if (transferringRef.current) return;
+    transferringRef.current = true;
     const source = getSourceConnection();
     const destination = getDestinationConnection();
 
     if (!source || !destination) {
       setError("Please select both source and destination connections");
       setCurrentStep("error");
+      transferringRef.current = false;
       return;
     }
 
@@ -245,6 +252,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       setCurrentStep("error");
     } finally {
       setIsTransferring(false);
+      transferringRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceConnectionId, destinationConnectionId, transferOptions, connections, onComplete]);
@@ -309,6 +317,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   };
 
   const resetWizard = () => {
+    transferringRef.current = false;
     setCurrentStep("select-sources");
     setProgress(null);
     setError(null);
