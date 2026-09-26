@@ -94,6 +94,67 @@ export async function buildSchemaDumpViaSql(
     const lit = escapeLiteral(schema);
     emit(`CREATE SCHEMA IF NOT EXISTS ${ident(schema)}`);
 
+    // Custom types BEFORE tables (columns reference them): enums, domains,
+    // composites. Anything unmappable warns instead of failing the dump.
+    try {
+      const enums = await select(
+        query,
+        connectionString,
+        `SELECT t.typname AS name, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+         FROM pg_type t
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+         JOIN pg_enum e ON e.enumtypid = t.oid
+         WHERE n.nspname = ${lit} AND t.typtype = 'e'
+         GROUP BY t.typname ORDER BY 1`,
+      );
+      for (const row of enums) {
+        const labels = parsePgArrayLiteral(row.labels);
+        if (labels.length === 0) {
+          warnings.push(`Enum ${schema}.${String(row.name)} has no labels; skipped.`);
+          continue;
+        }
+        emit(`CREATE TYPE ${ident(schema)}.${ident(row.name)} AS ENUM (${labels.map((l) => escapeLiteral(l)).join(", ")})`);
+      }
+      const domains = await select(
+        query,
+        connectionString,
+        `SELECT t.typname AS name, format_type(t.typbasetype, t.typtypmod) AS base,
+                t.typnotnull AS not_null, t.typdefaultbin IS NOT NULL AS has_default
+         FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+         WHERE n.nspname = ${lit} AND t.typtype = 'd' ORDER BY 1`,
+      );
+      for (const row of domains) {
+        let def = `CREATE DOMAIN ${ident(schema)}.${ident(row.name)} AS ${String(row.base)}`;
+        if (row.not_null === true || row.not_null === "t") def += " NOT NULL";
+        emit(def);
+        if (row.has_default === true || row.has_default === "t") {
+          warnings.push(`Domain ${schema}.${String(row.name)} has a default that is not migrated; set it manually if needed.`);
+        }
+      }
+      const composites = await select(
+        query,
+        connectionString,
+        `SELECT t.typname AS name, a.attname AS col, format_type(a.atttypid, a.atttypmod) AS type
+         FROM pg_type t
+         JOIN pg_class c ON c.oid = t.typrelid
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+         JOIN pg_attribute a ON a.attrelid = c.oid
+         WHERE n.nspname = ${lit} AND t.typtype = 'c' AND a.attnum > 0 AND NOT a.attisdropped
+         ORDER BY t.typname, a.attnum`,
+      );
+      const compByType = new Map<string, string[]>();
+      for (const row of composites) {
+        const t = String(row.name);
+        if (!compByType.has(t)) compByType.set(t, []);
+        compByType.get(t)?.push(`${ident(row.col)} ${String(row.type)}`);
+      }
+      for (const [name, cols] of compByType) {
+        emit(`CREATE TYPE ${ident(schema)}.${ident(name)} AS (${cols.join(", ")})`);
+      }
+    } catch (error) {
+      warnings.push(`Custom types unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
     // Sequences first (serial defaults reference them).
     try {
       const seqs = await select(

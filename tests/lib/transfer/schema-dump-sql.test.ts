@@ -184,3 +184,28 @@ describe("applyTransferViaQuery programmable tolerance", () => {
     ).rejects.toThrow(/PARTIALLY/);
   });
 });
+
+describe("buildSchemaDumpViaSql custom types", () => {
+  it("emits enums, domains and composites before tables", async () => {
+    const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("pg_enum")) {
+        return { success: true, data: { rows: [{ name: "mood", labels: "{happy,sad}" }] } };
+      }
+      if (sql.includes("typtype = 'd'")) {
+        return { success: true, data: { rows: [{ name: "slug", base: "text", not_null: true }] } };
+      }
+      if (sql.includes("typtype = 'c'")) {
+        return {
+          success: true,
+          data: { rows: [{ name: "address", col: "city", type: "text" }, { name: "address", col: "zip", type: "text" }] },
+        };
+      }
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
+    const { buildSchemaDumpViaSql: build } = await import("@/lib/transfer/schema-dump-sql");
+    const { sql } = await build(query, "supabase-mgmt://ref?token=t", ["public"]);
+    expect(sql).toContain('CREATE TYPE "public"."mood" AS ENUM (\'happy\', \'sad\')');
+    expect(sql).toContain('CREATE DOMAIN "public"."slug" AS text NOT NULL');
+    expect(sql).toContain('CREATE TYPE "public"."address" AS ("city" text, "zip" text)');
+  });
+});
