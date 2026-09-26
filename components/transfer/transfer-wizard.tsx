@@ -365,7 +365,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
       {currentStep === "transferring" && (
         <div className="flex justify-center">
-          <TaskRows tasks={runTasks} variant="Capsules" />
+          <TaskRows tasks={runTasks} variant="List" />
         </div>
       )}
 

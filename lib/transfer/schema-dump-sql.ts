@@ -134,12 +134,16 @@ export async function buildSchemaDumpViaSql(
       const composites = await select(
         query,
         connectionString,
+        // relkind = 'c': standalone composite types ONLY. Every table also
+        // owns a typtype='c' rowtype entry (relkind 'r'/'p'/...) — dumping
+        // those as CREATE TYPE shadows the real tables and breaks every
+        // subsequent ALTER TABLE with "X is a composite type".
         `SELECT t.typname AS name, a.attname AS col, format_type(a.atttypid, a.atttypmod) AS type
          FROM pg_type t
          JOIN pg_class c ON c.oid = t.typrelid
          JOIN pg_namespace n ON n.oid = t.typnamespace
          JOIN pg_attribute a ON a.attrelid = c.oid
-         WHERE n.nspname = ${lit} AND t.typtype = 'c' AND a.attnum > 0 AND NOT a.attisdropped
+         WHERE n.nspname = ${lit} AND t.typtype = 'c' AND c.relkind = 'c' AND a.attnum > 0 AND NOT a.attisdropped
          ORDER BY t.typname, a.attnum`,
       );
       const compByType = new Map<string, string[]>();
