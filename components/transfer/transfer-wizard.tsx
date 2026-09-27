@@ -642,7 +642,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             {(progress?.message || progress?.error) && (
               <div className={cn(statusPill, progress?.error && "!border-destructive/30 !bg-destructive/5")}>
                 <span className={cn("break-words text-xs leading-relaxed", progress?.error ? "text-destructive" : "text-muted-foreground")}>
-                  {progress?.error ?? `${progress?.message}${progress ? ` — ${progress.percentage}%` : ""}`}
+                  {progress?.error ?? (progress ? `${STEP_LABELS[progress.currentStep] ?? progress.currentStep} — ${progress.percentage}%` : "")}
                 </span>
               </div>
             )}

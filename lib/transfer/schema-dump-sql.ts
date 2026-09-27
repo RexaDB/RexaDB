@@ -512,7 +512,7 @@ export async function applyTransferViaQuery(
       for (const c of triggerTables) {
         const res = await query(
           connectionString,
-          `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER ALL`,
+          `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER USER`,
         );
         if (!res.success) {
           const msg = `Could not ${enable ? "re-enable" : "disable"} triggers on ${c.schema}.${c.table}: ${String(res.error ?? "unknown error")}`;

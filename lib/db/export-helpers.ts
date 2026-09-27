@@ -147,7 +147,6 @@ function applySupabaseDumpTransforms(input: string, excludedSchemasPattern: stri
     { re: /^CREATE SEQUENCE "/gim, replace: 'CREATE SEQUENCE IF NOT EXISTS "' },
     { re: /^CREATE VIEW "/gim, replace: 'CREATE OR REPLACE VIEW "' },
     { re: /^CREATE FUNCTION "/gim, replace: 'CREATE OR REPLACE FUNCTION "' },
-    { re: /^CREATE TRIGGER "/gim, replace: 'CREATE OR REPLACE TRIGGER "' },
     { re: /^CREATE PUBLICATION "supabase_realtime/gim, replace: "-- $&" },
     { re: /^CREATE EVENT TRIGGER /gim, replace: "-- $&" },
     { re: /^\s*WHEN TAG IN /gim, replace: "-- $&" },
@@ -533,7 +532,7 @@ export async function resetAndApplySql(
         };
         try {
           await guarded(
-            `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER ALL`,
+            `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER USER`,
           );
         } catch (e) {
           if (!enable) {

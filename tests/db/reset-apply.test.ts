@@ -66,7 +66,7 @@ afterEach(() => {
 describe("resetAndApplySql transaction hygiene", () => {
   it("a failed trigger DISABLE does not poison later statements", async () => {
     const { seen, FakeClient } = makeFakePg((sql) =>
-      /DISABLE TRIGGER ALL/.test(sql) ? "permission denied" : null,
+      /DISABLE TRIGGER USER/.test(sql) ? "permission denied" : null,
     );
     (globalThis as any).__pg = { Client: FakeClient };
     const schema = `CREATE TABLE "public"."t" ("id" integer);`;
