@@ -268,6 +268,19 @@ export async function runPgDumpSchemaOnly(
   }
 }
 
+
+/**
+ * Schemas a transfer must NEVER drop on the destination, even though they
+ * are not part of the migrated package: provider-managed system schemas
+ * whose contents cannot be restored (Neon Auth config, Supabase auth /
+ * storage / cron internals). Dropping neon_auth, for example, silently
+ * deletes the destination's managed auth setup.
+ */
+function isProtectedDestinationSchema(schemaName: string, destIsSupabaseLike: boolean): boolean {
+  if (schemaName === "neon_auth") return true;
+  return destIsSupabaseLike && isSupabaseExcludedSchema(schemaName);
+}
+
 export async function resetAndApplySql(
   connectionString: string,
   fullSql: string,
@@ -305,7 +318,7 @@ export async function resetAndApplySql(
     const dropStatements: string[] = [];
     for (const row of existingSchemas.data?.rows ?? []) {
       const schemaName = String((row as Record<string, unknown>).schema_name);
-      if (isSupabase && isSupabaseExcludedSchema(schemaName)) continue;
+      if (isProtectedDestinationSchema(schemaName, isSupabase)) continue;
       const schema = schemaName.replace(/"/g, "\"\"");
       dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
     }
@@ -340,7 +353,7 @@ export async function resetAndApplySql(
     const dropStatements: string[] = [];
     for (const row of existingSchemas.rows) {
       const schemaName = String(row.schema_name);
-      if (isSupabase && isSupabaseExcludedSchema(schemaName)) {
+      if (isProtectedDestinationSchema(schemaName, isSupabase)) {
         continue;
       }
       const schema = schemaName.replace(/"/g, "\"\"");
