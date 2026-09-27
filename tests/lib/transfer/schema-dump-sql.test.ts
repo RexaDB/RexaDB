@@ -217,3 +217,26 @@ describe("buildSchemaDumpViaSql custom types", () => {
     expect(sql).toContain('CREATE TYPE "public"."address" AS ("city" text, "zip" text)');
   });
 });
+
+describe("sanitizeExtensionsForDestination skip callback", () => {
+  it("skips flagged extensions without probing them", async () => {
+    let probed: string[] = [];
+    const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("pg_available_extensions")) {
+        return { success: true, data: { rows: [{ name: "pg_cron" }, { name: "uuid-ossp" }] } };
+      }
+      probed.push(sql);
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
+    const { sanitizeExtensionsForDestination: sanitize } = await import("@/lib/transfer/schema-dump-sql");
+    const { sql, warnings } = await sanitize(
+      query,
+      "conn",
+      'CREATE EXTENSION IF NOT EXISTS "pg_cron";\nCREATE EXTENSION IF NOT EXISTS "uuid-ossp";',
+      (name) => (name === "pg_cron" ? "test skip" : null),
+    );
+    expect(probed.join("\n")).not.toContain("pg_cron");
+    expect(warnings.join(" ")).toContain("test skip");
+    expect(sql).toContain("-- SKIPPED EXTENSION");
+  });
+});

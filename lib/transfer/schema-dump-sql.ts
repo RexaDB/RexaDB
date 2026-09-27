@@ -570,6 +570,7 @@ export async function sanitizeExtensionsForDestination(
   query: QueryFn,
   connectionString: string,
   schemaSql: string,
+  skipWithoutProbing?: (extName: string) => string | null,
 ): Promise<{ sql: string; warnings: string[] }> {
   const warnings: string[] = [];
   const kept: string[] = [];
@@ -606,6 +607,12 @@ export async function sanitizeExtensionsForDestination(
       continue;
     }
     const extName = extMatch[1].replace(/^"|"$/g, "");
+    const skipReason = skipWithoutProbing?.(extName);
+    if (skipReason) {
+      warnings.push(`Extension "${extName}" skipped: ${skipReason}`);
+      kept.push(`-- SKIPPED EXTENSION (${skipReason}):\n-- ${executable.split("\n").join("\n-- ")}`);
+      continue;
+    }
     if (available && !available.has(extName)) {
       const reason = `extension "${extName}" is not available on the destination`;
       warnings.push(

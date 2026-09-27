@@ -172,12 +172,22 @@ export class NeonAdapter implements ProviderAdapter {
 
   async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
-    const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
     const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
 
     // Probe extensions first (see supabase adapter): rejected ones become
-    // warnings instead of rolling back the whole import.
-    const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, effectiveConnectionString, data.schemaSql);
+    // warnings instead of rolling back the whole import. pg_cron never
+    // probes on Neon — it can only live in the `postgres` database, so a
+    // probe would just detonate a scary (but harmless) server log.
+    const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
+    const sanitized = await sanitizeExtensionsForDestination(
+      serverTransferQuery,
+      effectiveConnectionString,
+      data.schemaSql,
+      (extName) =>
+        extName === "pg_cron"
+          ? "Neon only allows pg_cron in the postgres database; enable it there manually if scheduled jobs are needed"
+          : null,
+    );
 
     // Single transaction (drops + schema + FK-ordered row data): failure
     // rolls everything back instead of leaving a partial destination.
