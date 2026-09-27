@@ -581,6 +581,19 @@ export async function sanitizeExtensionsForDestination(
     if (!stripCommentLines(chunk)) return chunk;
     return chunk.trimEnd().endsWith(";") ? chunk : `${chunk};`;
   };
+  // Extensions entirely absent from the destination (not installed server
+  // binaries) are skipped WITHOUT probing: probing them fails loudly in
+  // server logs for zero information. Location-restricted ones (Neon's
+  // pg_cron) still probe, since availability alone can't tell.
+  let available: Set<string> | null = null;
+  try {
+    const availRes = await query(connectionString, `SELECT name FROM pg_available_extensions`);
+    if (availRes.success) {
+      available = new Set((availRes.data?.rows ?? []).map((r) => String((r as Record<string, unknown>).name)));
+    }
+  } catch {
+    // fall through to probing everything
+  }
   for (const stmt of splitSqlStatements(schemaSql)) {
     const executable = stripCommentLines(stmt);
     if (!executable) {
@@ -593,6 +606,14 @@ export async function sanitizeExtensionsForDestination(
       continue;
     }
     const extName = extMatch[1].replace(/^"|"$/g, "");
+    if (available && !available.has(extName)) {
+      const reason = `extension "${extName}" is not available on the destination`;
+      warnings.push(
+        `Extension "${extName}" skipped: ${reason}. Objects depending on it may fail — enable it manually if needed.`,
+      );
+      kept.push(`-- SKIPPED EXTENSION (${reason}):\n-- ${executable.split("\n").join("\n-- ")}`);
+      continue;
+    }
     const probe = await query(connectionString, executable);
     if (probe.success) {
       kept.push(reterminate(stmt));

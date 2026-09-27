@@ -405,31 +405,39 @@ export class SupabaseAdapter implements ProviderAdapter {
     }
     
     try {
-      // Export RLS policies
+      // Export RLS policies. NOTE: pg_get_expr takes (node tree, oid) —
+      // passing text table names fails with "function does not exist".
+      // Policies primarily migrate via the schema dump; this export is
+      // informational (full CREATE POLICY statements for reference).
       const policiesResult = await serverTransferQuery(
         connectionString,
-        `SELECT schemaname as schema, tablename as table, policyname as name, pg_get_expr(qual, schemaname||'.'||tablename) as definition
-         FROM pg_policies
-         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+        `SELECT n.nspname AS schema, c.relname AS table_name, p.polname AS name,
+                CASE p.polcmd WHEN 'r' THEN 'SELECT' WHEN 'a' THEN 'INSERT' WHEN 'w' THEN 'UPDATE' WHEN 'd' THEN 'DELETE' ELSE 'ALL' END AS cmd,
+                COALESCE((SELECT string_agg(quote_ident(r.rolname), ', ') FROM pg_roles r WHERE r.oid = ANY (p.polroles)), 'PUBLIC') AS roles,
+                pg_get_expr(p.polqual, p.polrelid) AS qual,
+                pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
+         FROM pg_policy p
+         JOIN pg_class c ON c.oid = p.polrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
          LIMIT 500`
       );
-      
+
       if (policiesResult.success && policiesResult.data?.rows) {
         for (const row of policiesResult.data.rows) {
           const schema = String(row.schema);
-          const table = String(row.table);
+          const table = String(row.table_name);
           const name = String(row.name);
-          policies.push({
-            id: `${schema}.${table}.${name}`,
-            name,
-            schema,
-            table,
-            definition: String(row.definition),
-          });
+          let definition = `CREATE POLICY ${name} ON ${schema}.${table} FOR ${String(row.cmd)} TO ${String(row.roles)}`;
+          if (row.qual != null) definition += ` USING (${String(row.qual)})`;
+          if (row.with_check != null) definition += ` WITH CHECK (${String(row.with_check)})`;
+          policies.push({ id: `${schema}.${table}.${name}`, name, schema, table, definition });
         }
+      } else if (!policiesResult.success) {
+        warnings.push(`RLS policy export skipped: ${String(policiesResult.error ?? "query failed")} (policies in the schema dump still migrate).`);
       }
     } catch (error) {
-      console.warn("Failed to export RLS policies:", error);
+      warnings.push(`RLS policy export skipped: ${error instanceof Error ? error.message : String(error)} (policies in the schema dump still migrate).`);
     }
     
     return { users, providers, policies, identities, warnings };
@@ -657,23 +665,26 @@ export class SupabaseAdapter implements ProviderAdapter {
     }
     return { warnings, stats: { functionsTransferred: deployed } };
   }
+  async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {
+    const projectSettings: Record<string, unknown> = {};
 
-  async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {    const projectSettings: Record<string, unknown> = {};
-    
+    // public.settings rarely exists — check first so a missing table isn't
+    // probed (and logged as a scary failure) on every transfer.
     try {
-      // Export various project settings that might be stored in the database
-      const settingsResult = await serverTransferQuery(
+      const exists = await serverTransferQuery(
         connectionString,
-        `SELECT * FROM public.settings LIMIT 1`
+        `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'settings' LIMIT 1`,
       );
-      
+      if (!exists.success || (exists.data?.rows ?? []).length === 0) return { projectSettings };
+      const settingsResult = await serverTransferQuery(connectionString, `SELECT * FROM public.settings LIMIT 1`);
+
       if (settingsResult.success && settingsResult.data?.rows?.[0]) {
-        Object.assign(projectSettings, settingsResult.data.rows[0]);
+        Object.assign(projectSettings, settingsResult.data.rows[0] as Record<string, unknown>);
       }
-    } catch (error) {
+    } catch {
       // Settings table might not exist, that's okay
     }
-    
+
     return {
       projectSettings,
     };

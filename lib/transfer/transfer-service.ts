@@ -146,7 +146,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting database schema...",
+        message: "Phase 1 of 2 — exporting database schema...",
       });
       
       package_.database = await adapter.exportDatabase(source.connectionString, options);
@@ -160,7 +160,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting storage buckets and files...",
+        message: "Phase 1 of 2 — exporting storage buckets and files...",
       });
       
       package_.storage = await adapter.exportStorage(source.connectionString, options);
@@ -174,7 +174,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting authentication data...",
+        message: "Phase 1 of 2 — exporting authentication data...",
       });
       
       package_.auth = await adapter.exportAuth(source.connectionString, options);
@@ -188,7 +188,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting project settings...",
+        message: "Phase 1 of 2 — exporting project settings...",
       });
 
       package_.settings = await adapter.exportSettings(source.connectionString, options);
@@ -202,7 +202,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting edge functions...",
+        message: "Phase 1 of 2 — exporting edge functions...",
       });
 
       package_.functions = await adapter.exportFunctions(source.connectionString, options);
@@ -236,7 +236,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Importing database schema...",
+        message: "Phase 2 of 2 — importing database schema...",
       });
 
       // Database import is fully transactional (resetAndApplySql): success
@@ -258,7 +258,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing storage buckets and files...",
+          message: "Phase 2 of 2 — importing storage buckets and files...",
         });
 
         const outcome = await adapter.importStorage(destination.connectionString, package_.storage, options);
@@ -284,7 +284,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing authentication data...",
+          message: "Phase 2 of 2 — importing authentication data...",
         });
 
         const outcome = await adapter.importAuth(destination.connectionString, package_.auth, options);
@@ -308,7 +308,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing project settings...",
+          message: "Phase 2 of 2 — importing project settings...",
         });
 
         const outcome = await adapter.importSettings(destination.connectionString, package_.settings, options);
@@ -331,7 +331,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing edge functions...",
+          message: "Phase 2 of 2 — importing edge functions...",
         });
 
         const outcome = await adapter.importFunctions(destination.connectionString, package_.functions, options);

@@ -112,6 +112,9 @@ describe("applyTransferViaQuery", () => {
 
 describe("sanitizeExtensionsForDestination", () => {  it("keeps creatable extensions and comments out rejected ones", async () => {
     const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("pg_available_extensions")) {
+        return { success: true, data: { rows: [{ name: "uuid-ossp" }, { name: "pg_cron" }, { name: "supabase_vault" }] } };
+      }
       if (sql.includes("pg_cron")) return { success: false, error: "can only create extension in database postgres" };
       if (sql.includes("supabase_vault")) return { success: false, error: 'extension "supabase_vault" is not in the allowed extensions list' };
       return { success: true, data: { rows: [] } };
@@ -131,7 +134,12 @@ describe("sanitizeExtensionsForDestination", () => {  it("keeps creatable extens
   });
 
   it("re-terminates kept statements so they never fuse", async () => {
-    const query = (async () => ({ success: true, data: { rows: [] } })) as QueryFn;
+    const query = (async (_conn: string, sql: string) => {
+      if (sql.includes("pg_available_extensions")) {
+        return { success: true, data: { rows: [{ name: "uuid-ossp" }] } };
+      }
+      return { success: true, data: { rows: [] } };
+    }) as QueryFn;
     const { sql } = await sanitizeExtensionsForDestination(
       query,
       "conn",
