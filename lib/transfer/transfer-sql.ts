@@ -6,6 +6,8 @@
  * - naive `dataSql.split(";")` which breaks on semicolons inside string literals
  */
 
+import type { TransferOptions } from "./transfer-types";
+
 export type QueryFnResult = {
   success: boolean;
   data?: { rows?: Array<Record<string, unknown>> };
@@ -273,6 +275,9 @@ export function splitSqlStatements(sql: string): string[] {
 /** Tables larger than this are skipped for row-data export (schema still migrates). */
 export const MAX_DATA_EXPORT_ROWS = 10_000;
 
+/** Rows per INSERT statement: fewer round trips (each is network I/O). */
+export const DATA_EXPORT_BATCH_SIZE = 500;
+
 export type TableDataExport = {
   sql: string;
   exportedRows: number;
@@ -333,10 +338,17 @@ export async function exportTableDataSql(
     const columns = Object.keys(rows[0]);
     const target = qualifiedTable(schema, table);
     const colList = columns.map(escapeIdent).join(", ");
-    const lines = rows.map(
-      (row) =>
-        `INSERT INTO ${target} (${colList}) VALUES (${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")});`,
-    );
+    const formatRow = (row: Record<string, unknown>) =>
+      `(${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")})`;
+    // Multi-row batches: one statement per 500 rows instead of one per
+    // row. Round trips dominate transfer time (each is network I/O, worse
+    // on flaky links), so this is the single biggest speed lever. Import
+    // expands failed batches back to singles (see splitMultiRowInsert).
+    const lines: string[] = [];
+    for (let i = 0; i < rows.length; i += DATA_EXPORT_BATCH_SIZE) {
+      const batch = rows.slice(i, i + DATA_EXPORT_BATCH_SIZE);
+      lines.push(`INSERT INTO ${target} (${colList}) VALUES ${batch.map(formatRow).join(",\n")};`);
+    }
     return {
       sql: `-- Data for ${schema}.${table} (${rows.length} rows)\n${lines.join("\n")}\n`,
       exportedRows: rows.length,
@@ -403,6 +415,136 @@ export async function applyRowsResiliently(
 /** One-line preview for warnings/errors. */
 export function shortStatement(stmt: string, max = 160): string {
   return stmt.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/**
+ * Map import-phase hooks onto options.onItem so adapters report what is
+ * importing right now (schema statement / data chunk) without knowing
+ * progress bookkeeping.
+ */
+export function importHooks(options: { onItem?: TransferOptions["onItem"] }): {
+  onPhase: (phase: "schema" | "data", index: number, total: number, label: string) => void;
+} {
+  return {
+    onPhase: (phase, index, total, label) =>
+      options.onItem?.({
+        step: phase === "data" ? "importing_data" : "importing_schema",
+        item: label,
+        itemIndex: index,
+        itemTotal: total,
+      }),
+  };
+}
+
+/**
+ * Expand one multi-row `INSERT INTO t (cols) VALUES (a), (b), ...` back
+ * into single-row INSERTs. Tuple boundaries split on top-level commas
+ * only — quotes, brackets and parens are tracked so values containing
+ * commas, parens, semicolons or ARRAY[...] literals never mis-split.
+ * Returns [stmt] unchanged when it is not a multi-row insert.
+ */
+export function splitMultiRowInsert(stmt: string): string[] {
+  const m = /^([\s\S]*?\bVALUES\s+)([\s\S]+?);?\s*$/.exec(stmt.trim());
+  if (!m) return [stmt];
+  const [, prefix, body] = m;
+  const tuples: string[] = [];
+  let depthParen = 0;
+  let depthBracket = 0;
+  let depthBrace = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let cur = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    const nx = body[i + 1];
+    if (inSingle) {
+      if (ch === "'" && nx === "'") {
+        cur += "''";
+        i++;
+        continue;
+      }
+      if (ch === "'") inSingle = false;
+      cur += ch;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '"' && nx === '"') {
+        cur += '""';
+        i++;
+        continue;
+      }
+      if (ch === '"') inDouble = false;
+      cur += ch;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      cur += ch;
+      continue;
+    }
+    if (ch === "(") depthParen++;
+    else if (ch === ")") depthParen--;
+    else if (ch === "[") depthBracket++;
+    else if (ch === "]") depthBracket--;
+    else if (ch === "{") depthBrace++;
+    else if (ch === "}") depthBrace--;
+    if (ch === "," && depthParen === 0 && depthBracket === 0 && depthBrace === 0) {
+      if (cur.trim()) tuples.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) tuples.push(cur.trim());
+  if (tuples.length <= 1) return [stmt];
+  return tuples.map((t) => `${prefix}${t};`);
+}
+
+/**
+ * Apply one data chunk: statements run whole (multi-row batches stay
+ * batched — one round trip per 500 rows); a failed batch expands to
+ * singles with per-row isolation + retry, so one bad row degrades to
+ * warnings instead of killing the chunk.
+ */
+export async function applyChunkResiliently(
+  exec: (sql: string) => Promise<void>,
+  chunkSql: string,
+): Promise<{ applied: number; failed: Array<{ statement: string; error: string }> }> {
+  let applied = 0;
+  const failed: Array<{ statement: string; error: string }> = [];
+  const fail = (statement: string, e: unknown) => {
+    failed.push({ statement, error: e instanceof Error ? e.message : String(e) });
+  };
+  for (const raw of splitSqlStatements(chunkSql)) {
+    const stmt = stripCommentLines(raw);
+    if (!stmt) continue;
+    try {
+      await exec(stmt);
+      applied++;
+    } catch (e) {
+      const singles = splitMultiRowInsert(stmt);
+      if (singles.length <= 1) {
+        fail(stmt, e);
+        continue;
+      }
+      const res = await applyRowsResiliently(exec, singles);
+      applied += res.applied;
+      if (res.failed.length === singles.length) {
+        // Every row failed identically (missing table, wrong schema...):
+        // systemic, not a bad row — fail the chunk loudly so callers
+        // roll back instead of warning away 10k identical errors.
+        const sameError = res.failed.every((f) => f.error === res.failed[0].error);
+        if (sameError) throw new Error(res.failed[0].error);
+      }
+      failed.push(...res.failed);
+    }
+  }
+  return { applied, failed };
 }
 /**
  * A per-table slice of a dataSql bundle, parsed from `-- Data for

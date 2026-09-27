@@ -17,6 +17,7 @@ import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import {
   escapeLiteral,
   exportTableDataSql,
+  importHooks,
   qualifiedTable,
 } from "../transfer-sql";
 import { serverTransferQuery } from "../transfer-server-query";
@@ -65,6 +66,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     const warnings: string[] = [];
     let dataSql = "";
 
+    const tableTotal = tablesResult.success && tablesResult.data?.rows ? tablesResult.data.rows.length : 0;
     if (tablesResult.success && tablesResult.data?.rows) {
       const skippedSystem = new Set<string>();
       for (const row of tablesResult.data.rows) {
@@ -105,6 +107,7 @@ export class SupabaseAdapter implements ProviderAdapter {
         );
         dataSql += exported.sql;
         exportedRowCounts[tableFullName] = exported.exportedRows;
+        options.onItem?.({ step: "exporting_schema", item: tableFullName, itemIndex: tables.length, itemTotal: tableTotal });
         if (exported.message) warnings.push(exported.message);
       }
       if (skippedSystem.size > 0) {
@@ -137,7 +140,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     // Single transaction (drops + schema + row data, FK-ordered): a failure
     // rolls everything back, so the destination is never left partially
     // populated. Errors propagate so the transfer reports failure honestly.
-    const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
     const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
     if (allWarnings.length > 0) return { warnings: allWarnings };
   }

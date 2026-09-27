@@ -29,6 +29,12 @@ export interface TransferOptions {
   includeSettings: boolean;
   batchSize?: number;
   onProgress?: (progress: TransferProgress) => void;
+  /**
+   * Fine-grained item callback (per table, per bucket...). The service
+   * forwards these into progress details so UIs can show what's running
+   * inside long phases and how long each item takes.
+   */
+  onItem?: (info: { step: TransferStep; item: string; itemIndex: number; itemTotal: number }) => void;
 }
 
 export interface TransferProgress {

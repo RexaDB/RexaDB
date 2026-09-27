@@ -281,11 +281,17 @@ function isProtectedDestinationSchema(schemaName: string, destIsSupabaseLike: bo
   return destIsSupabaseLike && isSupabaseExcludedSchema(schemaName);
 }
 
+export interface ResetApplyHooks {
+  /** Fine-grained import progress: phase with 1-based index/total + label. */
+  onPhase?: (phase: "schema" | "data", index: number, total: number, label: string) => void;
+}
+
 export async function resetAndApplySql(
   connectionString: string,
   fullSql: string,
   dataSql?: string,
   queryFn?: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>,
+  hooks?: ResetApplyHooks,
 ) {
   if (!isPostgresConnection(connectionString)) {
     throw new Error("SQL import is supported only for PostgreSQL connections.");
@@ -323,7 +329,7 @@ export async function resetAndApplySql(
       dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
     }
     dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
-    const applied = await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql);
+    const applied = await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql, hooks);
     return { warnings: applied.warnings };
   }
 
@@ -375,7 +381,7 @@ export async function resetAndApplySql(
       splitSqlStatements,
       stripCommentLines,
       isProgrammableStatement,
-      applyRowsResiliently,
+      applyChunkResiliently,
       shortStatement,
     } = await import("@/lib/transfer/transfer-sql");
     const chunks = dataSql ? parseDataChunks(dataSql) : [];
@@ -406,11 +412,18 @@ export async function resetAndApplySql(
           throw new Error(`Drop failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      hooks?.onPhase?.("schema", 0, structural.length + programmable.length, "drops applied");
+      let schemaDone = 0;
+      const schemaTotal = structural.length + programmable.length;
       for (const stmt of structural) {
         try {
           await client.query(stmt);
         } catch (e) {
           throw new Error(`Schema apply failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        schemaDone++;
+        if (schemaDone % 25 === 0 || schemaDone === schemaTotal) {
+          hooks?.onPhase?.("schema", schemaDone, schemaTotal, shortStmt(stmt));
         }
       }
 
@@ -534,18 +547,17 @@ export async function resetAndApplySql(
       };
       for (const c of triggerTables) await disableTrigger(c, false);
       try {
-        // Per-row savepoints: one bad row must not abort its siblings
-        // (which previously cascaded as "current transaction is aborted"
-        // for every later statement, hiding the real error). Persistent
-        // row failures become warnings with statement context.
+        // Batched multi-row INSERTs stay whole (one round trip per 500
+        // rows); failed batches expand to singles internally, so one bad
+        // row warns instead of aborting its siblings (which previously
+        // cascaded as "current transaction is aborted" for everything
+        // after it, hiding the real error).
         let failedRows = 0;
+        let chunkIndex = 0;
         for (const chunk of ordered) {
+          chunkIndex++;
           const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
-          const statements: string[] = [];
-          for (const stmt of splitSqlStatements(chunk.sql)) {
-            const executable = stripCommentLines(stmt);
-            if (executable) statements.push(executable);
-          }
+          hooks?.onPhase?.("data", chunkIndex, ordered.length, where);
           const exec = async (sql: string): Promise<void> => {
             await client.query("SAVEPOINT transfer_row");
             try {
@@ -561,7 +573,7 @@ export async function resetAndApplySql(
               throw e;
             }
           };
-          const { failed } = await applyRowsResiliently(exec, statements);
+          const { failed } = await applyChunkResiliently(exec, chunk.sql);
           for (const f of failed.slice(0, 20)) {
             warnings.push(`Row skipped in ${where} (${f.error.slice(0, 200)}): ${shortStatement(f.statement)}`);
           }

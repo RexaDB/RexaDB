@@ -220,7 +220,7 @@ describe("buildSchemaDumpViaSql custom types", () => {
 
 describe("sanitizeExtensionsForDestination skip callback", () => {
   it("skips flagged extensions without probing them", async () => {
-    let probed: string[] = [];
+    const probed: string[] = [];
     const query = (async (_conn: string, sql: string) => {
       if (sql.includes("pg_available_extensions")) {
         return { success: true, data: { rows: [{ name: "pg_cron" }, { name: "uuid-ossp" }] } };

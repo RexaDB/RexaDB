@@ -15,11 +15,13 @@ import {
   Settings,
   Loader2,
   Check,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
   Download,
+  XCircle,
   Zap,
 } from "@/lib/icon-theme/lucide-react";
-import TaskRows from "@/components/studio/ai/task-rows";
-import type { Task } from "@/lib/ai/task-types";
 import { startTransfer, exportTransferPackage, type FunctionDiffView } from "@/lib/transfer/transfer-client";
 import type {
   TransferOptions,
@@ -186,6 +188,44 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   // Completion is user-acknowledged: the complete step (stats + warnings)
   // stays mounted until Done is clicked. Auto-firing onComplete used to
   // unmount the wizard before warnings could be read.
+  // Rolling per-step log: every progress tick is recorded with a
+  // timestamp so each step expands to show what ran, what is running,
+  // and how long it has taken so far.
+  type LogEntry = { step: TransferStep; message: string; at: number; time: string; item?: string };
+  const [progressLog, setProgressLog] = useState<LogEntry[]>([]);
+  const [expandedStep, setExpandedStep] = useState<TransferStep | null>(null);
+  const recordProgress = useCallback((p: TransferProgress) => {
+    setProgress(p);
+    setProgressLog((prev) => {
+      const details = p.details as Record<string, unknown> | undefined;
+      const item = typeof details?.item === "string" ? details.item : undefined;
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.step === p.currentStep && last.message === p.message) {
+        last.at = Date.now();
+        last.time = new Date(last.at).toLocaleTimeString([], { hour12: false });
+        if (item) last.item = item;
+      } else {
+        const at = Date.now();
+        next.push({
+          step: p.currentStep,
+          message: p.message,
+          at,
+          time: new Date(at).toLocaleTimeString([], { hour12: false }),
+          item,
+        });
+        if (next.length > 300) next.splice(0, next.length - 300);
+      }
+      return next;
+    });
+  }, []);
+
+  const formatElapsed = (ms: number): string => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
+
   const handleDone = useCallback(() => {
     if (transferResult?.success && onComplete) {
       onComplete({
@@ -229,7 +269,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
           options: transferOptions,
         },
         (progress) => {
-          setProgress(progress);
+          recordProgress(progress);
         }
       );
 
@@ -318,6 +358,8 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
   const resetWizard = () => {
     transferringRef.current = false;
+    setProgressLog([]);
+    setExpandedStep(null);
     setCurrentStep("select-sources");
     setProgress(null);
     setError(null);
@@ -325,22 +367,11 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     setIsTransferring(false);
   };
 
-  // Task capsules are transfer progress indicators only — they render
+  // Task rows are transfer progress indicators only — they render
   // while the transfer runs, never as a wizard stepper.
   const runSteps = useMemo(() => displaySteps(transferOptions), [transferOptions]);
   const runIndex = progress ? runSteps.indexOf(progress.currentStep) : -1;
-  const runTasks: Task[] = runSteps.map((step, i) => ({
-    id: step,
-    label: STEP_LABELS[step],
-    status:
-      progress?.currentStep === "complete" || runIndex > i
-        ? "completed"
-        : progress?.error && i === runIndex
-          ? "failed"
-          : i === runIndex
-            ? "in_progress"
-            : "pending",
-  }));
+
 
   const stats = transferResult?.stats;
   const statCards = stats
@@ -364,8 +395,73 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       </div>
 
       {currentStep === "transferring" && (
-        <div className="flex justify-center">
-          <TaskRows tasks={runTasks} variant="List" />
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          {runSteps.map((step, i) => {
+            const done = progress?.currentStep === "complete" || runIndex > i;
+            const failed = Boolean(progress?.error) && i === runIndex;
+            const active = i === runIndex && !done && !failed;
+            const entries = progressLog.filter((e) => e.step === step);
+            const firstAt = entries.length > 0 ? entries[0].at : null;
+            const lastAt = entries.length > 0 ? entries[entries.length - 1].at : null;
+            // Elapsed advances with progress ticks (no Date.now in render).
+            const elapsed = firstAt !== null && lastAt !== null ? formatElapsed(lastAt - firstAt) : null;
+            const expanded = expandedStep === step;
+            const latestItem = [...entries].reverse().find((e) => e.item)?.item;
+            return (
+              <div key={step} className={cn(i > 0 && "border-t border-border/60")}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedStep(expanded ? null : step)}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left"
+                >
+                  {failed ? (
+                    <XCircle className="size-4 shrink-0 text-destructive" />
+                  ) : done ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-green-500" />
+                  ) : active ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Circle className="size-4 shrink-0 opacity-40" />
+                  )}
+                  <span className={cn("min-w-0 flex-1 truncate text-sm", active ? "font-medium text-foreground" : "text-muted-foreground")}>
+                    {STEP_LABELS[step]}
+                    {active && latestItem ? <span className="font-normal opacity-70"> — {latestItem}</span> : null}
+                  </span>
+                  {elapsed !== null && (
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{elapsed}</span>
+                  )}
+                  {active && (
+                    <Badge variant="outline" className="shrink-0 border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400">
+                      In progress
+                    </Badge>
+                  )}
+                  {done && (
+                    <Badge variant="outline" className="shrink-0 border-green-500/40 text-[10px] text-green-600 dark:text-green-400">
+                      Done
+                    </Badge>
+                  )}
+                  {entries.length > 0 && (
+                    <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+                  )}
+                </button>
+                {expanded && entries.length > 0 && (
+                  <div className="border-t border-border/40 bg-muted/20 px-4 py-2">
+                    {entries.slice(-25).map((e, j) => (
+                      <div key={j} className="flex items-baseline gap-2 py-0.5 font-mono text-[11px]">
+                        <span className="shrink-0 text-muted-foreground/60">
+                          {e.time}
+                        </span>
+                        <span className="break-words text-muted-foreground">
+                          {e.message}
+                          {e.item ? <span className="text-foreground/80"> — {e.item}</span> : null}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

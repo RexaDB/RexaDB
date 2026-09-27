@@ -14,7 +14,7 @@ import type {
   ImportOutcome,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
-import { escapeIdent, escapeLiteral, exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { escapeIdent, escapeLiteral, exportTableDataSql, importHooks, qualifiedTable } from "../transfer-sql";
 import { serverTransferQuery } from "../transfer-server-query";
 import { MAX_STORAGE_TOTAL_BYTES } from "../supabase-api";
 import {
@@ -128,6 +128,7 @@ export class NeonAdapter implements ProviderAdapter {
     const warnings: string[] = [];
     let dataSql = "";
 
+    const tableTotal = tablesResult.success && tablesResult.data?.rows ? tablesResult.data.rows.length : 0;
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
@@ -156,6 +157,7 @@ export class NeonAdapter implements ProviderAdapter {
         );
         dataSql += exported.sql;
         exportedRowCounts[tableFullName] = exported.exportedRows;
+        options.onItem?.({ step: "exporting_schema", item: tableFullName, itemIndex: tables.length, itemTotal: tableTotal });
         if (exported.message) warnings.push(exported.message);
       }
     }
@@ -191,7 +193,7 @@ export class NeonAdapter implements ProviderAdapter {
 
     // Single transaction (drops + schema + FK-ordered row data): failure
     // rolls everything back instead of leaving a partial destination.
-    const applied = await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery);
+    const applied = await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
     const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
     if (allWarnings.length > 0) return { warnings: allWarnings };
   }

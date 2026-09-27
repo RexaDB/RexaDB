@@ -8,7 +8,7 @@
  * emitting ALL tables first, then ALL constraints as ALTER TABLEs.
  */
 
-import { applyRowsResiliently, escapeIdent, escapeLiteral, isProgrammableStatement, orderChunksByDependency, parseDataChunks, shortStatement, splitSqlStatements, stripCommentLines } from "./transfer-sql";
+import { applyChunkResiliently, escapeIdent, escapeLiteral, isProgrammableStatement, orderChunksByDependency, parseDataChunks, shortStatement, splitSqlStatements, stripCommentLines } from "./transfer-sql";
 import type { QueryFn, TableDependency } from "./transfer-sql";
 type Rows = Record<string, unknown>[];
 
@@ -420,6 +420,7 @@ export async function applyTransferViaQuery(
   dropStatements: string[],
   schemaSql: string,
   dataSql?: string,
+  hooks?: { onPhase?: (phase: "schema" | "data", index: number, total: number, label: string) => void },
 ): Promise<{ appliedStatements: number; warnings: string[] }> {
   const warnings: string[] = [];
   let applied = 0;
@@ -432,9 +433,13 @@ export async function applyTransferViaQuery(
     applied++;
   }
 
+  const schemaStatements: string[] = [];
   for (const stmt of splitSqlStatements(schemaSql)) {
     const executable = stripCommentLines(stmt);
-    if (!executable) continue;
+    if (executable) schemaStatements.push(executable);
+  }
+  let schemaDone = 0;
+  for (const executable of schemaStatements) {
     if (isProgrammableStatement(executable)) {
       // Best-effort with one retry (ordering): failures warn, never throw.
       // Structural failures below still abort — the destination may then be
@@ -448,15 +453,19 @@ export async function applyTransferViaQuery(
       } else {
         applied++;
       }
-      continue;
+    } else {
+      const res = await query(connectionString, executable);
+      if (!res.success) {
+        throw new Error(
+          `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+        );
+      }
+      applied++;
     }
-    const res = await query(connectionString, executable);
-    if (!res.success) {
-      throw new Error(
-        `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
-      );
+    schemaDone++;
+    if (schemaDone % 25 === 0 || schemaDone === schemaStatements.length) {
+      hooks?.onPhase?.("schema", schemaDone, schemaStatements.length, executable.replace(/\s+/g, " ").slice(0, 120));
     }
-    applied++;
   }
 
   if (dataSql) {
@@ -515,8 +524,11 @@ export async function applyTransferViaQuery(
     };
     await alterTriggers(false);
     try {
+      let chunkIndex = 0;
       for (const chunk of orderedChunks) {
+        chunkIndex++;
         const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+        hooks?.onPhase?.("data", chunkIndex, orderedChunks.length, where);
         // Fast path: whole chunk in one call. On failure, fall back to
         // per-row so one bad row neither kills its siblings nor masks the
         // real error behind "transaction is aborted"-style cascades.
@@ -525,20 +537,10 @@ export async function applyTransferViaQuery(
           applied++;
           continue;
         }
-        const statements: string[] = [];
-        for (const stmt of splitSqlStatements(chunk.sql)) {
-          const executable = stripCommentLines(stmt);
-          if (executable) statements.push(executable);
-        }
-        if (statements.length <= 1) {
-          throw new Error(
-            `Data import failed for ${where} (destination may be PARTIALLY modified — no transaction support over this connection): ${String(whole.error ?? "unknown error")}`,
-          );
-        }
-        const { applied: rowApplied, failed } = await applyRowsResiliently(async (sql) => {
+        const { applied: rowApplied, failed } = await applyChunkResiliently(async (sql) => {
           const r = await query(connectionString, sql);
           if (!r.success) throw new Error(String(r.error ?? "unknown error"));
-        }, statements);
+        }, chunk.sql);
         applied += rowApplied;
         for (const f of failed.slice(0, 20)) {
           warnings.push(`Row skipped in ${where} (${f.error.slice(0, 200)}): ${shortStatement(f.statement)}`);

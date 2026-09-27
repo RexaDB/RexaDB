@@ -138,8 +138,8 @@ export class TransferService {
     };
     
     let stepIndex = 1;
-    
-    // Export database
+
+    // Database
     if (options.includeDatabase) {
       await this.updateProgress(options, {
         currentStep: "exporting_schema",
@@ -148,8 +148,11 @@ export class TransferService {
         percentage: Math.round((stepIndex / totalSteps) * 100),
         message: "Phase 1 of 2 — exporting database schema...",
       });
-      
-      package_.database = await adapter.exportDatabase(source.connectionString, options);
+
+      package_.database = await adapter.exportDatabase(
+        source.connectionString,
+        this.withItemReporting(options, "exporting_schema", stepIndex, totalSteps, "Phase 1 of 2 — exporting database"),
+      );
       stepIndex++;
     }
     
@@ -242,7 +245,11 @@ export class TransferService {
       // Database import is fully transactional (resetAndApplySql): success
       // means every exported row landed, so export counts stand. Any
       // failure throws and fails the whole transfer — never partial.
-      const outcome = await adapter.importDatabase(destination.connectionString, package_.database, options);
+      const outcome = await adapter.importDatabase(
+        destination.connectionString,
+        package_.database,
+        this.withImportReporting(options, stepIndex, totalSteps),
+      );
       if (outcome?.warnings) warnings.push(...outcome.warnings);
       if (outcome?.stats) Object.assign(stats, outcome.stats);
       stepIndex++;
@@ -379,6 +386,56 @@ export class TransferService {
     return steps;
   }
   
+  /**
+   * Wrap options so per-item reports (per table, per chunk) surface as
+   * progress details: "what's running right now" for long phases.
+   */
+  private withItemReporting(    options: TransferOptions,
+    step: TransferStep,
+    stepIndex: number,
+    totalSteps: number,
+    message: string,
+  ): TransferOptions {
+    return {
+      ...options,
+      onItem: (info) => {
+        void this.updateProgress(options, {
+          currentStep: step,
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: `${message} — ${info.item}${info.itemTotal > 1 ? ` (${info.itemIndex}/${info.itemTotal})` : ""}`,
+          details: { item: info.item, itemIndex: info.itemIndex, itemTotal: info.itemTotal },
+        });
+      },
+    };
+  }
+
+  /**
+   * Wrap import options so per-item reports (schema statement, data
+   * chunk) surface as progress details, keeping the reporter's own step
+   * (schema vs data) instead of the phase default.
+   */
+  private withImportReporting(
+    options: TransferOptions,
+    stepIndex: number,
+    totalSteps: number,
+  ): TransferOptions {
+    return {
+      ...options,
+      onItem: (info) => {
+        void this.updateProgress(options, {
+          currentStep: info.step,
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: `Phase 2 of 2 — ${info.item}${info.itemTotal > 1 ? ` (${info.itemIndex}/${info.itemTotal})` : ""}`,
+          details: { item: info.item, itemIndex: info.itemIndex, itemTotal: info.itemTotal },
+        });
+      },
+    };
+  }
+
   /**
    * Calculate transfer statistics from rows actually exported — never from
    * source row counts, which would claim rows that were skipped or failed.
