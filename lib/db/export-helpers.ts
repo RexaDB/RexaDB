@@ -494,8 +494,32 @@ export async function resetAndApplySql(
         ordered.filter((c) => c.schema && c.table).map((c) => [`${c.schema}.${c.table}`, c] as const),
       ).values()];
       const disableTrigger = async (c: { schema: string; table: string }, enable: boolean) => {
+        // Savepoint-guarded: a failed ALTER aborts the whole transaction,
+        // so an unprotected DISABLE would turn every later statement into
+        // "current transaction is aborted" hiding the real error.
+        // Outside a transaction (nonTxn fallback) run it bare — each
+        // statement is independent there anyway.
+        const guarded = async (sql: string): Promise<void> => {
+          if (!inTxn) {
+            await client.query(sql);
+            return;
+          }
+          await client.query("SAVEPOINT transfer_trig");
+          try {
+            await client.query(sql);
+            await client.query("RELEASE SAVEPOINT transfer_trig");
+          } catch (e) {
+            try {
+              await client.query("ROLLBACK TO SAVEPOINT transfer_trig");
+            } catch {}
+            try {
+              await client.query("RELEASE SAVEPOINT transfer_trig");
+            } catch {}
+            throw e;
+          }
+        };
         try {
-          await client.query(
+          await guarded(
             `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER ALL`,
           );
         } catch (e) {
