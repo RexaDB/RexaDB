@@ -9,4 +9,6 @@ export interface HistoryEntry {
   caller: "user" | "system";
   executedBy?: string | null;
   executedByName?: string | null;
+  /** JSON-encoded bound parameter values (never displayed/searched; replay only). */
+  params?: string | null;
 }

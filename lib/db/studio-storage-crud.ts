@@ -31,6 +31,7 @@ export async function getStudioHistory(
       caller: row.caller,
       executedBy: row.executedBy,
       executedByName: row.executedByName,
+      params: (row as { params?: unknown }).params ?? null,
       connectionName: row.connection?.name ?? null,
     }));
 
@@ -57,6 +58,7 @@ export async function insertHistoryEntry(
     id: string; query: string; executedAt: number; duration: number;
     status: "success" | "error"; error?: string | null; rowsCount?: number | null;
     caller: "user" | "system"; executedBy?: string | null; executedByName?: string | null;
+    params?: string | null;
   },
   ensureCoreTables: () => Promise<void>,
   ensureConnectionExists: (connectionId: number) => Promise<void>,
@@ -71,6 +73,7 @@ export async function insertHistoryEntry(
         duration: entry.duration, status: entry.status, error: entry.error ?? null,
         rowsCount: entry.rowsCount ?? null, caller: entry.caller,
         executedBy: entry.executedBy ?? null, executedByName: entry.executedByName ?? null,
+        params: entry.params ?? null,
       },
       skipDuplicates: true,
     });
@@ -126,6 +129,7 @@ export async function saveStudioHistory(
         caller: h?.caller === "user" || h?.caller === "system" ? h.caller : "user",
         executedBy: typeof h?.executedBy === "string" ? h.executedBy : null,
         executedByName: typeof h?.executedByName === "string" ? h.executedByName : null,
+        params: typeof h?.params === "string" ? h.params : null,
       }))
       .filter((entry) => entry.id && entry.query);
     const dedupedHistory = Array.from(
@@ -142,6 +146,7 @@ export async function saveStudioHistory(
             status: sql`excluded.status`, error: sql`excluded.error`,
             rowsCount: sql`excluded.rows_count`, caller: sql`excluded.caller`,
             executedBy: sql`excluded.executed_by`, executedByName: sql`excluded.executed_by_name`,
+            params: sql`excluded.params`,
           },
         });
       }

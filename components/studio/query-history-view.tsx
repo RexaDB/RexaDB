@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { QueryHistory } from "@/lib/studio/types";
+import { interpolateSqlParamsForDisplay } from "@/lib/studio/general-utils";
 import { DataGridAg as DataGrid } from "./data-grid-ag";
 import { formatDelimitedValue } from "@/lib/studio/clipboard-utils";
 import {
@@ -66,6 +67,24 @@ function extractTableName(query: string) {
 
 function formatAbsoluteTime(timestamp: number) {
   return new Date(timestamp).toLocaleString();
+}
+
+/**
+ * Rebuild a runnable statement for history Run: parameterized entries carry
+ * their bound values as JSON in `params` (never displayed or searched), so
+ * interpolation happens in-memory here at click time — the stored/displayed
+ * query text itself keeps placeholders.
+ */
+function replayQuery(entry: QueryHistory): string {
+  if (entry.params) {
+    try {
+      const values = JSON.parse(entry.params);
+      if (Array.isArray(values)) return interpolateSqlParamsForDisplay(entry.query, values);
+    } catch {
+      // fall through to the raw query
+    }
+  }
+  return entry.query;
 }
 
 export function QueryHistoryView({
@@ -125,6 +144,7 @@ export function QueryHistoryView({
               caller: h.caller as "user" | "system",
               executedBy: h.executedBy || undefined,
               executedByName: h.executedByName || undefined,
+              params: typeof h.params === "string" ? h.params : undefined,
             }))
             .reverse(),
         ); // newest first
@@ -642,7 +662,7 @@ export function QueryHistoryView({
                             variant="secondary"
                             size="sm"
                             className="h-8 bg-studio-bg border border-studio-border shadow-sm gap-2"
-                            onClick={() => onRunQuery(entry.query)}
+                            onClick={() => onRunQuery(replayQuery(entry))}
                           >
                             <Play className="w-3.5 h-3.5 text-blue-500 fill-blue-500/10" />
                             Run

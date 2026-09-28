@@ -1250,6 +1250,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       caller: newEntry.caller ?? "user",
       executedBy: newEntry.executedBy,
       executedByName: newEntry.executedByName,
+      params: newEntry.params ?? null,
     }).then(res => {
       if (!res.success) console.error("[rexadb] insertHistoryEntry server error", res.error);
     }).catch((err: unknown) => console.error("[rexadb] insertHistoryEntry network error", err));
@@ -1261,7 +1262,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     });
   }, [connection.id, connection.name]);
 
-  const addQueryHistoryEntry = useCallback((sql: string, res: { success: boolean; error?: string; data?: { executionTime?: number; rows?: unknown[] } }, startTime: number) => {
+  const addQueryHistoryEntry = useCallback((sql: string, res: { success: boolean; error?: string; data?: { executionTime?: number; rows?: unknown[] } }, startTime: number, params?: unknown[]) => {
     addHistoryEntry({
       query: sql,
       duration: res.data?.executionTime || (Date.now() - startTime),
@@ -1269,6 +1270,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       error: res.error,
       rowsCount: res.data?.rows?.length || 0,
       caller: 'user',
+      params: params ? JSON.stringify(params) : undefined,
     });
   }, [addHistoryEntry]);
 
@@ -8438,7 +8440,7 @@ END $$;`.trim();
 
       // Persisted history keeps placeholders — interpolated values (which
       // may be secrets) must never land in stored query history.
-      addQueryHistoryEntry(sql, res, startTime);
+      addQueryHistoryEntry(sql, res, startTime, data);
 
       if (res.success) {
         const insertedRows = (res.data?.rows || []) as Array<Record<string, unknown>>;
@@ -8507,7 +8509,7 @@ END $$;`.trim();
 
     // Persisted history keeps placeholders — interpolated values (which
     // may be secrets) must never land in stored query history.
-    addQueryHistoryEntry(sql, res, startTime);
+    addQueryHistoryEntry(sql, res, startTime, params);
 
     if (res.success) {
       setIsInsertSheetOpen(false);

@@ -78,12 +78,12 @@ export async function buildSchemaDumpViaSql(
 ): Promise<{ sql: string; warnings: string[] }> {
   const parts: string[] = [];
   const warnings: string[] = [];
-  // Foreign-key ALTERs are deferred until every schema's tables exist:
-  // emitting them per-schema breaks when an earlier schema references a
-  // table created in a later one (the ALTER runs before its target exists).
-  // Partitions are deferred for the same reason (a partition's parent can
-  // live in a later schema) and topologically ordered (a partition that is
-  // itself partitioned must exist before its own subpartitions).
+  // Emission order across the whole dump: ALL schemas/tables first, then
+  // partitions (topologically parent-before-child), then dependent objects
+  // (PKs, constraints, indexes, views, functions, triggers, RLS/policies),
+  // then foreign keys last. Buffering dependents matters because a PK,
+  // index, trigger, policy, or FK can reference a partition — emitting
+  // them per-schema would run before a deferred partition exists.
   const pendingFk: string[] = [];
   type PendingPartition = {
     schema: string;
@@ -94,9 +94,14 @@ export async function buildSchemaDumpViaSql(
     partkey: string;
   };
   const pendingPartitions: PendingPartition[] = [];
+  const pendingDependents: string[] = [];
   const emit = (sql: string) => {
     const trimmed = sql.trim();
     if (trimmed) parts.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
+  };
+  const defer = (sql: string) => {
+    const trimmed = sql.trim();
+    if (trimmed) pendingDependents.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
   };
 
   // Extensions (plpgsql is always present; the rest need IF NOT EXISTS so
@@ -327,7 +332,7 @@ export async function buildSchemaDumpViaSql(
         pkByTable.get(t)?.cols.push(String(row.column_name));
       }
       for (const [table, pk] of pkByTable) {
-        emit(`ALTER TABLE ${ident(schema)}.${ident(table)} ADD CONSTRAINT ${ident(pk.name)} PRIMARY KEY (${pk.cols.map(ident).join(", ")})`);
+        defer(`ALTER TABLE ${ident(schema)}.${ident(table)} ADD CONSTRAINT ${ident(pk.name)} PRIMARY KEY (${pk.cols.map(ident).join(", ")})`);
       }
     } catch (error) {
       warnings.push(`Primary keys unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
@@ -363,7 +368,7 @@ export async function buildSchemaDumpViaSql(
             // cross-schema references never run before their target table.
             pendingFk.push(alter);
           } else {
-            emit(alter);
+            defer(alter);
           }
         }
       } catch (error) {
@@ -386,7 +391,7 @@ export async function buildSchemaDumpViaSql(
       for (const row of rows) {
         const def = String(row.def);
         // Same IF NOT EXISTS rationale as CREATE TABLE above.
-        emit(
+        defer(
           def.replace(
             /^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+)/i,
             (prefix: string) => (/\bIF\s+NOT\s+EXISTS\b/i.test(def) ? prefix : `${prefix}IF NOT EXISTS `),
@@ -404,14 +409,14 @@ export async function buildSchemaDumpViaSql(
         connectionString,
         `SELECT viewname, definition FROM pg_views WHERE schemaname = ${lit}`,
       );
-      for (const row of rows) emit(`CREATE OR REPLACE VIEW ${ident(schema)}.${ident(row.viewname)} AS ${String(row.definition)}`);
+      for (const row of rows) defer(`CREATE OR REPLACE VIEW ${ident(schema)}.${ident(row.viewname)} AS ${String(row.definition)}`);
       const mats = await select(
         query,
         connectionString,
         `SELECT matviewname, definition FROM pg_matviews WHERE schemaname = ${lit}`,
       );
       for (const row of mats) {
-        emit(`CREATE MATERIALIZED VIEW ${ident(schema)}.${ident(row.matviewname)} AS ${String(row.definition)} WITH NO DATA`);
+        defer(`CREATE MATERIALIZED VIEW ${ident(schema)}.${ident(row.matviewname)} AS ${String(row.definition)} WITH NO DATA`);
         warnings.push(`Materialized view ${schema}.${String(row.matviewname)} migrates WITHOUT data.`);
       }
     } catch (error) {
@@ -427,7 +432,7 @@ export async function buildSchemaDumpViaSql(
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = ${lit} AND p.prokind IN ('f', 'p', 'w')`,
       );
-      for (const row of rows) emit(String(row.def));
+      for (const row of rows) defer(String(row.def));
     } catch (error) {
       warnings.push(`Functions unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -443,7 +448,7 @@ export async function buildSchemaDumpViaSql(
          JOIN pg_namespace n ON n.oid = c.relnamespace
          WHERE n.nspname = ${lit} AND NOT t.tgisinternal`,
       );
-      for (const row of rows) emit(String(row.def));
+      for (const row of rows) defer(String(row.def));
     } catch (error) {
       warnings.push(`Triggers unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -458,7 +463,7 @@ export async function buildSchemaDumpViaSql(
          WHERE n.nspname = ${lit} AND c.relkind = 'r' AND c.relrowsecurity`,
       );
       for (const row of rlsTables) {
-        emit(`ALTER TABLE ${ident(schema)}.${ident(row.table_name)} ENABLE ROW LEVEL SECURITY`);
+        defer(`ALTER TABLE ${ident(schema)}.${ident(row.table_name)} ENABLE ROW LEVEL SECURITY`);
       }
       const policies = await select(
         query,
@@ -482,22 +487,16 @@ export async function buildSchemaDumpViaSql(
         stmt += ` FOR ${cmdMap[String(row.cmd)] ?? "ALL"} TO ${toClause}`;
         if (row.qual != null) stmt += ` USING (${String(row.qual)})`;
         if (row.with_check != null) stmt += ` WITH CHECK (${String(row.with_check)})`;
-        emit(stmt);
+        defer(stmt);
       }
     } catch (error) {
       warnings.push(`RLS unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  // Deferred foreign keys: every schema's tables now exist, so cross-schema
-  // references apply cleanly.
-  for (const alter of pendingFk) emit(alter);
-
-  // Deferred partitions: parents before children. A partition's parent is
-  // either a regular table (already emitted above) or another pending
-  // partition — repeatedly emit whatever's parent is satisfied. Anything
-  // left after no progress is emitted in export order with a warning
-  // rather than dropped.
+  // Flush order: partitions (parent-before-child) first so dependent
+  // objects can reference them, then PKs/constraints/indexes/views/
+  // functions/triggers/RLS, then foreign keys last.
   {
     const key = (s: string, t: string) => `${s}.${t}`;
     const pendingKeys = new Set(pendingPartitions.map((p) => key(p.schema, p.table)));
@@ -534,6 +533,12 @@ export async function buildSchemaDumpViaSql(
       remaining = next;
     }
   }
+
+  for (const stmt of pendingDependents) emit(stmt);
+
+  // Deferred foreign keys: every table and partition now exists, so
+  // cross-schema references apply cleanly.
+  for (const alter of pendingFk) emit(alter);
 
   return { sql: parts.join("\n"), warnings };
 }
