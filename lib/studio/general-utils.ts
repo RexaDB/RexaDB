@@ -145,10 +145,57 @@ export function formatSqlDisplayLiteral(value: unknown): string {
 }
 
 /**
- * Interpolate `$1, $2…` (postgres) or `?` (mysql/mssql/clickhouse)
- * placeholders with display literals so users see real values instead
- * of `VALUES ($1, $2, $3, $4)`. Display-only — execution keeps params.
+ * Render a JS value as a SQL literal for *execution* (history replay).
+ * Unlike the display formatter, strings are ALWAYS single-quoted — a value
+ * like "null", "true", or "42" must round-trip as text, never as a keyword
+ * or bare numeric.
  */
+export function formatSqlExecutionLiteral(value: unknown): string {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "NULL";
+  }
+  if (typeof value === "bigint") return String(value);
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime())
+      ? "NULL"
+      : `'${value.toISOString().replace(/'/g, "''")}'`;
+  }
+  if (typeof value === "object") {
+    try {
+      return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+    } catch {
+      return `'${String(value).replace(/'/g, "''")}'`;
+    }
+  }
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+/**
+ * Interpolate `$1, $2…` (postgres) or `?` (mysql/mssql/clickhouse)
+ * placeholders with execution-safe literals so a history entry can be
+ * replayed exactly. Values round-trip: strings stay quoted text.
+ */
+export function interpolateSqlParamsForExecution(
+  sql: string,
+  params: unknown[] | undefined | null,
+): string {
+  if (!params || params.length === 0) return sql;
+  const literals = params.map(formatSqlExecutionLiteral);
+  // Postgres-style $n
+  if (/\$\d+/.test(sql)) {
+    return sql.replace(/\$(\d+)/g, (match, n) => {
+      const idx = Number(n) - 1;
+      return idx >= 0 && idx < literals.length ? literals[idx] : match;
+    });
+  }
+  // Question-mark dialects — replace sequentially.
+  let i = 0;
+  return sql.replace(/\?/g, () =>
+    i < literals.length ? literals[i++] : "?",
+  );
+}
 export function interpolateSqlParamsForDisplay(
   sql: string,
   params: unknown[] | undefined | null,

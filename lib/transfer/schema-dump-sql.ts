@@ -78,12 +78,15 @@ export async function buildSchemaDumpViaSql(
 ): Promise<{ sql: string; warnings: string[] }> {
   const parts: string[] = [];
   const warnings: string[] = [];
-  // Emission order across the whole dump: ALL schemas/tables first, then
-  // partitions (topologically parent-before-child), then dependent objects
-  // (PKs, constraints, indexes, views, functions, triggers, RLS/policies),
-  // then foreign keys last. Buffering dependents matters because a PK,
-  // index, trigger, policy, or FK can reference a partition — emitting
-  // them per-schema would run before a deferred partition exists.
+  // Emission order across the whole dump: schemas/types/sequences first,
+  // then functions (table defaults and generated expressions can call
+  // them — including cross-schema), then ALL tables, then partitions
+  // (topologically parent-before-child), then dependent objects (PKs,
+  // constraints, indexes, views, triggers, RLS/policies), then foreign
+  // keys last. Function bodies are not validated against tables at CREATE
+  // time, and function-apply failures degrade to warnings at import while
+  // CREATE TABLE failures abort — so functions-before-tables is the safe
+  // direction for the one ordering we cannot satisfy both ways.
   const pendingFk: string[] = [];
   type PendingPartition = {
     schema: string;
@@ -95,6 +98,8 @@ export async function buildSchemaDumpViaSql(
   };
   const pendingPartitions: PendingPartition[] = [];
   const pendingDependents: string[] = [];
+  const pendingTables: string[] = [];
+  const pendingFunctions: string[] = [];
   const emit = (sql: string) => {
     const trimmed = sql.trim();
     if (trimmed) parts.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
@@ -102,6 +107,10 @@ export async function buildSchemaDumpViaSql(
   const defer = (sql: string) => {
     const trimmed = sql.trim();
     if (trimmed) pendingDependents.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
+  };
+  const buffer = (list: string[], sql: string) => {
+    const trimmed = sql.trim();
+    if (trimmed) list.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
   };
 
   // Extensions (plpgsql is always present; the rest need IF NOT EXISTS so
@@ -265,7 +274,7 @@ export async function buildSchemaDumpViaSql(
         const first = columns[0];
         const partkey = first?.partkey != null ? String(first.partkey) : "";
         const isPartitioned = String(first?.kind ?? "") === "p" && partkey !== "";
-        emit(`CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident(table)} (\n  ${defs.join(",\n  ")}\n)${isPartitioned ? ` PARTITION BY ${partkey}` : ""}`);
+        buffer(pendingTables, `CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident(table)} (\n  ${defs.join(",\n  ")}\n)${isPartitioned ? ` PARTITION BY ${partkey}` : ""}`);
       }
       // Partitions: buffered (see pendingPartitions) so they emit after
       // every schema's tables exist, ordered parent-before-child. The
@@ -432,7 +441,7 @@ export async function buildSchemaDumpViaSql(
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = ${lit} AND p.prokind IN ('f', 'p', 'w')`,
       );
-      for (const row of rows) defer(String(row.def));
+      for (const row of rows) buffer(pendingFunctions, String(row.def));
     } catch (error) {
       warnings.push(`Functions unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -494,9 +503,10 @@ export async function buildSchemaDumpViaSql(
     }
   }
 
-  // Flush order: partitions (parent-before-child) first so dependent
-  // objects can reference them, then PKs/constraints/indexes/views/
-  // functions/triggers/RLS, then foreign keys last.
+  // Flush order: functions (table defaults may call them) → tables →
+  // partitions (parent-before-child) → dependents → foreign keys last.
+  for (const stmt of pendingFunctions) emit(stmt);
+  for (const stmt of pendingTables) emit(stmt);
   {
     const key = (s: string, t: string) => `${s}.${t}`;
     const pendingKeys = new Set(pendingPartitions.map((p) => key(p.schema, p.table)));
