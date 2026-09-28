@@ -374,6 +374,22 @@ export function isProgrammableStatement(executableSql: string): boolean {
     executableSql,
   );
 }
+
+/**
+ * Security/behavior-critical subset of programmable objects: RLS policies,
+ * row-level-security toggles, and triggers. A twice-failed POLICY or TRIGGER
+ * must FAIL the transfer (rolling back the transactional path), not degrade
+ * to a warning — otherwise a "successful" transfer can leave an RLS-enabled
+ * table without its source policy, or omit a trigger the source relied on.
+ * FUNCTIONS/VIEWS/PROCEDURES stay best-effort (ordering failures are common
+ * and non-security-relevant).
+ */
+export function isSecurityCriticalProgrammable(executableSql: string): boolean {
+  return (
+    /^\s*CREATE\s+(OR\s+REPLACE\s+)?(TRIGGER|POLICY)\b/i.test(executableSql) ||
+    /\b(ENABLE|FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i.test(executableSql)
+  );
+}
 /**
  * Apply row INSERTs resiliently: each statement runs isolated so one bad
  * row can neither abort its siblings nor poison the surrounding

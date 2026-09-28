@@ -126,7 +126,7 @@ export async function downloadNeonObject(
   bucket: string,
   key: string,
 ): Promise<{ bytes: Buffer } | { error: string }> {
-  const { mkdtemp, readFile, rm } = await import("fs/promises");
+    const { mkdtemp, readFile, rm, stat } = await import("fs/promises");
   const { tmpdir } = await import("os");
   const { join } = await import("path");
   let dir = "";
@@ -168,6 +168,11 @@ export async function downloadNeonObject(
     if (code !== 0) {
       const detail = stderr.trim().split("\n").pop();
       return { error: detail ? `download failed: ${detail.slice(0, 200)}` : `download exited with code ${code}` };
+    }
+    // Stat before reading: never duplicate a huge object into heap memory.
+    const st = await stat(dest);
+    if (st.size > MAX_STORAGE_FILE_BYTES) {
+      return { error: `exceeds per-file cap (${st.size} bytes)` };
     }
     const bytes = await readFile(dest);
     if (bytes.length > MAX_STORAGE_FILE_BYTES) {

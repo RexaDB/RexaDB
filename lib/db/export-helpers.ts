@@ -329,7 +329,7 @@ export async function resetAndApplySql(
     }
     dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
     const applied = await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql, hooks);
-    return { warnings: applied.warnings };
+    return { warnings: applied.warnings, skippedRows: applied.skippedRows ?? 0 };
   }
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
@@ -403,7 +403,11 @@ export async function resetAndApplySql(
       `${fullSql}\n${dataSql ?? ""}`,
     );
 
+    // Rows skipped (warned, not applied). Returned so callers can report
+    // honest landed-row counts instead of the export total.
+    let skippedRows = 0;
     const applyAll = async (inTxn: boolean) => {
+      // `skipped` is assigned below and read after applyAll runs.
       for (const stmt of dropStatements) {
         try {
           await client.query(stmt);
@@ -461,6 +465,18 @@ export async function resetAndApplySql(
       for (const { stmt } of failed) {
         const err = await attempt(stmt);
         if (err) stillFailed.push({ stmt, error: err });
+      }
+      // Security-critical objects (RLS policies, triggers) must not degrade
+      // to warnings: a "successful" transfer would otherwise leave an
+      // RLS-enabled table without its policy or omit a relied-on trigger.
+      // Throwing rolls back the transactional path / aborts the fallback.
+      const { isSecurityCriticalProgrammable } = await import("@/lib/transfer/transfer-sql");
+      const securityFailed = stillFailed.filter(({ stmt }) => isSecurityCriticalProgrammable(stmt));
+      if (securityFailed.length > 0) {
+        const first = securityFailed[0];
+        throw new Error(
+          `Security-critical object failed to apply (${first.error.message.slice(0, 200)}): ${shortStmt(first.stmt)} — transfer aborted instead of leaving the destination without it.`,
+        );
       }
       for (const { stmt, error } of stillFailed) {
         warnings.push(`Skipped programmable object (${error.message.slice(0, 200)}): ${shortStmt(stmt)}`);
@@ -553,8 +569,7 @@ export async function resetAndApplySql(
         // after it, hiding the real error).
         let failedRows = 0;
         let chunkIndex = 0;
-        for (const chunk of ordered) {
-          chunkIndex++;
+        for (const chunk of ordered) {          chunkIndex++;
           const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
           hooks?.onPhase?.("data", chunkIndex, ordered.length, where);
           const exec = async (sql: string): Promise<void> => {
@@ -584,6 +599,7 @@ export async function resetAndApplySql(
         if (failedRows > 0) {
           warnings.push(`${failedRows} row(s) could not be imported and were skipped — see warnings above.`);
         }
+        skippedRows = failedRows;
       } finally {
         for (const c of triggerTables) await disableTrigger(c, true);
       }
@@ -602,7 +618,7 @@ export async function resetAndApplySql(
     } else {
       await applyAll(false);
     }
-    return { warnings };
+    return { warnings, skippedRows };
   } finally {
     await client.end().catch(() => {});
   }

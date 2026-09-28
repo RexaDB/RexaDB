@@ -97,10 +97,35 @@ export async function downloadStorageObject(
     const res = await fetch(url, { headers: storageHeaders(creds) });
     if (res.status === 404) return { error: "not found" };
     if (!res.ok) return { error: `HTTP ${res.status}` };
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_STORAGE_FILE_BYTES) {
-      return { error: `exceeds per-file cap (${buf.length} bytes)` };
+    // Pre-check before buffering: a huge object must not be materialized.
+    const declared = Number(res.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_STORAGE_FILE_BYTES) {
+      try { res.body?.cancel(); } catch { /* ignore */ }
+      return { error: `exceeds per-file cap (${declared} bytes)` };
     }
+    if (!res.body) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > MAX_STORAGE_FILE_BYTES) {
+        return { error: `exceeds per-file cap (${buf.length} bytes)` };
+      }
+      return { bytes: buf };
+    }
+    // Bounded stream: abort as soon as the cap is exceeded, even when the
+    // server lies about (or omits) content-length.
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_STORAGE_FILE_BYTES) {
+        try { await reader.cancel(); } catch { /* ignore */ }
+        return { error: `exceeds per-file cap (>${MAX_STORAGE_FILE_BYTES} bytes)` };
+      }
+      chunks.push(value);
+    }
+    const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
     return { bytes: buf };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };

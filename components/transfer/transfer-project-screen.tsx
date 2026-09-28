@@ -29,6 +29,9 @@ export function TransferProjectScreen({ connections, initialSourceConnectionId, 
         hideCloseButton
         className="max-h-[88vh] overflow-y-auto p-4 sm:max-w-[472px]"
         overlayClassName="bg-black/40"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogTitle className="sr-only">Transfer Project</DialogTitle>
         <TransferWizard

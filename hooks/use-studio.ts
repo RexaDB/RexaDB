@@ -8434,7 +8434,7 @@ END $$;`.trim();
       // execution below still uses the parameterized form + params.
       const displaySql = interpolateSqlParamsForDisplay(sql, data);
 
-      if (addReviewAction({ type: 'duplicate_row', description: `Duplicate row in ${selectedSchema}.${selectedTable}`, sql: displaySql, params: data, metadata: { schema: selectedSchema, table: selectedTable, data } })) return;
+      if (addReviewAction({ type: 'duplicate_row', description: `Duplicate row in ${selectedSchema}.${selectedTable}`, sql, params: data, metadata: { schema: selectedSchema, table: selectedTable, data } })) return;
 
       const startTime = Date.now();
       const res = await runQuery(currentConnectionString, sql, data);
@@ -8499,7 +8499,7 @@ END $$;`.trim();
     // execution below still uses the parameterized form + params.
     const displaySql = interpolateSqlParamsForDisplay(sql, params);
 
-    if (addReviewAction({ type: 'insert_row' as const, description: `Insert row into ${selectedSchema}.${selectedTable}`, sql: displaySql, params, metadata: { schema: selectedSchema, table: selectedTable, data: params } })) {
+    if (addReviewAction({ type: 'insert_row' as const, description: `Insert row into ${selectedSchema}.${selectedTable}`, sql, params, metadata: { schema: selectedSchema, table: selectedTable, data: params } })) {
       setIsInsertSheetOpen(false);
       setInsertData({});
       return;

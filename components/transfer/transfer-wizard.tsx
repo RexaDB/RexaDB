@@ -64,11 +64,12 @@ const STEP_LABELS: Record<TransferStep, string> = {
 
 function displaySteps(options: TransferOptions): TransferStep[] {
   const steps: TransferStep[] = ["validating"];
-  if (options.includeDatabase) steps.push("exporting_schema", "importing_schema");
+  if (options.includeDatabase) steps.push("exporting_schema", "exporting_data", "importing_schema", "importing_data");
   if (options.includeStorage) steps.push("exporting_storage", "importing_storage");
   if (options.includeAuth) steps.push("exporting_auth", "importing_auth");
   if (options.includeSettings) steps.push("exporting_settings", "importing_settings");
-  steps.push("complete");
+  if (options.includeEdgeFunctions) steps.push("exporting_functions", "importing_functions");
+  steps.push("finalizing", "complete");
   return steps;
 }
 
@@ -106,7 +107,7 @@ const COMPONENTS: Array<{
     key: "includeEdgeFunctions",
     icon: Zap,
     label: "Edge functions",
-    description: "Sources migrate with git-style compat diffs for the target runtime. Review before deploying.",
+    description: "Sources migrate with git-style compat diffs. Cross-runtime drafts stage for review, not auto-deployed.",
   },
 ];
 
@@ -633,12 +634,31 @@ export function TransferWizard({ connections, initialSourceConnectionId, onCompl
                       <ConfirmComponentRow
                         icon={<Zap className="size-3.5 shrink-0 text-muted-foreground" />}
                         label="Edge functions"
-                        warning="Sources migrate with git-style compat diffs — review every hunk before deploying."
+                        warning="Cross-runtime drafts stage for review only — they deploy only with the opt-in below."
                       />
                     )}
                   </ul>
                 </TooltipProvider>
               </div>
+              {transferOptions.includeEdgeFunctions && (
+                <label
+                  htmlFor="transfer-allow-auto-ported"
+                  className="flex cursor-pointer items-start gap-3 border-t border-border/60 px-4 py-2.5 hover:bg-muted/20"
+                >
+                  <Checkbox
+                    id="transfer-allow-auto-ported"
+                    checked={Boolean(transferOptions.allowAutoPortedDeploy)}
+                    onCheckedChange={(checked) =>
+                      setTransferOptions({ ...transferOptions, allowAutoPortedDeploy: Boolean(checked) })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">Deploy auto-ported drafts</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Cross-runtime rewrites deploy immediately — runtime APIs may differ.</span>
+                  </span>
+                </label>
+              )}
             </div>
           </div>
         )}

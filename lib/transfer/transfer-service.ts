@@ -242,9 +242,11 @@ export class TransferService {
         message: "Phase 2 of 2 — importing database schema...",
       });
 
-      // Database import is fully transactional (resetAndApplySql): success
-      // means every exported row landed, so export counts stand. Any
-      // failure throws and fails the whole transfer — never partial.
+      // Database import is transactional (resetAndApplySql): structural or
+      // security-critical failures throw and roll back. Individual bad rows
+      // degrade to warnings with honest counts — adapters report
+      // stats.rowsTransferred (export total minus skipped rows), which
+      // override the export-based completion counts below.
       const outcome = await adapter.importDatabase(
         destination.connectionString,
         package_.database,

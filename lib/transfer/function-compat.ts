@@ -22,10 +22,19 @@ export function transformSupabaseToNeon(files: FunctionFile[]): { files: Functio
       body = body.replace(serveImport, "");
       notes.add("Removed Deno serve import; handler is now the default export.");
     }
+    let rewroteServe = false;
     body = body.replace(/serve\(\s*(async\s*)?\(/g, (_m, a: string) => {
+      rewroteServe = true;
       notes.add("Rewrote serve(handler) to `export default handler`.");
       return `export default ${a || ""}(`;
     });
+    if (rewroteServe && /=>[\s\S]*\}\s*\)\s*;?\s*$/.test(body)) {
+      // serve(async (req) => { ... }); -> export default async (req) => { ... });
+      // leaves the serve() wrapper's closing paren behind — strip it so the
+      // emitted handler parses: export default async (req) => { ... };
+      body = body.replace(/\}\s*\)\s*;?\s*$/, "}\n;");
+      notes.add("Removed serve() wrapper closing paren from ported handler.");
+    }
     // Deno.env.get("X") -> process.env["X"]
     if (/Deno\.env\.get\(/.test(body)) {
       body = body.replace(/Deno\.env\.get\(([^)]+)\)/g, "process.env[$1]");
@@ -65,10 +74,11 @@ export function transformNeonToSupabase(files: FunctionFile[]): { files: Functio
   const out = files.map((f) => {
     let body = f.content;
     // Default-exported handler -> serve() wrapper.
-    if (/export\s+default\s+(async\s*)?\(/.test(body)) {
-      body = body.replace(/export\s+default\s+(async\s*)?\(/, (_m, a: string) => `serve(${a || ""}(`);
-      // close the serve( call: append one closing paren at end of file body
-      body = `${body.replace(/\s*$/, "")}\n);`;
+    if (/export\s+default\s+(async\s+)?(function\b|\(|[\w$]+\s*=>)/.test(body)) {
+      body = body.replace(/export\s+default\s+(async\s+)?/, (_m, a: string) => `serve(${a || ""}`);
+      // close the serve( call: strip any trailing ";" first so we don't emit
+      // serve(handler;); — then append the wrapper close.
+      body = `${body.replace(/[;\s]*$/, "")}\n);`;
       body = `import { serve } from "https://deno.land/std@0.208.0/http/server.ts";\n${body}`;
       notes.add("Wrapped default export in Deno serve().");
     } else {

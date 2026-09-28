@@ -104,7 +104,13 @@ export class PostgresAdapter implements ProviderAdapter {
       const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
       const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
       const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
-      if (allWarnings.length > 0) return { warnings: allWarnings };
+      // Honest row count: export total minus rows skipped mid-import, so the
+      // completion screen never counts missing rows as transferred.
+      const counts = data.exportedRowCounts ?? data.rowCounts ?? {};
+      const exportedTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+      const stats = { rowsTransferred: Math.max(0, exportedTotal - (applied?.skippedRows ?? 0)) };
+      if (allWarnings.length > 0) return { warnings: allWarnings, stats };
+      return { stats };
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);

@@ -242,11 +242,20 @@ function buildMockScript(request: TransferApiRequest): MockTick[] {
       ticks.push({ step: "exporting_schema", message: `Found table ${t.name} (${t.rows.toLocaleString()} rows)`, item: t.name });
     }
     ticks.push({ step: "exporting_schema", message: `Schema exported (${tables.length} tables)` });
+    ticks.push({ step: "exporting_data", message: "Exporting table data…" });
+    for (const t of tables) {
+      ticks.push({ step: "exporting_data", message: `Exported ${t.rows.toLocaleString()} rows from ${t.name}`, item: t.name });
+    }
     ticks.push({ step: "importing_schema", message: "Importing database schema…" });
     for (const t of tables) {
       ticks.push({ step: "importing_schema", message: `Created table ${t.name}`, item: t.name });
     }
     ticks.push({ step: "importing_schema", message: "Schema imported" });
+    ticks.push({ step: "importing_data", message: "Importing table data…" });
+    for (const t of tables) {
+      ticks.push({ step: "importing_data", message: `Imported ${t.rows.toLocaleString()} rows into ${t.name}`, item: t.name });
+    }
+    ticks.push({ step: "importing_data", message: "Table data imported" });
   }
   if (opts.includeStorage) {
     ticks.push({ step: "exporting_storage", message: "Exporting storage buckets…" });
@@ -277,9 +286,17 @@ function buildMockScript(request: TransferApiRequest): MockTick[] {
       { step: "importing_settings", message: "Settings imported" },
     );
   }
-  // NOTE: no edge-function or finalizing ticks on purpose — the wizard's
-  // displaySteps() doesn't render rows for those steps (runIndex would be
-  // -1, i.e. visible dead air). Functions are still counted in final stats.
+  // NOTE: mock ticks mirror the real service step order so the wizard's
+  // displaySteps() rows (runIndex, badges, log groups) behave like a real run.
+  if (opts.includeEdgeFunctions) {
+    ticks.push(
+      { step: "exporting_functions", message: "Exporting edge functions…" },
+      { step: "exporting_functions", message: "Exported 4 functions", item: "4 functions" },
+      { step: "importing_functions", message: "Importing edge functions…" },
+      { step: "importing_functions", message: "Edge functions imported", item: "4 functions" },
+    );
+  }
+  ticks.push({ step: "finalizing", message: "Finalizing transfer…" });
   return ticks;
 }
 
@@ -309,11 +326,12 @@ async function mockStartTransfer(
   // Step ordering mirrors the wizard's displaySteps() so the progress UI
   // (runIndex, badges, log groups) behaves exactly like a real run.
   const order: TransferStep[] = ["validating"];
-  if (request.options.includeDatabase) order.push("exporting_schema", "importing_schema");
+  if (request.options.includeDatabase) order.push("exporting_schema", "exporting_data", "importing_schema", "importing_data");
   if (request.options.includeStorage) order.push("exporting_storage", "importing_storage");
   if (request.options.includeAuth) order.push("exporting_auth", "importing_auth");
   if (request.options.includeSettings) order.push("exporting_settings", "importing_settings");
-  order.push("complete");
+  if (request.options.includeEdgeFunctions) order.push("exporting_functions", "importing_functions");
+  order.push("finalizing", "complete");
 
   const totalSteps = order.length;
   for (let i = 0; i < script.length; i++) {

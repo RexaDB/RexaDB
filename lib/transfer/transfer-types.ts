@@ -27,6 +27,13 @@ export interface TransferOptions {
   includeAuth: boolean;
   includeEdgeFunctions?: boolean;
   includeSettings: boolean;
+  /**
+   * Deploy mechanically auto-ported cross-runtime edge-function drafts.
+   * Default false: foreign drafts are staged for review (sources + compat
+   * diffs preserved in the package) and NOT deployed, so a working
+   * destination function can't be replaced before inspection.
+   */
+  allowAutoPortedDeploy?: boolean;
   batchSize?: number;
   onProgress?: (progress: TransferProgress) => void;
   /**

@@ -142,7 +142,13 @@ export class SupabaseAdapter implements ProviderAdapter {
     // populated. Errors propagate so the transfer reports failure honestly.
     const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
     const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
-    if (allWarnings.length > 0) return { warnings: allWarnings };
+    // Honest row count: export total minus rows skipped mid-import, so the
+    // completion screen never counts missing rows as transferred.
+    const counts = data.exportedRowCounts ?? data.rowCounts ?? {};
+    const exportedTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+    const stats = { rowsTransferred: Math.max(0, exportedTotal - (applied?.skippedRows ?? 0)) };
+    if (allWarnings.length > 0) return { warnings: allWarnings, stats };
+    return { stats };
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {
@@ -181,6 +187,10 @@ export class SupabaseAdapter implements ProviderAdapter {
         if (creds) {
           if (totalBytes >= MAX_STORAGE_TOTAL_BYTES) {
             warnings.push(`Storage byte budget exceeded: ${object.name} and remaining files migrate metadata-only.`);
+          } else if (typeof entry.size === "number" && entry.size > MAX_STORAGE_FILE_BYTES) {
+            // Pre-check from listing metadata: never fetch an object that
+            // already exceeds the per-file cap.
+            warnings.push(`Skipped ${bucket.name}/${object.name}: size ${entry.size} bytes exceeds per-file cap (metadata migrates).`);
           } else {
             const dl = await downloadStorageObject(creds, bucket.name, object.name);
             if ("bytes" in dl) {
@@ -647,12 +657,16 @@ export class SupabaseAdapter implements ProviderAdapter {
     }
     for (const fn of data.functions) {
       try {
+        if (fn.provider !== "supabase" && !options.allowAutoPortedDeploy) {
+          warnings.push(`Function ${fn.slug}: cross-runtime auto-ported draft NOT deployed — review its compat diff, then redeploy with auto-ported deploys enabled. Sources preserved in package.`);
+          continue;
+        }
         const useFiles =
           fn.provider === "supabase"
             ? fn.files
             : (fn.diffs.find((d) => d.targetProvider === "supabase")?.transformedFiles ?? fn.files);
         if (fn.provider !== "supabase") {
-          warnings.push(`Function ${fn.slug}: deploying auto-ported draft — review its compat diff first; runtime APIs may differ.`);
+          warnings.push(`Function ${fn.slug}: deploying auto-ported draft (explicitly enabled) — runtime APIs may differ, verify behavior.`);
         }
         const entry = useFiles.find((f) => /index\.[tj]s$/.test(f.path)) ?? useFiles[0];
         if (!entry) {

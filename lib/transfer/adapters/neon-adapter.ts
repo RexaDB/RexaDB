@@ -195,7 +195,13 @@ export class NeonAdapter implements ProviderAdapter {
     // rolls everything back instead of leaving a partial destination.
     const applied = await resetAndApplySql(effectiveConnectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
     const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
-    if (allWarnings.length > 0) return { warnings: allWarnings };
+    // Honest row count: export total minus rows skipped mid-import, so the
+    // completion screen never counts missing rows as transferred.
+    const counts = data.exportedRowCounts ?? data.rowCounts ?? {};
+    const exportedTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+    const stats = { rowsTransferred: Math.max(0, exportedTotal - (applied?.skippedRows ?? 0)) };
+    if (allWarnings.length > 0) return { warnings: allWarnings, stats };
+    return { stats };
   }
   
   // Neon Object Storage holds bytes outside Postgres, so there is nothing
@@ -255,10 +261,22 @@ export class NeonAdapter implements ProviderAdapter {
     let bucketsOk = 0;
     let filesOk = 0;
     const nameMap = new Map<string, string>();
+    const usedDestNames = new Set<string>();
     for (const bucket of data.buckets) {
-      const { name: destName, renamed } = sanitizeBucketName(bucket.name);
+      const { name: sanitized, renamed } = sanitizeBucketName(bucket.name);
+      // Distinct source names can sanitize to the same destination
+      // (e.g. My_Bucket and my-bucket). Disambiguate with a suffix so
+      // files never merge into one bucket and overwrite each other.
+      let destName = sanitized;
+      if (usedDestNames.has(destName)) {
+        let n = 2;
+        while (usedDestNames.has(`${sanitized.slice(0, 60)}-${n}`)) n++;
+        destName = `${sanitized.slice(0, 60)}-${n}`;
+        warnings.push(`Bucket ${bucket.name} collides after sanitize — using ${destName} instead.`);
+      }
+      usedDestNames.add(destName);
       nameMap.set(bucket.id, destName);
-      if (renamed) warnings.push(`Bucket ${bucket.name} renamed to ${destName} (S3 naming rules).`);
+      if (renamed && destName === sanitized) warnings.push(`Bucket ${bucket.name} renamed to ${destName} (S3 naming rules).`);
       const created = await ensureNeonBucket(connectionString, destName, bucket.public);
       if ("ok" in created) bucketsOk++;
       else warnings.push(`Failed to create bucket ${destName}: ${created.error}`);
@@ -452,14 +470,21 @@ export class NeonAdapter implements ProviderAdapter {
     const { tmpdir } = await import("os");
     const { join } = await import("path");
     for (const fn of data.functions) {
+      if (fn.provider !== "neon" && !options.allowAutoPortedDeploy) {
+        // Cross-runtime drafts stage for review — never auto-deploy. The
+        // transfer package keeps sources + compat diffs; the completion
+        // screen renders them for inspection before any manual deploy.
+        warnings.push(`Function ${fn.slug}: cross-runtime auto-ported draft NOT deployed — review its compat diff, then redeploy with auto-ported deploys enabled. Sources preserved in package.`);
+        continue;
+      }
       // Same-family deploys go verbatim; foreign sources deploy their
-      // pre-ported transform after review warning.
+      // pre-ported transform only with explicit opt-in (see above).
       const useFiles =
         fn.provider === "neon"
           ? fn.files
           : (fn.diffs.find((d) => d.targetProvider === "neon")?.transformedFiles ?? fn.files);
       if (fn.provider !== "neon") {
-        warnings.push(`Function ${fn.slug}: deploying auto-ported draft — review its compat diff first; runtime APIs may differ.`);
+        warnings.push(`Function ${fn.slug}: deploying auto-ported draft (explicitly enabled) — runtime APIs may differ, verify behavior.`);
       }
       if (useFiles.length === 0) {
         warnings.push(`Function ${fn.slug}: no sources to deploy; skipped.`);
