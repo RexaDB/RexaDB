@@ -308,6 +308,44 @@ async function fetchColumnTypes(
   }
 }
 
+/**
+ * Identity/stored-generation flags per column: "always" (GENERATED ALWAYS
+ * AS IDENTITY), "bydefault", "stored" (GENERATED ALWAYS AS (...) STORED),
+ * or absent for ordinary columns. Unknown on error (caller proceeds
+ * without overrides — same as the old behavior).
+ */
+export async function fetchGeneratedColumns(
+  query: QueryFn,
+  connectionString: string,
+  schema: string,
+  table: string,
+): Promise<Record<string, "always" | "bydefault" | "stored">> {
+  try {
+    const res = await query(
+      connectionString,
+      `SELECT a.attname AS column_name, a.attidentity AS identity, a.attgenerated AS generated
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = ${escapeLiteral(schema)} AND c.relname = ${escapeLiteral(table)}
+         AND a.attnum > 0 AND NOT a.attisdropped`,
+    );
+    const map: Record<string, "always" | "bydefault" | "stored"> = {};
+    for (const row of res.success ? (res.data?.rows ?? []) : []) {
+      const name = (row as Record<string, unknown>).column_name;
+      if (typeof name !== "string") continue;
+      const identity = String((row as Record<string, unknown>).identity ?? "");
+      const generated = String((row as Record<string, unknown>).generated ?? "");
+      if (generated === "s") map[name] = "stored";
+      else if (identity === "a") map[name] = "always";
+      else if (identity === "d") map[name] = "bydefault";
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function exportTableDataSql(
   query: QueryFn,
   connectionString: string,
@@ -322,9 +360,10 @@ export async function exportTableDataSql(
     return { sql: "", exportedRows: 0, status: "skipped", message };
   }
   try {
-    const [dataResult, columnTypes] = await Promise.all([
+    const [dataResult, columnTypes, generatedInfo] = await Promise.all([
       query(connectionString, `SELECT * FROM ${qualifiedTable(schema, table)}`),
       fetchColumnTypes(query, connectionString, schema, table),
+      fetchGeneratedColumns(query, connectionString, schema, table),
     ]);
     const rows = dataResult.success ? (dataResult.data?.rows ?? []) : [];
     if (!dataResult.success || rows.length === 0) {
@@ -335,9 +374,22 @@ export async function exportTableDataSql(
       }
       return { sql: "", exportedRows: 0, status: "empty" };
     }
-    const columns = Object.keys(rows[0]);
+    // Stored generated columns recompute on import — including explicit
+    // values for them is rejected, so they leave the column list.
+    // GENERATED ALWAYS identity columns keep their values (PK/FK references
+    // depend on them) and the INSERT carries OVERRIDING SYSTEM VALUE so the
+    // destination accepts explicit IDs. BY DEFAULT needs neither.
+    const allColumns = Object.keys(rows[0]);
+    const columns = allColumns.filter((c) => generatedInfo[c] !== "stored");
+    if (columns.length === 0) {
+      const message = `Skipping data export for ${schema}.${table}: every column is generated; values recompute on import.`;
+      console.warn(message);
+      return { sql: "", exportedRows: 0, status: "skipped", message };
+    }
+    const hasAlwaysIdentity = columns.some((c) => generatedInfo[c] === "always");
     const target = qualifiedTable(schema, table);
     const colList = columns.map(escapeIdent).join(", ");
+    const overriding = hasAlwaysIdentity ? " OVERRIDING SYSTEM VALUE" : "";
     const formatRow = (row: Record<string, unknown>) =>
       `(${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")})`;
     // Multi-row batches: one statement per 500 rows instead of one per
@@ -347,7 +399,7 @@ export async function exportTableDataSql(
     const lines: string[] = [];
     for (let i = 0; i < rows.length; i += DATA_EXPORT_BATCH_SIZE) {
       const batch = rows.slice(i, i + DATA_EXPORT_BATCH_SIZE);
-      lines.push(`INSERT INTO ${target} (${colList}) VALUES ${batch.map(formatRow).join(",\n")};`);
+      lines.push(`INSERT INTO ${target} (${colList})${overriding} VALUES ${batch.map(formatRow).join(",\n")};`);
     }
     return {
       sql: `-- Data for ${schema}.${table} (${rows.length} rows)\n${lines.join("\n")}\n`,

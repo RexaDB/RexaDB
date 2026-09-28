@@ -81,7 +81,19 @@ export async function buildSchemaDumpViaSql(
   // Foreign-key ALTERs are deferred until every schema's tables exist:
   // emitting them per-schema breaks when an earlier schema references a
   // table created in a later one (the ALTER runs before its target exists).
+  // Partitions are deferred for the same reason (a partition's parent can
+  // live in a later schema) and topologically ordered (a partition that is
+  // itself partitioned must exist before its own subpartitions).
   const pendingFk: string[] = [];
+  type PendingPartition = {
+    schema: string;
+    table: string;
+    parentSchema: string;
+    parentTable: string;
+    bound: string;
+    partkey: string;
+  };
+  const pendingPartitions: PendingPartition[] = [];
   const emit = (sql: string) => {
     const trimmed = sql.trim();
     if (trimmed) parts.push(trimmed.endsWith(";") ? trimmed : `${trimmed};`);
@@ -250,13 +262,17 @@ export async function buildSchemaDumpViaSql(
         const isPartitioned = String(first?.kind ?? "") === "p" && partkey !== "";
         emit(`CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident(table)} (\n  ${defs.join(",\n  ")}\n)${isPartitioned ? ` PARTITION BY ${partkey}` : ""}`);
       }
-      // Partitions: recreate each as PARTITION OF its parent so the
-      // destination keeps the source's partition structure (key, bounds).
+      // Partitions: buffered (see pendingPartitions) so they emit after
+      // every schema's tables exist, ordered parent-before-child. The
+      // partition key is captured too: a partition that is itself
+      // partitioned must keep PARTITION BY or it becomes a leaf and its
+      // own subpartitions fail to create.
       try {
         const partitions = await select(
           query,
           connectionString,
-          `SELECT c.relname AS table_name,
+          `SELECT c.relname AS table_name, c.relkind AS kind,
+                  pg_get_partkeydef(c.oid) AS partkey,
                   pn.nspname AS parent_schema, pc.relname AS parent_table,
                   pg_get_expr(c.relpartbound, c.oid) AS bound
            FROM pg_class c
@@ -275,9 +291,14 @@ export async function buildSchemaDumpViaSql(
             );
             continue;
           }
-          emit(
-            `CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident(p.table_name)} PARTITION OF ${ident(parentSchema || schema)}.${ident(p.parent_table)} FOR VALUES ${String(p.bound)}`,
-          );
+          pendingPartitions.push({
+            schema,
+            table: String(p.table_name),
+            parentSchema: parentSchema || schema,
+            parentTable: String(p.parent_table),
+            bound: String(p.bound),
+            partkey: p.partkey != null ? String(p.partkey) : "",
+          });
         }
       } catch (error) {
         warnings.push(`Partitions unreadable in ${schema}: ${error instanceof Error ? error.message : String(error)}`);
@@ -471,6 +492,48 @@ export async function buildSchemaDumpViaSql(
   // Deferred foreign keys: every schema's tables now exist, so cross-schema
   // references apply cleanly.
   for (const alter of pendingFk) emit(alter);
+
+  // Deferred partitions: parents before children. A partition's parent is
+  // either a regular table (already emitted above) or another pending
+  // partition — repeatedly emit whatever's parent is satisfied. Anything
+  // left after no progress is emitted in export order with a warning
+  // rather than dropped.
+  {
+    const key = (s: string, t: string) => `${s}.${t}`;
+    const pendingKeys = new Set(pendingPartitions.map((p) => key(p.schema, p.table)));
+    const emitted = new Set<string>();
+    let remaining = [...pendingPartitions];
+    while (remaining.length > 0) {
+      let progressed = false;
+      const next: PendingPartition[] = [];
+      for (const p of remaining) {
+        const parentKey = key(p.parentSchema, p.parentTable);
+        if (!pendingKeys.has(parentKey) || emitted.has(parentKey)) {
+          const subPartitioned = p.partkey !== "" && String(p.bound ?? "") !== "";
+          emit(
+            `CREATE TABLE IF NOT EXISTS ${ident(p.schema)}.${ident(p.table)} PARTITION OF ${ident(p.parentSchema)}.${ident(p.parentTable)} FOR VALUES ${p.bound}${subPartitioned ? ` PARTITION BY ${p.partkey}` : ""}`,
+          );
+          emitted.add(key(p.schema, p.table));
+          progressed = true;
+        } else {
+          next.push(p);
+        }
+      }
+      if (!progressed) {
+        for (const p of next) {
+          warnings.push(
+            `Partition ${p.schema}.${p.table} emitted without confirmed parent ${p.parentSchema}.${p.parentTable} — verify it manually if the import fails.`,
+          );
+          const subPartitioned = p.partkey !== "" && String(p.bound ?? "") !== "";
+          emit(
+            `CREATE TABLE IF NOT EXISTS ${ident(p.schema)}.${ident(p.table)} PARTITION OF ${ident(p.parentSchema)}.${ident(p.parentTable)} FOR VALUES ${p.bound}${subPartitioned ? ` PARTITION BY ${p.partkey}` : ""}`,
+          );
+        }
+        break;
+      }
+      remaining = next;
+    }
+  }
 
   return { sql: parts.join("\n"), warnings };
 }
