@@ -585,39 +585,51 @@ export async function applyTransferViaQuery(
     const executable = stripCommentLines(stmt);
     if (executable) schemaStatements.push(executable);
   }
+  // Structural statements run before programmable ones (mirroring the
+  // pg-client path): with function-body validation enabled, a SQL function
+  // referencing a transferred table fails if created first — and the retry
+  // below would also run before the table exists. Tables-first lets such
+  // functions create cleanly instead of degrading to skipped-with-warning
+  // (which a later trigger depending on the function would then fail on).
+  const structural = schemaStatements.filter((s) => !isProgrammableStatement(s));
+  const programmable = schemaStatements.filter((s) => isProgrammableStatement(s));
   let schemaDone = 0;
-  for (const executable of schemaStatements) {
-    if (isProgrammableStatement(executable)) {
-      // Best-effort with one retry (ordering): failures warn, never throw —
-      // EXCEPT security-critical objects (RLS policies, triggers), which
-      // abort the transfer instead of leaving the destination without them.
-      let res = await query(connectionString, executable);
-      if (!res.success) res = await query(connectionString, executable);
-      if (!res.success) {
-        if (isSecurityCriticalProgrammable(executable)) {
-          throw new Error(
-            `Security-critical object failed to apply (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)} — transfer aborted instead of leaving the destination without it.`,
-          );
-        }
-        warnings.push(
-          `Skipped programmable object (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
-        );
-      } else {
-        applied++;
-      }
-    } else {
-      const res = await query(connectionString, executable);
-      if (!res.success) {
+  const phaseTotal = schemaStatements.length;
+  const noteProgress = (executable: string) => {
+    schemaDone++;
+    if (schemaDone % 25 === 0 || schemaDone === phaseTotal) {
+      hooks?.onPhase?.("schema", schemaDone, phaseTotal, executable.replace(/\s+/g, " ").slice(0, 120));
+    }
+  };
+  for (const executable of structural) {
+    const res = await query(connectionString, executable);
+    if (!res.success) {
+      throw new Error(
+        `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+      );
+    }
+    applied++;
+    noteProgress(executable);
+  }
+  for (const executable of programmable) {
+    // Best-effort with one retry (ordering): failures warn, never throw —
+    // EXCEPT security-critical objects (RLS policies, triggers), which
+    // abort the transfer instead of leaving the destination without them.
+    let res = await query(connectionString, executable);
+    if (!res.success) res = await query(connectionString, executable);
+    if (!res.success) {
+      if (isSecurityCriticalProgrammable(executable)) {
         throw new Error(
-          `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+          `Security-critical object failed to apply (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)} — transfer aborted instead of leaving the destination without it.`,
         );
       }
+      warnings.push(
+        `Skipped programmable object (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
+      );
+    } else {
       applied++;
     }
-    schemaDone++;
-    if (schemaDone % 25 === 0 || schemaDone === schemaStatements.length) {
-      hooks?.onPhase?.("schema", schemaDone, schemaStatements.length, executable.replace(/\s+/g, " ").slice(0, 120));
-    }
+    noteProgress(executable);
   }
 
   if (dataSql) {
