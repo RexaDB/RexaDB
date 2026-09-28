@@ -158,3 +158,17 @@ describe("TransferService", () => {
     expect(result.warnings?.join(" ")).toContain("exceeds limit");
   });
 });
+describe("collapseWarnings", () => {
+  it("groups repetitive warnings with counts", async () => {
+    const { TransferService } = await import("@/lib/transfer/transfer-service");
+    const out = TransferService.collapseWarnings([
+      "Row skipped in public.t (duplicate key): INSERT INTO \"t\" (\"id\") VALUES (1);",
+      "Row skipped in public.t (duplicate key): INSERT INTO \"t\" (\"id\") VALUES (2);",
+      "Extension \"pg_cron\" skipped: Neon only allows it there.",
+      "Extension \"pg_cron\" skipped: Neon only allows it there.",
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain("(×2)");
+    expect(out[1]).toContain("(×2)");
+  });
+});

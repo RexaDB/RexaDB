@@ -93,7 +93,7 @@ export class TransferService {
       // stats override the export-based numbers so skipped/failed items
       // are never displayed as transferred.
       const stats = { ...this.calculateStats(package_), ...importStats };
-      const warnings = [...this.collectWarnings(package_), ...importWarnings];
+      const warnings = TransferService.collapseWarnings([...this.collectWarnings(package_), ...importWarnings]);
       
       await this.updateProgress(options, {
         currentStep: "complete",
@@ -455,10 +455,35 @@ export class TransferService {
   }
 
   /**
-   * Collect non-fatal export notes (skipped/failed tables, partial auth or
-   * storage exports) so the UI can disclose them instead of reporting a
-   * clean success.
+   * Collapse repetitive warnings (per-row skips, per-table notes) so the
+   * completion screen stays readable: identical-shape messages group with
+   * a ×N suffix, order of first appearance preserved, capped with overflow.
    */
+  static collapseWarnings(warnings: string[]): string[] {
+    const keyOf = (w: string) =>
+      w
+        .replace(/'[^']*'/g, "'$'")
+        .replace(/"[^"]*"/g, '"$"')
+        .replace(/\b\d[\d,]*(?:\.\d+)?\b/g, "#");
+    const groups = new Map<string, { sample: string; count: number }>();
+    for (const w of warnings) {
+      const key = keyOf(w);
+      const g = groups.get(key);
+      if (g) g.count++;
+      else groups.set(key, { sample: w, count: 1 });
+    }
+    const out: string[] = [];
+    for (const { sample, count } of groups.values()) {
+      out.push(count > 1 ? `${sample} (×${count})` : sample);
+      if (out.length >= 25) break;
+    }
+    const shown = [...groups.values()].slice(0, 25).reduce((a, g) => a + g.count, 0);
+    if (shown < warnings.length) {
+      out.push(`+${warnings.length - shown} more — see server log.`);
+    }
+    return out;
+  }
+  /** Non-fatal export notes from every package section. */
   private collectWarnings(package_: TransferPackage): string[] {
     const warnings: string[] = [];
     if (package_.database?.warnings) warnings.push(...package_.database.warnings);

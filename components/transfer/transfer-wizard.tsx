@@ -650,31 +650,40 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         )}
 
         {currentStep === "complete" && (
-          <div className="flex flex-col gap-5">
-            <div className={cn(statusPill, "!border-green-500/30 !bg-green-500/10")}>
-              <span className="flex items-center gap-2 text-xs font-medium text-green-600 dark:text-green-400">
-                <Check className="size-4" />
-                Transfer completed
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-center gap-2 py-1">
+              <span className="flex size-9 items-center justify-center rounded-full border border-green-500/40 bg-green-500/10">
+                <Check className="size-4 text-green-500" />
               </span>
+              <h3 className="text-lg font-semibold tracking-tight">Transfer complete</h3>
             </div>
 
             {statCards.length > 0 && (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {statCards.map((s) => (
-                  <div key={s.label} className="rounded-full border border-border bg-card px-3 py-2.5 text-center shadow-sm">
-                    <div className="text-xl font-semibold tracking-tight">{s.value}</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">{s.label}</div>
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                {statCards.map((s, i) => (
+                  <div
+                    key={s.label}
+                    className={cn("flex items-center justify-between px-4 py-2", i > 0 && "border-t border-border/40")}
+                  >
+                    <span className="text-xs text-muted-foreground">{s.label}</span>
+                    <span className="font-mono text-xs font-semibold">{s.value}</span>
                   </div>
                 ))}
               </div>
             )}
 
             {transferResult?.warnings && transferResult.warnings.length > 0 && (
-              <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
-                <span className="break-words text-left text-xs leading-relaxed text-amber-700 dark:text-amber-300">
-                  Completed with warnings: {transferResult.warnings.slice(0, 5).join(" ")}
-                  {transferResult.warnings.length > 5 ? ` (+${transferResult.warnings.length - 5} more — see server log)` : ""}
-                </span>
+              <div className="overflow-hidden rounded-2xl border border-amber-500/30 bg-amber-500/5 shadow-sm">
+                <div className="border-b border-amber-500/20 px-4 py-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                  Warnings ({transferResult.warnings.length})
+                </div>
+                <ul className="max-h-56 space-y-1.5 overflow-y-auto px-4 py-2.5">
+                  {transferResult.warnings.map((w, i) => (
+                    <li key={i} className="list-inside list-disc break-words text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                      {w}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
