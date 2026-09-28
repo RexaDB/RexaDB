@@ -860,9 +860,25 @@ export const DataGrid = React.memo(function DataGrid({
 
       let displayValue: string;
       if (value === null || value === undefined) displayValue = "NULL";
-      else if (kind === "json") displayValue = JSON.stringify(value);
-      else if (typeof value === "object") displayValue = JSON.stringify(value);
-      else displayValue = String(value);
+      else if (kind === "json") {
+        // value may already be a JSON string (from the driver) or a parsed
+        // object/array — only stringify the latter, otherwise we'd double-
+        // encode: JSON.stringify('[{"a":1}]') => '"[{\\"a\\":1}]"'.
+        if (typeof value === "string") displayValue = value;
+        else {
+          try {
+            displayValue = JSON.stringify(value);
+          } catch {
+            displayValue = String(value);
+          }
+        }
+      } else if (typeof value === "object") {
+        try {
+          displayValue = JSON.stringify(value);
+        } catch {
+          displayValue = String(value);
+        }
+      } else displayValue = String(value);
 
       // Data-dictionary display decorators (Outerbase data-decorator
       // parity): presentation only — editing and filtering still use the
@@ -904,7 +920,7 @@ export const DataGrid = React.memo(function DataGrid({
         !!globalSearchQuery &&
         value !== null &&
         value !== undefined &&
-        String(value).toLowerCase().includes(globalSearchQuery.toLowerCase());
+        displayValue.toLowerCase().includes(globalSearchQuery.toLowerCase());
       const isColumnHovered = enableColumnHover && hoveredHeaderCol === col;
       const isRowHovered =
         gridAnimations && hoveredCell !== null && hoveredCell[1] === row;
@@ -971,7 +987,9 @@ export const DataGrid = React.memo(function DataGrid({
             ? ""
             : decoratedMasked
               ? displayValue
-              : String(value),
+              : typeof value === "object"
+                ? displayValue
+                : String(value),
         // FK cells never open Glide's own text-editor overlay — matches
         // the legacy grid, where double-clicking an FK cell always goes
         // through the FK picker (handleFKSelection, wired via

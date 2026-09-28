@@ -6,11 +6,12 @@ import type { Connection } from "@/lib/db/schema";
 
 interface TransferProjectScreenProps {
   connections: Connection[];
+  initialSourceConnectionId?: string | null;
   onBack: () => void;
   onComplete: () => void;
 }
 
-export function TransferProjectScreen({ connections, onBack, onComplete }: TransferProjectScreenProps) {
+export function TransferProjectScreen({ connections, initialSourceConnectionId, onBack, onComplete }: TransferProjectScreenProps) {
   const handleComplete = (result: { success: boolean; stats?: Record<string, number> }) => {
     if (result.success) {
       onComplete();
@@ -25,6 +26,7 @@ export function TransferProjectScreen({ connections, onBack, onComplete }: Trans
       }}
     >
       <DialogContent
+        hideCloseButton
         className="max-h-[88vh] overflow-y-auto p-4 sm:max-w-[472px]"
         overlayClassName="bg-black/40"
       >
@@ -36,6 +38,7 @@ export function TransferProjectScreen({ connections, onBack, onComplete }: Trans
             connectionString: conn.connectionString,
             connectionType: conn.connectionType || "unknown",
           }))}
+          initialSourceConnectionId={initialSourceConnectionId}
           onComplete={handleComplete}
           onCancel={onBack}
         />

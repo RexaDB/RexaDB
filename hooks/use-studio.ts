@@ -46,7 +46,7 @@ import {
 import { snapToDashboardGrid, snapDashboardPosition, snapDashboardSize, normalizeDashboards, normalizeDashboardFolders } from "@/lib/studio/dashboard-utils";
 import { buildCreateSql as buildRlsCreateSql, supportsWithCheck, quoteRoles } from "@/lib/db/rls-utils";
 import { splitSqlStatements } from "@/lib/studio/split-sql";
-import { isJsonColumnType, normalizeJsonInput, stableStringify, inferMongoShape, inferMongoReferenceTarget, mergeById } from "@/lib/studio/general-utils";
+import { isJsonColumnType, normalizeJsonInput, stableStringify, inferMongoShape, inferMongoReferenceTarget, mergeById, interpolateSqlParamsForDisplay } from "@/lib/studio/general-utils";
 import { normalizeCloudFolders, normalizeCloudSnippets, mapStudioSnippet } from "@/lib/studio/cloud-sync-utils";
 import { normalizeJsonColumnValue } from "@/lib/studio/data-utils";
 import { isDatabaseTabType, TAB_TYPE_TO_DATABASE_VIEW } from "@/lib/studio/tab-types";
@@ -8430,13 +8430,16 @@ END $$;`.trim();
       const columns = columnsToInsert.map((k) => quoteIdentifier(k)).join(', ');
       const data = columnsToInsert.map(k => row[k]);
       const sql = buildInsertSql(columns, columnsToInsert.length);
+      // Display the interpolated statement (real values) in review + history;
+      // execution below still uses the parameterized form + params.
+      const displaySql = interpolateSqlParamsForDisplay(sql, data);
 
-      if (addReviewAction({ type: 'duplicate_row', description: `Duplicate row in ${selectedSchema}.${selectedTable}`, sql, params: data, metadata: { schema: selectedSchema, table: selectedTable, data } })) return;
+      if (addReviewAction({ type: 'duplicate_row', description: `Duplicate row in ${selectedSchema}.${selectedTable}`, sql: displaySql, params: data, metadata: { schema: selectedSchema, table: selectedTable, data } })) return;
 
       const startTime = Date.now();
       const res = await runQuery(currentConnectionString, sql, data);
 
-      addQueryHistoryEntry(sql, res, startTime);
+      addQueryHistoryEntry(displaySql, res, startTime);
 
       if (res.success) {
         const insertedRows = (res.data?.rows || []) as Array<Record<string, unknown>>;
@@ -8491,8 +8494,12 @@ END $$;`.trim();
 
     const columns = validData.map(([k]) => quoteIdentifier(k)).join(', ');
     const sql = buildInsertSql(columns, validData.length);
+    const params = validData.map(([_, v]) => v);
+    // Display the interpolated statement (real values) in review + history;
+    // execution below still uses the parameterized form + params.
+    const displaySql = interpolateSqlParamsForDisplay(sql, params);
 
-    if (addReviewAction({ type: 'insert_row' as const, description: `Insert row into ${selectedSchema}.${selectedTable}`, sql, params: validData.map(([_, v]) => v), metadata: { schema: selectedSchema, table: selectedTable, data: validData.map(([_, v]) => v) } })) {
+    if (addReviewAction({ type: 'insert_row' as const, description: `Insert row into ${selectedSchema}.${selectedTable}`, sql: displaySql, params, metadata: { schema: selectedSchema, table: selectedTable, data: params } })) {
       setIsInsertSheetOpen(false);
       setInsertData({});
       return;
@@ -8500,9 +8507,9 @@ END $$;`.trim();
 
     setMutationLoading(true);
     const startTime = Date.now();
-    const res = await runQuery(currentConnectionString, sql, validData.map(([_, v]) => v));
+    const res = await runQuery(currentConnectionString, sql, params);
 
-    addQueryHistoryEntry(sql, res, startTime);
+    addQueryHistoryEntry(displaySql, res, startTime);
 
     if (res.success) {
       setIsInsertSheetOpen(false);

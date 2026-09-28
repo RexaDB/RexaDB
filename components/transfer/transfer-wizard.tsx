@@ -37,6 +37,7 @@ interface TransferWizardProps {
     connectionString: string;
     connectionType: string;
   }>;
+  initialSourceConnectionId?: string | null;
   onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] }) => void;
   onCancel?: () => void;
 }
@@ -138,9 +139,14 @@ function ConfirmComponentRow({ icon, label, warning }: { icon: React.ReactNode; 
 const statusPill =
   "mx-auto mt-5 flex w-full max-w-[440px] items-center justify-center rounded-full border border-border bg-card px-8 py-3 text-center shadow-sm";
 
-export function TransferWizard({ connections, onComplete, onCancel }: TransferWizardProps) {
+export function TransferWizard({ connections, initialSourceConnectionId, onComplete, onCancel }: TransferWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>("select-sources");
-  const [sourceConnectionId, setSourceConnectionId] = useState<string>("");
+  const [sourceConnectionId, setSourceConnectionId] = useState<string>(
+    initialSourceConnectionId &&
+      connections.some((c) => c.id === initialSourceConnectionId)
+      ? initialSourceConnectionId
+      : "",
+  );
   const [destinationConnectionId, setDestinationConnectionId] = useState<string>("");
   const [transferOptions, setTransferOptions] = useState<TransferOptions>({
     includeDatabase: true,
@@ -389,9 +395,11 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const showNav = currentStep === "select-sources" || currentStep === "select-options" || currentStep === "confirm";
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <div className="flex items-center justify-center gap-3">
-        <h2 className="text-2xl font-semibold tracking-tight">Transfer Project</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {currentStep === "complete" ? "Transfer complete" : "Transfer Project"}
+        </h2>
       </div>
 
       {currentStep === "transferring" && (
@@ -406,7 +414,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
             // Elapsed advances with progress ticks (no Date.now in render).
             const elapsed = firstAt !== null && lastAt !== null ? formatElapsed(lastAt - firstAt) : null;
             const expanded = expandedStep === step;
-            const latestItem = [...entries].reverse().find((e) => e.item)?.item;
             return (
               <div key={step} className={cn(i > 0 && "border-t border-border/60")}>
                 <button
@@ -425,7 +432,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
                   )}
                   <span className={cn("min-w-0 flex-1 truncate text-sm", active ? "font-medium text-foreground" : "text-muted-foreground")}>
                     {STEP_LABELS[step]}
-                    {active && latestItem ? <span className="font-normal opacity-70"> — {latestItem}</span> : null}
                   </span>
                   {elapsed !== null && (
                     <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{elapsed}</span>
@@ -651,13 +657,6 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
 
         {currentStep === "complete" && (
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-center gap-2 py-1">
-              <span className="flex size-9 items-center justify-center rounded-full border border-green-500/40 bg-green-500/10">
-                <Check className="size-4 text-green-500" />
-              </span>
-              <h3 className="text-lg font-semibold tracking-tight">Transfer complete</h3>
-            </div>
-
             {statCards.length > 0 && (
               <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                 {statCards.map((s, i) => (
