@@ -585,14 +585,14 @@ export async function applyTransferViaQuery(
     const executable = stripCommentLines(stmt);
     if (executable) schemaStatements.push(executable);
   }
-  // Structural statements run before programmable ones (mirroring the
-  // pg-client path): with function-body validation enabled, a SQL function
-  // referencing a transferred table fails if created first — and the retry
-  // below would also run before the table exists. Tables-first lets such
-  // functions create cleanly instead of degrading to skipped-with-warning
-  // (which a later trigger depending on the function would then fail on).
-  const structural = schemaStatements.filter((s) => !isProgrammableStatement(s));
-  const programmable = schemaStatements.filter((s) => isProgrammableStatement(s));
+  // File order is the dependency order the dump was built in
+  // (functions → tables → partitions → dependents → FKs), so the schema
+  // phase runs statements as emitted. Programmable failures are retried
+  // immediately and then once more after the whole pass: a SQL function
+  // referencing a later table fails mid-pass but succeeds on the deferred
+  // retry, while function-dependent indexes/constraints already ran after
+  // their functions in file order. Only still-failing objects warn (or
+  // throw when security-critical) — ordering never silently drops them.
   let schemaDone = 0;
   const phaseTotal = schemaStatements.length;
   const noteProgress = (executable: string) => {
@@ -601,23 +601,70 @@ export async function applyTransferViaQuery(
       hooks?.onPhase?.("schema", schemaDone, phaseTotal, executable.replace(/\s+/g, " ").slice(0, 120));
     }
   };
-  for (const executable of structural) {
-    const res = await query(connectionString, executable);
-    if (!res.success) {
-      throw new Error(
-        `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
-      );
+  const deferred: string[] = [];
+  const failedStructural: string[] = [];
+  // Function names defined by this dump (bare, lowercased): a structural
+  // statement (expression index, CHECK) that fails while naming a defined
+  // but not-yet-applied function is retried after the function pass
+  // instead of aborting — the function may simply be deferred itself.
+  const definedFunctions = new Set<string>();
+  for (const s of schemaStatements) {
+    if (!isProgrammableStatement(s)) continue;
+    const m = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+("?(?:[^"\s(]+\.)?"?[^"\s(]+)/i.exec(s);
+    if (m) {
+      const bare = m[1].split(".").pop()!.replace(/^"|"$/g, "").toLowerCase();
+      if (bare) definedFunctions.add(bare);
     }
-    applied++;
-    noteProgress(executable);
   }
-  for (const executable of programmable) {
-    // Best-effort with one retry (ordering): failures warn, never throw —
-    // EXCEPT security-critical objects (RLS policies, triggers), which
-    // abort the transfer instead of leaving the destination without them.
+  const appliedFunctions = new Set<string>();
+  const namesIn = (stmt: string): string[] =>
+    [...definedFunctions].filter((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(`, "i").test(stmt));
+  const markApplied = (stmt: string) => {
+    for (const name of namesIn(stmt)) {
+      // Only a definition marks it applied (calls don't).
+      if (/CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+/i.test(stmt)) appliedFunctions.add(name);
+    }
+  };
+  for (const executable of schemaStatements) {
+    if (!isProgrammableStatement(executable)) {
+      const res = await query(connectionString, executable);
+      if (!res.success) {
+        // Retry after the function pass when the statement names a dumped
+        // function that isn't applied yet; otherwise abort immediately.
+        const pendingDeps = namesIn(executable).filter((name) => !appliedFunctions.has(name));
+        if (pendingDeps.length > 0) {
+          failedStructural.push(executable);
+        } else {
+          throw new Error(
+            `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+          );
+        }
+      } else {
+        applied++;
+      }
+      noteProgress(executable);
+      continue;
+    }
+    // Best-effort with one retry (ordering); persistent failures defer to
+    // the end-of-pass retry below instead of warning immediately.
     let res = await query(connectionString, executable);
     if (!res.success) res = await query(connectionString, executable);
     if (!res.success) {
+      deferred.push(executable);
+    } else {
+      applied++;
+      markApplied(executable);
+    }
+    noteProgress(executable);
+  }
+  // End-of-pass retries, functions before dependents: deferred programmables
+  // first (a table-dependent function now finds its table), then deferred
+  // structural (an index/constraint whose function is now applied).
+  for (const executable of deferred) {
+    const res = await query(connectionString, executable);
+    if (!res.success) {
+      // EXCEPT security-critical objects (RLS policies, triggers), which
+      // abort the transfer instead of leaving the destination without them.
       if (isSecurityCriticalProgrammable(executable)) {
         throw new Error(
           `Security-critical object failed to apply (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)} — transfer aborted instead of leaving the destination without it.`,
@@ -628,8 +675,17 @@ export async function applyTransferViaQuery(
       );
     } else {
       applied++;
+      markApplied(executable);
     }
-    noteProgress(executable);
+  }
+  for (const executable of failedStructural) {
+    const res = await query(connectionString, executable);
+    if (!res.success) {
+      throw new Error(
+        `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
+      );
+    }
+    applied++;
   }
 
   if (dataSql) {
