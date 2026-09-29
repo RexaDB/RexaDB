@@ -667,35 +667,50 @@ export async function applyTransferViaQuery(
     }
     noteProgress(executable);
   }
-  // End-of-pass retries, functions before dependents: deferred programmables
-  // first, then deferred structural (an index/constraint whose function is
-  // now applied). Programmable retries run to fixpoint: a chain F→G where G
-  // also failed resolves over successive passes no matter the file order —
-  // each progressing pass applies at least one object, and a pass with no
-  // progress ends the loop, so this always terminates.
-  let remaining = [...deferred];
+  // End-of-pass retries over deferred programmables AND deferred structural
+  // together, to fixpoint: a view referencing a table whose CHECK names a
+  // not-yet-created function would otherwise be warned-skipped before its
+  // table's retry runs. Each progressing pass applies at least one object
+  // (a created table unblocks views; a created function unblocks CHECKs),
+  // and a pass with no progress ends the loop, so this always terminates.
+  // Programmables go first within each pass (functions before dependents).
+  let remainingProg = [...deferred];
+  let remainingStruct = [...failedStructural];
   const lastError = new Map<string, unknown>();
-  while (remaining.length > 0) {
-    const next: string[] = [];
+  while (remainingProg.length + remainingStruct.length > 0) {
     let progressed = false;
-    for (const executable of remaining) {
+    const nextProg: string[] = [];
+    for (const executable of remainingProg) {
       const res = await query(connectionString, executable);
       if (!res.success) {
         lastError.set(executable, res.error);
-        next.push(executable);
+        nextProg.push(executable);
       } else {
         applied++;
         markApplied(executable);
         progressed = true;
       }
     }
+    const nextStruct: string[] = [];
+    for (const executable of remainingStruct) {
+      const res = await query(connectionString, executable);
+      if (!res.success) {
+        lastError.set(executable, res.error);
+        nextStruct.push(executable);
+      } else {
+        applied++;
+        progressed = true;
+      }
+    }
     if (!progressed) {
-      remaining = next;
+      remainingProg = nextProg;
+      remainingStruct = nextStruct;
       break;
     }
-    remaining = next;
+    remainingProg = nextProg;
+    remainingStruct = nextStruct;
   }
-  for (const executable of remaining) {
+  for (const executable of remainingProg) {
     const detail = String(lastError.get(executable) ?? "unknown error").slice(0, 200);
     // EXCEPT security-critical objects (RLS policies, triggers), which
     // abort the transfer instead of leaving the destination without them.
@@ -708,14 +723,11 @@ export async function applyTransferViaQuery(
       `Skipped programmable object (${detail}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
     );
   }
-  for (const executable of failedStructural) {
-    const res = await query(connectionString, executable);
-    if (!res.success) {
-      throw new Error(
-        `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${String(res.error ?? "unknown error")}`,
-      );
-    }
-    applied++;
+  for (const executable of remainingStruct) {
+    const detail = String(lastError.get(executable) ?? "unknown error").slice(0, 200);
+    throw new Error(
+      `Schema apply failed (destination may be PARTIALLY modified — no transaction support over this connection): ${detail}`,
+    );
   }
 
   if (dataSql) {
