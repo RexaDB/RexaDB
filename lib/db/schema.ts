@@ -60,6 +60,8 @@ export const queryHistory = sqliteTable("query_history", {
   caller: text("caller").$type<"user" | "system">().notNull(),
   executedBy: text("executed_by"),
   executedByName: text("executed_by_name"),
+  /** JSON-encoded bound parameter values for parameterized queries (never displayed or searched; used only to replay history entries). */
+  params: text("params"),
 });
 
 export const tags = sqliteTable("tags", {

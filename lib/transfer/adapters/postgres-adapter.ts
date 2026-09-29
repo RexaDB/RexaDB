@@ -10,9 +10,11 @@ import type {
   StorageExport,
   AuthExport,
   SettingsExport,
+  FunctionsExport,
+  ImportOutcome,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
-import { exportTableDataSql, qualifiedTable } from "../transfer-sql";
+import { exportTableDataSql, importHooks, qualifiedTable } from "../transfer-sql";
 import { serverTransferQuery } from "../transfer-server-query";
 
 export class PostgresAdapter implements ProviderAdapter {
@@ -46,6 +48,7 @@ export class PostgresAdapter implements ProviderAdapter {
     const warnings: string[] = [];
     let dataSql = "";
 
+    const tableTotal = tablesResult.success && tablesResult.data?.rows ? tablesResult.data.rows.length : 0;
     if (tablesResult.success && tablesResult.data?.rows) {
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
@@ -74,6 +77,7 @@ export class PostgresAdapter implements ProviderAdapter {
         );
         dataSql += exported.sql;
         exportedRowCounts[tableFullName] = exported.exportedRows;
+        options.onItem?.({ step: "exporting_schema", item: tableFullName, itemIndex: tables.length, itemTotal: tableTotal });
         if (exported.message) warnings.push(exported.message);
       }
     }
@@ -88,7 +92,7 @@ export class PostgresAdapter implements ProviderAdapter {
     };
   }
 
-  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
+  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
 
     // Destructive by design (drops + recreates destination schemas — the
@@ -96,32 +100,50 @@ export class PostgresAdapter implements ProviderAdapter {
     // fully transactional including FK-ordered row data: any failure rolls
     // back instead of leaving a partial destination.
     try {
-      await resetAndApplySql(connectionString, data.schemaSql, data.dataSql);
+      const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
+      const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
+      const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
+      const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
+      // Honest row count: export total minus rows skipped mid-import, so the
+      // completion screen never counts missing rows as transferred.
+      const counts = data.exportedRowCounts ?? data.rowCounts ?? {};
+      const exportedTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+      const stats = { rowsTransferred: Math.max(0, exportedTotal - (applied?.skippedRows ?? 0)) };
+      if (allWarnings.length > 0) return { warnings: allWarnings, stats };
+      return { stats };
     } catch (error) {
       console.error("Failed to import database:", error);
       throw new Error(`Database import failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   
-  // Generic Postgres has no built-in storage. There is intentionally NO
-  // importStorage: the service reports exported storage as skipped with a
-  // user-visible warning instead of silently discarding it.
+  // Generic Postgres exposes no Supabase-compatible storage over SQL.
+  // There is intentionally NO importStorage: the service reports exported
+  // storage as skipped with a user-visible warning instead of silently
+  // discarding it.
   async exportStorage?(connectionString: string, options: TransferOptions): Promise<StorageExport> {
     return {
       buckets: [],
       files: [],
-      warnings: ["Generic Postgres has no built-in storage: storage transfer selected, but there is nothing to export."],
+      warnings: ["Generic Postgres exposes no Supabase-compatible storage over SQL: nothing to export."],
     };
   }
 
-  // Generic Postgres has no built-in auth like Supabase. There is
+  // Generic Postgres has no GoTrue-compatible auth schema. There is
   // intentionally NO importAuth — see importStorage note above.
   async exportAuth?(connectionString: string, options: TransferOptions): Promise<AuthExport> {
     return {
       users: [],
       providers: [],
       policies: [],
-      warnings: ["Generic Postgres has no built-in auth: auth transfer selected, but there is nothing to export."],
+      warnings: ["Generic Postgres has no GoTrue-compatible auth schema: nothing to export."],
+    };
+  }
+
+  async exportFunctions?(connectionString: string, options: TransferOptions): Promise<FunctionsExport> {
+    return {
+      functions: [],
+      warnings: ["Generic Postgres has no edge-functions platform: nothing to export."],
     };
   }
   

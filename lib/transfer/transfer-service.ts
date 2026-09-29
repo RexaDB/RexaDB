@@ -93,7 +93,7 @@ export class TransferService {
       // stats override the export-based numbers so skipped/failed items
       // are never displayed as transferred.
       const stats = { ...this.calculateStats(package_), ...importStats };
-      const warnings = [...this.collectWarnings(package_), ...importWarnings];
+      const warnings = TransferService.collapseWarnings([...this.collectWarnings(package_), ...importWarnings]);
       
       await this.updateProgress(options, {
         currentStep: "complete",
@@ -138,18 +138,21 @@ export class TransferService {
     };
     
     let stepIndex = 1;
-    
-    // Export database
+
+    // Database
     if (options.includeDatabase) {
       await this.updateProgress(options, {
         currentStep: "exporting_schema",
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting database schema...",
+        message: "Phase 1 of 2 — exporting database schema...",
       });
-      
-      package_.database = await adapter.exportDatabase(source.connectionString, options);
+
+      package_.database = await adapter.exportDatabase(
+        source.connectionString,
+        this.withItemReporting(options, "exporting_schema", stepIndex, totalSteps, "Phase 1 of 2 — exporting database"),
+      );
       stepIndex++;
     }
     
@@ -160,7 +163,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting storage buckets and files...",
+        message: "Phase 1 of 2 — exporting storage buckets and files...",
       });
       
       package_.storage = await adapter.exportStorage(source.connectionString, options);
@@ -174,7 +177,7 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting authentication data...",
+        message: "Phase 1 of 2 — exporting authentication data...",
       });
       
       package_.auth = await adapter.exportAuth(source.connectionString, options);
@@ -188,13 +191,27 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Exporting project settings...",
+        message: "Phase 1 of 2 — exporting project settings...",
       });
-      
+
       package_.settings = await adapter.exportSettings(source.connectionString, options);
       stepIndex++;
     }
-    
+
+    // Export edge functions
+    if (options.includeEdgeFunctions && adapter.exportFunctions) {
+      await this.updateProgress(options, {
+        currentStep: "exporting_functions",
+        totalSteps,
+        currentStepIndex: stepIndex,
+        percentage: Math.round((stepIndex / totalSteps) * 100),
+        message: "Phase 1 of 2 — exporting edge functions...",
+      });
+
+      package_.functions = await adapter.exportFunctions(source.connectionString, options);
+      stepIndex++;
+    }
+
     return package_;
   }
   
@@ -222,13 +239,19 @@ export class TransferService {
         totalSteps,
         currentStepIndex: stepIndex,
         percentage: Math.round((stepIndex / totalSteps) * 100),
-        message: "Importing database schema...",
+        message: "Phase 2 of 2 — importing database schema...",
       });
 
-      // Database import is fully transactional (resetAndApplySql): success
-      // means every exported row landed, so export counts stand. Any
-      // failure throws and fails the whole transfer — never partial.
-      const outcome = await adapter.importDatabase(destination.connectionString, package_.database, options);
+      // Database import is transactional (resetAndApplySql): structural or
+      // security-critical failures throw and roll back. Individual bad rows
+      // degrade to warnings with honest counts — adapters report
+      // stats.rowsTransferred (export total minus skipped rows), which
+      // override the export-based completion counts below.
+      const outcome = await adapter.importDatabase(
+        destination.connectionString,
+        package_.database,
+        this.withImportReporting(options, stepIndex, totalSteps),
+      );
       if (outcome?.warnings) warnings.push(...outcome.warnings);
       if (outcome?.stats) Object.assign(stats, outcome.stats);
       stepIndex++;
@@ -244,7 +267,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing storage buckets and files...",
+          message: "Phase 2 of 2 — importing storage buckets and files...",
         });
 
         const outcome = await adapter.importStorage(destination.connectionString, package_.storage, options);
@@ -253,7 +276,7 @@ export class TransferService {
         stepIndex++;
       } else if (bucketCount > 0 || fileCount > 0) {
         warnings.push(
-          `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no storage support — they were skipped, not imported.`,
+          `Storage not transferred: ${bucketCount} bucket(s) and ${fileCount} file(s) were exported, but the ${destination.provider} destination has no Supabase-compatible storage schema — they were skipped, not imported. Ordinary tables migrate with the database transfer.`,
         );
         stats.storageBucketsTransferred = 0;
         stats.storageFilesTransferred = 0;
@@ -270,7 +293,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing authentication data...",
+          message: "Phase 2 of 2 — importing authentication data...",
         });
 
         const outcome = await adapter.importAuth(destination.connectionString, package_.auth, options);
@@ -279,7 +302,7 @@ export class TransferService {
         stepIndex++;
       } else if (userCount > 0 || providerCount > 0) {
         warnings.push(
-          `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no auth support — they were skipped, not imported.`,
+          `Auth not transferred: ${userCount} user(s) and ${providerCount} provider(s) were exported, but the ${destination.provider} destination has no GoTrue-compatible auth schema — they were skipped, not imported. Neon Auth lives in neon_auth tables and migrates with the database transfer.`,
         );
         stats.authUsersTransferred = 0;
         stats.authProvidersTransferred = 0;
@@ -294,7 +317,7 @@ export class TransferService {
           totalSteps,
           currentStepIndex: stepIndex,
           percentage: Math.round((stepIndex / totalSteps) * 100),
-          message: "Importing project settings...",
+          message: "Phase 2 of 2 — importing project settings...",
         });
 
         const outcome = await adapter.importSettings(destination.connectionString, package_.settings, options);
@@ -308,6 +331,30 @@ export class TransferService {
       }
     }
 
+    // Import edge functions
+    if (package_.functions && options.includeEdgeFunctions) {
+      const fnCount = package_.functions.functions.length;
+      if (adapter.importFunctions) {
+        await this.updateProgress(options, {
+          currentStep: "importing_functions",
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: "Phase 2 of 2 — importing edge functions...",
+        });
+
+        const outcome = await adapter.importFunctions(destination.connectionString, package_.functions, options);
+        if (outcome?.warnings) warnings.push(...outcome.warnings);
+        if (outcome?.stats) Object.assign(stats, outcome.stats);
+        stepIndex++;
+      } else if (fnCount > 0) {
+        warnings.push(
+          `Edge functions not transferred: ${fnCount} function(s) exported, but the ${destination.provider} destination has no functions import support — sources preserved in the package; deploy manually.`,
+        );
+        stats.functionsTransferred = 0;
+      }
+    }
+
     return { warnings, stats };
   }
   
@@ -316,27 +363,81 @@ export class TransferService {
    */
   private buildTransferSteps(options: TransferOptions): TransferStep[] {
     const steps: TransferStep[] = ["validating"];
-    
+
     if (options.includeDatabase) {
       steps.push("exporting_schema", "exporting_data", "importing_schema", "importing_data");
     }
-    
+
     if (options.includeStorage) {
       steps.push("exporting_storage", "importing_storage");
     }
-    
+
     if (options.includeAuth) {
       steps.push("exporting_auth", "importing_auth");
     }
-    
+
     if (options.includeSettings) {
       steps.push("exporting_settings", "importing_settings");
     }
-    
+
+    if (options.includeEdgeFunctions) {
+      steps.push("exporting_functions", "importing_functions");
+    }
+
     steps.push("finalizing", "complete");
     return steps;
   }
   
+  /**
+   * Wrap options so per-item reports (per table, per chunk) surface as
+   * progress details: "what's running right now" for long phases.
+   */
+  private withItemReporting(    options: TransferOptions,
+    step: TransferStep,
+    stepIndex: number,
+    totalSteps: number,
+    message: string,
+  ): TransferOptions {
+    return {
+      ...options,
+      onItem: (info) => {
+        void this.updateProgress(options, {
+          currentStep: step,
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: `${message} — ${info.item}${info.itemTotal > 1 ? ` (${info.itemIndex}/${info.itemTotal})` : ""}`,
+          details: { item: info.item, itemIndex: info.itemIndex, itemTotal: info.itemTotal },
+        });
+      },
+    };
+  }
+
+  /**
+   * Wrap import options so per-item reports (schema statement, data
+   * chunk) surface as progress details, keeping the reporter's own step
+   * (schema vs data) instead of the phase default.
+   */
+  private withImportReporting(
+    options: TransferOptions,
+    stepIndex: number,
+    totalSteps: number,
+  ): TransferOptions {
+    return {
+      ...options,
+      onItem: (info) => {
+        void this.updateProgress(options, {
+          currentStep: info.step,
+          totalSteps,
+          currentStepIndex: stepIndex,
+          percentage: Math.round((stepIndex / totalSteps) * 100),
+          message: `Phase 2 of 2 — ${info.item}${info.itemTotal > 1 ? ` (${info.itemIndex}/${info.itemTotal})` : ""}`,
+          details: { item: info.item, itemIndex: info.itemIndex, itemTotal: info.itemTotal },
+        });
+      },
+    };
+  }
+
   /**
    * Calculate transfer statistics from rows actually exported — never from
    * source row counts, which would claim rows that were skipped or failed.
@@ -351,19 +452,46 @@ export class TransferService {
       storageFilesTransferred: package_.storage?.files.length || 0,
       authUsersTransferred: package_.auth?.users.length || 0,
       authProvidersTransferred: package_.auth?.providers.length || 0,
+      functionsTransferred: package_.functions?.functions.length || 0,
     };
   }
 
   /**
-   * Collect non-fatal export notes (skipped/failed tables, partial auth or
-   * storage exports) so the UI can disclose them instead of reporting a
-   * clean success.
+   * Collapse repetitive warnings (per-row skips, per-table notes) so the
+   * completion screen stays readable: identical-shape messages group with
+   * a ×N suffix, order of first appearance preserved, capped with overflow.
    */
+  static collapseWarnings(warnings: string[]): string[] {
+    const keyOf = (w: string) =>
+      w
+        .replace(/'[^']*'/g, "'$'")
+        .replace(/"[^"]*"/g, '"$"')
+        .replace(/\b\d[\d,]*(?:\.\d+)?\b/g, "#");
+    const groups = new Map<string, { sample: string; count: number }>();
+    for (const w of warnings) {
+      const key = keyOf(w);
+      const g = groups.get(key);
+      if (g) g.count++;
+      else groups.set(key, { sample: w, count: 1 });
+    }
+    const out: string[] = [];
+    for (const { sample, count } of groups.values()) {
+      out.push(count > 1 ? `${sample} (×${count})` : sample);
+      if (out.length >= 25) break;
+    }
+    const shown = [...groups.values()].slice(0, 25).reduce((a, g) => a + g.count, 0);
+    if (shown < warnings.length) {
+      out.push(`+${warnings.length - shown} more — see server log.`);
+    }
+    return out;
+  }
+  /** Non-fatal export notes from every package section. */
   private collectWarnings(package_: TransferPackage): string[] {
     const warnings: string[] = [];
     if (package_.database?.warnings) warnings.push(...package_.database.warnings);
     if (package_.storage?.warnings) warnings.push(...package_.storage.warnings);
     if (package_.auth?.warnings) warnings.push(...package_.auth.warnings);
+    if (package_.functions?.warnings) warnings.push(...package_.functions.warnings);
     return warnings;
   }
   

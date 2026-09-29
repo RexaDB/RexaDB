@@ -200,3 +200,78 @@ describe("transfer-sql", () => {
     expect(chunks[0].sql).toContain("VALUES (2);");
   });
 });
+
+describe("applyRowsResiliently", () => {
+  it("isolates bad rows, retries once, then reports survivors", async () => {
+    const attempts = new Map<string, number>();
+    const exec = async (sql: string) => {
+      const n = (attempts.get(sql) ?? 0) + 1;
+      attempts.set(sql, n);
+      // always-bad row fails every attempt; flaky row succeeds on retry
+      if (sql.includes("flaky") && n < 2) throw new Error("fk violation");
+      if (sql.includes("bad")) throw new Error("check violation");
+    };
+    const { applyRowsResiliently: apply } = await import("@/lib/transfer/transfer-sql");
+    const { applied, failed } = await apply(exec, [
+      "INSERT good",
+      "INSERT flaky",
+      "INSERT bad",
+    ]);
+    expect(applied).toBe(2);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].statement).toContain("bad");
+    expect(failed[0].error).toContain("check violation");
+  });
+
+  it("shortStatement condenses whitespace", async () => {
+    const { shortStatement } = await import("@/lib/transfer/transfer-sql");
+    expect(shortStatement("INSERT  INTO\n  t  VALUES (1);")).toBe("INSERT INTO t VALUES (1);");
+  });
+});
+
+describe("splitMultiRowInsert", () => {
+  it("splits batched tuples without breaking quoted content", async () => {
+    const { splitMultiRowInsert } = await import("@/lib/transfer/transfer-sql");
+    const stmt = `INSERT INTO "t" ("a", "b") VALUES (1, 'x;y'), (2, 'it''s, (ok)'), (3, ARRAY[1,2]);`;
+    const parts = splitMultiRowInsert(stmt);
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toBe(`INSERT INTO "t" ("a", "b") VALUES (1, 'x;y');`);
+    expect(parts[1]).toContain(`'it''s, (ok)'`);
+    expect(parts[2]).toContain("ARRAY[1,2]");
+  });
+
+  it("leaves single-row inserts untouched", async () => {
+    const { splitMultiRowInsert } = await import("@/lib/transfer/transfer-sql");
+    const stmt = `INSERT INTO "t" ("a") VALUES (1);`;
+    expect(splitMultiRowInsert(stmt)).toEqual([stmt]);
+  });
+});
+
+describe("applyChunkResiliently", () => {
+  it("keeps batches whole, expands only failed ones", async () => {
+    const { applyChunkResiliently } = await import("@/lib/transfer/transfer-sql");
+    const seen: string[] = [];
+    const exec = async (sql: string) => {
+      seen.push(sql);
+      if (sql.includes(", (2),") || sql.includes("VALUES (2);")) throw new Error("bad row");
+    };
+    const { applied, failed } = await applyChunkResiliently(
+      exec,
+      `INSERT INTO "t" ("id") VALUES (1), (2), (3);`,
+    );
+    expect(applied).toBe(2);
+    expect(failed).toHaveLength(1);
+    // whole batch tried once, then 3 singles, then 1 retry
+    expect(seen).toHaveLength(5);
+  });
+
+  it("throws on uniform chunk failure instead of warning per row", async () => {
+    const { applyChunkResiliently } = await import("@/lib/transfer/transfer-sql");
+    const exec = async () => {
+      throw new Error('relation "missing" does not exist');
+    };
+    await expect(
+      applyChunkResiliently(exec, `INSERT INTO "missing" ("id") VALUES (1), (2);`),
+    ).rejects.toThrow(/does not exist/);
+  });
+});

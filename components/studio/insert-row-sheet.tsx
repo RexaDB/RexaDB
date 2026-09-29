@@ -25,6 +25,7 @@ interface InsertRowSheetProps {
   handleInsertFKSelection: (columnName: string) => Promise<boolean> | boolean | void;
   loading: boolean;
   isFKSelectionSheetOpen?: boolean;
+  hidden?: boolean;
 }
 
 export function InsertRowSheet({
@@ -38,6 +39,7 @@ export function InsertRowSheet({
   handleInsertFKSelection,
   loading,
   isFKSelectionSheetOpen = false,
+  hidden = false,
 }: InsertRowSheetProps) {
   useEffect(() => {
     if (isInsertSheetOpen) setInsertData({});
@@ -59,12 +61,16 @@ export function InsertRowSheet({
       e.preventDefault();
       return;
     }
+    // Clicking outside must not dismiss the sheet (even with no input yet) —
+    // only Cancel / Save / X should close it. Still run the dirty-confirm
+    // flow when enabled so unsaved changes prompt first.
     handleInteractOutside(e);
+    e.preventDefault();
   };
 
   return (
     <Sheet open={isInsertSheetOpen} onOpenChange={(open) => { setIsInsertSheetOpen(open); if (!open) setInsertData({}); }} modal={false}>
-      <SheetContent side="right" contained onInteractOutside={handleSheetInteractOutside} className="bg-background text-foreground flex flex-col p-0 gap-0">
+      <SheetContent side="right" contained onInteractOutside={handleSheetInteractOutside} className={`bg-background text-foreground flex flex-col p-0 gap-0${hidden ? " hidden" : ""}`}>
         {ConfirmDialog}
         <div className="flex flex-col h-full">
           <SheetHeader className="h-12 border-b shrink-0 flex items-center px-4">

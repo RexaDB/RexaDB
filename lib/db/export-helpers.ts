@@ -147,7 +147,6 @@ function applySupabaseDumpTransforms(input: string, excludedSchemasPattern: stri
     { re: /^CREATE SEQUENCE "/gim, replace: 'CREATE SEQUENCE IF NOT EXISTS "' },
     { re: /^CREATE VIEW "/gim, replace: 'CREATE OR REPLACE VIEW "' },
     { re: /^CREATE FUNCTION "/gim, replace: 'CREATE OR REPLACE FUNCTION "' },
-    { re: /^CREATE TRIGGER "/gim, replace: 'CREATE OR REPLACE TRIGGER "' },
     { re: /^CREATE PUBLICATION "supabase_realtime/gim, replace: "-- $&" },
     { re: /^CREATE EVENT TRIGGER /gim, replace: "-- $&" },
     { re: /^\s*WHEN TAG IN /gim, replace: "-- $&" },
@@ -174,6 +173,14 @@ function applySupabaseDumpTransforms(input: string, excludedSchemasPattern: stri
   return output;
 }
 
+/** pg_dump / pg clients need a directly-dialable Postgres DSN. Pointers
+ * like supabase-mgmt:// (API-routed SQL) are not dialable — those go
+ * through the SQL-native dump/apply paths instead of failing obscurely. */
+export function isDirectDialablePostgres(connectionString: string): boolean {
+  const stripped = stripRexaDbParams(connectionString);
+  return stripped.startsWith("postgres://") || stripped.startsWith("postgresql://");
+}
+
 export async function runPgDumpSchemaOnly(
   connectionString: string,
   runQuery: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>
@@ -183,6 +190,21 @@ export async function runPgDumpSchemaOnly(
   const schemas = await getAllowedSchemasForDump(connectionString, runQuery);
   if (schemas.length === 0) {
     throw new Error("No accessible schemas found to export.");
+  }
+
+  // Non-dialable connections (supabase-mgmt://, ...): pg_dump cannot
+  // connect, so build equivalent DDL straight out of pg_catalog.
+  if (!isDirectDialablePostgres(connectionString)) {
+    const { buildSchemaDumpViaSql } = await import("@/lib/transfer/schema-dump-sql");
+    const { sql, warnings } = await buildSchemaDumpViaSql(runQuery, connectionString, schemas);
+    const header = [
+      `-- Schema dump generated via SQL introspection (pg_dump cannot dial this connection type).`,
+      ...warnings.map((w) => `-- NOTE: ${w}`),
+    ].join("\n");
+    if (!sql.trim()) {
+      throw new Error(`SQL schema dump produced no statements. ${warnings.join(" ")}`);
+    }
+    return `${header}\n${sql}`;
   }
 
   const { execFile } = await import("child_process");
@@ -245,10 +267,30 @@ export async function runPgDumpSchemaOnly(
   }
 }
 
+
+/**
+ * Schemas a transfer must NEVER drop on the destination, even though they
+ * are not part of the migrated package: provider-managed system schemas
+ * whose contents cannot be restored (Neon Auth config, Supabase auth /
+ * storage / cron internals). Dropping neon_auth, for example, silently
+ * deletes the destination's managed auth setup.
+ */
+function isProtectedDestinationSchema(schemaName: string, destIsSupabaseLike: boolean): boolean {
+  if (schemaName === "neon_auth") return true;
+  return destIsSupabaseLike && isSupabaseExcludedSchema(schemaName);
+}
+
+export interface ResetApplyHooks {
+  /** Fine-grained import progress: phase with 1-based index/total + label. */
+  onPhase?: (phase: "schema" | "data", index: number, total: number, label: string) => void;
+}
+
 export async function resetAndApplySql(
   connectionString: string,
   fullSql: string,
   dataSql?: string,
+  queryFn?: (connectionString: string, query: string) => Promise<{ success: boolean; data?: { rows?: any[] }; error?: unknown }>,
+  hooks?: ResetApplyHooks,
 ) {
   if (!isPostgresConnection(connectionString)) {
     throw new Error("SQL import is supported only for PostgreSQL connections.");
@@ -256,6 +298,39 @@ export async function resetAndApplySql(
 
   const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
   connectionString = await resolveEffectiveConnectionString(connectionString);
+
+  // Non-dialable connections (supabase-mgmt://, ...): no pg-client and no
+  // cross-statement transaction is possible — apply statement by statement
+  // through the query path. Mid-apply failures can leave a partial
+  // destination; errors say so explicitly.
+  if (!isDirectDialablePostgres(connectionString)) {
+    if (!queryFn) {
+      throw new Error("This destination is not directly reachable: pass a query function for SQL-statement apply.");
+    }
+    const { applyTransferViaQuery } = await import("@/lib/transfer/schema-dump-sql");
+    const isSupabase = isLikelySupabaseConnection(connectionString);
+    const existingSchemas = await queryFn(
+      connectionString,
+      `SELECT schema_name
+       FROM information_schema.schemata
+       WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'public')
+         AND schema_name NOT LIKE 'pg_%'
+       ORDER BY schema_name;`,
+    );
+    if (!existingSchemas.success) {
+      throw new Error(`Could not list destination schemas: ${String(existingSchemas.error ?? "unknown error")}`);
+    }
+    const dropStatements: string[] = [];
+    for (const row of existingSchemas.data?.rows ?? []) {
+      const schemaName = String((row as Record<string, unknown>).schema_name);
+      if (isProtectedDestinationSchema(schemaName, isSupabase)) continue;
+      const schema = schemaName.replace(/"/g, "\"\"");
+      dropStatements.push(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
+    }
+    dropStatements.push(`DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`);
+    const applied = await applyTransferViaQuery(queryFn, connectionString, dropStatements, fullSql, dataSql, hooks);
+    return { warnings: applied.warnings, skippedRows: applied.skippedRows ?? 0 };
+  }
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
 
@@ -283,7 +358,7 @@ export async function resetAndApplySql(
     const dropStatements: string[] = [];
     for (const row of existingSchemas.rows) {
       const schemaName = String(row.schema_name);
-      if (isSupabase && isSupabaseExcludedSchema(schemaName)) {
+      if (isProtectedDestinationSchema(schemaName, isSupabase)) {
         continue;
       }
       const schema = schemaName.replace(/"/g, "\"\"");
@@ -294,12 +369,31 @@ export async function resetAndApplySql(
     // Row-data chunks, ordered so referenced (parent) tables load first.
     // FK edges are read from the destination AFTER the schema is applied,
     // so ordering reflects the schema being installed — not the source.
-    // Everything (drops + schema + data) runs in ONE transaction: any
-    // failure rolls back instead of leaving a partially populated database.
-    const { parseDataChunks, orderChunksByDependency } = await import(
-      "@/lib/transfer/transfer-sql"
-    );
+    // Drops + structural schema + data run in ONE transaction: any failure
+    // there rolls back instead of leaving a partial database. Programmable
+    // objects (functions, triggers, policies, views) apply best-effort via
+    // savepoints: ordering issues (e.g. an overloaded SQL function calling
+    // a variant created later) warn instead of killing the transfer.
+    const {
+      parseDataChunks,
+      orderChunksByDependency,
+      splitSqlStatements,
+      stripCommentLines,
+      isProgrammableStatement,
+      applyChunkResiliently,
+      shortStatement,
+    } = await import("@/lib/transfer/transfer-sql");
     const chunks = dataSql ? parseDataChunks(dataSql) : [];
+    const warnings: string[] = [];
+    const shortStmt = (stmt: string) => stmt.replace(/\s+/g, " ").trim().slice(0, 160);
+
+    const structural: string[] = [];
+    const programmable: string[] = [];
+    for (const stmt of splitSqlStatements(fullSql)) {
+      const executable = stripCommentLines(stmt);
+      if (!executable) continue;
+      (isProgrammableStatement(executable) ? programmable : structural).push(executable);
+    }
 
     // Some dump outputs cannot run inside a transaction block
     // (e.g. CREATE INDEX CONCURRENTLY, VACUUM). Only use the transactional
@@ -309,11 +403,84 @@ export async function resetAndApplySql(
       `${fullSql}\n${dataSql ?? ""}`,
     );
 
-    const applyAll = async () => {
+    // Rows skipped (warned, not applied). Returned so callers can report
+    // honest landed-row counts instead of the export total.
+    let skippedRows = 0;
+    const applyAll = async (inTxn: boolean) => {
+      // `skipped` is assigned below and read after applyAll runs.
       for (const stmt of dropStatements) {
-        await client.query(stmt);
+        try {
+          await client.query(stmt);
+        } catch (e) {
+          throw new Error(`Drop failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      await client.query(fullSql);
+      hooks?.onPhase?.("schema", 0, structural.length + programmable.length, "drops applied");
+      let schemaDone = 0;
+      const schemaTotal = structural.length + programmable.length;
+      for (const stmt of structural) {
+        try {
+          await client.query(stmt);
+        } catch (e) {
+          throw new Error(`Schema apply failed at ${shortStmt(stmt)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        schemaDone++;
+        if (schemaDone % 25 === 0 || schemaDone === schemaTotal) {
+          hooks?.onPhase?.("schema", schemaDone, schemaTotal, shortStmt(stmt));
+        }
+      }
+
+      // Programmable objects: savepoint each (retry once for ordering),
+      // failures become warnings — never a full rollback.
+      const attempt = async (stmt: string): Promise<Error | null> => {
+        if (!inTxn) {
+          try {
+            await client.query(stmt);
+            return null;
+          } catch (e) {
+            return e instanceof Error ? e : new Error(String(e));
+          }
+        }
+        await client.query("SAVEPOINT transfer_prog");
+        try {
+          await client.query(stmt);
+          await client.query("RELEASE SAVEPOINT transfer_prog");
+          return null;
+        } catch (e) {
+          try {
+            await client.query("ROLLBACK TO SAVEPOINT transfer_prog");
+          } catch {}
+          try {
+            await client.query("RELEASE SAVEPOINT transfer_prog");
+          } catch {}
+          return e instanceof Error ? e : new Error(String(e));
+        }
+      };
+      const failed: Array<{ stmt: string; error: Error }> = [];
+      for (const stmt of programmable) {
+        const err = await attempt(stmt);
+        if (err) failed.push({ stmt, error: err });
+      }
+      const stillFailed: Array<{ stmt: string; error: Error }> = [];
+      for (const { stmt } of failed) {
+        const err = await attempt(stmt);
+        if (err) stillFailed.push({ stmt, error: err });
+      }
+      // Security-critical objects (RLS policies, triggers) must not degrade
+      // to warnings: a "successful" transfer would otherwise leave an
+      // RLS-enabled table without its policy or omit a relied-on trigger.
+      // Throwing rolls back the transactional path / aborts the fallback.
+      const { isSecurityCriticalProgrammable } = await import("@/lib/transfer/transfer-sql");
+      const securityFailed = stillFailed.filter(({ stmt }) => isSecurityCriticalProgrammable(stmt));
+      if (securityFailed.length > 0) {
+        const first = securityFailed[0];
+        throw new Error(
+          `Security-critical object failed to apply (${first.error.message.slice(0, 200)}): ${shortStmt(first.stmt)} — transfer aborted instead of leaving the destination without it.`,
+        );
+      }
+      for (const { stmt, error } of stillFailed) {
+        warnings.push(`Skipped programmable object (${error.message.slice(0, 200)}): ${shortStmt(stmt)}`);
+      }
       if (chunks.length === 0) return;
 
       const fkRes = await client.query(`
@@ -345,30 +512,113 @@ export async function resetAndApplySql(
         }
       }
       const ordered = orderChunksByDependency(chunks, deps);
-      for (const chunk of ordered) {
+      // Row-level triggers (membership auto-grants, audit writers, ...)
+      // fire per INSERT and write derived rows that violate FKs mid-load
+      // or duplicate migrated data. Disable them for the load; the
+      // transaction restores everything on rollback, and we re-enable
+      // before commit. Best-effort: without TRIGGER privilege we proceed
+      // undisabled and surface any resulting error honestly.
+      const triggerTables = [...new Map(
+        ordered.filter((c) => c.schema && c.table).map((c) => [`${c.schema}.${c.table}`, c] as const),
+      ).values()];
+      const disableTrigger = async (c: { schema: string; table: string }, enable: boolean) => {
+        // Savepoint-guarded: a failed ALTER aborts the whole transaction,
+        // so an unprotected DISABLE would turn every later statement into
+        // "current transaction is aborted" hiding the real error.
+        // Outside a transaction (nonTxn fallback) run it bare — each
+        // statement is independent there anyway.
+        const guarded = async (sql: string): Promise<void> => {
+          if (!inTxn) {
+            await client.query(sql);
+            return;
+          }
+          await client.query("SAVEPOINT transfer_trig");
+          try {
+            await client.query(sql);
+            await client.query("RELEASE SAVEPOINT transfer_trig");
+          } catch (e) {
+            try {
+              await client.query("ROLLBACK TO SAVEPOINT transfer_trig");
+            } catch {}
+            try {
+              await client.query("RELEASE SAVEPOINT transfer_trig");
+            } catch {}
+            throw e;
+          }
+        };
         try {
-          await client.query(chunk.sql);
-        } catch (chunkError) {
-          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
-          throw new Error(
-            `Data import failed for ${where}: ${chunkError instanceof Error ? chunkError.message : String(chunkError)}`,
+          await guarded(
+            `ALTER TABLE "${c.schema.replace(/"/g, '""')}"."${c.table.replace(/"/g, '""')}" ${enable ? "ENABLE" : "DISABLE"} TRIGGER USER`,
           );
+        } catch (e) {
+          if (!enable) {
+            warnings.push(
+              `Could not disable triggers on ${c.schema}.${c.table} (${e instanceof Error ? e.message : String(e)}); row triggers stay live during import.`,
+            );
+          } else {
+            throw e;
+          }
         }
+      };
+      for (const c of triggerTables) await disableTrigger(c, false);
+      try {
+        // Batched multi-row INSERTs stay whole (one round trip per 500
+        // rows); failed batches expand to singles internally, so one bad
+        // row warns instead of aborting its siblings (which previously
+        // cascaded as "current transaction is aborted" for everything
+        // after it, hiding the real error).
+        let failedRows = 0;
+        let chunkIndex = 0;
+        for (const chunk of ordered) {          chunkIndex++;
+          const where = chunk.table ? `${chunk.schema}.${chunk.table}` : "unmarked statements";
+          hooks?.onPhase?.("data", chunkIndex, ordered.length, where);
+          const exec = async (sql: string): Promise<void> => {
+            await client.query("SAVEPOINT transfer_row");
+            try {
+              await client.query(sql);
+              await client.query("RELEASE SAVEPOINT transfer_row");
+            } catch (e) {
+              try {
+                await client.query("ROLLBACK TO SAVEPOINT transfer_row");
+              } catch {}
+              try {
+                await client.query("RELEASE SAVEPOINT transfer_row");
+              } catch {}
+              throw e;
+            }
+          };
+          const { failed } = await applyChunkResiliently(exec, chunk.sql);
+          for (const f of failed.slice(0, 20)) {
+            warnings.push(`Row skipped in ${where} (${f.error.slice(0, 200)}): ${shortStatement(f.statement)}`);
+          }
+          if (failed.length > 20) {
+            warnings.push(`…and ${failed.length - 20} more skipped rows in ${where}.`);
+          }
+          failedRows += failed.length;
+        }
+        if (failedRows > 0) {
+          warnings.push(`${failedRows} row(s) could not be imported and were skipped — see warnings above.`);
+        }
+        skippedRows = failedRows;
+      } finally {
+        for (const c of triggerTables) await disableTrigger(c, true);
       }
+      warnings.push("Row triggers were disabled during data import and re-enabled after; derived rows come from migrated data, not trigger side effects.");
     };
 
     if (!nonTransactional) {
       await client.query("BEGIN;");
       try {
-        await applyAll();
+        await applyAll(true);
         await client.query("COMMIT;");
       } catch (applyError) {
         await client.query("ROLLBACK;").catch(() => {});
         throw applyError;
       }
     } else {
-      await applyAll();
+      await applyAll(false);
     }
+    return { warnings, skippedRows };
   } finally {
     await client.end().catch(() => {});
   }

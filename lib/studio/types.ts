@@ -59,6 +59,8 @@ export interface QueryHistory {
   executedBy?: string;
   executedByName?: string;
   connectionName?: string;
+  /** JSON-encoded bound parameter values (never displayed/searched; replay only). */
+  params?: string | null;
 }
 
 export interface UseStudioProps {

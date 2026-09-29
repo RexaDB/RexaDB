@@ -1172,6 +1172,9 @@ export function ConnectionManager({
   const [connectionScreen, setConnectionScreen] = useState<ConnectionScreen>(
     initialScreen ?? "list",
   );
+  const [transferSourceConnectionId, setTransferSourceConnectionId] = useState<string | null>(
+    null,
+  );
   const [openingConnectionId, setOpeningConnectionId] = useState<number | null>(
     null,
   );
@@ -2969,6 +2972,10 @@ export function ConnectionManager({
   };
   const handleDuplicate = (conn: Connection) =>
     populateFormFromConnection(conn, true);
+  const openTransferForConnection = (conn: Connection) => {
+    setTransferSourceConnectionId(String(conn.id));
+    setConnectionScreen("transfer");
+  };
 
   const autoEditTriggeredRef = useRef(false);
   useEffect(() => {
@@ -4762,7 +4769,7 @@ export function ConnectionManager({
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  <div className="ml-auto">
+                  <div className="ml-auto flex items-center gap-2">
                     {can("connections.create") && (
                       <button
                         onClick={() => {
@@ -5010,6 +5017,15 @@ export function ConnectionManager({
                                           >
                                             {" "}
                                             Copy URI
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={() =>
+                                              openTransferForConnection(conn)
+                                            }
+                                            className="gap-2 focus:bg-muted/50"
+                                          >
+                                            <ArrowRightLeft className="w-4 h-4" />
+                                            Transfer Project
                                           </DropdownMenuItem>
                                           {!workspaceMode && renderFolderSubmenu(conn)}
                                           {workspaceMode && (
@@ -5263,6 +5279,16 @@ export function ConnectionManager({
                                             >
                                               Copy URI
                                             </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openTransferForConnection(conn);
+                                              }}
+                                              className="gap-2 text-xs focus:bg-muted/50"
+                                            >
+                                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                                              Transfer Project
+                                            </DropdownMenuItem>
                                             {!workspaceMode && renderFolderSubmenu(conn, "3")}
                                             {workspaceMode && (
                                               <DropdownMenuItem
@@ -5445,9 +5471,17 @@ export function ConnectionManager({
             />
           ) : connectionScreen === "transfer" ? (
             <TransferProjectScreen
+              key={transferSourceConnectionId ?? "no-source"}
               connections={connections}
-              onBack={() => setConnectionScreen("list")}
-              onComplete={() => setConnectionScreen("list")}
+              initialSourceConnectionId={transferSourceConnectionId}
+              onBack={() => {
+                setTransferSourceConnectionId(null);
+                setConnectionScreen("list");
+              }}
+              onComplete={() => {
+                setTransferSourceConnectionId(null);
+                setConnectionScreen("list");
+              }}
             />
           ) : connectionScreen === "settings" ? (
             <Dialog

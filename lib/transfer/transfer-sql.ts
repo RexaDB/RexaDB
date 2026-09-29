@@ -6,6 +6,8 @@
  * - naive `dataSql.split(";")` which breaks on semicolons inside string literals
  */
 
+import type { TransferOptions } from "./transfer-types";
+
 export type QueryFnResult = {
   success: boolean;
   data?: { rows?: Array<Record<string, unknown>> };
@@ -273,6 +275,9 @@ export function splitSqlStatements(sql: string): string[] {
 /** Tables larger than this are skipped for row-data export (schema still migrates). */
 export const MAX_DATA_EXPORT_ROWS = 10_000;
 
+/** Rows per INSERT statement: fewer round trips (each is network I/O). */
+export const DATA_EXPORT_BATCH_SIZE = 500;
+
 export type TableDataExport = {
   sql: string;
   exportedRows: number;
@@ -303,6 +308,44 @@ async function fetchColumnTypes(
   }
 }
 
+/**
+ * Identity/stored-generation flags per column: "always" (GENERATED ALWAYS
+ * AS IDENTITY), "bydefault", "stored" (GENERATED ALWAYS AS (...) STORED),
+ * or absent for ordinary columns. Unknown on error (caller proceeds
+ * without overrides — same as the old behavior).
+ */
+export async function fetchGeneratedColumns(
+  query: QueryFn,
+  connectionString: string,
+  schema: string,
+  table: string,
+): Promise<Record<string, "always" | "bydefault" | "stored">> {
+  try {
+    const res = await query(
+      connectionString,
+      `SELECT a.attname AS column_name, a.attidentity AS identity, a.attgenerated AS generated
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = ${escapeLiteral(schema)} AND c.relname = ${escapeLiteral(table)}
+         AND a.attnum > 0 AND NOT a.attisdropped`,
+    );
+    const map: Record<string, "always" | "bydefault" | "stored"> = {};
+    for (const row of res.success ? (res.data?.rows ?? []) : []) {
+      const name = (row as Record<string, unknown>).column_name;
+      if (typeof name !== "string") continue;
+      const identity = String((row as Record<string, unknown>).identity ?? "");
+      const generated = String((row as Record<string, unknown>).generated ?? "");
+      if (generated === "s") map[name] = "stored";
+      else if (identity === "a") map[name] = "always";
+      else if (identity === "d") map[name] = "bydefault";
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function exportTableDataSql(
   query: QueryFn,
   connectionString: string,
@@ -317,9 +360,10 @@ export async function exportTableDataSql(
     return { sql: "", exportedRows: 0, status: "skipped", message };
   }
   try {
-    const [dataResult, columnTypes] = await Promise.all([
+    const [dataResult, columnTypes, generatedInfo] = await Promise.all([
       query(connectionString, `SELECT * FROM ${qualifiedTable(schema, table)}`),
       fetchColumnTypes(query, connectionString, schema, table),
+      fetchGeneratedColumns(query, connectionString, schema, table),
     ]);
     const rows = dataResult.success ? (dataResult.data?.rows ?? []) : [];
     if (!dataResult.success || rows.length === 0) {
@@ -330,13 +374,33 @@ export async function exportTableDataSql(
       }
       return { sql: "", exportedRows: 0, status: "empty" };
     }
-    const columns = Object.keys(rows[0]);
+    // Stored generated columns recompute on import — including explicit
+    // values for them is rejected, so they leave the column list.
+    // GENERATED ALWAYS identity columns keep their values (PK/FK references
+    // depend on them) and the INSERT carries OVERRIDING SYSTEM VALUE so the
+    // destination accepts explicit IDs. BY DEFAULT needs neither.
+    const allColumns = Object.keys(rows[0]);
+    const columns = allColumns.filter((c) => generatedInfo[c] !== "stored");
+    if (columns.length === 0) {
+      const message = `Skipping data export for ${schema}.${table}: every column is generated; values recompute on import.`;
+      console.warn(message);
+      return { sql: "", exportedRows: 0, status: "skipped", message };
+    }
+    const hasAlwaysIdentity = columns.some((c) => generatedInfo[c] === "always");
     const target = qualifiedTable(schema, table);
     const colList = columns.map(escapeIdent).join(", ");
-    const lines = rows.map(
-      (row) =>
-        `INSERT INTO ${target} (${colList}) VALUES (${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")});`,
-    );
+    const overriding = hasAlwaysIdentity ? " OVERRIDING SYSTEM VALUE" : "";
+    const formatRow = (row: Record<string, unknown>) =>
+      `(${columns.map((c) => formatValueWithType(row[c], columnTypes[c])).join(", ")})`;
+    // Multi-row batches: one statement per 500 rows instead of one per
+    // row. Round trips dominate transfer time (each is network I/O, worse
+    // on flaky links), so this is the single biggest speed lever. Import
+    // expands failed batches back to singles (see splitMultiRowInsert).
+    const lines: string[] = [];
+    for (let i = 0; i < rows.length; i += DATA_EXPORT_BATCH_SIZE) {
+      const batch = rows.slice(i, i + DATA_EXPORT_BATCH_SIZE);
+      lines.push(`INSERT INTO ${target} (${colList})${overriding} VALUES ${batch.map(formatRow).join(",\n")};`);
+    }
     return {
       sql: `-- Data for ${schema}.${table} (${rows.length} rows)\n${lines.join("\n")}\n`,
       exportedRows: rows.length,
@@ -349,6 +413,207 @@ export async function exportTableDataSql(
   }
 }
 
+/**
+ * Programmable objects (functions, triggers, policies, views) can fail for
+ * ordering reasons that have nothing to do with the transfer itself — e.g.
+ * an overloaded SQL function calling a variant created later. Callers apply
+ * these best-effort (savepoint + warning) instead of aborting the whole
+ * import. Classification is conservative: a false positive only softens
+ * failure semantics, never skips the statement.
+ */
+export function isProgrammableStatement(executableSql: string): boolean {
+  return /^\s*CREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE|TRIGGER|POLICY|VIEW|MATERIALIZED\s+VIEW)\b/i.test(
+    executableSql,
+  );
+}
+
+/**
+ * Security/behavior-critical subset of programmable objects: RLS policies,
+ * row-level-security toggles, and triggers. A twice-failed POLICY or TRIGGER
+ * must FAIL the transfer (rolling back the transactional path), not degrade
+ * to a warning — otherwise a "successful" transfer can leave an RLS-enabled
+ * table without its source policy, or omit a trigger the source relied on.
+ * FUNCTIONS/VIEWS/PROCEDURES stay best-effort (ordering failures are common
+ * and non-security-relevant).
+ */
+export function isSecurityCriticalProgrammable(executableSql: string): boolean {
+  return (
+    /^\s*CREATE\s+(OR\s+REPLACE\s+)?(TRIGGER|POLICY)\b/i.test(executableSql) ||
+    /\b(ENABLE|FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i.test(executableSql)
+  );
+}
+/**
+ * Apply row INSERTs resiliently: each statement runs isolated so one bad
+ * row can neither abort its siblings nor poison the surrounding
+ * transaction (which previously surfaced as a wave of "current
+ * transaction is aborted" hiding the real error). Failed statements get
+ * ONE retry at the end (self-referencing FKs resolve once parents land);
+ * persistent failures are returned for warnings — skipped, never silent.
+ */
+export async function applyRowsResiliently(
+  exec: (sql: string) => Promise<void>,
+  statements: string[],
+): Promise<{ applied: number; failed: Array<{ statement: string; error: string }> }> {
+  let applied = 0;
+  const failed: Array<{ statement: string; error: string }> = [];
+  const attempt = async (stmt: string): Promise<string | null> => {
+    try {
+      await exec(stmt);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  };
+  const pending = [...statements];
+  for (const stmt of pending) {
+    const err = await attempt(stmt);
+    if (err === null) applied++;
+    else failed.push({ statement: stmt, error: err });
+  }
+  // Retry pass for ordering-dependent rows.
+  const stillFailed: Array<{ statement: string; error: string }> = [];
+  for (const { statement } of failed) {
+    const err = await attempt(statement);
+    if (err === null) applied++;
+    else stillFailed.push({ statement, error: err });
+  }
+  return { applied, failed: stillFailed };
+}
+
+/** One-line preview for warnings/errors. */
+export function shortStatement(stmt: string, max = 160): string {
+  return stmt.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/**
+ * Map import-phase hooks onto options.onItem so adapters report what is
+ * importing right now (schema statement / data chunk) without knowing
+ * progress bookkeeping.
+ */
+export function importHooks(options: { onItem?: TransferOptions["onItem"] }): {
+  onPhase: (phase: "schema" | "data", index: number, total: number, label: string) => void;
+} {
+  return {
+    onPhase: (phase, index, total, label) =>
+      options.onItem?.({
+        step: phase === "data" ? "importing_data" : "importing_schema",
+        item: label,
+        itemIndex: index,
+        itemTotal: total,
+      }),
+  };
+}
+
+/**
+ * Expand one multi-row `INSERT INTO t (cols) VALUES (a), (b), ...` back
+ * into single-row INSERTs. Tuple boundaries split on top-level commas
+ * only — quotes, brackets and parens are tracked so values containing
+ * commas, parens, semicolons or ARRAY[...] literals never mis-split.
+ * Returns [stmt] unchanged when it is not a multi-row insert.
+ */
+export function splitMultiRowInsert(stmt: string): string[] {
+  const m = /^([\s\S]*?\bVALUES\s+)([\s\S]+?);?\s*$/.exec(stmt.trim());
+  if (!m) return [stmt];
+  const [, prefix, body] = m;
+  const tuples: string[] = [];
+  let depthParen = 0;
+  let depthBracket = 0;
+  let depthBrace = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let cur = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    const nx = body[i + 1];
+    if (inSingle) {
+      if (ch === "'" && nx === "'") {
+        cur += "''";
+        i++;
+        continue;
+      }
+      if (ch === "'") inSingle = false;
+      cur += ch;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '"' && nx === '"') {
+        cur += '""';
+        i++;
+        continue;
+      }
+      if (ch === '"') inDouble = false;
+      cur += ch;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      cur += ch;
+      continue;
+    }
+    if (ch === "(") depthParen++;
+    else if (ch === ")") depthParen--;
+    else if (ch === "[") depthBracket++;
+    else if (ch === "]") depthBracket--;
+    else if (ch === "{") depthBrace++;
+    else if (ch === "}") depthBrace--;
+    if (ch === "," && depthParen === 0 && depthBracket === 0 && depthBrace === 0) {
+      if (cur.trim()) tuples.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) tuples.push(cur.trim());
+  if (tuples.length <= 1) return [stmt];
+  return tuples.map((t) => `${prefix}${t};`);
+}
+
+/**
+ * Apply one data chunk: statements run whole (multi-row batches stay
+ * batched — one round trip per 500 rows); a failed batch expands to
+ * singles with per-row isolation + retry, so one bad row degrades to
+ * warnings instead of killing the chunk.
+ */
+export async function applyChunkResiliently(
+  exec: (sql: string) => Promise<void>,
+  chunkSql: string,
+): Promise<{ applied: number; failed: Array<{ statement: string; error: string }> }> {
+  let applied = 0;
+  const failed: Array<{ statement: string; error: string }> = [];
+  const fail = (statement: string, e: unknown) => {
+    failed.push({ statement, error: e instanceof Error ? e.message : String(e) });
+  };
+  for (const raw of splitSqlStatements(chunkSql)) {
+    const stmt = stripCommentLines(raw);
+    if (!stmt) continue;
+    try {
+      await exec(stmt);
+      applied++;
+    } catch (e) {
+      const singles = splitMultiRowInsert(stmt);
+      if (singles.length <= 1) {
+        fail(stmt, e);
+        continue;
+      }
+      const res = await applyRowsResiliently(exec, singles);
+      applied += res.applied;
+      if (res.failed.length === singles.length) {
+        // Every row failed identically (missing table, wrong schema...):
+        // systemic, not a bad row — fail the chunk loudly so callers
+        // roll back instead of warning away 10k identical errors.
+        const sameError = res.failed.every((f) => f.error === res.failed[0].error);
+        if (sameError) throw new Error(res.failed[0].error);
+      }
+      failed.push(...res.failed);
+    }
+  }
+  return { applied, failed };
+}
 /**
  * A per-table slice of a dataSql bundle, parsed from `-- Data for
  * schema.table (N rows)` marker lines. Unmarked statements (legacy
@@ -364,8 +629,7 @@ function splitChunkName(name: string): { schema: string; table: string } {
   return { schema: name.slice(0, dot), table: name.slice(dot + 1) };
 }
 
-/** Remove full-line `--` comments; returns "" when nothing executable remains. */
-export function stripCommentLines(sql: string): string {
+/** Remove full-line `--` comments; returns "" when nothing executable remains. */export function stripCommentLines(sql: string): string {
   // Quote-aware: a line starting with `--` INSIDE a multiline string literal
   // is data, not a comment. Track quote state across lines so such lines
   // are preserved verbatim.

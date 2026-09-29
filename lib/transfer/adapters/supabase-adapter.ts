@@ -10,18 +10,30 @@ import type {
   StorageExport,
   AuthExport,
   SettingsExport,
+  FunctionsExport,
   ImportOutcome,
 } from "../transfer-types";
 import { runPgDumpSchemaOnly } from "@/lib/db/export-helpers";
 import {
   escapeLiteral,
   exportTableDataSql,
+  importHooks,
   qualifiedTable,
 } from "../transfer-sql";
 import { serverTransferQuery } from "../transfer-server-query";
 import { fetchStorageBuckets, fetchStorageObjects } from "@/lib/studio/storage-utils";
 import { fetchAuthProviderConfigs } from "@/lib/studio/auth/fetch";
-import { isLikelySupabaseConnection } from "@/lib/db/supabase-helpers";
+import {
+  MAX_STORAGE_TOTAL_BYTES,
+  deploySupabaseFunction,
+  downloadStorageObject,
+  getSupabaseFunctionBody,
+  listSupabaseFunctions,
+  resolveSupabaseApiCreds,
+  uploadStorageObject,
+} from "../supabase-api";
+import { buildCompatDiffs } from "../function-compat";
+import { isLikelySupabaseConnection, isSupabaseExcludedSchema } from "@/lib/db/supabase-helpers";
 
 export class SupabaseAdapter implements ProviderAdapter {
   type = "supabase" as const;
@@ -54,11 +66,23 @@ export class SupabaseAdapter implements ProviderAdapter {
     const warnings: string[] = [];
     let dataSql = "";
 
+    const tableTotal = tablesResult.success && tablesResult.data?.rows ? tablesResult.data.rows.length : 0;
     if (tablesResult.success && tablesResult.data?.rows) {
+      const skippedSystem = new Set<string>();
       for (const row of tablesResult.data.rows) {
         const tableSchema = String(row.table_schema);
         const tableName = String(row.table_name);
         const tableFullName = `${tableSchema}.${tableName}`;
+
+        // Data must cover exactly the schemas the schema dump covers.
+        // System schemas (cron, vault, realtime, ...) migrate via dedicated
+        // components or not at all — exporting their rows would fail the
+        // import against tables that were never created.
+        if (isSupabaseExcludedSchema(tableSchema)) {
+          skippedSystem.add(tableSchema);
+          exportedRowCounts[tableFullName] = 0;
+          continue;
+        }
         tables.push(tableFullName);
 
         // Get row count for each table
@@ -83,7 +107,13 @@ export class SupabaseAdapter implements ProviderAdapter {
         );
         dataSql += exported.sql;
         exportedRowCounts[tableFullName] = exported.exportedRows;
+        options.onItem?.({ step: "exporting_schema", item: tableFullName, itemIndex: tables.length, itemTotal: tableTotal });
         if (exported.message) warnings.push(exported.message);
+      }
+      if (skippedSystem.size > 0) {
+        warnings.push(
+          `Skipped row data for Supabase system schemas (${[...skippedSystem].sort().join(", ")}): managed outside the transfer — schema is not migrated, so rows would have nowhere to land.`,
+        );
       }
     }
 
@@ -97,45 +127,94 @@ export class SupabaseAdapter implements ProviderAdapter {
     };
   }
 
-  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<void> {
+  async importDatabase(connectionString: string, data: DatabaseExport, options: TransferOptions): Promise<ImportOutcome | void> {
     const { resetAndApplySql } = await import("@/lib/db/export-helpers");
+    const { sanitizeExtensionsForDestination } = await import("../schema-dump-sql");
+
+    // Probe extensions first: destinations reject some outright (Neon:
+    // pg_cron only in `postgres`, supabase_vault unlisted) and one bad
+    // CREATE EXTENSION would roll back the whole import. Rejected ones
+    // become warnings; everything else still imports atomically.
+    const sanitized = await sanitizeExtensionsForDestination(serverTransferQuery, connectionString, data.schemaSql);
 
     // Single transaction (drops + schema + row data, FK-ordered): a failure
     // rolls everything back, so the destination is never left partially
     // populated. Errors propagate so the transfer reports failure honestly.
-    await resetAndApplySql(connectionString, data.schemaSql, data.dataSql);
+    const applied = await resetAndApplySql(connectionString, sanitized.sql, data.dataSql, serverTransferQuery, importHooks(options));
+    const allWarnings = [...sanitized.warnings, ...(applied?.warnings ?? [])];
+    // Honest row count: export total minus rows skipped mid-import, so the
+    // completion screen never counts missing rows as transferred.
+    const counts = data.exportedRowCounts ?? data.rowCounts ?? {};
+    const exportedTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+    const stats = { rowsTransferred: Math.max(0, exportedTotal - (applied?.skippedRows ?? 0)) };
+    if (allWarnings.length > 0) return { warnings: allWarnings, stats };
+    return { stats };
   }
   
   async exportStorage(connectionString: string, options: TransferOptions): Promise<StorageExport> {
     const { buckets, error: bucketsError } = await fetchStorageBuckets(connectionString);
-    
+
     if (bucketsError) {
       console.warn("Failed to fetch storage buckets:", bucketsError);
       return { buckets: [], files: [] };
     }
-    
+
     const files: StorageExport["files"] = [];
-    
+    const warnings: string[] = [];
+
+    // File bytes migrate only with management credentials (service_role via
+    // the mgmt API). Without them this stays metadata-only — disclosed, not silent.
+    const { creds, warning: credsWarning } = await resolveSupabaseApiCreds(connectionString);
+    if (credsWarning) warnings.push(credsWarning);
+
+    let totalBytes = 0;
     for (const bucket of buckets) {
       const { objects, error: objectsError } = await fetchStorageObjects(connectionString, bucket.name);
-      
+
       if (objectsError) {
-        console.warn(`Failed to fetch objects for bucket ${bucket.name}:`, objectsError);
+        warnings.push(`Failed to list objects for bucket ${bucket.name}: ${objectsError}`);
         continue;
       }
-      
+
       for (const object of objects) {
-        // For now, we'll export metadata only. Full file content export would need
-        // additional implementation with proper streaming and size limits
-        files.push({
+        const entry: StorageExport["files"][number] = {
           bucketId: bucket.id,
           path: object.name,
           metadata: object.metadata || {},
           size: object.metadata ? (object.metadata as any).size : undefined,
-        });
+        };
+        // Best-effort byte fetch within budget; metadata always migrates.
+        if (creds) {
+          if (totalBytes >= MAX_STORAGE_TOTAL_BYTES) {
+            warnings.push(`Storage byte budget exceeded: ${object.name} and remaining files migrate metadata-only.`);
+          } else if (typeof entry.size === "number" && entry.size > MAX_STORAGE_FILE_BYTES) {
+            // Pre-check from listing metadata: never fetch an object that
+            // already exceeds the per-file cap.
+            warnings.push(`Skipped ${bucket.name}/${object.name}: size ${entry.size} bytes exceeds per-file cap (metadata migrates).`);
+          } else {
+            const dl = await downloadStorageObject(creds, bucket.name, object.name);
+            if ("bytes" in dl) {
+              totalBytes += dl.bytes.length;
+              entry.contentBase64 = dl.bytes.toString("base64");
+              entry.size = dl.bytes.length;
+            } else if (dl.error !== "not found") {
+              warnings.push(`Could not download ${bucket.name}/${object.name}: ${dl.error} (metadata migrates).`);
+            }
+          }
+        }
+        files.push(entry);
       }
     }
-    
+
+    if (files.some((f) => f.contentBase64)) {
+      warnings.push(
+        `Downloaded ${(totalBytes / 1024 / 1024).toFixed(1)} MB of file contents from ${creds?.projectRef ?? "source"}; files without contents migrate metadata-only.`,
+      );
+    } else if (files.length > 0) {
+      warnings.push(
+        `Storage export is metadata-only: ${files.length} file(s) recorded without contents (object bytes are not reachable over SQL${creds ? "" : " and no management token is available"}). File contents will NOT migrate.`,
+      );
+    }
     return {
       buckets: buckets.map(b => ({
         id: b.id,
@@ -145,12 +224,7 @@ export class SupabaseAdapter implements ProviderAdapter {
         allowed_mime_types: b.allowed_mime_types,
       })),
       files,
-      warnings:
-        files.length > 0
-          ? [
-              `Storage export is metadata-only: ${files.length} file(s) recorded without contents (object bytes are not reachable over SQL). File contents will NOT migrate.`,
-            ]
-          : [],
+      warnings,
     };
   }
   
@@ -159,6 +233,7 @@ export class SupabaseAdapter implements ProviderAdapter {
     // data cannot alter the SQL executed with destination privileges.
     const warnings: string[] = [];
     let bucketsOk = 0;
+    let filesOk = 0;
     for (const bucket of data.buckets) {
       try {
         const fileSizeLimit = bucket.file_size_limit === null ? 'NULL' : bucket.file_size_limit;
@@ -186,16 +261,40 @@ export class SupabaseAdapter implements ProviderAdapter {
       }
     }
 
-    // File CONTENTS cannot migrate over SQL: object bytes live in the
-    // Storage backend (S3/disk), not in Postgres, and the transfer holds no
-    // Storage API credentials. Buckets + metadata migrate; contents do not —
-    // reported as a warning, and files counted as 0 transferred, never silently.
-    if (data.files.length > 0) {
+    // File contents upload when the export carried bytes AND this
+    // destination offers management credentials. Otherwise metadata-only,
+    // reported per file count — never silently counted as transferred.
+    const withBytes = data.files.filter((f) => f.contentBase64);
+    const metadataOnly = data.files.length - withBytes.length;
+    if (withBytes.length > 0) {
+      const { creds, warning: credsWarning } = await resolveSupabaseApiCreds(connectionString);
+      if (!creds) {
+        warnings.push(
+          `${withBytes.length} file(s) carried contents but the destination has no management token${credsWarning ? ` (${credsWarning})` : ""} — contents NOT uploaded.`,
+        );
+      } else {
+        const mimeOf = (f: StorageExport["files"][number]): string | undefined => {
+          const m = (f.metadata as Record<string, unknown> | null)?.mimetype;
+          return typeof m === "string" ? m : undefined;
+        };
+        for (const file of withBytes) {
+          try {
+            const bytes = Buffer.from(file.contentBase64 as string, "base64");
+            const up = await uploadStorageObject(creds, file.bucketId, file.path, bytes, mimeOf(file));
+            if ("ok" in up) filesOk++;
+            else warnings.push(`Failed to upload ${file.bucketId}/${file.path}: ${up.error} (bucket + metadata migrated).`);
+          } catch (error) {
+            warnings.push(`Failed to upload ${file.bucketId}/${file.path}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+    }
+    if (metadataOnly > 0) {
       warnings.push(
-        `${data.files.length} file(s) across ${data.buckets.length} bucket(s) migrated metadata-only: file contents require Storage API access and were NOT copied. Re-upload contents or copy the underlying bucket store manually.`,
+        `${metadataOnly} file(s) migrated metadata-only: contents were not in the export (unreachable over SQL or over budget) and were NOT copied.`,
       );
     }
-    return { warnings, stats: { storageBucketsTransferred: bucketsOk, storageFilesTransferred: 0 } };
+    return { warnings, stats: { storageBucketsTransferred: bucketsOk, storageFilesTransferred: filesOk } };
   }
   
   async exportAuth(connectionString: string, options: TransferOptions): Promise<AuthExport> {
@@ -319,31 +418,39 @@ export class SupabaseAdapter implements ProviderAdapter {
     }
     
     try {
-      // Export RLS policies
+      // Export RLS policies. NOTE: pg_get_expr takes (node tree, oid) —
+      // passing text table names fails with "function does not exist".
+      // Policies primarily migrate via the schema dump; this export is
+      // informational (full CREATE POLICY statements for reference).
       const policiesResult = await serverTransferQuery(
         connectionString,
-        `SELECT schemaname as schema, tablename as table, policyname as name, pg_get_expr(qual, schemaname||'.'||tablename) as definition
-         FROM pg_policies
-         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+        `SELECT n.nspname AS schema, c.relname AS table_name, p.polname AS name,
+                CASE p.polcmd WHEN 'r' THEN 'SELECT' WHEN 'a' THEN 'INSERT' WHEN 'w' THEN 'UPDATE' WHEN 'd' THEN 'DELETE' ELSE 'ALL' END AS cmd,
+                COALESCE((SELECT string_agg(quote_ident(r.rolname), ', ') FROM pg_roles r WHERE r.oid = ANY (p.polroles)), 'PUBLIC') AS roles,
+                pg_get_expr(p.polqual, p.polrelid) AS qual,
+                pg_get_expr(p.polwithcheck, p.polrelid) AS with_check
+         FROM pg_policy p
+         JOIN pg_class c ON c.oid = p.polrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
          LIMIT 500`
       );
-      
+
       if (policiesResult.success && policiesResult.data?.rows) {
         for (const row of policiesResult.data.rows) {
           const schema = String(row.schema);
-          const table = String(row.table);
+          const table = String(row.table_name);
           const name = String(row.name);
-          policies.push({
-            id: `${schema}.${table}.${name}`,
-            name,
-            schema,
-            table,
-            definition: String(row.definition),
-          });
+          let definition = `CREATE POLICY ${name} ON ${schema}.${table} FOR ${String(row.cmd)} TO ${String(row.roles)}`;
+          if (row.qual != null) definition += ` USING (${String(row.qual)})`;
+          if (row.with_check != null) definition += ` WITH CHECK (${String(row.with_check)})`;
+          policies.push({ id: `${schema}.${table}.${name}`, name, schema, table, definition });
         }
+      } else if (!policiesResult.success) {
+        warnings.push(`RLS policy export skipped: ${String(policiesResult.error ?? "query failed")} (policies in the schema dump still migrate).`);
       }
     } catch (error) {
-      console.warn("Failed to export RLS policies:", error);
+      warnings.push(`RLS policy export skipped: ${error instanceof Error ? error.message : String(error)} (policies in the schema dump still migrate).`);
     }
     
     return { users, providers, policies, identities, warnings };
@@ -500,23 +607,101 @@ export class SupabaseAdapter implements ProviderAdapter {
     return { warnings, stats: { authUsersTransferred: usersOk, authProvidersTransferred: providersOk } };
   }
   
+  async exportFunctions(connectionString: string, options: TransferOptions): Promise<FunctionsExport> {
+    const warnings: string[] = [];
+    const { creds, warning: credsWarning } = await resolveSupabaseApiCreds(connectionString);
+    if (!creds) {
+      return {
+        functions: [],
+        warnings: [credsWarning ?? "Edge functions require a supabase-mgmt connection; nothing exported."],
+      };
+    }
+    const listed = await listSupabaseFunctions(creds);
+    if ("error" in listed) {
+      return { functions: [], warnings: [`Failed to list edge functions: ${listed.error}`] };
+    }
+    const functions: FunctionsExport["functions"] = [];
+    for (const fn of listed.functions) {
+      const bodyRes = await getSupabaseFunctionBody(creds, fn.slug);
+      if ("error" in bodyRes) {
+        warnings.push(`Function ${fn.slug}: source not readable (${bodyRes.error}); skipped.`);
+        continue;
+      }
+      const files = [{ path: "index.ts", content: bodyRes.body }];
+      functions.push({
+        slug: fn.slug,
+        provider: "supabase",
+        verifyJwt: fn.verifyJwt,
+        files,
+        diffs: buildCompatDiffs(fn.slug, "supabase", files),
+      });
+    }
+    if (listed.functions.length === 0) warnings.push("No edge functions found on source.");
+    return { functions, warnings };
+  }
+
+  async importFunctions(connectionString: string, data: FunctionsExport, options: TransferOptions) {
+    const warnings: string[] = [];
+    let deployed = 0;
+    // Same-family redeploy needs no porting: deploy sources verbatim.
+    // Foreign sources deploy their pre-ported transform when the diff
+    // builder produced one, else verbatim with a warning.
+    const { creds, warning: credsWarning } = await resolveSupabaseApiCreds(connectionString);
+    if (!creds) {
+      if (data.functions.length > 0) {
+        warnings.push(
+          `Edge functions not deployed: destination has no management token${credsWarning ? ` (${credsWarning})` : ""}. Sources are preserved in the transfer package — deploy manually.`,
+        );
+      }
+      return { warnings, stats: { functionsTransferred: 0 } };
+    }
+    for (const fn of data.functions) {
+      try {
+        if (fn.provider !== "supabase" && !options.allowAutoPortedDeploy) {
+          warnings.push(`Function ${fn.slug}: cross-runtime auto-ported draft NOT deployed — review its compat diff, then redeploy with auto-ported deploys enabled. Sources preserved in package.`);
+          continue;
+        }
+        const useFiles =
+          fn.provider === "supabase"
+            ? fn.files
+            : (fn.diffs.find((d) => d.targetProvider === "supabase")?.transformedFiles ?? fn.files);
+        if (fn.provider !== "supabase") {
+          warnings.push(`Function ${fn.slug}: deploying auto-ported draft (explicitly enabled) — runtime APIs may differ, verify behavior.`);
+        }
+        const entry = useFiles.find((f) => /index\.[tj]s$/.test(f.path)) ?? useFiles[0];
+        if (!entry) {
+          warnings.push(`Function ${fn.slug}: no deployable file; skipped.`);
+          continue;
+        }
+        const res = await deploySupabaseFunction(creds, fn.slug, entry.content, fn.verifyJwt);
+        if ("ok" in res) deployed++;
+        else warnings.push(`Function ${fn.slug}: deploy failed (${res.error}).`);
+      } catch (error) {
+        warnings.push(`Function ${fn.slug}: deploy failed (${error instanceof Error ? error.message : String(error)}).`);
+      }
+    }
+    return { warnings, stats: { functionsTransferred: deployed } };
+  }
   async exportSettings(connectionString: string, options: TransferOptions): Promise<SettingsExport> {
     const projectSettings: Record<string, unknown> = {};
-    
+
+    // public.settings rarely exists — check first so a missing table isn't
+    // probed (and logged as a scary failure) on every transfer.
     try {
-      // Export various project settings that might be stored in the database
-      const settingsResult = await serverTransferQuery(
+      const exists = await serverTransferQuery(
         connectionString,
-        `SELECT * FROM public.settings LIMIT 1`
+        `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'settings' LIMIT 1`,
       );
-      
+      if (!exists.success || (exists.data?.rows ?? []).length === 0) return { projectSettings };
+      const settingsResult = await serverTransferQuery(connectionString, `SELECT * FROM public.settings LIMIT 1`);
+
       if (settingsResult.success && settingsResult.data?.rows?.[0]) {
-        Object.assign(projectSettings, settingsResult.data.rows[0]);
+        Object.assign(projectSettings, settingsResult.data.rows[0] as Record<string, unknown>);
       }
-    } catch (error) {
+    } catch {
       // Settings table might not exist, that's okay
     }
-    
+
     return {
       projectSettings,
     };

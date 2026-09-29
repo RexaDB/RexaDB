@@ -33,7 +33,13 @@ export const SUPABASE_DUMP_EXCLUDED_SCHEMA_PATTERNS = [
 
 export function isLikelySupabaseConnection(connectionString: string): boolean {
   try {
-    const host = new URL(normalizePgConnectionString(connectionString)).hostname.toLowerCase();
+    const input = String(connectionString || "").trim();
+    // Management pointers carry no supabase.co hostname (just the project
+    // ref) — but they ARE Supabase, and every exclusion/transform gated on
+    // this check applies to them (missing it once dumped auth.* into a
+    // transfer and broke the destination import).
+    if (/^supabase-mgmt:\/\//i.test(input)) return true;
+    const host = new URL(normalizePgConnectionString(input)).hostname.toLowerCase();
     return host.includes("supabase.co") || host.includes("supabase.in");
   } catch {
     return false;

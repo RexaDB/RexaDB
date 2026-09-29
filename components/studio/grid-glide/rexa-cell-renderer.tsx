@@ -392,7 +392,13 @@ function rowSpacingToPx(rowSpacing: RexaCellData["rowSpacing"]): number {
 
 function toDisplayValue(value: any): string {
   if (value === null || value === undefined) return "NULL";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value) ?? String(value);
+    } catch {
+      return String(value);
+    }
+  }
   return String(value);
 }
 
@@ -539,9 +545,22 @@ function EditorFooter({
 }
 
 function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {
-  const [value, setValue] = React.useState(
-    d.value === null || d.value === undefined ? "" : String(d.value),
-  );
+  const [value, setValue] = React.useState(() => {
+    if (d.value === null || d.value === undefined) return "";
+    // Never use String(object) — that yields "[object Object],[object Object],..."
+    // for arrays of row objects (the bug in the screenshot). Use the already-
+    // computed displayValue (JSON.stringify for objects) so WYSIWYG holds:
+    // what you see in the cell is what you edit.
+    if (typeof d.displayValue === "string") return d.displayValue;
+    if (typeof d.value === "object") {
+      try {
+        return JSON.stringify(d.value);
+      } catch {
+        return String(d.value);
+      }
+    }
+    return String(d.value);
+  });
   const [isMaximized, setIsMaximized] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 

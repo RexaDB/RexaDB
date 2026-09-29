@@ -8,6 +8,8 @@ import {
   Sheet,
   SheetContent,
   SheetHeader,
+  SheetTitle,
+  SheetDescription,
   SheetFooter,
 } from "@/components/ui/sheet";
 
@@ -188,7 +190,16 @@ export function FKSelectionSheet({
         resizeHandleLabel="Resize select record sheet"
       >
         <SheetHeader className="h-12 border-b shrink-0 flex flex-row items-center gap-2 px-4">
-          <span className="text-xs text-muted-foreground shrink-0">
+          <SheetTitle className="sr-only">
+            Choose a record
+            {fkSelectionTarget?.fkInfo?.foreign_table_name
+              ? ` from ${fkSelectionTarget.fkInfo.foreign_table_schema}.${fkSelectionTarget.fkInfo.foreign_table_name}`
+              : ""}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            Select a row to link as a foreign key value.
+          </SheetDescription>
+          <span className="text-xs text-muted-foreground shrink-0" aria-hidden="true">
             Choose a record from{" "}
             <span className="font-mono text-primary bg-primary/10 px-1 rounded">
               {fkSelectionTarget?.fkInfo.foreign_table_schema}.

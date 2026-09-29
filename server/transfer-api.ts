@@ -18,11 +18,30 @@ import type { TransferProgress } from "@/lib/transfer/transfer-types";
 type TransferJob = {
   progress: TransferProgress;
   done: boolean;
-  result?: { success: boolean; stats?: Record<string, number>; warnings?: string[]; error?: string };
+  result?: {
+    success: boolean;
+    stats?: Record<string, number>;
+    warnings?: string[];
+    error?: string;
+    functionDiffs?: Array<{ slug: string; targetProvider: string; diff: string; notes: string[] }>;
+  };
   updatedAt: number;
 };
 
 const jobs = new Map<string, TransferJob>();
+
+/**
+ * One running transfer per destination connection. Two concurrent imports
+ * into the same database interleave drops/creates and collide mid-flight
+ * ("relation already exists", half-written schemas). The second starter
+ * gets a clear rejection instead of a corrupted destination.
+ */
+const activeByDestination = new Map<string, string>();
+
+export function getActiveTransferIdForDestination(destinationConnectionString: string): string | undefined {
+  const id = activeByDestination.get(destinationConnectionString);
+  return id && !jobs.get(id)?.done ? id : undefined;
+}
 
 const JOB_TTL_MS = 60 * 60 * 1000; // keep finished jobs for an hour
 
@@ -35,6 +54,9 @@ function pruneJobs(): void {
   for (const [id, job] of jobs) {
     if (job.done && job.updatedAt < cutoff) jobs.delete(id);
   }
+  for (const [dest, id] of activeByDestination) {
+    if (jobs.get(id)?.done) activeByDestination.delete(dest);
+  }
 }
 
 function newTransferId(): string {
@@ -43,6 +65,13 @@ function newTransferId(): string {
 
 export async function handleTransferStart(request: TransferApiRequest): Promise<TransferApiResponse> {
   pruneJobs();
+  const clash = getActiveTransferIdForDestination(request.destinationConnectionString);
+  if (clash) {
+    return {
+      success: false,
+      error: `Another transfer to this destination is already running (${clash}). Wait for it to finish before starting a new one — concurrent imports would corrupt the destination.`,
+    };
+  }
   try {
     const transferId = newTransferId();
 
@@ -58,6 +87,7 @@ export async function handleTransferStart(request: TransferApiRequest): Promise<
       updatedAt: Date.now(),
     };
     jobs.set(transferId, job);
+    activeByDestination.set(request.destinationConnectionString, transferId);
 
     // Run in the background; the client polls /progress/:transferId.
     void executeTransfer(transferId, request);
@@ -98,6 +128,15 @@ async function executeTransfer(transferId: string, request: TransferApiRequest):
       stats: result.stats as Record<string, number> | undefined,
       warnings: result.warnings,
       error: result.error,
+      // Compat diffs for the UI (truncated per diff so polling stays light).
+      functionDiffs: result.package?.functions?.functions.flatMap((fn) =>
+        fn.diffs.map((d) => ({
+          slug: fn.slug,
+          targetProvider: d.targetProvider,
+          diff: d.diff.length > 6000 ? `${d.diff.slice(0, 6000)}\n… (truncated — full diff in exported package)` : d.diff,
+          notes: d.notes,
+        })),
+      ),
     };
     if (result.success) {
       job.progress = {
@@ -119,6 +158,9 @@ async function executeTransfer(transferId: string, request: TransferApiRequest):
   } finally {
     job.done = true;
     touch(job);
+    if (activeByDestination.get(request.destinationConnectionString) === transferId) {
+      activeByDestination.delete(request.destinationConnectionString);
+    }
   }
 }
 

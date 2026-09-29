@@ -1,32 +1,32 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
-  ArrowRight,
-  ArrowLeft,
   Database,
   HardDrive,
   Shield,
   Settings,
   Loader2,
+  Check,
   CheckCircle2,
-  AlertCircle,
+  ChevronDown,
+  Circle,
   Download,
-  Upload,
-  RefreshCw,
+  XCircle,
+  Zap,
 } from "@/lib/icon-theme/lucide-react";
-import { startTransfer, exportTransferPackage } from "@/lib/transfer/transfer-client";
+import { startTransfer, exportTransferPackage, type FunctionDiffView } from "@/lib/transfer/transfer-client";
 import type {
   TransferOptions,
   TransferProgress,
+  TransferStep,
   ProviderType,
 } from "@/lib/transfer/transfer-types";
 
@@ -37,42 +37,131 @@ interface TransferWizardProps {
     connectionString: string;
     connectionType: string;
   }>;
-  onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[] }) => void;
+  initialSourceConnectionId?: string | null;
+  onComplete?: (result: { success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] }) => void;
   onCancel?: () => void;
 }
 
 type WizardStep = "select-sources" | "select-options" | "confirm" | "transferring" | "complete" | "error";
 
-export function TransferWizard({ connections, onComplete, onCancel }: TransferWizardProps) {
+const STEP_LABELS: Record<TransferStep, string> = {
+  validating: "Validating connections",
+  exporting_schema: "Exporting database",
+  exporting_data: "Exporting table data",
+  exporting_storage: "Exporting storage",
+  exporting_auth: "Exporting auth",
+  exporting_settings: "Exporting settings",
+  importing_schema: "Importing database",
+  importing_data: "Importing table data",
+  importing_storage: "Importing storage",
+  importing_auth: "Importing auth",
+  importing_settings: "Importing settings",
+  exporting_functions: "Exporting edge functions",
+  importing_functions: "Importing edge functions",
+  finalizing: "Finalizing",
+  complete: "Complete",
+};
+
+function displaySteps(options: TransferOptions): TransferStep[] {
+  const steps: TransferStep[] = ["validating"];
+  if (options.includeDatabase) steps.push("exporting_schema", "exporting_data", "importing_schema", "importing_data");
+  if (options.includeStorage) steps.push("exporting_storage", "importing_storage");
+  if (options.includeAuth) steps.push("exporting_auth", "importing_auth");
+  if (options.includeSettings) steps.push("exporting_settings", "importing_settings");
+  if (options.includeEdgeFunctions) steps.push("exporting_functions", "importing_functions");
+  steps.push("finalizing", "complete");
+  return steps;
+}
+
+const COMPONENTS: Array<{
+  key: "includeDatabase" | "includeStorage" | "includeAuth" | "includeSettings" | "includeEdgeFunctions";
+  icon: typeof Database;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "includeDatabase",
+    icon: Database,
+    label: "Database schema & data",
+    description: "Tables, schemas and row data up to the per-table cap — including Neon Auth's neon_auth tables.",
+  },
+  {
+    key: "includeStorage",
+    icon: HardDrive,
+    label: "Storage buckets & files",
+    description: "Supabase buckets plus file metadata. File contents never migrate over SQL.",
+  },
+  {
+    key: "includeAuth",
+    icon: Shield,
+    label: "Authentication users & providers",
+    description: "Supabase GoTrue users with password hashes when readable, identity links and OAuth providers.",
+  },
+  {
+    key: "includeSettings",
+    icon: Settings,
+    label: "Project settings",
+    description: "Project-level settings snapshot.",
+  },
+  {
+    key: "includeEdgeFunctions",
+    icon: Zap,
+    label: "Edge functions",
+    description: "Sources migrate with git-style compat diffs. Cross-runtime drafts stage for review, not auto-deployed.",
+  },
+];
+
+const pillButton =
+  "h-11 flex-1 rounded-full border border-border bg-card px-8 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50";
+
+function ConfirmComponentRow({ icon, label, warning }: { icon: React.ReactNode; label: string; warning: string }) {
+  return (
+    <li className="flex items-center gap-2 py-1 text-xs">
+      {icon}
+      <span className="font-medium">{label}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${label} caveats`}
+            className="flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-amber-500/50 text-[10px] font-medium leading-none text-amber-600 dark:text-amber-400"
+          >
+            ?
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[260px] text-xs">
+          {warning}
+        </TooltipContent>
+      </Tooltip>
+    </li>
+  );
+}
+
+const statusPill =
+  "mx-auto mt-5 flex w-full max-w-[440px] items-center justify-center rounded-full border border-border bg-card px-8 py-3 text-center shadow-sm";
+
+export function TransferWizard({ connections, initialSourceConnectionId, onComplete, onCancel }: TransferWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>("select-sources");
-  const [sourceConnectionId, setSourceConnectionId] = useState<string>("");
+  const [sourceConnectionId, setSourceConnectionId] = useState<string>(
+    initialSourceConnectionId &&
+      connections.some((c) => c.id === initialSourceConnectionId)
+      ? initialSourceConnectionId
+      : "",
+  );
   const [destinationConnectionId, setDestinationConnectionId] = useState<string>("");
   const [transferOptions, setTransferOptions] = useState<TransferOptions>({
     includeDatabase: true,
     includeStorage: true,
     includeAuth: true,
     includeSettings: true,
+    includeEdgeFunctions: true,
     batchSize: 100,
   });
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[] } | null>(null);
+  const [transferResult, setTransferResult] = useState<{ success: boolean; stats?: Record<string, number>; warnings?: string[]; functionDiffs?: FunctionDiffView[] } | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
-
-  // Completion is user-acknowledged: the complete step (stats + warnings)
-  // stays mounted until Done is clicked. Auto-firing onComplete here used
-  // to unmount the wizard before warnings could be read.
-  const handleDone = useCallback(() => {
-    if (transferResult?.success && onComplete) {
-      onComplete({
-        success: true,
-        stats: transferResult.stats,
-        warnings: transferResult.warnings,
-      });
-    } else {
-      onCancel?.();
-    }
-  }, [transferResult, onComplete, onCancel]);
+  const transferringRef = useRef(false);
 
   const getProviderType = (connectionType: string): ProviderType => {
     if (connectionType.includes("supabase")) return "supabase";
@@ -84,13 +173,92 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const getSourceConnection = () => connections.find(c => c.id === sourceConnectionId);
   const getDestinationConnection = () => connections.find(c => c.id === destinationConnectionId);
 
+  const destProvider: ProviderType | null = useMemo(() => {
+    const dest = getDestinationConnection();
+    return dest ? getProviderType(dest.connectionType) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destinationConnectionId, connections]);
+
+  const unsupportedNotice = useMemo(() => {
+    // Supabase and Neon both transfer storage bytes and auth rows. Only
+    // generic Postgres lacks Supabase-compatible storage/auth schemas.
+    if (!destProvider || destProvider === "supabase" || destProvider === "neon") return null;
+    const parts = [
+      transferOptions.includeStorage ? "storage buckets/files" : null,
+      transferOptions.includeAuth ? "GoTrue users/providers" : null,
+    ].filter(Boolean);
+    if (parts.length === 0) return null;
+    const destName = destProvider === "generic" ? "This destination" : `A ${destProvider} destination`;
+    return `${destName} has no Supabase-compatible storage or auth schemas: ${parts.join(" and ")} will be skipped with a warning, not transferred. Ordinary tables migrate with the database.`;
+  }, [destProvider, transferOptions.includeStorage, transferOptions.includeAuth]);
+
+  // Completion is user-acknowledged: the complete step (stats + warnings)
+  // stays mounted until Done is clicked. Auto-firing onComplete used to
+  // unmount the wizard before warnings could be read.
+  // Rolling per-step log: every progress tick is recorded with a
+  // timestamp so each step expands to show what ran, what is running,
+  // and how long it has taken so far.
+  type LogEntry = { step: TransferStep; message: string; at: number; time: string; item?: string };
+  const [progressLog, setProgressLog] = useState<LogEntry[]>([]);
+  const [expandedStep, setExpandedStep] = useState<TransferStep | null>(null);
+  const recordProgress = useCallback((p: TransferProgress) => {
+    setProgress(p);
+    setProgressLog((prev) => {
+      const details = p.details as Record<string, unknown> | undefined;
+      const item = typeof details?.item === "string" ? details.item : undefined;
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.step === p.currentStep && last.message === p.message) {
+        last.at = Date.now();
+        last.time = new Date(last.at).toLocaleTimeString([], { hour12: false });
+        if (item) last.item = item;
+      } else {
+        const at = Date.now();
+        next.push({
+          step: p.currentStep,
+          message: p.message,
+          at,
+          time: new Date(at).toLocaleTimeString([], { hour12: false }),
+          item,
+        });
+        if (next.length > 300) next.splice(0, next.length - 300);
+      }
+      return next;
+    });
+  }, []);
+
+  const formatElapsed = (ms: number): string => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
+
+  const handleDone = useCallback(() => {
+    if (transferResult?.success && onComplete) {
+      onComplete({
+        success: true,
+        stats: transferResult.stats,
+        warnings: transferResult.warnings,
+        functionDiffs: transferResult.functionDiffs,
+      });
+    } else {
+      onCancel?.();
+    }
+  }, [transferResult, onComplete, onCancel]);
+
   const handleStartTransfer = useCallback(async () => {
+    // Ref guard (not state): rapid double-clicks land in the same tick
+    // before setIsTransferring re-renders, spawning two concurrent
+    // transfers whose imports collide mid-destination ("already exists").
+    if (transferringRef.current) return;
+    transferringRef.current = true;
     const source = getSourceConnection();
     const destination = getDestinationConnection();
 
     if (!source || !destination) {
       setError("Please select both source and destination connections");
       setCurrentStep("error");
+      transferringRef.current = false;
       return;
     }
 
@@ -108,7 +276,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
           options: transferOptions,
         },
         (progress) => {
-          setProgress(progress);
+          recordProgress(progress);
         }
       );
 
@@ -116,6 +284,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
         success: result.success,
         stats: result.stats,
         warnings: result.warnings,
+        functionDiffs: result.functionDiffs,
       });
 
       if (result.success) {
@@ -130,7 +299,9 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
       setCurrentStep("error");
     } finally {
       setIsTransferring(false);
+      transferringRef.current = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceConnectionId, destinationConnectionId, transferOptions, connections, onComplete]);
 
   const handleExportPackage = useCallback(async () => {
@@ -171,11 +342,12 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     } finally {
       setIsTransferring(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceConnectionId, transferOptions, connections]);
 
   const canProceed = () => {
     if (currentStep === "select-sources") {
-      return sourceConnectionId && destinationConnectionId && sourceConnectionId !== destinationConnectionId;
+      return Boolean(sourceConnectionId && destinationConnectionId && sourceConnectionId !== destinationConnectionId);
     }
     return true;
   };
@@ -183,7 +355,7 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   const nextStep = () => {
     if (currentStep === "select-sources") setCurrentStep("select-options");
     else if (currentStep === "select-options") setCurrentStep("confirm");
-    else if (currentStep === "confirm") handleStartTransfer();
+    else if (currentStep === "confirm") void handleStartTransfer();
   };
 
   const prevStep = () => {
@@ -192,6 +364,9 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
   };
 
   const resetWizard = () => {
+    transferringRef.current = false;
+    setProgressLog([]);
+    setExpandedStep(null);
     setCurrentStep("select-sources");
     setProgress(null);
     setError(null);
@@ -199,414 +374,421 @@ export function TransferWizard({ connections, onComplete, onCancel }: TransferWi
     setIsTransferring(false);
   };
 
-  return (
-    <div className="max-w-4xl mx-auto p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <RefreshCw className="h-5 w-5" />
-            Project Transfer Wizard
-          </CardTitle>
-          <CardDescription>
-            Transfer your entire project between database providers including database, storage, auth, and settings.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* Step indicator */}
-          <div className="flex items-center justify-between mb-6">
-            {["select-sources", "select-options", "confirm", "transferring", "complete"].map((step, index) => (
-              <div key={step} className="flex items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                    currentStep === step
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {index + 1}
-                </div>
-                {index < 4 && <div className="w-12 h-0.5 bg-muted mx-2" />}
-              </div>
-            ))}
-          </div>
+  // Task rows are transfer progress indicators only — they render
+  // while the transfer runs, never as a wizard stepper.
+  const runSteps = useMemo(() => displaySteps(transferOptions), [transferOptions]);
+  const runIndex = progress ? runSteps.indexOf(progress.currentStep) : -1;
 
-          {/* Step content */}
-          {currentStep === "select-sources" && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label>Source Connection</Label>
-                <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select source database" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connections.map((conn) => (
-                      <SelectItem key={conn.id} value={conn.id}>
-                        <div className="flex items-center gap-2">
-                          <Database className="h-4 w-4" />
+
+  const stats = transferResult?.stats;
+  const statCards = stats
+    ? [
+        { label: "Tables", value: stats.tablesTransferred },
+        { label: "Rows", value: stats.rowsTransferred },
+        { label: "Storage buckets", value: stats.storageBucketsTransferred },
+        { label: "Storage files", value: stats.storageFilesTransferred },
+        { label: "Auth users", value: stats.authUsersTransferred },
+        { label: "Auth providers", value: stats.authProvidersTransferred },
+        { label: "Edge functions", value: stats.functionsTransferred },
+      ]
+    : [];
+
+  const showNav = currentStep === "select-sources" || currentStep === "select-options" || currentStep === "confirm";
+
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <div className="flex items-center justify-center gap-3">
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {currentStep === "complete" ? "Transfer complete" : "Transfer Project"}
+        </h2>
+      </div>
+
+      {currentStep === "transferring" && (
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          {runSteps.map((step, i) => {
+            const done = progress?.currentStep === "complete" || runIndex > i;
+            const failed = Boolean(progress?.error) && i === runIndex;
+            const active = i === runIndex && !done && !failed;
+            const entries = progressLog.filter((e) => e.step === step);
+            const firstAt = entries.length > 0 ? entries[0].at : null;
+            const lastAt = entries.length > 0 ? entries[entries.length - 1].at : null;
+            // Elapsed advances with progress ticks (no Date.now in render).
+            const elapsed = firstAt !== null && lastAt !== null ? formatElapsed(lastAt - firstAt) : null;
+            const expanded = expandedStep === step;
+            return (
+              <div key={step} className={cn(i > 0 && "border-t border-border/60")}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedStep(expanded ? null : step)}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left"
+                >
+                  {failed ? (
+                    <XCircle className="size-4 shrink-0 text-destructive" />
+                  ) : done ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-green-500" />
+                  ) : active ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Circle className="size-4 shrink-0 opacity-40" />
+                  )}
+                  <span className={cn("min-w-0 flex-1 truncate text-sm", active ? "font-medium text-foreground" : "text-muted-foreground")}>
+                    {STEP_LABELS[step]}
+                  </span>
+                  {elapsed !== null && (
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{elapsed}</span>
+                  )}
+                  {active && (
+                    <Badge variant="outline" className="shrink-0 border-amber-500/40 text-[10px] text-amber-600 dark:text-amber-400">
+                      In progress
+                    </Badge>
+                  )}
+                  {done && (
+                    <Badge variant="outline" className="shrink-0 border-green-500/40 text-[10px] text-green-600 dark:text-green-400">
+                      Done
+                    </Badge>
+                  )}
+                  {entries.length > 0 && (
+                    <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+                  )}
+                </button>
+                {expanded && entries.length > 0 && (
+                  <div className="border-t border-border/40 bg-muted/20 px-4 py-2">
+                    {entries.slice(-25).map((e, j) => (
+                      <div key={j} className="flex items-baseline gap-2 py-0.5 font-mono text-[11px]">
+                        <span className="shrink-0 text-muted-foreground/60">
+                          {e.time}
+                        </span>
+                        <span className="break-words text-muted-foreground">
+                          {e.message}
+                          {e.item ? <span className="text-foreground/80"> — {e.item}</span> : null}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="px-1 py-2">
+        {currentStep === "select-sources" && (
+          <div className="mx-auto flex w-full max-w-[440px] flex-col gap-3">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Source</div>
+              <Select value={sourceConnectionId} onValueChange={setSourceConnectionId}>
+                <SelectTrigger className="h-8 rounded-full text-xs">
+                  <SelectValue placeholder="Select source database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((conn) => (
+                    <SelectItem key={conn.id} value={conn.id} className="text-xs">
+                      <span className="flex items-center gap-2">
+                        <Database className="size-3.5 shrink-0 text-muted-foreground" />
+                        {conn.name}
+                        <Badge variant="outline" className="ml-1 font-mono text-[10px]">{conn.connectionType}</Badge>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Destination</div>
+              <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
+                <SelectTrigger className="h-8 rounded-full text-xs">
+                  <SelectValue placeholder="Select destination database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections
+                    .filter((c) => c.id !== sourceConnectionId)
+                    .map((conn) => (
+                      <SelectItem key={conn.id} value={conn.id} className="text-xs">
+                        <span className="flex items-center gap-2">
+                          <Database className="size-3.5 shrink-0 text-muted-foreground" />
                           {conn.name}
-                          <Badge variant="outline" className="ml-2">{conn.connectionType}</Badge>
-                        </div>
+                          <Badge variant="outline" className="ml-1 font-mono text-[10px]">{conn.connectionType}</Badge>
+                        </span>
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex justify-center">
-                <ArrowRight className="h-6 w-6 text-muted-foreground" />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Destination Connection</Label>
-                <Select value={destinationConnectionId} onValueChange={setDestinationConnectionId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select destination database" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connections
-                      .filter((c) => c.id !== sourceConnectionId)
-                      .map((conn) => (
-                        <SelectItem key={conn.id} value={conn.id}>
-                          <div className="flex items-center gap-2">
-                            <Database className="h-4 w-4" />
-                            {conn.name}
-                            <Badge variant="outline" className="ml-2">{conn.connectionType}</Badge>
-                          </div>
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {sourceConnectionId && destinationConnectionId && sourceConnectionId === destinationConnectionId && (
-                <div className="p-3 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4" />
-                    <span className="font-medium">Invalid selection</span>
-                  </div>
-                  <p className="text-sm mt-1">
-                    Source and destination cannot be the same connection.
-                  </p>
-                </div>
-            )}
+                </SelectContent>
+              </Select>
             </div>
-          )}
 
-          {currentStep === "select-options" && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Select Transfer Components</h3>
-
-              {(() => {
-                const destProvider = getDestinationConnection()
-                  ? getProviderType(getDestinationConnection()!.connectionType)
-                  : null;
-                const needsNotice =
-                  destProvider &&
-                  destProvider !== "supabase" &&
-                  (transferOptions.includeStorage || transferOptions.includeAuth);
-                if (!needsNotice) return null;
-                return (
-                  <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 text-amber-600" />
-                      <span className="font-medium text-amber-800 dark:text-amber-200">
-                        Destination limitation
-                      </span>
-                    </div>
-                    <p className="text-sm mt-1 text-amber-700 dark:text-amber-300">
-                      {destProvider === "generic"
-                        ? "The destination provider was not recognized"
-                        : `A ${destProvider} destination`} has no built-in storage or auth:{" "}
-                      {[
-                        transferOptions.includeStorage ? "storage buckets/files" : null,
-                        transferOptions.includeAuth ? "auth users/providers" : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" and ")}{" "}
-                      will be skipped with a warning, not transferred. Uncheck them or pick a Supabase destination for a complete migration.
-                    </p>
-                  </div>
-                );
-              })()}
-              
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="include-database"
-                    checked={transferOptions.includeDatabase}
-                    onCheckedChange={(checked) =>
-                      setTransferOptions({ ...transferOptions, includeDatabase: Boolean(checked) })
-                    }
-                  />
-                  <Label htmlFor="include-database" className="flex items-center gap-2 cursor-pointer">
-                    <Database className="h-4 w-4" />
-                    Database Schema & Data
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="include-storage"
-                    checked={transferOptions.includeStorage}
-                    onCheckedChange={(checked) =>
-                      setTransferOptions({ ...transferOptions, includeStorage: Boolean(checked) })
-                    }
-                  />
-                  <Label htmlFor="include-storage" className="flex items-center gap-2 cursor-pointer">
-                    <HardDrive className="h-4 w-4" />
-                    Storage Buckets & Files
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="include-auth"
-                    checked={transferOptions.includeAuth}
-                    onCheckedChange={(checked) =>
-                      setTransferOptions({ ...transferOptions, includeAuth: Boolean(checked) })
-                    }
-                  />
-                  <Label htmlFor="include-auth" className="flex items-center gap-2 cursor-pointer">
-                    <Shield className="h-4 w-4" />
-                    Authentication Users & Providers
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="include-settings"
-                    checked={transferOptions.includeSettings}
-                    onCheckedChange={(checked) =>
-                      setTransferOptions({ ...transferOptions, includeSettings: Boolean(checked) })
-                    }
-                  />
-                  <Label htmlFor="include-settings" className="flex items-center gap-2 cursor-pointer">
-                    <Settings className="h-4 w-4" />
-                    Project Settings
-                  </Label>
-                </div>
+            {sourceConnectionId && destinationConnectionId && sourceConnectionId === destinationConnectionId && (
+              <div className={cn(statusPill, "!border-destructive/30 !bg-destructive/5")}>
+                <span className="break-words text-xs leading-relaxed text-destructive">
+                  Source and destination cannot be the same connection.
+                </span>
               </div>
-
-              <div className="pt-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={handleExportPackage}
-                  disabled={isTransferring}
-                  className="gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  Export Package Only
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {currentStep === "confirm" && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Confirm Transfer</h3>
-              
-              <div className="p-3 rounded-lg border border-border bg-muted">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="font-medium">Important</span>
-                </div>
-                <p className="text-sm mt-1 text-muted-foreground">
-                  This transfer will modify the destination database. Make sure you have backups before proceeding.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <span className="font-medium text-amber-800 dark:text-amber-200">Limitations</span>
-                </div>
-                <ul className="text-sm mt-2 text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
-                  <li>Storage migrates buckets + metadata only — file contents require Storage API access and are not copied</li>
-                  <li>Auth users migrate with password hashes when readable; otherwise they must reset passwords. OAuth sign-ins need matching provider config on the destination</li>
-                  <li>Neon / generic Postgres destinations have no storage or auth — those components are skipped with a warning</li>
-                  <li>Database transfer is destructive - it drops and recreates schemas (inside one transaction: failure rolls back)</li>
-                </ul>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center p-3 bg-muted rounded">
-                  <span className="font-medium">Source:</span>
-                  <span>{getSourceConnection()?.name}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 bg-muted rounded">
-                  <span className="font-medium">Destination:</span>
-                  <span>{getDestinationConnection()?.name}</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <h4 className="font-medium">Components to transfer:</h4>
-                <ul className="space-y-1">
-                  {transferOptions.includeDatabase && <li>✓ Database Schema & Data</li>}
-                  {transferOptions.includeStorage && <li>✓ Storage Buckets & Files</li>}
-                  {transferOptions.includeAuth && <li>✓ Authentication Users & Providers</li>}
-                  {transferOptions.includeSettings && <li>✓ Project Settings</li>}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {currentStep === "transferring" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                {isTransferring ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5 text-green-500" />
-                )}
-                <h3 className="text-lg font-semibold">
-                  {progress?.message || "Preparing transfer..."}
-                </h3>
-              </div>
-
-              {progress && (
-                <>
-                  <Progress value={progress.percentage} className="h-2" />
-                  <div className="text-sm text-muted-foreground">
-                    Step {progress.currentStepIndex + 1} of {progress.totalSteps}: {progress.currentStep}
-                  </div>
-                </>
-              )}
-
-              {progress?.error && (
-                <div className="p-3 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4" />
-                    <span className="font-medium">Error</span>
-                  </div>
-                  <p className="text-sm mt-1">{progress.error}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {currentStep === "complete" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 text-green-600">
-                <CheckCircle2 className="h-8 w-8" />
-                <h3 className="text-xl font-semibold">Transfer Completed Successfully!</h3>
-              </div>
-
-              {transferResult?.warnings && transferResult.warnings.length > 0 && (
-                <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-amber-600" />
-                    <span className="font-medium text-amber-800 dark:text-amber-200">Completed with warnings</span>
-                  </div>
-                  <ul className="text-sm mt-2 text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
-                    {transferResult.warnings.slice(0, 10).map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                    {transferResult.warnings.length > 10 && (
-                      <li>…and {transferResult.warnings.length - 10} more (see console)</li>
-                    )}
-                  </ul>
-                </div>
-              )}
-
-              {transferResult?.stats && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.tablesTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Tables Transferred</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.rowsTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Rows Transferred</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.storageBucketsTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Storage Buckets</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.storageFilesTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Storage Files</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.authUsersTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Auth Users</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded">
-                    <div className="text-2xl font-bold">{transferResult.stats.authProvidersTransferred}</div>
-                    <div className="text-sm text-muted-foreground">Auth Providers</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {currentStep === "error" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 text-red-600">
-                <AlertCircle className="h-8 w-8" />
-                <h3 className="text-xl font-semibold">Transfer Failed</h3>
-              </div>
-
-              <div className="p-3 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="font-medium">Error</span>
-                </div>
-                <p className="text-sm mt-1">{error || "An unknown error occurred"}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Navigation buttons */}
-          <div className="flex justify-between mt-6 pt-4 border-t">
-            {currentStep !== "transferring" && currentStep !== "complete" && currentStep !== "error" && (
-              <Button
-                variant="outline"
-                onClick={prevStep}
-                disabled={currentStep === "select-sources"}
-                className="gap-2"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
-            )}
-
-            {currentStep === "error" && (
-              <Button variant="outline" onClick={resetWizard} className="gap-2">
-                <RefreshCw className="h-4 w-4" />
-                Start Over
-              </Button>
-            )}
-
-            {currentStep === "complete" && (
-              <Button onClick={handleDone} className="gap-2">
-                Done
-              </Button>
-            )}
-
-            {currentStep !== "transferring" && currentStep !== "complete" && currentStep !== "error" && (
-              <Button
-                onClick={nextStep}
-                disabled={!canProceed() || isTransferring}
-                className="gap-2 ml-auto"
-              >
-                {currentStep === "confirm" ? (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    Start Transfer
-                  </>
-                ) : (
-                  <>
-                    Next
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </Button>
             )}
           </div>
-        </CardContent>
-      </Card>
+        )}
+
+        {currentStep === "select-options" && (
+          <div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              {COMPONENTS.map((c, i) => (
+                <label
+                  key={c.key}
+                  htmlFor={`transfer-${c.key}`}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-muted/20",
+                    i > 0 && "border-t border-border/60",
+                  )}
+                >
+                  <Checkbox
+                    id={`transfer-${c.key}`}
+                    checked={transferOptions[c.key]}
+                    onCheckedChange={(checked) =>
+                      setTransferOptions({ ...transferOptions, [c.key]: Boolean(checked) })
+                    }
+                    className="mt-0.5"
+                  />
+                  <c.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{c.label}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{c.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {unsupportedNotice && (
+              <div className={cn(statusPill, "!rounded-2xl !border-amber-500/30 !bg-amber-500/10")}>
+                <span className="break-words text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                  {unsupportedNotice}
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0 gap-1.5 rounded-full text-xs"
+                disabled={isTransferring || !sourceConnectionId}
+                onClick={() => void handleExportPackage()}
+              >
+                <Download className="size-3.5 shrink-0" />
+                Export package only
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === "confirm" && (
+          <div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Source</span>
+                <span className="text-xs font-medium">{getSourceConnection()?.name}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Destination</span>
+                <span className="text-xs font-medium">{getDestinationConnection()?.name}</span>
+              </div>
+              <div className="flex flex-col gap-1 border-t border-border/60 px-4 py-2.5">
+                <span className="text-xs text-muted-foreground">Components</span>
+                <TooltipProvider delayDuration={150}>
+                  <ul className="flex flex-col">
+                    {transferOptions.includeDatabase && (
+                      <ConfirmComponentRow
+                        icon={<Database className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Database"
+                        warning="Schemas are dropped and recreated inside one transaction — a failure rolls back. Row data migrates up to the per-table cap."
+                      />
+                    )}
+                    {transferOptions.includeStorage && (
+                      <ConfirmComponentRow
+                        icon={<HardDrive className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Storage"
+                        warning={
+                          destProvider !== null && destProvider !== "supabase" && destProvider !== "neon"
+                            ? "Skipped on this destination: no Supabase-compatible storage schema."
+                            : "Buckets + metadata migrate. File contents copy when both sides allow it, otherwise skipped with a warning."
+                        }
+                      />
+                    )}
+                    {transferOptions.includeAuth && (
+                      <ConfirmComponentRow
+                        icon={<Shield className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Auth"
+                        warning={
+                          destProvider !== null && destProvider !== "supabase" && destProvider !== "neon"
+                            ? "Skipped on this destination: no GoTrue-compatible auth schema."
+                            : "Passwords migrate when readable, else reset required. OAuth providers need matching config on the destination."
+                        }
+                      />
+                    )}
+                    {transferOptions.includeSettings && (
+                      <ConfirmComponentRow
+                        icon={<Settings className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Settings"
+                        warning="Project settings snapshot migrates as-is."
+                      />
+                    )}
+                    {transferOptions.includeEdgeFunctions && (
+                      <ConfirmComponentRow
+                        icon={<Zap className="size-3.5 shrink-0 text-muted-foreground" />}
+                        label="Edge functions"
+                        warning="Cross-runtime drafts stage for review only — they deploy only with the opt-in below."
+                      />
+                    )}
+                  </ul>
+                </TooltipProvider>
+              </div>
+              {transferOptions.includeEdgeFunctions && (
+                <label
+                  htmlFor="transfer-allow-auto-ported"
+                  className="flex cursor-pointer items-start gap-3 border-t border-border/60 px-4 py-2.5 hover:bg-muted/20"
+                >
+                  <Checkbox
+                    id="transfer-allow-auto-ported"
+                    checked={Boolean(transferOptions.allowAutoPortedDeploy)}
+                    onCheckedChange={(checked) =>
+                      setTransferOptions({ ...transferOptions, allowAutoPortedDeploy: Boolean(checked) })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">Deploy auto-ported drafts</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Cross-runtime rewrites deploy immediately — runtime APIs may differ.</span>
+                  </span>
+                </label>
+              )}
+            </div>
+          </div>
+        )}
+
+        {currentStep === "transferring" && (
+          <>
+            {(progress?.message || progress?.error) && (
+              <div className={cn(statusPill, progress?.error && "!border-destructive/30 !bg-destructive/5")}>
+                <span className={cn("break-words text-xs leading-relaxed", progress?.error ? "text-destructive" : "text-muted-foreground")}>
+                  {progress?.error ?? (progress ? `${STEP_LABELS[progress.currentStep] ?? progress.currentStep} — ${progress.percentage}%` : "")}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+
+        {currentStep === "complete" && (
+          <div className="flex flex-col gap-4">
+            {statCards.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                {statCards.map((s, i) => (
+                  <div
+                    key={s.label}
+                    className={cn("flex items-center justify-between px-4 py-2", i > 0 && "border-t border-border/40")}
+                  >
+                    <span className="text-xs text-muted-foreground">{s.label}</span>
+                    <span className="font-mono text-xs font-semibold">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {transferResult?.warnings && transferResult.warnings.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-amber-500/30 bg-amber-500/5 shadow-sm">
+                <div className="border-b border-amber-500/20 px-4 py-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                  Warnings ({transferResult.warnings.length})
+                </div>
+                <ul className="max-h-56 space-y-1.5 overflow-y-auto px-4 py-2.5">
+                  {transferResult.warnings.map((w, i) => (
+                    <li key={i} className="list-inside list-disc break-words text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                      {w}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {transferResult?.functionDiffs && transferResult.functionDiffs.length > 0 && (
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                <div className="border-b border-border/60 px-4 py-2.5 text-xs font-medium">
+                  Runtime compat diffs — review before deploying
+                </div>
+                {transferResult.functionDiffs.slice(0, 10).map((d, i) => (
+                  <details key={`${d.slug}-${d.targetProvider}-${i}`} className="border-b border-border/40 px-4 py-2.5 last:border-0">
+                    <summary className="cursor-pointer text-xs font-medium">
+                      {d.slug} <span className="text-muted-foreground">→ {d.targetProvider}</span>
+                    </summary>
+                    {d.notes.length > 0 && (
+                      <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-[11px] text-muted-foreground">
+                        {d.notes.map((n, j) => (
+                          <li key={j}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <pre className="mt-2 overflow-x-auto rounded-xl bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
+                      {d.diff}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentStep === "error" && (
+          <div className={cn(statusPill, "!rounded-xl !border-destructive/30 !bg-destructive/5")}>
+            <span className="break-words text-xs leading-relaxed text-destructive">
+              {error || "An unknown error occurred"}
+            </span>
+          </div>
+        )}
+
+        {showNav && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            {currentStep !== "select-sources" ? (
+              <Button className={pillButton} onClick={prevStep}>
+                Back
+              </Button>
+            ) : (
+              <Button className={pillButton} onClick={() => onCancel?.()}>
+                Cancel
+              </Button>
+            )}
+            <Button className={pillButton} disabled={!canProceed() || isTransferring} onClick={nextStep}>
+              {isTransferring ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : currentStep === "confirm" ? (
+                "Start transfer"
+              ) : (
+                "Next"
+              )}
+            </Button>
+          </div>
+        )}
+
+        {currentStep === "transferring" && !isTransferring && !progress?.error && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={() => onCancel?.()}>
+              Close
+            </Button>
+          </div>
+        )}
+
+        {currentStep === "complete" && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={handleDone}>
+              <Check className="size-4" />
+              Done
+            </Button>
+          </div>
+        )}
+
+        {currentStep === "error" && (
+          <div className="mx-auto mt-7 flex w-full max-w-[440px] items-center gap-2">
+            <Button className={pillButton} onClick={resetWizard}>
+              Start over
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

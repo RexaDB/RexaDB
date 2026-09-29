@@ -57,6 +57,7 @@ export async function ensureCoreTables() {
     ensureColumns("query_history", [
       { column: "executed_by", statement: "ALTER TABLE query_history ADD COLUMN executed_by TEXT" },
       { column: "executed_by_name", statement: "ALTER TABLE query_history ADD COLUMN executed_by_name TEXT" },
+      { column: "params", statement: "ALTER TABLE query_history ADD COLUMN params TEXT" },
     ]),
     ensureColumns("folders", [
       { column: "created_at", statement: "ALTER TABLE folders ADD COLUMN created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')*1000)" },
@@ -256,6 +257,7 @@ export async function ensureCoreTables() {
     { name: "caller", type: "TEXT", constraints: "NOT NULL" },
     { name: "executed_by", type: "TEXT" },
     { name: "executed_by_name", type: "TEXT" },
+    { name: "params", type: "TEXT" },
   ]);
   await createTableIfNotExists("tags", [
     { name: "id", type: "INTEGER", constraints: "PRIMARY KEY AUTOINCREMENT" },

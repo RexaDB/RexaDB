@@ -925,6 +925,7 @@ export function StudioInterface({
         handleInsertFKSelection={studio.handleInsertFKSelection}
         loading={studio.mutationLoading}
         isFKSelectionSheetOpen={studio.isFKSelectionSheetOpen}
+        hidden={studio.isFKSelectionSheetOpen && studio.fkSelectionTarget?.rowIndex === null}
       />
 
       <ReviewSheet

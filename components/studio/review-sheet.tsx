@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/sheet";
 import { Loader2, Check, X, Trash2 } from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";
+import { interpolateSqlParamsForDisplay } from "@/lib/studio/general-utils";
 
 interface PendingAction {
   id: string;
@@ -140,7 +141,9 @@ export function ReviewSheet({
                           </div>
                           {action.sql && (
                             <code className="block p-1 rounded bg-background/50 text-[10px] overflow-x-auto">
-                              {action.sql}
+                              {action.params?.length
+                                ? interpolateSqlParamsForDisplay(action.sql, action.params)
+                                : action.sql}
                             </code>
                           )}
                         </div>

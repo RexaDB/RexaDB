@@ -31,7 +31,7 @@ export function PendingChangesBanner({
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 shrink-0">
+    <div className="flex items-center justify-between px-4 py-1.5 bg-amber-500/10 shrink-0">
       <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">
         {label}
       </span>
