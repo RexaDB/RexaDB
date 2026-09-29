@@ -554,6 +554,20 @@ export async function buildSchemaDumpViaSql(
 }
 
 /**
+ * Bare function/procedure name from a CREATE statement, lowercased.
+ * Quote-aware: `"my schema".my_func(...)` → `my_func` (never a schema
+ * fragment), `public."Camel"` → `camel`. Returns null when unparseable.
+ */
+export function bareFunctionName(def: string): string | null {
+  const m = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+([^(\s][^(]*?)\s*\(/i.exec(def);
+  if (!m) return null;
+  const parts = m[1].match(/"[^"]*"|[^.]+/g);
+  if (!parts || parts.length === 0) return null;
+  const bare = parts[parts.length - 1].replace(/^"|"$/g, "").toLowerCase();
+  return bare || null;
+}
+
+/**
  * Apply drops + schema + FK-ordered row data through a plain query
  * function (connections with no direct pg-client path, e.g.
  * supabase-mgmt://). There is NO cross-statement transaction here — the
@@ -588,11 +602,9 @@ export async function applyTransferViaQuery(
   // File order is the dependency order the dump was built in
   // (functions → tables → partitions → dependents → FKs), so the schema
   // phase runs statements as emitted. Programmable failures are retried
-  // immediately and then once more after the whole pass: a SQL function
-  // referencing a later table fails mid-pass but succeeds on the deferred
-  // retry, while function-dependent indexes/constraints already ran after
-  // their functions in file order. Only still-failing objects warn (or
-  // throw when security-critical) — ordering never silently drops them.
+  // immediately and then deferred to end-of-pass fixpoint retries: a SQL
+  // function referencing a later table fails mid-pass but succeeds once
+  // its table exists, no matter how deep the function chain runs.
   let schemaDone = 0;
   const phaseTotal = schemaStatements.length;
   const noteProgress = (executable: string) => {
@@ -607,14 +619,12 @@ export async function applyTransferViaQuery(
   // statement (expression index, CHECK) that fails while naming a defined
   // but not-yet-applied function is retried after the function pass
   // instead of aborting — the function may simply be deferred itself.
+  // Quote-aware via bareFunctionName (never a schema fragment).
   const definedFunctions = new Set<string>();
   for (const s of schemaStatements) {
     if (!isProgrammableStatement(s)) continue;
-    const m = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+("?(?:[^"\s(]+\.)?"?[^"\s(]+)/i.exec(s);
-    if (m) {
-      const bare = m[1].split(".").pop()!.replace(/^"|"$/g, "").toLowerCase();
-      if (bare) definedFunctions.add(bare);
-    }
+    const name = bareFunctionName(s);
+    if (name) definedFunctions.add(name);
   }
   const appliedFunctions = new Set<string>();
   const namesIn = (stmt: string): string[] =>
@@ -658,25 +668,45 @@ export async function applyTransferViaQuery(
     noteProgress(executable);
   }
   // End-of-pass retries, functions before dependents: deferred programmables
-  // first (a table-dependent function now finds its table), then deferred
-  // structural (an index/constraint whose function is now applied).
-  for (const executable of deferred) {
-    const res = await query(connectionString, executable);
-    if (!res.success) {
-      // EXCEPT security-critical objects (RLS policies, triggers), which
-      // abort the transfer instead of leaving the destination without them.
-      if (isSecurityCriticalProgrammable(executable)) {
-        throw new Error(
-          `Security-critical object failed to apply (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)} — transfer aborted instead of leaving the destination without it.`,
-        );
+  // first, then deferred structural (an index/constraint whose function is
+  // now applied). Programmable retries run to fixpoint: a chain F→G where G
+  // also failed resolves over successive passes no matter the file order —
+  // each progressing pass applies at least one object, and a pass with no
+  // progress ends the loop, so this always terminates.
+  let remaining = [...deferred];
+  const lastError = new Map<string, unknown>();
+  while (remaining.length > 0) {
+    const next: string[] = [];
+    let progressed = false;
+    for (const executable of remaining) {
+      const res = await query(connectionString, executable);
+      if (!res.success) {
+        lastError.set(executable, res.error);
+        next.push(executable);
+      } else {
+        applied++;
+        markApplied(executable);
+        progressed = true;
       }
-      warnings.push(
-        `Skipped programmable object (${String(res.error ?? "unknown error").slice(0, 200)}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
-      );
-    } else {
-      applied++;
-      markApplied(executable);
     }
+    if (!progressed) {
+      remaining = next;
+      break;
+    }
+    remaining = next;
+  }
+  for (const executable of remaining) {
+    const detail = String(lastError.get(executable) ?? "unknown error").slice(0, 200);
+    // EXCEPT security-critical objects (RLS policies, triggers), which
+    // abort the transfer instead of leaving the destination without them.
+    if (isSecurityCriticalProgrammable(executable)) {
+      throw new Error(
+        `Security-critical object failed to apply (${detail}): ${executable.replace(/\s+/g, " ").slice(0, 160)} — transfer aborted instead of leaving the destination without it.`,
+      );
+    }
+    warnings.push(
+      `Skipped programmable object (${detail}): ${executable.replace(/\s+/g, " ").slice(0, 160)}`,
+    );
   }
   for (const executable of failedStructural) {
     const res = await query(connectionString, executable);
