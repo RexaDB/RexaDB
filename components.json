@@ -28,6 +28,7 @@
     "@blocks-so": "https://blocks.so/r/{name}.json",
     "@fancy": "https://www.fancycomponents.dev/r/{name}.json",
     "@dotmatrix": "https://dotmatrix.zzzzshawn.cloud/r/{name}.json",
-    "@spell": "https://spell.sh/r/{name}.json"
+    "@spell": "https://spell.sh/r/{name}.json",
+    "@notra": "https://ui.usenotra.com/r/{name}.json"
   }
 }
