@@ -204,8 +204,8 @@ function NeonAccountContent({
     }
     const connectionString = buildNeonCliConnectionString(pointer);
     const name = branch.default
-      ? `${project.name} / ${database}`
-      : `${project.name} (${branch.name}) / ${database}`;
+      ? `${project.name} / ${database} (${role})`
+      : `${project.name} (${branch.name}) / ${database} (${role})`;
     pendingConnections.current.add(key);
     try {
       await onConnectDatabase({ name, connectionString, connectionType: "neon" });

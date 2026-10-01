@@ -211,7 +211,7 @@ export async function neonConnectionString(
     "--pooled",
   ]);
   if (code !== 0) {
-    console.error(`[neon-cli] connection-string failed for profile=${profile} project=${projectId} branch=${branchId} database=${database}: ${stderr.trim()}`);
+    console.error(`[neon-cli] connection-string failed (exit code ${code})`);
     throw friendlyNeonError(stderr, `Failed to get connection string for ${projectId}/${branchId}/${database}`);
   }
   const uri = stdout.trim().split("\n").pop()?.trim() || "";

@@ -20,6 +20,7 @@ import {
   isSslUnsupportedError,
   sslModeAllowsPlaintextFallback,
 } from "./pg-connection";
+import { getPgTlsConfig as getPgSslConfig } from "./pg-tls";
 import { quotePgIdentifier } from "./quote-identifier";
 import { resolveEffectiveConnectionString } from "./neon-cli-client";
 type ExecuteQueryOptions = {
@@ -146,13 +147,6 @@ function getPgPort(connectionString: string): number {
   return parsePgConfig(connectionString).port;
 }
 
-function getPgSslConfig(connectionString: string) {
-  const sslMode = parsePgConfig(connectionString).sslMode;
-  return sslMode === "disable" ? false : { rejectUnauthorized: false };
-}
-
-
-
 async function getPgPoolEntry(rawConnectionString: string) {
   const connectionString = await resolveEffectiveConnectionString(rawConnectionString);
   const config = parsePgConfig(connectionString);
@@ -183,8 +177,8 @@ async function getPgPoolEntry(rawConnectionString: string) {
       });
 
     let pool: PoolType | undefined;
-    let ssl = getPgSslConfig(effectiveConnectionString);
     try {
+      let ssl = getPgSslConfig(effectiveConnectionString);
       pool = makePool(ssl);
       try {
         const probe = await pool.connect();

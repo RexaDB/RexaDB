@@ -113,6 +113,7 @@ test("connected database remains available for a different role; duplicate pair 
   ui.nodes("Button").find((node) => node.props.children === "Connect").props.onClick();
   await flush();
   assert.equal(ui.saves[0].connectionString, savedConnection("reader"));
+  assert.equal(ui.saves[0].name, "Project (Branch) / db (reader)");
 });
 
 test("single database shortcut does not save an existing connection", async () => {

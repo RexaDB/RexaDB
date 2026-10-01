@@ -23,6 +23,10 @@ function loadModule(file, dependencies) {
 const connection = loadModule("pg-connection", {
   "./connection-type": { detectConnectionDbType: () => "postgres" },
 });
+const tls = loadModule("pg-tls", {
+  "./pg-connection": connection,
+  "node:fs": { readFileSync: (path) => `contents of ${path}` },
+});
 const unsupported = () => new Error("The server does not support SSL connections");
 
 function createHarness({ plaintextError, tlsError = unsupported(), tunnelUrl } = {}) {
@@ -62,6 +66,7 @@ function createHarness({ plaintextError, tlsError = unsupported(), tunnelUrl } =
   const api = loadModule("pg-client", {
     pg: { Pool, Client },
     "./pg-connection": connection,
+    "./pg-tls": tls,
     "./neon-cli-client": { resolveEffectiveConnectionString: async (url) => url },
     "./ssh-tunnel": {
       startSshTunnelIfNeeded: async (url) => ({
@@ -126,15 +131,19 @@ test("connection test preserves startup options and closes both clients", async 
   try {
     const api = loadModule("actions-core", {
       "./pg-connection": connection,
+      "./pg-tls": tls,
       "./connection-type": { detectConnectionDbType: () => "postgres" },
       "./neon-cli-client": { resolveEffectiveConnectionString: async (value) => value },
     });
     const original = `${url}?sslmode=prefer&dbname=other&application_name=studio&options=-c%20statement_timeout%3D5000&sslcert=missing&ssl=1`;
     assert.deepEqual(await api.testConnection(original), { success: true });
-    assert.equal(clients[0].config.connectionString, original);
+    const initial = new URL(clients[0].config.connectionString);
+    assert.equal(clients[0].config.ssl.cert, "contents of missing");
+    assert.equal(initial.searchParams.has("sslmode"), false);
     const retry = new URL(clients[1].config.connectionString);
     for (const key of ["dbname", "application_name", "options"]) {
       assert.equal(retry.searchParams.get(key), new URL(original).searchParams.get(key));
+      assert.equal(initial.searchParams.get(key), new URL(original).searchParams.get(key));
     }
     const parsedClient = new (require("pg").Client)(clients[1].config);
     assert.equal(parsedClient.connectionParameters.ssl, false);
@@ -143,3 +152,30 @@ test("connection test preserves startup options and closes both clients", async 
     globalThis.__pg = savedPg;
   }
 });
+
+for (const mode of ["disable", "prefer", "allow", "require", "verify-ca", "verify-full"]) {
+  test(`test clients and query pools share tls settings for ${mode}`, async () => {
+    const connectionString = `${url}?sslmode=${mode}&sslrootcert=private-ca&sslcert=client-cert&sslkey=client-key`;
+    const { api, pools } = createHarness();
+    try {
+      await api.executeQuery(connectionString, "SELECT 1");
+    } catch (error) {
+      assert.match(error.message, /does not support SSL/);
+    }
+    const client = new (require("pg").Client)(tls.getPgClientConfig(connectionString));
+    const poolSsl = pools[0].config.ssl;
+    const clientSsl = client.connectionParameters.ssl;
+    if (mode === "disable") {
+      assert.equal(poolSsl, false);
+      assert.equal(clientSsl, false);
+      return;
+    }
+    assert.equal(poolSsl.rejectUnauthorized, mode.startsWith("verify-"));
+    for (const key of ["ca", "cert", "key", "rejectUnauthorized"]) {
+      assert.equal(clientSsl[key], poolSsl[key]);
+    }
+    assert.equal(poolSsl.ca, "contents of private-ca");
+    assert.equal(typeof poolSsl.checkServerIdentity, mode === "verify-ca" ? "function" : "undefined");
+    assert.equal(typeof clientSsl.checkServerIdentity, typeof poolSsl.checkServerIdentity);
+  });
+}

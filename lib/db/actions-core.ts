@@ -20,12 +20,12 @@ import {
   getPgDatabase,
   getPgHost,
   getPgPort,
-  getPgSslConfig,
   getPgSslMode,
   isPostgresConnection,
   isSslUnsupportedError,
   sslModeAllowsPlaintextFallback,
 } from "./pg-connection";
+import { getPgClientConfig } from "./pg-tls";
 import { resolvePgDumpBinary } from "./pg-dump";
 import {
   SUPABASE_DUMP_EXCLUDED_SCHEMA_PATTERNS,
@@ -2461,10 +2461,7 @@ export async function testConnection(
         const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
         const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
         const pgMod = (globalThis as any).__pg || (await import("pg")).default;
-        let client = new pgMod.Client({
-          connectionString: effectiveConnectionString,
-          ssl: getPgSslConfig(effectiveConnectionString),
-        });
+        let client = new pgMod.Client(getPgClientConfig(effectiveConnectionString));
         try {
           try {
             await client.connect();
