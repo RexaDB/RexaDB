@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ConnectionsHeader } from "@/components/connections/connections-header";
+import { EnvironmentBadge } from "@/components/connections/environment-badge";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Kbd } from "@/components/ui/kbd";
@@ -4901,17 +4902,12 @@ export function ConnectionManager({
                                           <h3 className="text-sm font-medium text-foreground truncate max-w-[120px]">
                                             {conn.name}
                                           </h3>
-                                          {env &&
-                                            (env === "production" ||
-                                              env === "staging") && (
-                                              <span
-                                                className={`text-xs font-boldpx-1 rounded border ${env === "production" ? "bg-red-500/10 text-red-500 border-red-500/20" : "bg-amber-500/10 text-amber-500 border-amber-500/20"}`}
-                                              >
-                                                {env}
-                                              </span>
-                                            )}
+                                          {(env === "production" ||
+                                            env === "staging") && (
+                                            <EnvironmentBadge environment={env} />
+                                          )}
                                         </div>
-                                        <p className="text-xs text-muted-foregroundtracking-tight">
+                                        <p className="text-xs text-muted-foreground tracking-tight">
                                           {providerCard?.label}
                                         </p>
                                       </div>
@@ -5172,18 +5168,7 @@ export function ConnectionManager({
                                       </td>
                                       <td className="px-3 py-2.5">
                                         {env ? (
-                                          <span
-                                            className={cn(
-                                              "text-xs font-medium px-1.5 py-0.5 rounded border",
-                                              env === "production"
-                                                ? "bg-red-500/10 text-red-500 border-red-500/20"
-                                                : env === "staging"
-                                                  ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                                                  : "bg-blue-500/10 text-blue-500 border-blue-500/20",
-                                            )}
-                                          >
-                                            {env}
-                                          </span>
+                                          <EnvironmentBadge environment={env} />
                                         ) : (
                                           <span className="text-xs text-muted-foreground/40">
                                             &mdash;

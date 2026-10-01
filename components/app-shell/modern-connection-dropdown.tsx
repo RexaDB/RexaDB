@@ -137,7 +137,7 @@ export function ModernConnectionDropdown({
         }
         return;
       }
-      router.push(`/studio/${conn.id}`);
+      router.push(`/studio?id=${conn.id}`);
     },
     [
       connection,
