@@ -37,7 +37,7 @@ export function EnvironmentBadge({
   return (
     <span
       className={cn(
-        'inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full p-2 text-[10px] font-medium leading-none ring-1 ring-inset select-none',
+        'inline-flex h-4.5 shrink-0 items-center gap-1 rounded-full p-2 text-[10px] font-medium leading-none ring-1 ring-inset select-none',
         style.tone,
         className,
       )}
