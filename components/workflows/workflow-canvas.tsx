@@ -400,21 +400,43 @@ export function hasOverlappingNodes(nodes: WfNode[]): boolean {
 }
 
 // Returns tidied nodes, or null when the current arrangement should be left
-// alone. Saved manual arrangements are preserved — only position-less nodes
-// or genuinely overlapping stacks get re-laid-out.
+// alone. Saved manual arrangements are preserved — untangles overlapping
+// stacks wholesale, but fills position-less nodes individually, nudging each
+// past any kept card it would otherwise cover.
 export function tidyPositions(nodes: WfNode[], edges: WfEdge[]): WfNode[] | null {
   if (nodes.length === 0) return null;
   const missing = nodes.some((n) => !hasValidPosition(n.position));
   const overlap = !missing && hasOverlappingNodes(nodes);
   if (!missing && !overlap) return null;
   const layout = getLayeredLayout(nodes, edges);
+  if (overlap) {
+    let changed = false;
+    const next = nodes.map((n) => {
+      const p = layout.get(n.id) ?? { x: 0, y: 0 };
+      if (!n.position || Math.abs(n.position.x - p.x) > 1 || Math.abs(n.position.y - p.y) > 1) {
+        changed = true;
+      }
+      return { ...n, position: p };
+    });
+    return changed ? next : null;
+  }
+  // Gap-fill only: kept cards never move; each new card starts at its layered
+  // slot and slides down until it clears every kept (and already placed) card.
+  const occupied: Array<{ x: number; y: number }> = nodes
+    .filter((n) => hasValidPosition(n.position))
+    .map((n) => n.position as { x: number; y: number });
+  const collides = (p: { x: number; y: number }) =>
+    occupied.some((q) => Math.abs(q.x - p.x) < 300 && Math.abs(q.y - p.y) < 200);
   let changed = false;
   const next = nodes.map((n) => {
-    if (!overlap && hasValidPosition(n.position)) return n;
-    const p = layout.get(n.id) ?? { x: 0, y: 0 };
-    if (!n.position || Math.abs(n.position.x - p.x) > 1 || Math.abs(n.position.y - p.y) > 1) {
-      changed = true;
+    if (hasValidPosition(n.position)) return n;
+    let p = layout.get(n.id) ?? { x: 0, y: 0 };
+    let guard = 0;
+    while (guard++ < 60 && collides(p)) {
+      p = { x: p.x, y: p.y + 120 };
     }
+    occupied.push(p);
+    changed = true;
     return { ...n, position: p };
   });
   return changed ? next : null;

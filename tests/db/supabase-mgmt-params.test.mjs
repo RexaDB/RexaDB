@@ -72,9 +72,19 @@ test("inlineMgmtParams leaves dollar-quoted blocks alone", () => {
   assert.equal(out, "SELECT $$body $1$$, 'a'");
 });
 
+test("inlineMgmtParams treats backslash as literal in ordinary strings", () => {
+  const out = mod.inlineMgmtParams("SELECT 'x\\' AS literal, $1", ["a"]);
+  assert.equal(out, "SELECT 'x\\' AS literal, 'a'");
+});
+
 test("inlineMgmtParams escapes doubled quotes inside literals", () => {
   const out = mod.inlineMgmtParams("SELECT 'it''s $1', $1", ["a"]);
   assert.equal(out, "SELECT 'it''s $1', 'a'");
+});
+
+test("inlineMgmtParams honors backslash escapes in E-strings", () => {
+  const out = mod.inlineMgmtParams("SELECT E'a\\\\n', $1", ["v"]);
+  assert.equal(out, "SELECT E'a\\\\n', 'v'");
 });
 
 test("inlineMgmtParams renders arrays as postgres array literals", () => {

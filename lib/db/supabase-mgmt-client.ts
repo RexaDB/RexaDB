@@ -84,8 +84,16 @@ function inlinePlaceholders(query: string, escaped: string[]): string {
       i = stop;
       continue;
     }
-    // quoted string or identifier ('...' with '' escape, "..." with "" escape)
+    // quoted string or identifier ('...' with '' escape, "..." with "" escape).
+    // Backslash escapes are only real in E'...' strings — with the default
+    // standard_conforming_strings=on, the quote after a backslash in an
+    // ordinary literal (e.g. 'x\') CLOSES the string.
     if (c === "'" || c === '"') {
+      const isEscapeString =
+        c === "'" &&
+        i > 0 &&
+        (query[i - 1] === "E" || query[i - 1] === "e") &&
+        (i - 1 === 0 || !/[A-Za-z0-9_$]/.test(query[i - 2]));
       let j = i + 1;
       while (j < len) {
         if (query[j] === c) {
@@ -93,7 +101,7 @@ function inlinePlaceholders(query: string, escaped: string[]): string {
           j += 1;
           break;
         }
-        if (c === "'" && query[j] === "\\" && j + 1 < len) { j += 2; continue; }
+        if (isEscapeString && query[j] === "\\" && j + 1 < len) { j += 2; continue; }
         j += 1;
       }
       out += query.slice(i, j);
