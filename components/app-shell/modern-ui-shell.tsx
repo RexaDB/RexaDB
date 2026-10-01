@@ -33,7 +33,7 @@ export type ModernUIShellProps = {
 	/** Studio state used to drive the navigation rail. */
 	studio: any;
 	/** Local-only connection switch handler for the title-bar connection
-	 *  dropdown. When omitted, the dropdown navigates to `/studio/{id}`. */
+	 *  dropdown. When omitted, the dropdown navigates to `/studio?id={id}`. */
 	onHeaderSelectConnection?: (conn: import("@/lib/db/schema").Connection) => void | Promise<void>;
 	/** Custom sidebar body. When set, replaces the default connections nav. */
 	sidebarContent?: React.ReactNode;
