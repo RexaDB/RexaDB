@@ -204,17 +204,25 @@ export async function neonConnectionString(
 ): Promise<string> {
   const { stdout, stderr, code } = await run([
     "connection-string", branchId,
+    "--profile", profile,
     "--project-id", projectId,
     "--database-name", database,
     "--role-name", role,
     "--pooled",
   ]);
   if (code !== 0) {
+    console.error(`[neon-cli] connection-string failed for profile=${profile} project=${projectId} branch=${branchId} database=${database}: ${stderr.trim()}`);
     throw friendlyNeonError(stderr, `Failed to get connection string for ${projectId}/${branchId}/${database}`);
   }
   const uri = stdout.trim().split("\n").pop()?.trim() || "";
   if (!uri.startsWith("postgres")) {
     throw new Error("neon CLI did not return a valid connection string.");
+  }
+  try {
+    const logged = new URL(uri);
+    console.log(`[neon-cli] resolved connection string for ${projectId}/${branchId}/${database}: host=${logged.hostname} database=${logged.pathname.replace(/^\//, "")}`);
+  } catch {
+    // ignore parse errors in logging
   }
   return uri;
 }

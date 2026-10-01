@@ -131,6 +131,7 @@ test("connection test preserves startup options and closes both clients", async 
     });
     const original = `${url}?sslmode=prefer&dbname=other&application_name=studio&options=-c%20statement_timeout%3D5000&sslcert=missing&ssl=1`;
     assert.deepEqual(await api.testConnection(original), { success: true });
+    assert.equal(clients[0].config.connectionString, original);
     const retry = new URL(clients[1].config.connectionString);
     for (const key of ["dbname", "application_name", "options"]) {
       assert.equal(retry.searchParams.get(key), new URL(original).searchParams.get(key));

@@ -2461,7 +2461,10 @@ export async function testConnection(
         const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
         const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
         const pgMod = (globalThis as any).__pg || (await import("pg")).default;
-        let client = new pgMod.Client({ connectionString: effectiveConnectionString });
+        let client = new pgMod.Client({
+          connectionString: effectiveConnectionString,
+          ssl: getPgSslConfig(effectiveConnectionString),
+        });
         try {
           try {
             await client.connect();
