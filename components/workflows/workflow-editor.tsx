@@ -27,7 +27,7 @@ import {
   runWorkflow,
   type WorkflowNodeLog,
 } from "@/lib/api/actions-client";
-import { WorkflowCanvas, type WfNode, type WfEdge } from "./workflow-canvas";
+import { WorkflowCanvas, tidyPositions, type WfNode, type WfEdge } from "./workflow-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
 import { NodePalette } from "./node-palette";
 import { WorkflowLogsView } from "./workflow-run-logs";
@@ -62,12 +62,19 @@ function parseEdges(workflow: WorkflowRow, nodes: WfNode[]): WfEdge[] {
   return nodes.slice(0, -1).map((n, i) => ({ id: `e-${n.id}-${nodes[i + 1].id}`, source: n.id, target: nodes[i + 1].id }));
 }
 
+function parseGraph(workflow: WorkflowRow): { nodes: WfNode[]; edges: WfEdge[] } {
+  let parsedNodes: WfNode[] = [];
+  try { parsedNodes = JSON.parse(workflow.nodesJson) as WfNode[]; } catch {}
+  const parsedEdges = parseEdges(workflow, parsedNodes);
+  // Saved manual arrangements survive reopening — tidy only fills in
+  // position-less nodes or untangles overlapping stacks before first paint.
+  return { nodes: tidyPositions(parsedNodes, parsedEdges) ?? parsedNodes, edges: parsedEdges };
+}
+
 export function WorkflowEditor({ workflow, onSaved }: Props) {
   const [name, setName] = useState(workflow.name);
-  const [nodes, setNodes] = useState<WfNode[]>(() => {
-    try { return JSON.parse(workflow.nodesJson) as WfNode[]; } catch { return []; }
-  });
-  const [edges, setEdges] = useState<WfEdge[]>(() => parseEdges(workflow, nodes));
+  const [nodes, setNodes] = useState<WfNode[]>(() => parseGraph(workflow).nodes);
+  const [edges, setEdges] = useState<WfEdge[]>(() => parseGraph(workflow).edges);
   const [scheduleEnabled, setScheduleEnabled] = useState(Boolean(workflow.scheduleEnabled));
   const [scheduleType, setScheduleType] = useState<ScheduleType>(workflow.scheduleType ?? "cron");
   const [scheduleValue, setScheduleValue] = useState(workflow.scheduleValue ?? "");
@@ -97,10 +104,9 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
     setScheduleEnabled(Boolean(workflow.scheduleEnabled));
     setScheduleType(workflow.scheduleType ?? "cron");
     setScheduleValue(workflow.scheduleValue ?? "");
-    let parsedNodes: WfNode[] = [];
-    try { parsedNodes = JSON.parse(workflow.nodesJson) as WfNode[]; } catch {}
+    const { nodes: parsedNodes, edges: parsedEdges } = parseGraph(workflow);
     setNodes(parsedNodes);
-    setEdges(parseEdges(workflow, parsedNodes));
+    setEdges(parsedEdges);
     setSelectedNodeId(null);
   }, [workflow.id]);
 

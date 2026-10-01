@@ -8,7 +8,7 @@ export async function executeDbQuery(
   options: { queryId?: string; connectionType?: string; executionContext?: QueryExecutionContext | null } = {}
 ): Promise<any> {
   const dbType = detectConnectionDbType(connectionString, options.connectionType);
-  if (dbType === "supabase-mgmt") return (await import("../supabase-mgmt-client")).executeSupabaseMgmtQuery(connectionString, query);
+  if (dbType === "supabase-mgmt") return (await import("../supabase-mgmt-client")).executeSupabaseMgmtQuery(connectionString, query, params);
   if (dbType === "federated") return (await import("../federated")).executeFederatedQuery(connectionString, query, params);
   if (dbType === "mongodb") return (await import("../mongo-client")).executeMongoQuery(connectionString, query);
   if (dbType === "redis") return (await import("../redis-client")).executeRedisCommand(connectionString, query);

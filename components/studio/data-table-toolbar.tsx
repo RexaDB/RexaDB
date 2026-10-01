@@ -50,6 +50,7 @@ interface DataTableToolbarProps {
   loading: boolean;
   fetchingStructure: boolean;
   onOpenRlsPolicies: () => void;
+  onEnableRls?: () => Promise<void> | void;
   globalSearchQuery: string;
   setGlobalSearchQuery: (query: string) => void;
   globalSearchScope: "page" | "table";
@@ -132,6 +133,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       loading={props.loading}
       fetchingStructure={props.fetchingStructure}
       onOpenRlsPolicies={props.onOpenRlsPolicies}
+      onEnableRls={props.onEnableRls}
       dbType={props.dbType}
       rlsEnabled={props.rlsEnabled}
       rlsPolicyCount={props.rlsPolicyCount}

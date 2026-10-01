@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import { ChevronDown, ChevronUp, Loader2, Shield, User, Users } from "@/lib/icon-theme/lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -7,7 +9,6 @@ import {
   SelectItem,
   SelectLabel,
   SelectSeparator,
-  SelectTrigger,
 } from "@/components/ui/select";
 import {
   DEFAULT_TABLE_PERMISSION_OPTION_VALUE,
@@ -70,21 +71,27 @@ export function ToolbarPermissionFilter({
         onValueChange(createSupabaseUserPermissionContext(nextUser));
       }}
     >
-      <SelectTrigger className="h-8 max-w-[240px] gap-2 !border-0 !bg-transparent px-2 text-xs font-normal !shadow-none hover:!bg-transparent focus-visible:ring-0 dark:!bg-transparent dark:hover:!bg-transparent data-[state=open]:!bg-transparent dark:data-[state=open]:!bg-transparent [&>svg:last-child]:hidden">
-        <div className="flex min-w-0 items-center gap-2">
-          {value?.kind === "supabase-user" ? (
-            <User className="w-3.5 h-3.5 shrink-0" />
+      <SelectPrimitive.Trigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="max-w-[240px] font-normal dark:border-white/15 dark:bg-white/[0.02]"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            {value?.kind === "supabase-user" ? (
+              <User className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <Shield className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span className="truncate">{triggerLabel}</span>
+          </div>
+          {open ? (
+            <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           ) : (
-            <Shield className="w-3.5 h-3.5 shrink-0" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate">{triggerLabel}</span>
-        </div>
-        {open ? (
-          <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        )}
-      </SelectTrigger>
+        </Button>
+      </SelectPrimitive.Trigger>
       <SelectContent
         align="end"
         className="w-[320px]"
