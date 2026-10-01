@@ -27,6 +27,24 @@ export function buildSupabaseMgmtConnectionString(
   return `supabase-mgmt://${projectRef}?token=${encodeURIComponent(token)}`;
 }
 
+function escapeArrayElement(value: unknown): string {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "number" || typeof value === "bigint") {
+    return Number.isFinite(Number(value)) ? String(value) : "NULL";
+  }
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  // Double-quoted array element inside a single-quoted literal: escape both,
+  // and double any single quotes so the outer literal stays intact.
+  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/'/g, "''")}"`;
+}
+
+// Arrays become PostgreSQL array literals ('{1,2}', '{"a","b"}') instead of
+// JSON strings, so ANY($1) and IN-style comparisons keep working.
+function escapeMgmtArray(value: unknown[]): string {
+  return `'{${value.map(escapeArrayElement).join(",")}}'`;
+}
+
 function escapeMgmtParam(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number" || typeof value === "bigint") {
@@ -34,10 +52,80 @@ function escapeMgmtParam(value: unknown): string {
   }
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (value instanceof Date) return `'${value.toISOString()}'`;
+  if (Array.isArray(value)) return escapeMgmtArray(value);
   if (typeof value === "object") {
     return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
   }
   return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+// Replace $n placeholders only in live SQL — never inside string literals,
+// quoted identifiers, comments, or dollar-quoted blocks. Single pass, so
+// inserted values are never re-scanned.
+function inlinePlaceholders(query: string, escaped: string[]): string {
+  let out = "";
+  let i = 0;
+  const len = query.length;
+  while (i < len) {
+    const c = query[i];
+    // line comment
+    if (c === "-" && query[i + 1] === "-") {
+      const end = query.indexOf("\n", i + 2);
+      const stop = end === -1 ? len : end;
+      out += query.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    // block comment
+    if (c === "/" && query[i + 1] === "*") {
+      const end = query.indexOf("*/", i + 2);
+      const stop = end === -1 ? len : end + 2;
+      out += query.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    // quoted string or identifier ('...' with '' escape, "..." with "" escape)
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < len) {
+        if (query[j] === c) {
+          if (query[j + 1] === c) { j += 2; continue; }
+          j += 1;
+          break;
+        }
+        if (c === "'" && query[j] === "\\" && j + 1 < len) { j += 2; continue; }
+        j += 1;
+      }
+      out += query.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (c === "$") {
+      // dollar-quoted block $tag$...$tag$
+      const tagMatch = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/.exec(query.slice(i));
+      if (tagMatch) {
+        const tag = tagMatch[0];
+        const end = query.indexOf(tag, i + tag.length);
+        const stop = end === -1 ? len : end + tag.length;
+        out += query.slice(i, stop);
+        i = stop;
+        continue;
+      }
+      const ph = /^\$(\d+)\b/.exec(query.slice(i));
+      if (ph) {
+        const idx = Number(ph[1]) - 1;
+        out += idx >= 0 && idx < escaped.length ? escaped[idx] : ph[0];
+        i += ph[0].length;
+        continue;
+      }
+      out += c;
+      i += 1;
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
 }
 
 // The Management API's /database/query endpoint accepts raw SQL only — no
@@ -45,11 +133,7 @@ function escapeMgmtParam(value: unknown): string {
 // values are never re-scanned) instead of letting $1 reach the API (42P02).
 export function inlineMgmtParams(query: string, params: unknown[] = []): string {
   if (!params || params.length === 0) return query;
-  const escaped = params.map(escapeMgmtParam);
-  return query.replace(/\$(\d+)\b/g, (match, n) => {
-    const idx = Number(n) - 1;
-    return idx >= 0 && idx < escaped.length ? escaped[idx] : match;
-  });
+  return inlinePlaceholders(query, params.map(escapeMgmtParam));
 }
 
 export async function executeSupabaseMgmtQuery(

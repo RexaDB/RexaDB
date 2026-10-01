@@ -27,7 +27,7 @@ import {
   runWorkflow,
   type WorkflowNodeLog,
 } from "@/lib/api/actions-client";
-import { WorkflowCanvas, getLayeredLayout, type WfNode, type WfEdge } from "./workflow-canvas";
+import { WorkflowCanvas, tidyPositions, type WfNode, type WfEdge } from "./workflow-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
 import { NodePalette } from "./node-palette";
 import { WorkflowLogsView } from "./workflow-run-logs";
@@ -62,19 +62,13 @@ function parseEdges(workflow: WorkflowRow, nodes: WfNode[]): WfEdge[] {
   return nodes.slice(0, -1).map((n, i) => ({ id: `e-${n.id}-${nodes[i + 1].id}`, source: n.id, target: nodes[i + 1].id }));
 }
 
-function applyAutoLayout(nodes: WfNode[], edges: WfEdge[]): WfNode[] {
-  if (nodes.length === 0) return nodes;
-  const layout = getLayeredLayout(nodes, edges);
-  return nodes.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position ?? { x: 0, y: 0 } }));
-}
-
 function parseGraph(workflow: WorkflowRow): { nodes: WfNode[]; edges: WfEdge[] } {
   let parsedNodes: WfNode[] = [];
   try { parsedNodes = JSON.parse(workflow.nodesJson) as WfNode[]; } catch {}
   const parsedEdges = parseEdges(workflow, parsedNodes);
-  // Fresh opens always start tidy — saved positions are normalized to the
-  // layered layout before first paint, so no post-mount reshuffle is needed.
-  return { nodes: applyAutoLayout(parsedNodes, parsedEdges), edges: parsedEdges };
+  // Saved manual arrangements survive reopening — tidy only fills in
+  // position-less nodes or untangles overlapping stacks before first paint.
+  return { nodes: tidyPositions(parsedNodes, parsedEdges) ?? parsedNodes, edges: parsedEdges };
 }
 
 export function WorkflowEditor({ workflow, onSaved }: Props) {

@@ -56,3 +56,28 @@ test("inlineMgmtParams does not re-scan inserted values", () => {
   const out = mod.inlineMgmtParams("SELECT $1, $2", ["has $2 inside", "second"]);
   assert.equal(out, "SELECT 'has $2 inside', 'second'");
 });
+
+test("inlineMgmtParams leaves '$1' inside string literals alone", () => {
+  const out = mod.inlineMgmtParams("SELECT '$1' AS lit, $1", ["a"]);
+  assert.equal(out, "SELECT '$1' AS lit, 'a'");
+});
+
+test("inlineMgmtParams leaves placeholders in comments alone", () => {
+  const out = mod.inlineMgmtParams("SELECT $1 -- $2\n/* $3 */", ["a"]);
+  assert.equal(out, "SELECT 'a' -- $2\n/* $3 */");
+});
+
+test("inlineMgmtParams leaves dollar-quoted blocks alone", () => {
+  const out = mod.inlineMgmtParams("SELECT $$body $1$$, $1", ["a"]);
+  assert.equal(out, "SELECT $$body $1$$, 'a'");
+});
+
+test("inlineMgmtParams escapes doubled quotes inside literals", () => {
+  const out = mod.inlineMgmtParams("SELECT 'it''s $1', $1", ["a"]);
+  assert.equal(out, "SELECT 'it''s $1', 'a'");
+});
+
+test("inlineMgmtParams renders arrays as postgres array literals", () => {
+  assert.equal(mod.inlineMgmtParams("SELECT * FROM t WHERE id = ANY($1)", [[1, 2, 3]]), "SELECT * FROM t WHERE id = ANY('{1,2,3}')");
+  assert.equal(mod.inlineMgmtParams("SELECT $1", [[null, "a'b", true]]), `SELECT '{NULL,"a''b",TRUE}'`);
+});

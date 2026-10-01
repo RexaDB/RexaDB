@@ -147,7 +147,8 @@ export function ToolbarGlobalActions({
                   variant="outline"
                   size="sm"
                   onClick={handleEnableRls}
-                  disabled={enablingRls || !selectedTable}
+                  disabled={enablingRls || !selectedTable || previewOnly}
+                  title={previewOnly ? "Disabled while previewing as a role or user" : undefined}
                   className="mt-5 h-9 rounded-xl border-white/15 bg-white/[0.04] px-4 text-[15px] font-normal text-white hover:bg-white/10 hover:text-white dark:border-white/15 dark:bg-white/[0.04] dark:hover:bg-white/10"
                 >
                   {enablingRls ? "Enabling…" : "Enable RLS for this table"}

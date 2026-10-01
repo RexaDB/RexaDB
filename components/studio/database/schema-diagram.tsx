@@ -169,10 +169,13 @@ const stripHandleSuffix = (handleId?: string | null) =>
 // per column row (still fully interactive for drag-to-connect).
 const TableNodeComponent = ({ id, data, targetPosition, sourcePosition }: TableNodeProps) => {
   const { selectedEdge, isDownloading } = useSchemaDiagramContext();
-  // Nasty hack to use Handles (required for edge calculations), but not show
-  // them in the UI. (Same approach as Supabase.)
-  const hiddenNodeConnector =
-    "!h-px !w-px !min-w-0 !min-h-0 !cursor-grab !border-0 !opacity-0";
+  // Handles stay invisible at rest (Supabase look) but remain interactive,
+  // and reveal as grab pills on row hover so connecting is discoverable.
+  // transform-none! neutralizes xyflow's built-in handle translate so the
+  // top-1/2 centering below is exact.
+  const rowHandleClass =
+    "absolute top-1/2 -translate-y-1/2 transform-none! h-5 w-1.5 rounded-full border-0 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 group-hover/row:bg-primary/70 cursor-grab";
+  const rowHandleInteractive = data.allowConnect ? "" : "pointer-events-none";
   const itemHeight = "h-[22px]";
 
   const hasEdgeSelected = selectedEdge?.source === id || selectedEdge?.target === id;
@@ -300,10 +303,11 @@ const TableNodeComponent = ({ id, data, targetPosition, sourcePosition }: TableN
               "border-t",
               "border-t-[0.5px] border-border/60",
               "hover:bg-muted/40 transition cursor-default",
-              "group",
+              "group/row",
               "pr-1",
               itemHeight,
             )}
+            title={data.allowConnect ? `${col.name} — drag to connect` : col.name}
           >
             <div className="gap-[0.24rem] flex mx-2 align-middle items-center justify-start">
               {col.isPrimary && (
@@ -345,7 +349,7 @@ const TableNodeComponent = ({ id, data, targetPosition, sourcePosition }: TableN
                 type="target"
                 id={`${col.name}-target`}
                 position={targetPosition}
-                className={hiddenNodeConnector}
+                className={cn(rowHandleClass, rowHandleInteractive, "left-0")}
               />
             )}
             {sourcePosition && (
@@ -353,7 +357,7 @@ const TableNodeComponent = ({ id, data, targetPosition, sourcePosition }: TableN
                 type="source"
                 id={`${col.name}-source`}
                 position={sourcePosition}
-                className={hiddenNodeConnector}
+                className={cn(rowHandleClass, rowHandleInteractive, "right-0")}
               />
             )}
           </div>

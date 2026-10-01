@@ -90,10 +90,18 @@ function getPreviewRows(wfNode: WfNode): string[] {
     ([, v]) => v !== null && v !== undefined && v !== "",
   );
   const rows = entries.map(([k, v]) => {
+    if (isSensitiveField(k)) return `${k}: ••••••`;
     const text = summarizeValue(v);
     return text || k;
   }).filter(Boolean);
   return rows.slice(0, 5);
+}
+
+// Never render secrets on the canvas — API keys, tokens, passwords and
+// webhook URLs stay in the configuration panel.
+const SENSITIVE_FIELD_PATTERN = /\bkey\b|api[_-]?key|secret|token|passwd|password|auth|private[_-]?key|webhook[_-]?url|smtp[_-]?pass|headers?|account[_-]?sid/i;
+function isSensitiveField(key: string): boolean {
+  return SENSITIVE_FIELD_PATTERN.test(key);
 }
 
 function WorkflowNodeCard({ data }: { data: CustomNodeData }) {
@@ -286,7 +294,13 @@ type Props = {
 };
 
 const SPACING_X = 340;
-const SPACING_Y = 280;
+
+// Estimated card height from content rows (worst case: all rows visible).
+// Keeps expanded cards in the same layer from overlapping each other.
+function estimateNodeHeight(wn: WfNode): number {
+  const rows = getPreviewRows(wn).length;
+  return Math.max(170, 120 + rows * 38);
+}
 
 export function getLayeredLayout(nodes: WfNode[], edges: WfEdge[]): Map<string, { x: number; y: number }> {
   const ids = nodes.map((n) => n.id);
@@ -340,6 +354,10 @@ export function getLayeredLayout(nodes: WfNode[], edges: WfEdge[]): Map<string, 
   const sortedDepths = [...layers.keys()].sort((a, b) => a - b);
   // Order nodes within a layer by topology: parents' order first, then name.
   const orderIndex = new Map(ids.map((id, i) => [id, i]));
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  // Height-aware stacking: each layer reserves its tallest card + a gap,
+  // so expanding a card ("show more") can't cover its neighbor.
+  const LAYER_GAP = 90;
   for (const d of sortedDepths) {
     const layer = layers.get(d)!;
     layer.sort((a, b) => {
@@ -350,14 +368,56 @@ export function getLayeredLayout(nodes: WfNode[], edges: WfEdge[]): Map<string, 
       if (oa !== ob) return oa - ob;
       return (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0);
     });
+    const heights = layer.map((id) => estimateNodeHeight(nodeById.get(id)!));
+    const step = Math.max(...heights) + LAYER_GAP;
+    const total = step * layer.length;
     layer.forEach((id, i) => {
       positions.set(id, {
         x: d * SPACING_X,
-        y: (i - (layer.length - 1) / 2) * SPACING_Y,
+        y: -total / 2 + step * i + step / 2,
       });
     });
   }
   return positions;
+}
+
+function hasValidPosition(p: { x: number; y: number } | undefined): p is { x: number; y: number } {
+  return !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+
+// Cards overlap when their estimated boxes intersect.
+export function hasOverlappingNodes(nodes: WfNode[]): boolean {
+  const pts = nodes.map((n) => n.position);
+  if (pts.some((p) => !hasValidPosition(p))) return false;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i]!;
+      const b = pts[j]!;
+      if (Math.abs(a.x - b.x) < 300 && Math.abs(a.y - b.y) < 200) return true;
+    }
+  }
+  return false;
+}
+
+// Returns tidied nodes, or null when the current arrangement should be left
+// alone. Saved manual arrangements are preserved — only position-less nodes
+// or genuinely overlapping stacks get re-laid-out.
+export function tidyPositions(nodes: WfNode[], edges: WfEdge[]): WfNode[] | null {
+  if (nodes.length === 0) return null;
+  const missing = nodes.some((n) => !hasValidPosition(n.position));
+  const overlap = !missing && hasOverlappingNodes(nodes);
+  if (!missing && !overlap) return null;
+  const layout = getLayeredLayout(nodes, edges);
+  let changed = false;
+  const next = nodes.map((n) => {
+    if (!overlap && hasValidPosition(n.position)) return n;
+    const p = layout.get(n.id) ?? { x: 0, y: 0 };
+    if (!n.position || Math.abs(n.position.x - p.x) > 1 || Math.abs(n.position.y - p.y) > 1) {
+      changed = true;
+    }
+    return { ...n, position: p };
+  });
+  return changed ? next : null;
 }
 
 export function WorkflowCanvas(props: Props) {
@@ -382,25 +442,19 @@ function WorkflowCanvasInner({
   const { resolvedTheme } = useTheme();
   const colorMode = (resolvedTheme === "light" ? "light" : "dark") as ColorMode;
 
-  // Auto-tidy: whenever the graph structure changes (nodes added/removed or
-  // edges rewired), snap every node to its layered slot so the canvas is
-  // always organized. Keyed on ids+edges only, so free-dragging (which only
-  // changes positions) is respected until the next structural change.
+  // Auto-tidy: when the graph structure changes, fill in position-less nodes
+  // or untangle overlapping stacks. Clean manual arrangements are left
+  // alone (keyed on ids+edges, so free-dragging never triggers a snap-back).
+  // The Tidy button forces a full re-layout on demand.
   const autoTidyKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (wfNodes.length === 0) return;
     const key = `${wfNodes.map((n) => n.id).join("|")}#${wfEdges.map((e) => `${e.source}>${e.target}`).join("|")}`;
     if (autoTidyKeyRef.current === key) return;
     autoTidyKeyRef.current = key;
-    const layout = getLayeredLayout(wfNodes, wfEdges);
-    const needs = wfNodes.some((n) => {
-      const p = layout.get(n.id);
-      if (!p) return false;
-      if (!n.position) return true;
-      return Math.abs(n.position.x - p.x) > 1 || Math.abs(n.position.y - p.y) > 1;
-    });
-    if (!needs) return;
-    onChange(wfNodes.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position ?? { x: 0, y: 0 } })));
+    const tidied = tidyPositions(wfNodes, wfEdges);
+    if (!tidied) return;
+    onChange(tidied);
     const raf = requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
     return () => cancelAnimationFrame(raf);
   }, [wfNodes, wfEdges, onChange, fitView]);
