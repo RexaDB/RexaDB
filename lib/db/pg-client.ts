@@ -13,7 +13,13 @@ try {
 }
 import type { QueryExecutionContext } from "@/lib/studio/table-permissions";
 import { startSshTunnelIfNeeded, type TunnelHandle } from "./ssh-tunnel";
-import { normalizePgConnectionString, validateSslMode, recoverPgCredentials } from "./pg-connection";
+import {
+  normalizePgConnectionString,
+  validateSslMode,
+  recoverPgCredentials,
+  isSslUnsupportedError,
+  sslModeAllowsPlaintextFallback,
+} from "./pg-connection";
 import { quotePgIdentifier } from "./quote-identifier";
 import { resolveEffectiveConnectionString } from "./neon-cli-client";
 type ExecuteQueryOptions = {
@@ -159,17 +165,34 @@ async function getPgPoolEntry(rawConnectionString: string) {
   const pending = (async () => {
     const tunnel = await startSshTunnelIfNeeded(connectionString, 5432, normalizePgConnectionString);
     const effectiveConnectionString = tunnel.connectionString;
-    const pool = new Pool({
-      host: config.host,
-      port: config.port,
-      database: config.database,
-      user: config.username,
-      password: config.password,
-      connectionTimeoutMillis: 15000,
-      idleTimeoutMillis: 30000,
-      max: 6,
-      ssl: getPgSslConfig(effectiveConnectionString),
-    });
+
+    const makePool = (ssl: ReturnType<typeof getPgSslConfig>) =>
+      new Pool({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.username,
+        password: config.password,
+        connectionTimeoutMillis: 15000,
+        idleTimeoutMillis: 30000,
+        max: 6,
+        ssl,
+      });
+
+    let pool = makePool(getPgSslConfig(effectiveConnectionString));
+    try {
+      const probe = await pool.connect();
+      probe.release();
+    } catch (error) {
+      // node-postgres won't retry sslmode=prefer/allow in plaintext on its own
+      // (see isSslUnsupportedError) — reconnect without SSL to match libpq.
+      if (!isSslUnsupportedError(error) || !sslModeAllowsPlaintextFallback(config.sslMode)) {
+        await pool.end().catch(() => {});
+        throw error;
+      }
+      await pool.end().catch(() => {});
+      pool = makePool(false);
+    }
 
     pool.on("error", (error: Error) => {
       console.error("PostgreSQL pool error:", error.message);
