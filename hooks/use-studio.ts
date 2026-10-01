@@ -2538,6 +2538,23 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     await loadRlsPolicies(values.schema, values.tableName);
   }, [executionMode, currentConnectionString, runQuery, addHistoryEntry, loadRlsPolicies]);
 
+  const enableRlsForCurrentTable = useCallback(async () => {
+    if (!selectedSchema || !selectedTable) return;
+    const sql = `ALTER TABLE "${selectedSchema}"."${selectedTable}" ENABLE ROW LEVEL SECURITY;`;
+    const startTime = Date.now();
+    const res = await runQuery(currentConnectionString, sql);
+    logQueryResult(sql, res, startTime);
+    if (!res.success) {
+      toast.error(res.error || "Failed to enable RLS");
+      throw new Error(res.error || "Failed to enable RLS");
+    }
+    toast.success("RLS enabled");
+    await Promise.all([
+      loadTables(true),
+      loadRlsPolicies(selectedSchema, selectedTable),
+    ]);
+  }, [selectedSchema, selectedTable, currentConnectionString, runQuery, addHistoryEntry, loadTables, loadRlsPolicies]);
+
   async function handleToggleExtension(name: string, install: boolean) {
     const sql = install ? `CREATE EXTENSION IF NOT EXISTS "${name}";` : `DROP EXTENSION IF EXISTS "${name}";`;
 
@@ -9426,6 +9443,7 @@ END $$;`.trim();
     handleSaveRlsPolicy,
     handleDeleteRlsPolicy,
     handleAddRlsPolicy,
+    enableRlsForCurrentTable,
     handleDeleteIndex,
     handleToggleExtension,
     queryHistory, setQueryHistory,

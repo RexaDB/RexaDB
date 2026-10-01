@@ -3,7 +3,10 @@
 import dagre from "@dagrejs/dagre";
 import { toPng, toSvg } from "html-to-image";
 import {
+  createContext,
+  memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -15,16 +18,19 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   Panel,
   useNodesState,
   useEdgesState,
   Handle,
   Position,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getSmoothStepPath,
   type Edge,
+  type EdgeProps,
   type Node,
+  type NodeProps,
   type ReactFlowInstance,
-  MarkerType,
   ColorMode,
   ConnectionMode,
   ConnectionLineType,
@@ -40,6 +46,8 @@ import {
   Copy,
   Download,
   EllipsisVertical,
+  MoreVertical,
+  ArrowRight,
   PencilLine,
   Hash,
   Fingerprint,
@@ -47,6 +55,7 @@ import {
   Loader2,
   Trash2,
 } from "@/lib/icon-theme/lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -129,187 +138,330 @@ interface SchemaDiagramProps {
   toolbarExtras?: ReactNode;
 }
 
-// Custom Node Component for Tables
-const TableNode = ({ data }: { data: TableData }) => {
-  const ROW_HEIGHT = 28;
-  const HEADER_HEIGHT = 52;
+// ─── Table node, edge & legend ─────────────────────────────────────────
+// Ported from Supabase Studio's schema visualizer
+// (apps/studio/components/interfaces/Database/Schemas in
+// https://github.com/supabase/supabase, Apache-2.0 licensed) and adapted to
+// RexaDB's data model. Apache-2.0 code may be included in GPL-3.0 works;
+// original Supabase copyright is retained via this notice.
+
+export const TABLE_NODE_WIDTH = 160;
+export const TABLE_NODE_ROW_HEIGHT = 22;
+const TABLE_NODE_HEADER_HEIGHT = 22;
+
+interface SchemaDiagramContextValue {
+  selectedEdge: Edge | null;
+  isDownloading: boolean;
+}
+
+const SchemaDiagramContext =
+  createContext<SchemaDiagramContextValue>({ selectedEdge: null, isDownloading: false });
+
+const useSchemaDiagramContext = () => useContext(SchemaDiagramContext);
+
+type TableNodeProps = NodeProps<Node<TableData>>;
+
+const stripHandleSuffix = (handleId?: string | null) =>
+  handleId?.replace(/-source$|-target$/, "");
+
+// Compact Supabase-style table card: 160px wide, 22px header/rows, 8px type,
+// icon indicators (PK / nullable / unique / identity), invisible 1px handles
+// per column row (still fully interactive for drag-to-connect).
+const TableNodeComponent = ({ id, data, targetPosition, sourcePosition }: TableNodeProps) => {
+  const { selectedEdge, isDownloading } = useSchemaDiagramContext();
+  // Nasty hack to use Handles (required for edge calculations), but not show
+  // them in the UI. (Same approach as Supabase.)
+  const hiddenNodeConnector =
+    "!h-px !w-px !min-w-0 !min-h-0 !cursor-grab !border-0 !opacity-0";
+  const itemHeight = "h-[22px]";
+
+  const hasEdgeSelected = selectedEdge?.source === id || selectedEdge?.target === id;
+  const isColumnSelected = (colName: string) => {
+    if (!selectedEdge || !hasEdgeSelected) return false;
+    return (
+      stripHandleSuffix(selectedEdge.sourceHandle) === colName ||
+      stripHandleSuffix(selectedEdge.targetHandle) === colName
+    );
+  };
+
   return (
-    <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden min-w-72 select-none">
-      <div className="px-4 h-[52px] bg-studio-header-bg border-b border-border flex items-center justify-between gap-3 group drag-handle cursor-grab active:cursor-grabbing">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted/20">
-            <TableIcon className="w-4 h-4 shrink-0 text-foreground/80" />
+    <article>
+      <div
+        className={cn(
+          "border-[0.5px] border-border overflow-hidden rounded-[4px] shadow-sm bg-card",
+          hasEdgeSelected && "outline outline-1 outline-primary",
+        )}
+        style={{ width: TABLE_NODE_WIDTH }}
+      >
+        <header
+          className={cn(
+            "text-[0.55rem] pl-2 pr-1 bg-muted flex gap-2 items-center justify-between drag-handle cursor-grab active:cursor-grabbing border-b border-border/60",
+            itemHeight,
+          )}
+        >
+          <div className="min-w-0 flex shrink gap-x-1 items-center">
+            <TableIcon strokeWidth={1} size={12} className="shrink-0 text-muted-foreground" />
+            <span
+              className="whitespace-nowrap overflow-hidden text-ellipsis text-foreground/90"
+              title={data.name}
+            >
+              {data.name}
+            </span>
           </div>
-          <span className="text-sm leading-none font-normal text-foreground tracking-tight truncate">
-            {data.name}
-          </span>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="h-8 w-8 shrink-0 rounded-lg border border-border bg-muted/30 text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors flex items-center justify-center pointer-events-auto"
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <EllipsisVertical className="w-4 h-4 shrink-0" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            {data.editable ? (
-              <>
-                <DropdownMenuItem
-                  onClick={() => data.onEditTable?.(data.name)}
-                  className="gap-2"
+          {!isDownloading && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="px-0 w-[16px] h-[16px] rounded-sm nodrag nopan shrink-0 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  onPointerDown={(event) => event.stopPropagation()}
                 >
-                  <PencilLine className="w-4 h-4" />
-                  Edit table
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onCopySql?.(data.name)}
-                  className="gap-2"
-                >
-                  <Copy className="w-4 h-4" />
-                  Copy SQL
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onFocusTable?.(data.name)}
-                  className="gap-2"
-                >
-                  <GitFork className="w-4 h-4" />
-                  Focus in diagram
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onDeleteTable?.(data.name)}
-                  className="gap-2 text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete table
-                </DropdownMenuItem>
-              </>
-            ) : (
-              <>
-                <DropdownMenuItem
-                  onClick={() => data.onCopyName?.(data.name)}
-                  className="gap-2"
-                >
-                  <Copy className="w-4 h-4" />
-                  Copy name
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onCopySql?.(data.name)}
-                  className="gap-2"
-                >
-                  <PencilLine className="w-4 h-4" />
-                  Copy SQL
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onOpenTable?.(data.name)}
-                  className="gap-2"
-                >
-                  <Rows3 className="w-4 h-4" />
-                  Table editor
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => data.onFocusTable?.(data.name)}
-                  className="gap-2"
-                >
-                  <GitFork className="w-4 h-4" />
-                  Focus in schema
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="divide-y divide-border/60">
-        {data.columns.map((col, idx) => {
-          const rowIcons = [
-            col.isPrimary ? (
-              <Key
-                key="pk"
-                className="w-3.5 h-3.5 shrink-0 text-warning/85 -rotate-45"
-              />
-            ) : null,
-            isIdentityColumn(col) ? (
-              <Hash
-                key="identity"
-                className="w-3.5 h-3.5 shrink-0 text-foreground/55"
-              />
-            ) : null,
-            isUniqueColumn(col) ? (
-              <Fingerprint
-                key="unique"
-                className="w-3.5 h-3.5 shrink-0 text-foreground/55"
-              />
-            ) : null,
-            col.isNullable ? (
-              <Diamond
-                key="nullable"
-                className="w-3.5 h-3.5 shrink-0 text-foreground/55"
-              />
-            ) : (
-              <Diamond
-                key="non-nullable"
-                className={`w-3.5 h-3.5 shrink-0 ${col.references ? "text-primary/70" : "text-foreground/75"} fill-current`}
-              />
-            ),
-          ].filter(Boolean);
-
-          return (
-            <div
-              key={col.name}
-              className="pl-3 pr-4 py-0 flex items-center justify-between hover:bg-muted/20 transition-colors group/row relative overflow-hidden h-12"
-              data-table={data.name}
-              data-col={col.name}
-            >
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`${col.name}-target`}
-                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${data.allowConnect ? "" : "pointer-events-none"}`}
-                style={{
-                  top: HEADER_HEIGHT + idx * ROW_HEIGHT + ROW_HEIGHT / 2,
-                  height: ROW_HEIGHT,
-                  width: 28,
-                }}
-              />
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`${col.name}-source`}
-                className={`row-handle opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 ${data.allowConnect ? "" : "pointer-events-none"}`}
-                style={{
-                  top: HEADER_HEIGHT + idx * ROW_HEIGHT + ROW_HEIGHT / 2,
-                  height: ROW_HEIGHT,
-                  width: 28,
-                }}
-              />
-
-              <div className="flex items-center gap-2 min-w-0 relative z-10 pointer-events-none">
-                <div className="flex items-center gap-2 shrink-0">
-                  {rowIcons.map((icon, index) => (
-                    <span
-                      key={index}
-                      className="flex h-4 w-4 items-center justify-center"
+                  <MoreVertical size={10} />
+                  <span className="sr-only">{data.name} actions</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                {data.editable ? (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => data.onEditTable?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
                     >
-                      {icon}
-                    </span>
-                  ))}
-                </div>
-                <span
-                  className={`text-xs leading-none truncate ${col.isPrimary ? "text-foreground/95 font-medium" : "text-foreground/80"}`}
-                >
-                  {col.name}
-                </span>
-              </div>
-              <span className="text-xs text-muted-foreground/50 font-mono lowercase shrink-0 ml-4 group-hover/row:text-muted-foreground/70 transition-colors relative z-10 pointer-events-none tracking-[0.18em]">
+                      <PencilLine size={12} />
+                      <p>Edit table</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onCopySql?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <Copy size={12} />
+                      <p>Copy SQL</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onFocusTable?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <GitFork size={12} />
+                      <p>Focus in diagram</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onDeleteTable?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap text-destructive focus:text-destructive"
+                    >
+                      <Trash2 size={12} />
+                      <p>Delete table</p>
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => data.onCopyName?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <Copy size={12} />
+                      <p>Copy name</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onCopySql?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <PencilLine size={12} />
+                      <p>Copy SQL</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onOpenTable?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <Rows3 size={12} />
+                      <p>Table editor</p>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => data.onFocusTable?.(data.name)}
+                      className="flex items-center space-x-2 whitespace-nowrap"
+                    >
+                      <GitFork size={12} />
+                      <p>Focus in schema</p>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </header>
+
+        {data.columns.map((col) => (
+          <div
+            key={col.name}
+            data-table={data.name}
+            data-col={col.name}
+            className={cn(
+              "text-[8px] leading-5 relative flex flex-row justify-items-start",
+              "bg-card",
+              "border-t",
+              "border-t-[0.5px] border-border/60",
+              "hover:bg-muted/40 transition cursor-default",
+              "group",
+              "pr-1",
+              itemHeight,
+            )}
+          >
+            <div className="gap-[0.24rem] flex mx-2 align-middle items-center justify-start">
+              {col.isPrimary && (
+                <Key size={8} strokeWidth={1} className="shrink-0 text-muted-foreground" />
+              )}
+              {col.isNullable ? (
+                <Diamond size={8} strokeWidth={1} className="shrink-0 text-muted-foreground" />
+              ) : (
+                <Diamond
+                  size={8}
+                  strokeWidth={1}
+                  fill="currentColor"
+                  className="shrink-0 text-muted-foreground"
+                />
+              )}
+              {isUniqueColumn(col) && (
+                <Fingerprint size={8} strokeWidth={1} className="shrink-0 text-muted-foreground" />
+              )}
+              {isIdentityColumn(col) && (
+                <Hash size={8} strokeWidth={1} className="shrink-0 text-muted-foreground" />
+              )}
+            </div>
+            <div className="flex w-full justify-between min-w-0">
+              <span
+                className={cn(
+                  "text-ellipsis overflow-hidden whitespace-nowrap min-w-0 max-w-[80%]",
+                  isColumnSelected(col.name) ? "text-primary" : "text-foreground/80",
+                )}
+                title={col.name}
+              >
+                {col.name}
+              </span>
+              <span className="shrink-0 pl-2 pr-1 inline-flex justify-end font-mono text-muted-foreground/60 text-[0.4rem]">
                 {col.type}
               </span>
             </div>
-          );
-        })}
+            {targetPosition && (
+              <Handle
+                type="target"
+                id={`${col.name}-target`}
+                position={targetPosition}
+                className={hiddenNodeConnector}
+              />
+            )}
+            {sourcePosition && (
+              <Handle
+                type="source"
+                id={`${col.name}-source`}
+                position={sourcePosition}
+                className={hiddenNodeConnector}
+              />
+            )}
+          </div>
+        ))}
       </div>
+    </article>
+  );
+};
+
+// Custom comparator: xyflow re-renders nodes on selection/drag with new prop
+// objects; only the listed props affect rendered output. Selection-driven
+// styling is read from context, so `selected` can be safely ignored here.
+const TableNode = memo(
+  TableNodeComponent,
+  (prev, next) =>
+    prev.id === next.id &&
+    prev.data === next.data &&
+    prev.targetPosition === next.targetPosition &&
+    prev.sourcePosition === next.sourcePosition,
+);
+
+export type SchemaDiagramEdgeData = {
+  sourceName: string;
+  sourceSchemaName: string;
+  sourceColumnName: string;
+  targetName: string;
+  targetSchemaName: string;
+  targetColumnName: string;
+};
+
+// Supabase-style edge: smoothstep path, relation badge on selection.
+const DefaultEdgeComponent = ({
+  id,
+  data,
+  selected,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  style,
+}: EdgeProps<Edge<SchemaDiagramEdgeData>>) => {
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  const relation = (data ?? {}) as Partial<SchemaDiagramEdgeData>;
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={style}
+        className={cn(selected && "stroke-primary")}
+      />
+      {relation.sourceName && selected && (
+        <EdgeLabelRenderer>
+          <Badge
+            className="absolute pointer-events-none z-50 p-1 rounded-[4px] gap-1 text-[8px] font-mono normal-case"
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          >
+            <span>
+              {relation.sourceName}.{relation.sourceColumnName}
+            </span>
+            <ArrowRight size={10} />
+            <span>
+              {relation.targetName}.{relation.targetColumnName}
+            </span>
+          </Badge>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+};
+
+const DefaultEdge = memo(DefaultEdgeComponent);
+
+// Supabase-style legend: PK / identity / unique / nullable / non-nullable.
+const SchemaGraphLegend = () => {
+  return (
+    <div className="absolute bottom-0 left-0 border-t border-border flex justify-center px-1 py-2 shadow-md bg-card w-full z-10">
+      <ul className="flex flex-wrap items-center justify-center gap-4">
+        <li className="flex items-center text-xs font-mono gap-1 text-muted-foreground">
+          <Key size={15} strokeWidth={1.5} className="shrink-0" />
+          Primary key
+        </li>
+        <li className="flex items-center text-xs font-mono gap-1 text-muted-foreground">
+          <Hash size={15} strokeWidth={1.5} className="shrink-0" />
+          Identity
+        </li>
+        <li className="flex items-center text-xs font-mono gap-1 text-muted-foreground">
+          <Fingerprint size={15} strokeWidth={1.5} className="shrink-0" />
+          Unique
+        </li>
+        <li className="flex items-center text-xs font-mono gap-1 text-muted-foreground">
+          <Diamond size={15} strokeWidth={1.5} className="shrink-0" />
+          Nullable
+        </li>
+        <li className="flex items-center text-xs font-mono gap-1 text-muted-foreground">
+          <Diamond size={15} strokeWidth={1.5} fill="currentColor" className="shrink-0" />
+          Non-Nullable
+        </li>
+      </ul>
     </div>
   );
 };
@@ -318,9 +470,8 @@ const nodeTypes = {
   table: TableNode,
 };
 
-const TABLE_NODE_WIDTH = 288;
-const DAGRE_NODE_SEP = 72;
-const DAGRE_RANK_SEP = 120;
+const DAGRE_NODE_SEP = 25;
+const DAGRE_RANK_SEP = 50;
 
 export function SchemaDiagram({
   schemaData,
@@ -350,6 +501,7 @@ export function SchemaDiagram({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [layoutMode, setLayoutMode] = useState<"grid" | "auto">("auto");
   const dragSourceRef = useRef<{ table: string; column: string } | null>(null);
   const connectHandledRef = useRef<boolean>(false);
@@ -408,8 +560,12 @@ export function SchemaDiagram({
     const alphaPct = currentTheme === "light" ? "60%" : "40%";
     return `color-mix(in srgb, var(--primary) ${alphaPct}, transparent)`;
   }, [currentTheme]);
-  const miniMapNodeColor = "var(--muted-foreground)";
-  const miniMapMaskColor = "color-mix(in srgb, var(--studio-bg) 80%, transparent)";
+  const edgeTypes = useMemo(() => ({ default: DefaultEdge }), []);
+
+  const diagramContext = useMemo<SchemaDiagramContextValue>(
+    () => ({ selectedEdge, isDownloading }),
+    [selectedEdge, isDownloading],
+  );
 
   const filteredTables = useMemo(() => {
     if (!schemaData) return [] as TableData[];
@@ -544,20 +700,21 @@ export function SchemaDiagram({
               sourceHandle: `${col.name}-source`,
               targetHandle: `${col.references.column}-target`,
               animated: false,
-              type: "smoothstep",
+              type: "default",
               style: {
                 stroke: edgeColor,
                 strokeWidth: 1.5,
-                strokeDasharray: "6,4",
               },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 12,
-                height: 12,
-                color: edgeColor,
+              data: {
+                sourceName: table.name,
+                sourceSchemaName: selectedSchema,
+                sourceColumnName: col.name,
+                targetName: col.references.table,
+                targetSchemaName: col.references.schema,
+                targetColumnName: col.references.column,
               },
-              selectable: isEditable,
-              focusable: isEditable,
+              selectable: true,
+              focusable: true,
             });
           }
         });
@@ -866,6 +1023,7 @@ export function SchemaDiagram({
   }
 
   return (
+    <SchemaDiagramContext.Provider value={diagramContext}>
     <div
       ref={containerRef}
       className="flex-1 bg-studio-bg overflow-hidden relative w-full h-full"
@@ -878,13 +1036,14 @@ export function SchemaDiagram({
         }}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onSelectionChange={({ edges: selected }) => setSelectedEdge(selected[0] ?? null)}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         connectionLineType={ConnectionLineType.SmoothStep}
         connectionLineStyle={{
           stroke: edgeColor,
           strokeWidth: 1.5,
-          strokeDasharray: "6,4",
         }}
         connectionRadius={48}
         onEdgeClick={
@@ -1048,15 +1207,10 @@ export function SchemaDiagram({
         <Background gap={16} color="var(--border)" />
         <Controls
           showInteractive={false}
+          position="top-left"
           className="bg-card border-border fill-foreground/50"
         />
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor={miniMapNodeColor}
-          maskColor={miniMapMaskColor}
-          className="border rounded-lg shadow-sm bg-card"
-        />
+        <SchemaGraphLegend />
 
         {(refreshCurrentTab || isEditable) && (
           <Panel position="top-right">
@@ -1200,6 +1354,7 @@ export function SchemaDiagram({
         )}
       </ReactFlow>
     </div>
+    </SchemaDiagramContext.Provider>
   );
 }
 
@@ -1630,10 +1785,8 @@ function buildTableSql(
 }
 
 function estimateTableHeight(table: TableData) {
-  const HEADER_HEIGHT = 52;
-  const ROW_HEIGHT = 48;
   const rowCount = Array.isArray(table.columns) ? table.columns.length : 0;
-  return HEADER_HEIGHT + rowCount * ROW_HEIGHT + 2;
+  return TABLE_NODE_HEADER_HEIGHT + rowCount * TABLE_NODE_ROW_HEIGHT + 1;
 }
 
 function quoteTableRef(

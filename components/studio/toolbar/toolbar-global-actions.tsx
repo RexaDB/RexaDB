@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Plus, RefreshCw, Check, ChevronDown, Unlock } from "@/lib/icon-theme/solar-icons";
+import { Plus, RefreshCw, Check, ChevronDown } from "@/lib/icon-theme/solar-icons";
+import { Lock } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ConnectionDbType } from "@/lib/db/connection-type";
 import type {
@@ -14,6 +15,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ToolbarPermissionFilter } from "./toolbar-permission-filter";
 
 interface ToolbarGlobalActionsProps {
@@ -23,6 +29,7 @@ interface ToolbarGlobalActionsProps {
   loading: boolean;
   fetchingStructure: boolean;
   onOpenRlsPolicies: () => void;
+  onEnableRls?: () => Promise<void> | void;
   dbType?: ConnectionDbType;
   rlsEnabled?: boolean;
   rlsPolicyCount?: number;
@@ -50,6 +57,7 @@ export function ToolbarGlobalActions({
   loading,
   fetchingStructure,
   onOpenRlsPolicies,
+  onEnableRls,
   dbType,
   rlsEnabled,
   rlsPolicyCount,
@@ -61,7 +69,22 @@ export function ToolbarGlobalActions({
   connectionString,
 }: ToolbarGlobalActionsProps) {
   const [refreshInterval, setRefreshInterval] = useState<number>(0);
+  const [rlsPopoverOpen, setRlsPopoverOpen] = useState(false);
+  const [enablingRls, setEnablingRls] = useState(false);
   const previewOnly = Boolean(permissionContext);
+
+  const handleEnableRls = async () => {
+    if (!onEnableRls || enablingRls) return;
+    setEnablingRls(true);
+    try {
+      await onEnableRls();
+      setRlsPopoverOpen(false);
+    } catch {
+      // parent surfaces the error via toast
+    } finally {
+      setEnablingRls(false);
+    }
+  };
 
   useEffect(() => {
     if (refreshInterval > 0) {
@@ -88,27 +111,64 @@ export function ToolbarGlobalActions({
       )}
 
       {(dbType === "postgres" || dbType === "supabase-mgmt") && (
-        <Button
-          variant="outline"
-          size="sm"
-          className={`font-normal ${rlsEnabled === false ? "text-red-500 hover:text-red-500" : ""}`}
-          onClick={onOpenRlsPolicies}
-          disabled={!selectedTable}
-        >
+        <>
           {rlsEnabled === false ? (
-            <>
-              <Unlock className="w-3.5 h-3.5 text-red-500" />
-              RLS Disabled
-            </>
+            <Popover open={rlsPopoverOpen} onOpenChange={setRlsPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  size="sm"
+                  disabled={!selectedTable}
+                  className="font-normal border-transparent bg-[#b54444] text-white hover:bg-[#a53c3c] hover:text-white dark:bg-[#b54444] dark:hover:bg-[#a53c3c]"
+                >
+                  <Lock className="w-3.5 h-3.5 text-white" />
+                  RLS disabled
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={8}
+                className="w-[380px] rounded-2xl border-white/10 bg-[#1c1c1e] p-5 text-white shadow-2xl"
+              >
+                <div className="flex items-center gap-2">
+                  <Lock className="w-5 h-5 text-white" />
+                  <p className="text-lg font-medium text-white">
+                    Row Level Security (RLS)
+                  </p>
+                </div>
+                <p className="mt-3 text-[15px] leading-relaxed text-white/70">
+                  You can restrict and control who can read, write and update
+                  data in this table using Row Level Security.
+                </p>
+                <p className="mt-4 text-[15px] leading-relaxed text-white/70">
+                  With RLS enabled, anonymous users will not be able to
+                  read/write data in the table.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEnableRls}
+                  disabled={enablingRls || !selectedTable}
+                  className="mt-5 h-9 rounded-xl border-white/15 bg-white/[0.04] px-4 text-[15px] font-normal text-white hover:bg-white/10 hover:text-white dark:border-white/15 dark:bg-white/[0.04] dark:hover:bg-white/10"
+                >
+                  {enablingRls ? "Enabling…" : "Enable RLS for this table"}
+                </Button>
+              </PopoverContent>
+            </Popover>
           ) : (
-            <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="font-normal dark:border-white/15 dark:bg-white/[0.02]"
+              onClick={onOpenRlsPolicies}
+              disabled={!selectedTable}
+            >
               <span className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-lg text-xs bg-muted text-foreground/80 border border-studio-border">
                 {Number.isFinite(rlsPolicyCount) ? rlsPolicyCount : "—"}
               </span>
               RLS Policies
-            </>
+            </Button>
           )}
-        </Button>
+        </>
       )}
 
       {(dbType === "postgres" || dbType === "supabase-mgmt") && (

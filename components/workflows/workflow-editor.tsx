@@ -27,7 +27,7 @@ import {
   runWorkflow,
   type WorkflowNodeLog,
 } from "@/lib/api/actions-client";
-import { WorkflowCanvas, type WfNode, type WfEdge } from "./workflow-canvas";
+import { WorkflowCanvas, getLayeredLayout, type WfNode, type WfEdge } from "./workflow-canvas";
 import { NodeConfigPanel } from "./node-config-panel";
 import { NodePalette } from "./node-palette";
 import { WorkflowLogsView } from "./workflow-run-logs";
@@ -62,12 +62,25 @@ function parseEdges(workflow: WorkflowRow, nodes: WfNode[]): WfEdge[] {
   return nodes.slice(0, -1).map((n, i) => ({ id: `e-${n.id}-${nodes[i + 1].id}`, source: n.id, target: nodes[i + 1].id }));
 }
 
+function applyAutoLayout(nodes: WfNode[], edges: WfEdge[]): WfNode[] {
+  if (nodes.length === 0) return nodes;
+  const layout = getLayeredLayout(nodes, edges);
+  return nodes.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position ?? { x: 0, y: 0 } }));
+}
+
+function parseGraph(workflow: WorkflowRow): { nodes: WfNode[]; edges: WfEdge[] } {
+  let parsedNodes: WfNode[] = [];
+  try { parsedNodes = JSON.parse(workflow.nodesJson) as WfNode[]; } catch {}
+  const parsedEdges = parseEdges(workflow, parsedNodes);
+  // Fresh opens always start tidy — saved positions are normalized to the
+  // layered layout before first paint, so no post-mount reshuffle is needed.
+  return { nodes: applyAutoLayout(parsedNodes, parsedEdges), edges: parsedEdges };
+}
+
 export function WorkflowEditor({ workflow, onSaved }: Props) {
   const [name, setName] = useState(workflow.name);
-  const [nodes, setNodes] = useState<WfNode[]>(() => {
-    try { return JSON.parse(workflow.nodesJson) as WfNode[]; } catch { return []; }
-  });
-  const [edges, setEdges] = useState<WfEdge[]>(() => parseEdges(workflow, nodes));
+  const [nodes, setNodes] = useState<WfNode[]>(() => parseGraph(workflow).nodes);
+  const [edges, setEdges] = useState<WfEdge[]>(() => parseGraph(workflow).edges);
   const [scheduleEnabled, setScheduleEnabled] = useState(Boolean(workflow.scheduleEnabled));
   const [scheduleType, setScheduleType] = useState<ScheduleType>(workflow.scheduleType ?? "cron");
   const [scheduleValue, setScheduleValue] = useState(workflow.scheduleValue ?? "");
@@ -97,10 +110,9 @@ export function WorkflowEditor({ workflow, onSaved }: Props) {
     setScheduleEnabled(Boolean(workflow.scheduleEnabled));
     setScheduleType(workflow.scheduleType ?? "cron");
     setScheduleValue(workflow.scheduleValue ?? "");
-    let parsedNodes: WfNode[] = [];
-    try { parsedNodes = JSON.parse(workflow.nodesJson) as WfNode[]; } catch {}
+    const { nodes: parsedNodes, edges: parsedEdges } = parseGraph(workflow);
     setNodes(parsedNodes);
-    setEdges(parseEdges(workflow, parsedNodes));
+    setEdges(parsedEdges);
     setSelectedNodeId(null);
   }, [workflow.id]);
 

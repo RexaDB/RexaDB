@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   useNodesState,
@@ -11,8 +11,9 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   Background,
+  BackgroundVariant,
   Controls,
-  MiniMap,
+  type ColorMode,
   type Node,
   type Edge,
   type EdgeProps,
@@ -27,8 +28,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import { cn } from "@/lib/utils";
 import { NODE_REGISTRY_MAP, getNodeIcon } from "@/lib/workflows/node-registry";
-import { hexAlpha } from "@/lib/studio/themes/color-utils";
-import { Plus, Trash2, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
+import { useTheme } from "@/components/providers/theme-provider";
+import { ChevronDown, Plus, Trash2, CheckCircle2, AlertCircle, Loader2, X, TriangleAlert, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export type WfNode = {
@@ -55,63 +56,184 @@ type CustomNodeData = {
   onDelete: (id: string) => void;
 };
 
+function categoryLabel(category: string | undefined, fallback: string): string {
+  switch (category) {
+    case "trigger": return "Triggers";
+    case "database": return "Database";
+    case "data": return "Data";
+    case "code": return "Code";
+    case "http": return "Requests";
+    case "file": return "Files";
+    case "flow": return "Flow";
+    case "notify": return "Channels";
+    case "ai": return "Agent";
+    case "transform": return "Tools";
+    case "utility": return "Memory";
+    default: return fallback;
+  }
+}
+
+function summarizeValue(value: unknown, max = 42): string {
+  if (value === null || value === undefined || value === "") return "";
+  let s: string;
+  if (typeof value === "string") s = value;
+  else if (typeof value === "number" || typeof value === "boolean") s = String(value);
+  else {
+    try { s = JSON.stringify(value); } catch { s = String(value); }
+  }
+  s = s.replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function getPreviewRows(wfNode: WfNode): string[] {
+  const entries = Object.entries(wfNode.config ?? {}).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "",
+  );
+  const rows = entries.map(([k, v]) => {
+    const text = summarizeValue(v);
+    return text || k;
+  }).filter(Boolean);
+  return rows.slice(0, 5);
+}
+
 function WorkflowNodeCard({ data }: { data: CustomNodeData }) {
   const { wfNode, isSelected, status, onSelect, onDelete } = data;
   const def = NODE_REGISTRY_MAP.get(wfNode.type);
   const Icon = getNodeIcon(def?.icon ?? "");
-  const color = def?.color ?? "#6b7280";
+  const color = def?.color ?? "#71717a";
+
+  const header = categoryLabel(def?.category, def?.name ?? wfNode.type);
+  const rows = getPreviewRows(wfNode);
+  const missingRequired = (def?.fields ?? []).some(
+    (f) => f.required && (wfNode.config?.[f.key] === undefined || wfNode.config?.[f.key] === null || wfNode.config?.[f.key] === ""),
+  );
+  const needsSetup = missingRequired || !def?.implemented;
+
+  // Collapsible card: header toggles the whole body, long row lists hide
+  // behind a "Show N more" expander like the reference design.
+  const [collapsed, setCollapsed] = useState(false);
+  const [showAllRows, setShowAllRows] = useState(false);
+  const MAX_ROWS = 3;
+  const visibleRows = showAllRows ? rows : rows.slice(0, MAX_ROWS);
+  const hiddenCount = rows.length - visibleRows.length;
 
   return (
     <div
       onClick={() => onSelect(wfNode.id)}
       className={cn(
-        "group relative min-w-[180px] cursor-pointer rounded-xl border-2 bg-card shadow-md transition-colors",
-        isSelected ? "border-primary" : "border-border hover:border-primary/40",
-        status === "success" && "border-green-500/70",
-        status === "error" && "border-red-500/70",
-        status === "running" && "border-blue-500/70 animate-pulse",
+        "group relative w-[264px] cursor-pointer rounded-2xl border p-2 shadow-lg transition-colors",
+        "border-border bg-card",
+        isSelected && "border-dashed border-primary bg-primary/[0.06]",
+        status === "success" && "border-green-500/60",
+        status === "error" && "border-red-500/60",
+        status === "running" && "animate-pulse border-blue-500/60",
       )}
     >
-      <Handle type="target" position={Position.Top} className="!size-3 !border-2 !border-border !bg-background" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!size-2 !border-0"
+        style={{ background: "var(--muted-foreground)", left: -3 }}
+      />
 
-      <div className="p-3">
-        <div className="flex items-center gap-2">
-          <span
-            className="flex size-6 shrink-0 items-center justify-center rounded-md border text-white shadow-sm"
-            style={{
-              background: `linear-gradient(145deg, ${color} 0%, ${hexAlpha(color, 0.72)} 100%)`,
-              borderColor: hexAlpha(color, 0.55),
-            }}
-          >
-            <Icon className="size-3.5" />
+      {/* header — click collapses / expands the body */}
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        title={collapsed ? "Expand" : "Collapse"}
+        className="flex w-full items-center gap-1.5 rounded-lg px-2 pb-1.5 pt-1 text-left outline-none hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", collapsed && "-rotate-90")} />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{header}</span>
+        {!def?.implemented ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium leading-none text-blue-600 dark:text-blue-300">
+            New
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-semibold leading-tight">{wfNode.name}</div>
-            <div className="truncate text-[10px] text-muted-foreground leading-tight">
-              {def?.name ?? wfNode.type}
-            </div>
+        ) : needsSetup ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium leading-none text-amber-600 dark:text-amber-300">
+            <TriangleAlert className="size-3" />
+            Set up
+          </span>
+        ) : null}
+        {status === "success" && <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />}
+        {status === "error" && <AlertCircle className="size-3.5 shrink-0 text-red-500" />}
+        {status === "running" && <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-400" />}
+      </button>
+
+      {/* body */}
+      {!collapsed && (
+      <div className="overflow-hidden rounded-xl border border-border bg-muted/40">
+        {/* title block */}
+        <div className="px-3 py-2.5">
+          <div className="truncate text-[13px] font-semibold leading-tight text-foreground">{wfNode.name}</div>
+          <div className="mt-1 line-clamp-2 text-[12.5px] leading-snug text-muted-foreground">
+            {def?.description ?? wfNode.type}
           </div>
-          {status === "success" && <CheckCircle2 className="size-3.5 shrink-0 text-green-500" />}
-          {status === "error" && <AlertCircle className="size-3.5 shrink-0 text-red-500" />}
-          {status === "running" && <Loader2 className="size-3.5 shrink-0 animate-spin text-blue-500" />}
         </div>
 
+        {visibleRows.length > 0 && (
+          <div className="divide-y divide-border border-t border-border">
+            {visibleRows.map((row, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-2">
+                <span
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60"
+                  style={{ color }}
+                >
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/80">{row}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowAllRows(true); }}
+            className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60 text-muted-foreground">
+              <ChevronDown className="size-3.5" />
+            </span>
+            <span>Show {hiddenCount} more</span>
+          </button>
+        )}
+        {showAllRows && rows.length > MAX_ROWS && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowAllRows(false); }}
+            className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/60">
+              <ChevronDown className="size-3.5 rotate-180" />
+            </span>
+            <span>Show less</span>
+          </button>
+        )}
+
         {!def?.implemented && (
-          <div className="mt-1.5 rounded bg-yellow-500/10 px-1.5 py-0.5 text-[9px] text-yellow-600 dark:text-yellow-400">
+          <div className="border-t border-border px-3 py-2 text-[11px] text-yellow-600 dark:text-yellow-400">
             Not yet implemented
           </div>
         )}
       </div>
+      )}
 
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onDelete(wfNode.id); }}
-        className="absolute right-1 top-1 hidden rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+        className="absolute right-1.5 top-1.5 hidden rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
       >
         <Trash2 className="size-3" />
       </button>
 
-      <Handle type="source" position={Position.Bottom} className="!size-3 !border-2 !border-border !bg-background" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!size-2 !border-0"
+        style={{ background: color, right: -3 }}
+      />
     </div>
   );
 }
@@ -163,9 +285,80 @@ type Props = {
   nodeStatuses: NodeStatus;
 };
 
-const SPACING_X = 250;
-const SPACING_Y = 140;
-const PER_ROW = 3;
+const SPACING_X = 340;
+const SPACING_Y = 280;
+
+export function getLayeredLayout(nodes: WfNode[], edges: WfEdge[]): Map<string, { x: number; y: number }> {
+  const ids = nodes.map((n) => n.id);
+  const out = new Map<string, string[]>();
+  const indegree = new Map<string, number>();
+  for (const id of ids) {
+    out.set(id, []);
+    indegree.set(id, 0);
+  }
+  for (const e of edges) {
+    if (!out.has(e.source) || !indegree.has(e.target)) continue;
+    out.get(e.source)!.push(e.target);
+    indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1);
+  }
+  // Longest-path depth via Kahn's topological pass.
+  const depth = new Map<string, number>(ids.map((id) => [id, 0]));
+  const queue: string[] = ids.filter((id) => (indegree.get(id) ?? 0) === 0);
+  // Disconnected/cyclic fallback: seed with first node so every node gets placed.
+  if (queue.length === 0 && ids.length > 0) queue.push(ids[0]);
+  const visited = new Set<string>();
+  const indeg = new Map(indegree);
+  while (queue.length > 0) {
+    // Stable order: process shallower, then insertion order.
+    queue.sort((a, b) => (depth.get(a) ?? 0) - (depth.get(b) ?? 0) || ids.indexOf(a) - ids.indexOf(b));
+    const cur = queue.shift()!;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+    for (const next of out.get(cur) ?? []) {
+      const d = (depth.get(cur) ?? 0) + 1;
+      if (d > (depth.get(next) ?? 0)) depth.set(next, d);
+      indeg.set(next, (indeg.get(next) ?? 1) - 1);
+      if ((indeg.get(next) ?? 0) <= 0 && !visited.has(next)) queue.push(next);
+    }
+  }
+  // Anything unvisited (cycle) goes on a new layer at the end.
+  let maxDepth = 0;
+  for (const d of depth.values()) maxDepth = Math.max(maxDepth, d);
+  for (const id of ids) {
+    if (!visited.has(id)) {
+      maxDepth += 1;
+      depth.set(id, maxDepth);
+    }
+  }
+  const layers = new Map<number, string[]>();
+  for (const id of ids) {
+    const d = depth.get(id) ?? 0;
+    if (!layers.has(d)) layers.set(d, []);
+    layers.get(d)!.push(id);
+  }
+  const positions = new Map<string, { x: number; y: number }>();
+  const sortedDepths = [...layers.keys()].sort((a, b) => a - b);
+  // Order nodes within a layer by topology: parents' order first, then name.
+  const orderIndex = new Map(ids.map((id, i) => [id, i]));
+  for (const d of sortedDepths) {
+    const layer = layers.get(d)!;
+    layer.sort((a, b) => {
+      const pa = edges.find((e) => e.target === a)?.source ?? "";
+      const pb = edges.find((e) => e.target === b)?.source ?? "";
+      const oa = pa ? (orderIndex.get(pa) ?? 0) : 0;
+      const ob = pb ? (orderIndex.get(pb) ?? 0) : 0;
+      if (oa !== ob) return oa - ob;
+      return (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0);
+    });
+    layer.forEach((id, i) => {
+      positions.set(id, {
+        x: d * SPACING_X,
+        y: (i - (layer.length - 1) / 2) * SPACING_Y,
+      });
+    });
+  }
+  return positions;
+}
 
 export function WorkflowCanvas(props: Props) {
   return (
@@ -186,17 +379,31 @@ function WorkflowCanvasInner({
   nodeStatuses,
 }: Props) {
   const { fitView } = useReactFlow();
-  const prevNodeCount = useRef(wfNodes.length);
+  const { resolvedTheme } = useTheme();
+  const colorMode = (resolvedTheme === "light" ? "light" : "dark") as ColorMode;
 
-  // Keep newly added nodes in view - React Flow's `fitView` prop only runs
-  // once on mount, so a node added later can land off-screen otherwise.
+  // Auto-tidy: whenever the graph structure changes (nodes added/removed or
+  // edges rewired), snap every node to its layered slot so the canvas is
+  // always organized. Keyed on ids+edges only, so free-dragging (which only
+  // changes positions) is respected until the next structural change.
+  const autoTidyKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    const increased = wfNodes.length > prevNodeCount.current;
-    prevNodeCount.current = wfNodes.length;
-    if (!increased) return;
+    if (wfNodes.length === 0) return;
+    const key = `${wfNodes.map((n) => n.id).join("|")}#${wfEdges.map((e) => `${e.source}>${e.target}`).join("|")}`;
+    if (autoTidyKeyRef.current === key) return;
+    autoTidyKeyRef.current = key;
+    const layout = getLayeredLayout(wfNodes, wfEdges);
+    const needs = wfNodes.some((n) => {
+      const p = layout.get(n.id);
+      if (!p) return false;
+      if (!n.position) return true;
+      return Math.abs(n.position.x - p.x) > 1 || Math.abs(n.position.y - p.y) > 1;
+    });
+    if (!needs) return;
+    onChange(wfNodes.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position ?? { x: 0, y: 0 } })));
     const raf = requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
     return () => cancelAnimationFrame(raf);
-  }, [wfNodes.length, fitView]);
+  }, [wfNodes, wfEdges, onChange, fitView]);
 
   const onDelete = useCallback(
     (id: string) => {
@@ -220,10 +427,12 @@ function WorkflowCanvasInner({
   // React Flow keeps its internally-tracked position/measurement per node -
   // replacing the array wholesale on every render was resetting that tracking
   // and left nodes permanently stuck at `visibility: hidden`.
+  // New nodes without a saved position get a flow-aware layered slot
+  // (depth = longest path from a root), not a blind grid index.
   useEffect(() => {
+    const layout = getLayeredLayout(wfNodes, wfEdges);
     setNodes((current) => {
       const currentById = new Map(current.map((n) => [n.id, n]));
-      let placedCount = current.length;
       return wfNodes.map((wn) => {
         const data: CustomNodeData = {
           wfNode: wn,
@@ -233,34 +442,58 @@ function WorkflowCanvasInner({
           onDelete,
         };
         const existing = currentById.get(wn.id);
-        if (existing) return { ...existing, data };
-        const i = placedCount++;
-        const position = wn.position ?? { x: (i % PER_ROW) * SPACING_X, y: Math.floor(i / PER_ROW) * SPACING_Y };
+        if (existing) {
+          // Adopt the saved position if it changed externally (e.g. tidy layout).
+          if (wn.position && (wn.position.x !== existing.position.x || wn.position.y !== existing.position.y)) {
+            return { ...existing, position: wn.position, data };
+          }
+          return { ...existing, data };
+        }
+        const position = wn.position ?? layout.get(wn.id) ?? { x: 0, y: 0 };
         return { id: wn.id, type: "workflowNode", position, data };
       });
     });
-  }, [wfNodes, selectedNodeId, nodeStatuses, onSelectNode, onDelete, setNodes]);
+  }, [wfNodes, wfEdges, selectedNodeId, nodeStatuses, onSelectNode, onDelete, setNodes]);
+
+  const handleTidyLayout = useCallback(() => {
+    const layout = getLayeredLayout(wfNodes, wfEdges);
+    onChange(wfNodes.map((n) => ({ ...n, position: layout.get(n.id) ?? n.position ?? { x: 0, y: 0 } })));
+    requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
+  }, [wfNodes, wfEdges, onChange, fitView]);
 
   // Edges are fully derived from wfEdges + status each render - unlike nodes,
   // they carry no independent transient state worth preserving across rebuilds.
+  // Dotted bezier style like the reference: thin dashed line tinted by source color.
   useEffect(() => {
+    const nodeById = new Map(wfNodes.map((n) => [n.id, n]));
     setFlowEdges(
-      wfEdges.map((we) => ({
-        id: we.id,
-        source: we.source,
-        target: we.target,
-        type: "deletable",
-        animated: nodeStatuses[we.source] === "running",
-        style: {
-          stroke: nodeStatuses[we.source] === "success" ? "#22c55e"
+      wfEdges.map((we) => {
+        const sourceNode = nodeById.get(we.source);
+        const sourceDef = sourceNode ? NODE_REGISTRY_MAP.get(sourceNode.type) : undefined;
+        const sourceColor = sourceDef?.color ?? "#71717a";
+        const statusColor =
+          nodeStatuses[we.source] === "success" ? "#22c55e"
             : nodeStatuses[we.source] === "error" ? "#ef4444"
-              : "var(--border)",
-          strokeWidth: 2,
-        },
-        data: { onDelete: onDeleteEdge } satisfies DeletableEdgeData,
-      })),
+              : nodeStatuses[we.source] === "running" ? "#60a5fa"
+                : sourceColor;
+        return {
+          id: we.id,
+          source: we.source,
+          target: we.target,
+          type: "deletable",
+          animated: nodeStatuses[we.source] === "running",
+          style: {
+            stroke: statusColor,
+            strokeWidth: 1.5,
+            strokeDasharray: "3 6",
+            strokeLinecap: "round" as const,
+            opacity: 0.85,
+          },
+          data: { onDelete: onDeleteEdge } satisfies DeletableEdgeData,
+        };
+      }),
     );
-  }, [wfEdges, nodeStatuses, onDeleteEdge, setFlowEdges]);
+  }, [wfNodes, wfEdges, nodeStatuses, onDeleteEdge, setFlowEdges]);
 
   // Attach: drag from one node's handle to another's to create a new connection.
   const onConnect: OnConnect = useCallback(
@@ -304,7 +537,7 @@ function WorkflowCanvasInner({
   );
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full bg-[var(--shell-content-bg)]!">
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
@@ -322,27 +555,28 @@ function WorkflowCanvasInner({
         fitView
         fitViewOptions={{ padding: 0.2 }}
         proOptions={{ hideAttribution: true }}
+        colorMode={colorMode}
+        style={{ "--xy-background-color": "transparent" } as React.CSSProperties}
         defaultEdgeOptions={{
-          style: { strokeWidth: 2 },
+          style: { strokeWidth: 1.5, strokeDasharray: "3 6" },
         }}
       >
-        <Background gap={16} color="var(--border)" />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1.5} color="var(--border)" />
         <Controls
           showInteractive={false}
-          className="!bg-card !border-2 !border-border !fill-foreground/50 [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button]:hover:!bg-accent [&>button]:hover:!text-accent-foreground"
-        />
-        <MiniMap
-          className="!border-border !bg-card"
-          nodeColor={(n: any) => {
-            const def = NODE_REGISTRY_MAP.get(n.data?.wfNode?.type ?? "");
-            return def?.color ?? "#6b7280";
-          }}
+          className="!overflow-hidden !rounded-lg !border !border-border !bg-card !fill-foreground/50 [&>button]:!border-b-border [&>button]:!bg-card [&>button]:!text-foreground/70 [&>button]:hover:!bg-muted [&>button]:hover:!text-foreground"
         />
         <Panel position="top-right">
-          <Button size="sm" variant="secondary" onClick={onAddNode} className="gap-1.5 shadow-md">
-            <Plus className="size-3.5" />
-            Add Node
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="outline" onClick={handleTidyLayout} className="gap-1.5 shadow-md">
+              <Wand2 className="size-3.5" />
+              Tidy
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onAddNode} className="gap-1.5 shadow-md">
+              <Plus className="size-3.5" />
+              Add Node
+            </Button>
+          </div>
         </Panel>
       </ReactFlow>
     </div>
