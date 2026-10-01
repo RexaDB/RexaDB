@@ -130,3 +130,12 @@ export function validateSslMode(raw: string, defaultMode = "prefer"): string {
 export function isPostgresConnection(connectionString: string) {
   return detectConnectionDbType(connectionString) === "postgres";
 }
+
+export function disablePgSsl(connectionString: string): string {
+  const parsed = new URL(normalizePgConnectionString(connectionString));
+  for (const parameter of ["ssl", "sslcert", "sslkey", "sslrootcert"]) {
+    parsed.searchParams.delete(parameter);
+  }
+  parsed.searchParams.set("sslmode", "disable");
+  return parsed.toString();
+}

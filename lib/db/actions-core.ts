@@ -14,6 +14,7 @@ import type { SqlEditorRunQueryResult as SqlEditorRunQueryResult_ } from "./acti
 export type SqlEditorRunQueryResult = SqlEditorRunQueryResult_;
 import {
   normalizePgConnectionString,
+  disablePgSsl,
   getPgPassword,
   getPgUsername,
   getPgDatabase,
@@ -2466,18 +2467,14 @@ export async function testConnection(
             await client.connect();
           } catch (error) {
             // node-postgres won't retry sslmode=prefer/allow in plaintext on its own
-            // (see isSslUnsupportedError) — reconnect without SSL to match libpq.
+            // reconnect without ssl to match libpq.
             const sslMode = getPgSslMode(effectiveConnectionString);
             if (!isSslUnsupportedError(error) || !sslModeAllowsPlaintextFallback(sslMode)) {
               throw error;
             }
+            await client.end().catch(() => {});
             client = new pgMod.Client({
-              host: getPgHost(effectiveConnectionString),
-              port: getPgPort(effectiveConnectionString),
-              database: getPgDatabase(effectiveConnectionString),
-              user: getPgUsername(effectiveConnectionString),
-              password: getPgPassword(effectiveConnectionString),
-              ssl: false,
+              connectionString: disablePgSsl(effectiveConnectionString),
             });
             await client.connect();
           }

@@ -30,6 +30,7 @@ type ExecuteQueryOptions = {
 const runningPgQueries = new Map<string, {
   pid: number;
   effectiveConnectionString: string;
+  ssl: ReturnType<typeof getPgSslConfig>;
 }>();
 
 const pgPoolEntries = new Map<string, {
@@ -37,6 +38,7 @@ const pgPoolEntries = new Map<string, {
     pool: PoolType;
     effectiveConnectionString: string;
     tunnel: TunnelHandle;
+    ssl: ReturnType<typeof getPgSslConfig>;
   }>;
   lastUsed: number;
 }>();
@@ -154,7 +156,7 @@ function getPgSslConfig(connectionString: string) {
 async function getPgPoolEntry(rawConnectionString: string) {
   const connectionString = await resolveEffectiveConnectionString(rawConnectionString);
   const config = parsePgConfig(connectionString);
-  const cacheKey = `${config.host}:${config.port}:${config.database}:${config.username}:${config.password}`;
+  const cacheKey = JSON.stringify([connectionString, config.sslMode]);
 
   const cached = pgPoolEntries.get(cacheKey);
   if (cached) {
@@ -165,44 +167,51 @@ async function getPgPoolEntry(rawConnectionString: string) {
   const pending = (async () => {
     const tunnel = await startSshTunnelIfNeeded(connectionString, 5432, normalizePgConnectionString);
     const effectiveConnectionString = tunnel.connectionString;
+    const effectiveConfig = parsePgConfig(effectiveConnectionString);
 
     const makePool = (ssl: ReturnType<typeof getPgSslConfig>) =>
       new Pool({
-        host: config.host,
-        port: config.port,
-        database: config.database,
-        user: config.username,
-        password: config.password,
+        host: effectiveConfig.host,
+        port: effectiveConfig.port,
+        database: effectiveConfig.database,
+        user: effectiveConfig.username,
+        password: effectiveConfig.password,
         connectionTimeoutMillis: 15000,
         idleTimeoutMillis: 30000,
         max: 6,
         ssl,
       });
 
-    let pool = makePool(getPgSslConfig(effectiveConnectionString));
+    let pool: PoolType | undefined;
+    let ssl = getPgSslConfig(effectiveConnectionString);
     try {
-      const probe = await pool.connect();
-      probe.release();
-    } catch (error) {
-      // node-postgres won't retry sslmode=prefer/allow in plaintext on its own
-      // (see isSslUnsupportedError) — reconnect without SSL to match libpq.
-      if (!isSslUnsupportedError(error) || !sslModeAllowsPlaintextFallback(config.sslMode)) {
+      pool = makePool(ssl);
+      try {
+        const probe = await pool.connect();
+        probe.release();
+      } catch (error) {
+        // node-postgres does not retry opportunistic ssl connections in plaintext.
+        if (!isSslUnsupportedError(error) || !sslModeAllowsPlaintextFallback(config.sslMode)) {
+          throw error;
+        }
         await pool.end().catch(() => {});
-        throw error;
+        pool = undefined;
+        ssl = false;
+        pool = makePool(ssl);
+        const probe = await pool.connect();
+        probe.release();
       }
-      await pool.end().catch(() => {});
-      pool = makePool(false);
+
+      pool.on("error", (error: Error) => {
+        console.error("PostgreSQL pool error:", error.message);
+      });
+
+      return { pool, effectiveConnectionString, tunnel, ssl };
+    } catch (error) {
+      await pool?.end().catch(() => {});
+      await tunnel.close().catch(() => {});
+      throw error;
     }
-
-    pool.on("error", (error: Error) => {
-      console.error("PostgreSQL pool error:", error.message);
-    });
-
-    return {
-      pool,
-      effectiveConnectionString,
-      tunnel,
-    };
   })();
 
   pgPoolEntries.set(cacheKey, {
@@ -261,7 +270,7 @@ export async function executeQuery(
   params: any[] = [],
   options: ExecuteQueryOptions = {}
 ) {
-  const { pool, effectiveConnectionString } = await getPgPoolEntry(connectionString);
+  const { pool, effectiveConnectionString, ssl } = await getPgPoolEntry(connectionString);
   const queryId = options.queryId?.trim();
   const executionContext = options.executionContext ?? null;
   let client: PoolClient | null = null;
@@ -274,6 +283,7 @@ export async function executeQuery(
       runningPgQueries.set(queryId, {
         pid: backendPid,
         effectiveConnectionString,
+        ssl,
       });
     }
     if (executionContext) {
@@ -354,7 +364,7 @@ export async function cancelQueryById(queryId: string): Promise<boolean> {
     user: getPgUsername(running.effectiveConnectionString),
     password: getPgPassword(running.effectiveConnectionString),
     connectionTimeoutMillis: 8000,
-    ssl: getPgSslConfig(running.effectiveConnectionString),
+    ssl: running.ssl,
   });
 
   try {
