@@ -785,6 +785,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");

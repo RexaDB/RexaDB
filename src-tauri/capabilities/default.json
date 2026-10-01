@@ -30,6 +30,8 @@
     "process:allow-exit",
     "process:allow-restart",
 
+    "window-state:default",
+
     "core:path:default",
 
     "updater:default",
