@@ -14,13 +14,17 @@ import type { SqlEditorRunQueryResult as SqlEditorRunQueryResult_ } from "./acti
 export type SqlEditorRunQueryResult = SqlEditorRunQueryResult_;
 import {
   normalizePgConnectionString,
+  disablePgSsl,
   getPgPassword,
   getPgUsername,
   getPgDatabase,
   getPgHost,
   getPgPort,
   getPgSslConfig,
+  getPgSslMode,
   isPostgresConnection,
+  isSslUnsupportedError,
+  sslModeAllowsPlaintextFallback,
 } from "./pg-connection";
 import { resolvePgDumpBinary } from "./pg-dump";
 import {
@@ -2457,9 +2461,23 @@ export async function testConnection(
         const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
         const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
         const pgMod = (globalThis as any).__pg || (await import("pg")).default;
-        const client = new pgMod.Client({ connectionString: effectiveConnectionString });
+        let client = new pgMod.Client({ connectionString: effectiveConnectionString });
         try {
-          await client.connect();
+          try {
+            await client.connect();
+          } catch (error) {
+            // node-postgres won't retry sslmode=prefer/allow in plaintext on its own
+            // reconnect without ssl to match libpq.
+            const sslMode = getPgSslMode(effectiveConnectionString);
+            if (!isSslUnsupportedError(error) || !sslModeAllowsPlaintextFallback(sslMode)) {
+              throw error;
+            }
+            await client.end().catch(() => {});
+            client = new pgMod.Client({
+              connectionString: disablePgSsl(effectiveConnectionString),
+            });
+            await client.connect();
+          }
           await client.query("SELECT 1");
         } finally {
           await client.end();

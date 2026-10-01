@@ -61,21 +61,37 @@ export function getPgPort(connectionString: string): number {
   }
 }
 
-export function getPgSslConfig(connectionString: string) {
+export function getPgSslMode(connectionString: string): string {
   try {
     const parsed = new URL(normalizePgConnectionString(connectionString));
-    const rawSslMode = String(parsed.searchParams.get("sslmode") || "prefer").toLowerCase();
-    const sslMode = ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"].includes(rawSslMode)
-      ? rawSslMode
-      : "prefer";
-    if (sslMode === "disable") return false;
-    if (sslMode === "verify-full" || sslMode === "verify-ca") {
-      return { rejectUnauthorized: true };
-    }
-    return { rejectUnauthorized: false };
+    return validateSslMode(parsed.searchParams.get("sslmode") || "prefer");
   } catch {
-    return false;
+    return "prefer";
   }
+}
+
+export function getPgSslConfig(connectionString: string) {
+  const sslMode = getPgSslMode(connectionString);
+  if (sslMode === "disable") return false;
+  if (sslMode === "verify-full" || sslMode === "verify-ca") {
+    return { rejectUnauthorized: true };
+  }
+  return { rejectUnauthorized: false };
+}
+
+// node-postgres has no native "opportunistic SSL" behavior: unlike libpq, it
+// never retries in plaintext when the server responds that it doesn't speak
+// SSL — it just surfaces this exact message as a fatal error. Callers that
+// want real sslmode=prefer/allow semantics need to catch it and reconnect
+// with ssl disabled themselves.
+const SSL_UNSUPPORTED_MESSAGE = "The server does not support SSL connections";
+
+export function isSslUnsupportedError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes(SSL_UNSUPPORTED_MESSAGE);
+}
+
+export function sslModeAllowsPlaintextFallback(sslMode: string): boolean {
+  return sslMode === "prefer" || sslMode === "allow";
 }
 
 export function recoverPgCredentials(params: {
@@ -113,4 +129,13 @@ export function validateSslMode(raw: string, defaultMode = "prefer"): string {
 
 export function isPostgresConnection(connectionString: string) {
   return detectConnectionDbType(connectionString) === "postgres";
+}
+
+export function disablePgSsl(connectionString: string): string {
+  const parsed = new URL(normalizePgConnectionString(connectionString));
+  for (const parameter of ["ssl", "sslcert", "sslkey", "sslrootcert"]) {
+    parsed.searchParams.delete(parameter);
+  }
+  parsed.searchParams.set("sslmode", "disable");
+  return parsed.toString();
 }
