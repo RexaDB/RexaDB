@@ -1,19 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { useOrgScopedLoader } from "@/components/shared/provider-accounts/use-org-scoped-loader";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+// components
 import { Button } from "@/components/ui/button";
-import { NeonLogo } from "@/components/shared/provider-logo";
-import {
-  listProjects,
-  listOrgs,
-  listBranches,
-  listDatabases,
-  listRoles,
-  type NeonProject,
-  type NeonOrg,
-  type NeonBranch,
-} from "@/lib/neon-cli/client";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,13 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { NeonCliAccount } from "@/lib/neon-cli/profile-store";
-import {
-  buildNeonCliConnectionString,
-  parseNeonCliConnectionString,
-} from "@/lib/neon-cli/pointer";
-import { openExternalUrl } from "@/lib/desktop";
-import { isNeonSessionExpiredError } from "@/lib/neon-cli/errors";
+import { NeonLogo } from "@/components/shared/provider-logo";
 import { NeonInstallPrompt } from "@/components/neon/neon-install-prompt";
 import {
   AccountChips,
@@ -39,7 +26,6 @@ import {
   filterByName,
   type ProviderAccountScreenBaseProps,
 } from "@/components/shared/provider-accounts";
-import { toast } from "sonner";
 import {
   Database,
   ExternalLink,
@@ -47,6 +33,35 @@ import {
   Loader2,
   GitBranch,
 } from "@/lib/icon-theme/lucide-react";
+
+// hooks
+import { useOrgScopedLoader } from "@/components/shared/provider-accounts/use-org-scoped-loader";
+
+// services
+import {
+  listProjects,
+  listOrgs,
+  listBranches,
+  listDatabases,
+  listRoles,
+  type NeonProject,
+  type NeonOrg,
+  type NeonBranch,
+  type NeonDatabase,
+  type NeonRole,
+} from "@/lib/neon-cli/client";
+
+// utils
+import {
+  buildNeonCliConnectionString,
+  getNeonConnectionKey,
+  parseNeonCliConnectionString,
+} from "@/lib/neon-cli/pointer";
+import { openExternalUrl } from "@/lib/desktop";
+import { isNeonSessionExpiredError } from "@/lib/neon-cli/errors";
+
+// types
+import type { NeonCliAccount } from "@/lib/neon-cli/profile-store";
 
 interface NeonAccountsScreenProps extends ProviderAccountScreenBaseProps {
   accounts: NeonCliAccount[];
@@ -60,7 +75,12 @@ interface NeonAccountsScreenProps extends ProviderAccountScreenBaseProps {
   reloadSignal: number;
 }
 
-export function NeonAccountsScreen({
+export function NeonAccountsScreen(props: NeonAccountsScreenProps) {
+  const account = props.accounts.find((item) => item.id === props.activeAccountId);
+  return <NeonAccountContent key={JSON.stringify([account?.id, account?.profileName])} {...props} />;
+}
+
+function NeonAccountContent({
   accounts,
   activeAccountId,
   onSwitchAccount,
@@ -76,20 +96,51 @@ export function NeonAccountsScreen({
   onReconnectAccount,
   reloadSignal,
 }: NeonAccountsScreenProps) {
-  const [search, setSearch] = useState("");
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
+
+  const mounted = useRef<boolean>(true);
+  const pendingConnections = useRef<Set<string>>(new Set());
+
+  const [search, setSearch] = useState<string>("");
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   const [branchesByProject, setBranchesByProject] = useState<Record<string, NeonBranch[]>>({});
   const [branchesLoading, setBranchesLoading] = useState<string | null>(null);
   const [connectingBranchId, setConnectingBranchId] = useState<string | null>(null);
+  const [connectDialog, setConnectDialog] = useState<{
+    profile: string;
+    project: NeonProject;
+    branch: NeonBranch;
+    databases: NeonDatabase[];
+    roles: NeonRole[];
+  } | null>(null);
+  const [selectedDatabase, setSelectedDatabase] = useState<string>("");
+  const [selectedRole, setSelectedRole] = useState<string>("");
 
-  const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? null;
+  const connectedPointers = existingConnectionStrings
+    .map((conn) => parseNeonCliConnectionString(conn))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p));
 
   const connectedKeys = new Set(
-    existingConnectionStrings
-      .map((conn) => parseNeonCliConnectionString(conn))
-      .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      .map((p) => `${p.profile}/${p.projectId}/${p.branchId}`),
+    connectedPointers.map(getNeonConnectionKey),
   );
+
+  const getConnectedCount = (projectId: string, branchId: string) =>
+    connectedPointers.filter((p) => p.profile === activeAccount?.profileName && p.projectId === projectId && p.branchId === branchId).length;
+
+  const selectedConnectionExists = connectDialog !== null && connectedKeys.has(getNeonConnectionKey({
+    profile: connectDialog.profile,
+    projectId: connectDialog.project.id,
+    branchId: connectDialog.branch.id,
+    database: selectedDatabase,
+    role: selectedRole,
+  }));
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const {
     orgs,
@@ -131,6 +182,38 @@ export function NeonAccountsScreen({
     }
   };
 
+  const connectWithDatabaseAndRole = async (
+    profile: string,
+    project: NeonProject,
+    branch: NeonBranch,
+    database: string,
+    role: string,
+  ) => {
+    if (!mounted.current) return;
+    const pointer = {
+      profile,
+      projectId: project.id,
+      branchId: branch.id,
+      database,
+      role,
+    };
+    const key = getNeonConnectionKey(pointer);
+    if (connectedKeys.has(key) || pendingConnections.current.has(key)) {
+      toast.info("This database and role are already connected.");
+      return;
+    }
+    const connectionString = buildNeonCliConnectionString(pointer);
+    const name = branch.default
+      ? `${project.name} / ${database} (${role})`
+      : `${project.name} (${branch.name}) / ${database} (${role})`;
+    pendingConnections.current.add(key);
+    try {
+      await onConnectDatabase({ name, connectionString, connectionType: "neon" });
+    } finally {
+      pendingConnections.current.delete(key);
+    }
+  };
+
   const handleConnectBranch = async (project: NeonProject, branch: NeonBranch) => {
     if (!activeAccount) return;
     setConnectingBranchId(branch.id);
@@ -139,22 +222,32 @@ export function NeonAccountsScreen({
         listDatabases(activeAccount.profileName, project.id, branch.id),
         listRoles(activeAccount.profileName, project.id, branch.id),
       ]);
-      const database = databases[0]?.name;
-      const role = roles[0]?.name;
-      if (!database || !role) {
+      if (!mounted.current) return;
+      if (databases.length === 0 || roles.length === 0) {
         toast.error("This branch has no database/role to connect to.");
         return;
       }
-      const connectionString = buildNeonCliConnectionString({
-        profile: activeAccount.profileName,
-        projectId: project.id,
-        branchId: branch.id,
-        database,
-        role,
-      });
-      const name = branch.default ? project.name : `${project.name} (${branch.name})`;
-      await onConnectDatabase({ name, connectionString, connectionType: "neon" });
+      const available = databases
+        .flatMap((database) => roles.map((role) => ({ database: database.name, role: role.name })))
+        .find((selection) => !connectedKeys.has(getNeonConnectionKey({
+          profile: activeAccount.profileName,
+          projectId: project.id,
+          branchId: branch.id,
+          ...selection,
+        })));
+      if (!available) {
+        toast.info("All database and role combinations are already connected.");
+        return;
+      }
+      if (databases.length === 1 && roles.length === 1) {
+        await connectWithDatabaseAndRole(activeAccount.profileName, project, branch, available.database, available.role);
+        return;
+      }
+      setConnectDialog({ profile: activeAccount.profileName, project, branch, databases, roles });
+      setSelectedDatabase(available.database);
+      setSelectedRole(available.role);
     } catch (err) {
+      if (!mounted.current) return;
       const message = err instanceof Error ? err.message : "Failed to connect.";
       toast.error(message, {
         action: isNeonSessionExpiredError(message)
@@ -326,8 +419,7 @@ export function NeonAccountsScreen({
                               <div className="py-3 text-xs text-muted-foreground">No branches found.</div>
                             ) : (
                               branches.map((branch) => {
-                                const key = `${activeAccount?.profileName}/${project.id}/${branch.id}`;
-                                const isConnected = connectedKeys.has(key);
+                                const connectedCount = getConnectedCount(project.id, branch.id);
                                 return (
                                   <div
                                     key={branch.id}
@@ -340,23 +432,22 @@ export function NeonAccountsScreen({
                                         <span className="ml-1.5 text-[10px] text-muted-foreground">default</span>
                                       )}
                                     </div>
-                                    {isConnected ? (
+                                    {connectedCount > 0 && (
                                       <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                        Connected
+                                        {connectedCount} connected
                                       </span>
-                                    ) : (
-                                      <Button
-                                        size="sm"
-                                        className="h-6 shrink-0 gap-1 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
-                                        onClick={() => void handleConnectBranch(project, branch)}
-                                        disabled={connectingBranchId === branch.id}
-                                      >
-                                        {connectingBranchId === branch.id ? (
-                                          <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : null}
-                                        Connect
-                                      </Button>
                                     )}
+                                    <Button
+                                      size="sm"
+                                      className="h-6 shrink-0 gap-1 bg-primary text-[11px] text-primary-foreground hover:bg-primary/90"
+                                      onClick={() => void handleConnectBranch(project, branch)}
+                                      disabled={connectingBranchId !== null}
+                                    >
+                                      {connectingBranchId === branch.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : null}
+                                      Connect
+                                    </Button>
                                   </div>
                                 );
                               })
@@ -378,6 +469,83 @@ export function NeonAccountsScreen({
           </section>
         </>
       )}
+
+      <Dialog open={connectDialog !== null} onOpenChange={(open) => { if (!open) setConnectDialog(null); }}>
+        <DialogContent className="gap-0 rounded-xl p-0 sm:max-w-md" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <div className="px-5 pt-5 pb-4">
+            <DialogTitle className="text-base font-semibold">Connect to database</DialogTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {connectDialog ? `${connectDialog.project.name} · ${connectDialog.branch.name}` : ""}
+            </p>
+          </div>
+          <div className="space-y-4 px-5 pb-5">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Database</Label>
+              <Select value={selectedDatabase} onValueChange={setSelectedDatabase}>
+                <SelectTrigger className="h-9 border-border/60 bg-background/70 text-sm">
+                  <SelectValue placeholder="Select a database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {connectDialog?.databases.map((db) => (
+                    <SelectItem key={db.name} value={db.name}>
+                      {db.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {connectDialog && connectDialog.roles.length > 1 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Role</Label>
+                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                  <SelectTrigger className="h-9 border-border/60 bg-background/70 text-sm">
+                    <SelectValue placeholder="Select a role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {connectDialog.roles.map((role) => (
+                      <SelectItem key={role.name} value={role.name}>
+                        {role.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {selectedConnectionExists && (
+              <p className="text-xs text-muted-foreground">This database and role are already connected.</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setConnectDialog(null)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={!selectedDatabase || !selectedRole || selectedConnectionExists}
+                onClick={() => {
+                  if (!connectDialog || !selectedDatabase || !selectedRole || selectedConnectionExists) return;
+                  const { profile, project, branch } = connectDialog;
+                  setConnectDialog(null);
+                  void (async () => {
+                    setConnectingBranchId(branch.id);
+                    try {
+                      await connectWithDatabaseAndRole(profile, project, branch, selectedDatabase, selectedRole);
+                    } catch (err) {
+                      const message = err instanceof Error ? err.message : "Failed to connect.";
+                      toast.error(message);
+                    } finally {
+                      setConnectingBranchId(null);
+                    }
+                  })();
+                }}
+              >
+                Connect
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

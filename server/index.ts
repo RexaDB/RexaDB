@@ -23,6 +23,7 @@ import { handleTransferStart, handleTransferProgress, handleTransferExport } fro
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
+import * as neonCliRunner from "../lib/neon-cli/cli-runner";
 
 // Packaged/prod desktop builds are launched by the OS, not a terminal, so
 // process.env.PATH is missing Homebrew/nvm/npm-global dirs — enrich it
@@ -368,8 +369,7 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
 // reimplementation of its OAuth flow under its identity. See lib/neon-cli/.
 app.post("/api/neon-cli/detect", async (_req, res) => {
   try {
-    const { detectNeonCli } = await import("../lib/neon-cli/cli-runner");
-    res.json({ success: true, ...(await detectNeonCli()) });
+    res.json({ success: true, ...(await neonCliRunner.detectNeonCli()) });
   } catch (e: any) {
     res.json({ success: false, installed: false, error: e.message });
   }
@@ -439,13 +439,12 @@ app.post("/api/neon-cli/login", async (req, res) => {
   };
 
   try {
-    const { spawnNeonAuthLogin } = await import("../lib/neon-cli/cli-runner");
     // Single-flight: a retry/reopen kills every previous flow (each attempt
     // uses a fresh profile, so anything narrower never fires) so a stale
     // browser tab can no longer collide with new OAuth state (CSRF
     // mismatch) or a dead callback port.
     killAllNeonLogins();
-    const child = spawnNeonAuthLogin(profile);
+    const child = neonCliRunner.spawnNeonAuthLogin(profile);
     neonLoginChildren.add(child);
     const forgetChild = () => {
       neonLoginChildren.delete(child);
@@ -549,19 +548,42 @@ app.post("/api/neon-cli/auth-status", async (req, res) => {
         return;
       }
     }
-    const { neonAuthStatus } = await import("../lib/neon-cli/cli-runner");
-    res.json({ success: true, data: await neonAuthStatus(profiles) });
+    res.json({ success: true, data: await neonCliRunner.neonAuthStatus(profiles) });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.post("/api/neon-cli/orgs", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonOrgsList(body.profile)));
-app.post("/api/neon-cli/projects", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProjectsList(body.profile, body.orgId)));
-app.post("/api/neon-cli/branches", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonBranchesList(body.profile, body.projectId)));
-app.post("/api/neon-cli/databases", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonDatabasesList(body.profile, body.projectId, body.branchId)));
-app.post("/api/neon-cli/roles", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonRolesList(body.profile, body.projectId, body.branchId)));
-app.post("/api/neon-cli/remove-profile", dynamicPostRoute("../lib/neon-cli/cli-runner", (body, m) => m.neonProfileRemove(body.profile)));
+app.post("/api/neon-cli/orgs", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonOrgsList(req.body.profile) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
+app.post("/api/neon-cli/projects", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonProjectsList(req.body.profile, req.body.orgId) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
+app.post("/api/neon-cli/branches", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonBranchesList(req.body.profile, req.body.projectId) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
+app.post("/api/neon-cli/databases", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonDatabasesList(req.body.profile, req.body.projectId, req.body.branchId) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
+app.post("/api/neon-cli/roles", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonRolesList(req.body.profile, req.body.projectId, req.body.branchId) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
+app.post("/api/neon-cli/remove-profile", async (req, res) => {
+  try {
+    res.json({ success: true, data: await neonCliRunner.neonProfileRemove(req.body.profile) });
+  } catch (e: any) { res.json({ success: false, error: e.message }); }
+});
 
 // Load actions-core at module init — forces Bun to bundle it and all static deps
 const actionsCore = require("../lib/db/actions-core");

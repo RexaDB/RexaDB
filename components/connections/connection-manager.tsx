@@ -214,6 +214,7 @@ import {
   type NeonCliAccount,
 } from "@/lib/neon-cli/profile-store";
 import { detectNeonCli } from "@/lib/neon-cli/detect";
+import { isNeonCliConnectionString } from "@/lib/neon-cli/pointer";
 import { PlanetscaleLoginDialog } from "@/components/planetscale/planetscale-login-dialog";
 import { PlanetscaleAccountsScreen } from "@/components/planetscale/planetscale-account-screen";
 import {
@@ -1793,6 +1794,9 @@ export function ConnectionManager({
   }, [fieldValues, selectedProvider]);
 
   const getCandidateConnectionString = useCallback(() => {
+    if (isNeonCliConnectionString(connectionString)) {
+      return connectionString.trim();
+    }
     if (selectedProvider === "postgresql") {
       return buildPostgresConnectionString().trim();
     }
@@ -2765,7 +2769,12 @@ export function ConnectionManager({
         sslMode?: string;
         authToken?: string;
       } = {};
-      if (selectedProvider && isFieldBasedProvider(selectedProvider) && fieldValues) {
+      if (
+        selectedProvider &&
+        isFieldBasedProvider(selectedProvider) &&
+        fieldValues &&
+        !isNeonCliConnectionString(candidateConnectionString)
+      ) {
         connectionFields.host = fieldValues.host;
         connectionFields.port = fieldValues.port;
         connectionFields.database = fieldValues.database;
@@ -2883,12 +2892,14 @@ export function ConnectionManager({
       const parsed = parsePostgresConnectionString(conn.connectionString);
       if (parsed) fillPgForm(parsed);
     }
-    if (isFieldBasedProvider(detected)) {
+    if (isFieldBasedProvider(detected) && !isNeonCliConnectionString(conn.connectionString)) {
       const parsed = parseFieldsFromConnectionString(
         detected as FieldProviderId,
         conn.connectionString,
       );
       setFieldValues(parsed);
+    } else if (isNeonCliConnectionString(conn.connectionString)) {
+      setFieldValues(null);
     }
     if (detected === "turso") {
       const parsed = parseTursoConnectionString(conn.connectionString);
@@ -6734,6 +6745,18 @@ export function ConnectionManager({
                             </>
                           ),
                         })
+                      ) : isNeonCliConnectionString(connectionString) ? (
+                        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
+                          <Label className="text-sm font-medium">
+                            Neon CLI connection
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            This connection is managed by the Neon CLI. Rename it
+                            here, or connect the database again from the Neon
+                            screen to change the project, branch, database or
+                            role.
+                          </p>
+                        </div>
                       ) : isFieldBasedProvider(selectedProvider) ? (
                         renderGenericFieldForm()
                       ) : (

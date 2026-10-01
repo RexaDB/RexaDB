@@ -40,3 +40,13 @@ export function parseNeonCliConnectionString(connectionString: string): NeonCliP
     return null;
   }
 }
+
+export function getNeonConnectionKey(pointer: NeonCliPointer): string {
+  return JSON.stringify([
+    pointer.profile,
+    pointer.projectId,
+    pointer.branchId,
+    pointer.database,
+    pointer.role,
+  ]);
+}
