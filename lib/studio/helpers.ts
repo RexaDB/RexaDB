@@ -41,15 +41,26 @@ export function mergeTableTabSnapshot(
   previous: Record<string, any> | undefined,
   snapshot: Record<string, any>,
 ) {
+  const sortChanged = previous
+    && Object.prototype.hasOwnProperty.call(snapshot, "sortConfig")
+    && JSON.stringify(previous.sortConfig ?? null) !== JSON.stringify(snapshot.sortConfig ?? null);
   return {
     ...previous,
     ...snapshot,
-    results: snapshot.results ?? previous?.results ?? null,
+    results: sortChanged
+      ? null
+      : Object.prototype.hasOwnProperty.call(snapshot, "results")
+        ? snapshot.results
+        : (previous?.results ?? null),
     tableStructure: snapshot.tableStructure.length > 0 ? snapshot.tableStructure : (previous?.tableStructure ?? []),
     foreignKeys: snapshot.foreignKeys.length > 0 ? snapshot.foreignKeys : (previous?.foreignKeys ?? []),
     totalCount: snapshot.totalCount ?? previous?.totalCount ?? null,
-    filterQuery: snapshot.filterQuery ?? previous?.filterQuery ?? "",
-    sortConfig: snapshot.sortConfig ?? previous?.sortConfig ?? null,
+    filterQuery: Object.prototype.hasOwnProperty.call(snapshot, "filterQuery")
+      ? snapshot.filterQuery
+      : (previous?.filterQuery ?? ""),
+    sortConfig: Object.prototype.hasOwnProperty.call(snapshot, "sortConfig")
+      ? snapshot.sortConfig
+      : (previous?.sortConfig ?? null),
     page: snapshot.page ?? previous?.page ?? 0,
     pageSize: snapshot.pageSize ?? previous?.pageSize ?? 25,
   };

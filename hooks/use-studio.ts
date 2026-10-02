@@ -1671,7 +1671,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [isInsertSheetOpen, setIsInsertSheetOpen] = useState(false);
   const [insertData, setInsertData] = useState<Record<string, string>>({});
   const [filterQuery, setFilterQuery] = useState(searchParams.get("f") || "");
-  const [sortConfig, setSortConfig] = useState<{ column: string; direction: 'ASC' | 'DESC' } | null>(() => {
+  const [sortConfig, setSortConfigState] = useState<{ column: string; direction: 'ASC' | 'DESC' } | null>(() => {
     const col = searchParams.get("sc");
     const dir = searchParams.get("sd");
     if (col && (dir === "ASC" || dir === "DESC")) {
@@ -1679,6 +1679,17 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return null;
   });
+  const setSortConfig: React.Dispatch<React.SetStateAction<{ column: string; direction: 'ASC' | 'DESC' } | null>> = useCallback((nextSort) => {
+    const resolvedSort = typeof nextSort === "function" ? nextSort(sortConfig) : nextSort;
+    setSortConfigState(resolvedSort);
+    const tabId = activeTabIdRef.current;
+    if (tabId) {
+      setTabDataCache((prev) => ({
+        ...prev,
+        [tabId]: { ...prev[tabId], sortConfig: resolvedSort, results: null },
+      }));
+    }
+  }, [sortConfig]);
   const [tableSearch, setTableSearch] = useState("");
   const [isCreatingTable, setIsCreatingTable] = useState(false);
   const [newTableData, setNewTableData] = useState<{
@@ -4555,7 +4566,9 @@ END $$;`.trim();
                   ...prev[tabId],
                   tableStructure: structRes.data || [],
                   filterQuery: prev[tabId]?.filterQuery || filterQuery,
-                  sortConfig: prev[tabId]?.sortConfig || sortConfig,
+                  sortConfig: prev[tabId] && Object.prototype.hasOwnProperty.call(prev[tabId], "sortConfig")
+                    ? prev[tabId].sortConfig
+                    : sortConfig,
                   page: prev[tabId]?.page ?? page,
                   pageSize: prev[tabId]?.pageSize ?? pageSize
                 }
@@ -4569,7 +4582,9 @@ END $$;`.trim();
                   ...prev[tabId],
                   foreignKeys: fkRes.data || [],
                   filterQuery: prev[tabId]?.filterQuery || filterQuery,
-                  sortConfig: prev[tabId]?.sortConfig || sortConfig,
+                  sortConfig: prev[tabId] && Object.prototype.hasOwnProperty.call(prev[tabId], "sortConfig")
+                    ? prev[tabId].sortConfig
+                    : sortConfig,
                   page: prev[tabId]?.page ?? page,
                   pageSize: prev[tabId]?.pageSize ?? pageSize
                 }
