@@ -40,16 +40,33 @@ export function SavedTableViews({ connectionString, table, schema, filter, sort,
   const [name, setName] = React.useState("");
   const [creating, setCreating] = React.useState(false);
 
-  React.useEffect(() => setViews(readViews(key)), [key]);
+  React.useEffect(() => {
+    setViews(readViews(key));
+    const sync = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === key) setViews(readViews(key));
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === key) setViews(readViews(key));
+    };
+    window.addEventListener("rexadb-saved-views-updated", sync);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("rexadb-saved-views-updated", sync);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [key]);
   const scoped = views.filter((view) => view.table === table && view.schema === schema);
   const persist = (next: SavedView[]) => {
     setViews(next);
     try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Storage may be unavailable. */ }
+    window.dispatchEvent(new CustomEvent("rexadb-saved-views-updated", { detail: key }));
   };
   const save = () => {
     const trimmed = name.trim();
     if (!trimmed || !table) return;
-    persist([...views, { id: crypto.randomUUID(), name: trimmed, table, schema, filter, sort }]);
+    // Read fresh state so a stale toolbar copy cannot drop views saved elsewhere.
+    const current = readViews(key);
+    persist([...current, { id: crypto.randomUUID(), name: trimmed, table, schema, filter, sort }]);
     setName("");
     setCreating(false);
   };
@@ -74,7 +91,7 @@ export function SavedTableViews({ connectionString, table, schema, filter, sort,
               <button className="min-w-0 flex-1 truncate py-2 text-left text-xs" onClick={() => { onApply(view.filter, view.sort); setOpen(false); }}>
                 {view.name}<span className="ml-2 text-muted-foreground">{view.filter ? "Filtered" : "All rows"}</span>
               </button>
-              <Button size="icon" variant="ghost" aria-label={`Delete ${view.name}`} className="h-7 w-7" onClick={() => persist(views.filter((item) => item.id !== view.id))}>
+              <Button size="icon" variant="ghost" aria-label={`Delete ${view.name}`} className="h-7 w-7" onClick={() => persist(readViews(key).filter((item) => item.id !== view.id))}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>

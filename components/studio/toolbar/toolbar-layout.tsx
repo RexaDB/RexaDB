@@ -45,10 +45,6 @@ export function ToolbarLayout({ items, connectionString }: { items: Item[]; conn
       <ContextMenuTrigger asChild>
         <div
           className="flex w-0 min-w-8 flex-1 self-stretch items-center justify-end gap-2"
-          onContextMenu={(event) => {
-            const target = event.target;
-            if (target instanceof HTMLElement && target.closest("button, input, [role='button']")) event.preventDefault();
-          }}
         >
           {items.filter((item) => !hidden.includes(item.id)).map((item) => <React.Fragment key={item.id}>{item.content}</React.Fragment>)}
         </div>
