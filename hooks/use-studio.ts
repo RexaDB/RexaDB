@@ -1671,7 +1671,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [isInsertSheetOpen, setIsInsertSheetOpen] = useState(false);
   const [insertData, setInsertData] = useState<Record<string, string>>({});
   const [filterQuery, setFilterQuery] = useState(searchParams.get("f") || "");
-  const [sortConfig, setSortConfigState] = useState<{ column: string; direction: 'ASC' | 'DESC' } | null>(() => {
+  const [sortConfig, setSortConfig] = useState<{ column: string; direction: 'ASC' | 'DESC' } | null>(() => {
     const col = searchParams.get("sc");
     const dir = searchParams.get("sd");
     if (col && (dir === "ASC" || dir === "DESC")) {
@@ -1679,17 +1679,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     return null;
   });
-  const setSortConfig: React.Dispatch<React.SetStateAction<{ column: string; direction: 'ASC' | 'DESC' } | null>> = useCallback((nextSort) => {
-    const resolvedSort = typeof nextSort === "function" ? nextSort(sortConfig) : nextSort;
-    setSortConfigState(resolvedSort);
-    const tabId = activeTabIdRef.current;
-    if (tabId) {
-      setTabDataCache((prev) => ({
-        ...prev,
-        [tabId]: { ...prev[tabId], sortConfig: resolvedSort, results: null },
-      }));
-    }
-  }, [sortConfig]);
   const [tableSearch, setTableSearch] = useState("");
   const [isCreatingTable, setIsCreatingTable] = useState(false);
   const [newTableData, setNewTableData] = useState<{
