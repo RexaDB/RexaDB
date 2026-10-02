@@ -1,5 +1,6 @@
 import { argon2idAsync } from "@noble/hashes/argon2.js";
 import { API_BASE } from "@/lib/api-base";
+import { isDesktopRuntime } from "@/lib/desktop";
 
 export type VaultPrompt = {
   setup: boolean;
@@ -19,9 +20,11 @@ let promptHandler: ((prompt: VaultPrompt) => void) | null = null;
 const queuedPrompts: VaultPrompt[] = [];
 
 export function getCredentialStorageMode(): CredentialStorageMode {
-  if (typeof localStorage === "undefined") return "keychain";
+  if (typeof localStorage === "undefined") return "vault";
   const mode = localStorage.getItem(MODE_KEY);
-  return mode === "vault" || mode === "plaintext" ? mode : "keychain";
+  if (mode === "vault" || mode === "plaintext") return mode;
+  if (mode === "keychain") return mode;
+  return isDesktopRuntime() ? "keychain" : "vault";
 }
 
 export function setCredentialStorageMode(mode: CredentialStorageMode) {

@@ -110,9 +110,12 @@ function SheetContent({
       return
     }
     onInteractOutsideProp?.(event)
-    // Sheets in the app are persistent side panels: outside clicks may
+    if (event.defaultPrevented) return
+    // Contained sheets are persistent side panels: outside clicks may
     // interact with the workspace, but must not dismiss the open sheet.
-    event.preventDefault()
+    // Regular modal sheets (mobile sidebar, edit dialogs) must still
+    // dismiss on backdrop click.
+    if (contained) event.preventDefault()
   }, [contained, onInteractOutsideProp])
 
   const getViewportMaxWidth = React.useCallback(() => {
@@ -194,9 +197,11 @@ function SheetContent({
         onInteractOutside={handleInteractOutside}
         onPointerDownOutside={(event) => {
           onPointerDownOutsideProp?.(event)
-          // Block dismissal at the pointer event itself. This also protects
-          // docked sheets while the resize sash receives pointer input.
-          event.preventDefault()
+          if (event.defaultPrevented) return
+          // Block dismissal at the pointer event itself only for persistent
+          // contained sheets. This also protects docked sheets while the
+          // resize sash receives pointer input.
+          if (contained) event.preventDefault()
         }}
         data-slot="sheet-content"
         data-side={side}

@@ -223,6 +223,7 @@ export async function ensureCoreTables() {
   ]);
   await ensureColumns("connections", [
     { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
+    { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
   ]);
   await createTableIfNotExists("folders", [
     { name: "id", type: "TEXT", constraints: "PRIMARY KEY NOT NULL" },

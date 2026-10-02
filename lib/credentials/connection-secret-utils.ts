@@ -6,6 +6,8 @@ export type SecretBearingConnection = {
 
 const SECRET_QUERY_KEYS = /^(password|passwd|pwd|pass|token|auth[_-]?token|access[_-]?token|refresh[_-]?token|api[_-]?(?:key|token)|apikey|secret|client[_-]?secret|private[_-]?key|bearer|credential)$/i;
 
+const SECRET_REDACT_PATTERN = "password|passwd|pwd|pass|token|auth[_-]?token|access[_-]?token|refresh[_-]?token|api[_-]?(?:key|token)|apikey|secret|client[_-]?secret|private[_-]?key|bearer|credential";
+
 function splitQuery(value: string) {
   const hashAt = value.indexOf("#");
   const beforeHash = hashAt < 0 ? value : value.slice(0, hashAt);
@@ -32,15 +34,16 @@ export function stripConnectionSecrets(value: string): string {
       if (SECRET_QUERY_KEYS.test(key)) url.searchParams.delete(key);
     });
     const normalized = `${jdbcPrefix}${url.toString()}`;
+    const querySecretPattern = new RegExp(`([;?&])(?:${SECRET_REDACT_PATTERN})=[^;&?#]*`, "gi");
     return normalized
-      .replace(/([;?&])(?:password|passwd|pwd|pass|token|auth_token|access_token|refresh_token|api_key|api_token|secret|client_secret|private_key|bearer|credential)=[^;&?#]*/gi, "")
+      .replace(querySecretPattern, "")
       .replace(/(jdbc:oracle:thin:[^/]+)\/[^@]+(@)/i, "$1$2");
   } catch {
     const userInfoRedacted = value.replace(/(\/\/[^:/@]+):[^@/]+@/, "$1@");
     const { base, hash, parts } = splitQuery(userInfoRedacted);
     const safeParts = parts.filter((part) => !isSecretParameter(part));
     return `${base}${safeParts.length ? `?${safeParts.join("&")}` : ""}${hash}`
-      .replace(/(;)(?:password|passwd|pwd|pass|token|auth_token|access_token|refresh_token|api_key|api_token|secret|client_secret|private_key|bearer|credential)=[^;&?#]*/gi, "")
+      .replace(new RegExp(`(;)(?:${SECRET_REDACT_PATTERN})=[^;&?#]*`, "gi"), "")
       .replace(/(jdbc:oracle:thin:[^/]+)\/[^@]+(@)/i, "$1$2");
   }
 }

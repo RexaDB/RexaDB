@@ -16,6 +16,25 @@ type SavedConnection = Record<string, any> & {
   credentialError?: boolean;
 };
 
+const CLEANUP_PENDING_KEY = "rexadb:secure-migration-cleanup-pending";
+
+function markCleanupPending() {
+  try { localStorage.setItem(CLEANUP_PENDING_KEY, "1"); } catch { /* storage unavailable */ }
+}
+
+function clearCleanupPending() {
+  try { localStorage.removeItem(CLEANUP_PENDING_KEY); } catch { /* storage unavailable */ }
+}
+
+function isCleanupPending() {
+  try { return localStorage.getItem(CLEANUP_PENDING_KEY) === "1"; } catch { return false; }
+}
+
+async function runSecureCleanup() {
+  const compacted = await fetch(new URL("/api/connections/secure-migration/complete", API_BASE), { method: "POST" });
+  if (!compacted.ok) throw new Error("Secure-migration cleanup failed.");
+}
+
 async function persistMigration(connection: SavedConnection) {
   const protectedData = await protectConnectionPayload(connection);
   try {
@@ -64,12 +83,13 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
       });
     }
   }
-  if (migrated) {
+  if (migrated) markCleanupPending();
+  if (migrated || isCleanupPending()) {
     try {
-      const compacted = await fetch(new URL("/api/connections/secure-migration/complete", API_BASE), { method: "POST" });
-      if (!compacted.ok) secured.forEach((connection) => { connection.credentialError = true; });
+      await runSecureCleanup();
+      clearCleanupPending();
     } catch {
-      secured.forEach((connection) => { connection.credentialError = true; });
+      markCleanupPending();
     }
   }
   return secured;
