@@ -2020,6 +2020,7 @@ function TableWidget({
         onToggleColumn={toggleColumn}
         onShowAllColumns={showAllColumns}
         tableStructure={structure}
+        connectionString={connectionString}
       />
       <DataGrid
         results={results}

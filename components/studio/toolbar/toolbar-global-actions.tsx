@@ -183,7 +183,7 @@ export function ToolbarGlobalActions({
         />
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <div className="flex items-center">
           <Button
             variant="outline"

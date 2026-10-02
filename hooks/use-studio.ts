@@ -4555,7 +4555,9 @@ END $$;`.trim();
                   ...prev[tabId],
                   tableStructure: structRes.data || [],
                   filterQuery: prev[tabId]?.filterQuery || filterQuery,
-                  sortConfig: prev[tabId]?.sortConfig || sortConfig,
+                  sortConfig: prev[tabId] && Object.prototype.hasOwnProperty.call(prev[tabId], "sortConfig")
+                    ? prev[tabId].sortConfig
+                    : sortConfig,
                   page: prev[tabId]?.page ?? page,
                   pageSize: prev[tabId]?.pageSize ?? pageSize
                 }
@@ -4569,7 +4571,9 @@ END $$;`.trim();
                   ...prev[tabId],
                   foreignKeys: fkRes.data || [],
                   filterQuery: prev[tabId]?.filterQuery || filterQuery,
-                  sortConfig: prev[tabId]?.sortConfig || sortConfig,
+                  sortConfig: prev[tabId] && Object.prototype.hasOwnProperty.call(prev[tabId], "sortConfig")
+                    ? prev[tabId].sortConfig
+                    : sortConfig,
                   page: prev[tabId]?.page ?? page,
                   pageSize: prev[tabId]?.pageSize ?? pageSize
                 }

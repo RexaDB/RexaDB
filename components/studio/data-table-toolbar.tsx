@@ -1,6 +1,8 @@
 import { ToolbarSelectionActions } from "./toolbar/toolbar-selection-actions";
 import { ToolbarFilterSort } from "./toolbar/toolbar-filter-sort";
 import { ToolbarGlobalActions } from "./toolbar/toolbar-global-actions";
+import { SavedTableViews } from "./saved-table-views";
+import { ToolbarLayout } from "./toolbar/toolbar-layout";
 import { Search, ChevronDown } from "@/lib/icon-theme/solar-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { LayoutTable01Icon } from "@hugeicons/core-free-icons";
@@ -180,6 +182,27 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
     </DropdownMenu>
   );
 
+  const toolbarItems = [
+    { id: "filter", label: "Filter and sort", content: <><ToolbarFilterSort
+      filterQuery={props.filterQuery} setFilterQuery={props.setFilterQuery}
+      sortConfig={props.sortConfig} setSortConfig={props.setSortConfig}
+      refreshTableData={props.refreshTableData} selectedTable={props.selectedTable}
+      selectedSchema={props.selectedSchema} results={props.results} dbType={props.dbType}
+      globalSearchQuery={props.globalSearchQuery} setGlobalSearchQuery={props.setGlobalSearchQuery}
+      setGlobalSearchScope={props.setGlobalSearchScope}
+    /></> },
+    { id: "views", label: "Saved views", content: <SavedTableViews
+      connectionString={props.connectionString} table={props.selectedTable}
+      schema={props.selectedSchema} filter={props.filterQuery} sort={props.sortConfig}
+      onApply={(filter, sort) => {
+        props.setFilterQuery(filter); props.setSortConfig(sort);
+        if (props.selectedTable) props.refreshTableData(props.selectedTable, props.selectedSchema, filter, sort);
+      }}
+    /> },
+    { id: "columns", label: "Columns", content: ColumnsDropdown },
+    { id: "actions", label: "Table actions", content: toolbarGlobalActions },
+  ];
+
   return (
     <div className="relative border-b border-border bg-studio-bg h-12 shrink-0 overflow-hidden">
       {/* Default State */}
@@ -192,24 +215,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
         )}
       >
         {SearchInputWithScope}
-        <div className="ml-auto flex items-center gap-2">
-          <ToolbarFilterSort
-            filterQuery={props.filterQuery}
-            setFilterQuery={props.setFilterQuery}
-            sortConfig={props.sortConfig}
-            setSortConfig={props.setSortConfig}
-            refreshTableData={props.refreshTableData}
-            selectedTable={props.selectedTable}
-            selectedSchema={props.selectedSchema}
-            results={props.results}
-            dbType={props.dbType}
-            globalSearchQuery={props.globalSearchQuery}
-            setGlobalSearchQuery={props.setGlobalSearchQuery}
-            setGlobalSearchScope={props.setGlobalSearchScope}
-          />
-          {ColumnsDropdown}
-          {toolbarGlobalActions}
-        </div>
+        <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
       </div>
 
       {/* Selection State */}
@@ -231,10 +237,9 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
           deleteDisabled={props.isPermissionPreview}
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2">
           {SearchInputWithScope}
-          {ColumnsDropdown}
-          {toolbarGlobalActions}
+          <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
         </div>
       </div>
     </div>
