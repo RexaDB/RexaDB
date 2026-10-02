@@ -1942,7 +1942,7 @@ export function ConnectionManager({
         fetchConnectionGroups(),
       ]);
       setConnections(conns);
-      if (conns.some((conn: any) => conn.credentialError)) {
+      if (conns.some((conn: any) => conn.credentialError || conn.secureCleanupPending)) {
         toast.error(
           "Some saved credentials could not be unlocked or their SQLite cleanup did not finish. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
         );

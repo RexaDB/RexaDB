@@ -22,6 +22,8 @@ export function CredentialStorageSetting() {
       const connections = await getConnections();
       if (connections.some((connection: any) => connection.credentialError)) {
         toast.error("Some credentials could not be migrated or unlocked. Restore access and retry.");
+      } else if (connections.some((connection: any) => connection.secureCleanupPending)) {
+        toast.warning("Credentials migrated, but SQLite cleanup did not finish and will retry. Older database copies may still contain recoverable secrets until it succeeds.");
       } else {
         toast.success("Credential storage updated; saved connections are being migrated.");
       }

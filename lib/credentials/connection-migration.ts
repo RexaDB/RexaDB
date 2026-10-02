@@ -14,6 +14,7 @@ type SavedConnection = Record<string, any> & {
   password?: string | null;
   authToken?: string | null;
   credentialError?: boolean;
+  secureCleanupPending?: boolean;
 };
 
 const CLEANUP_PENDING_KEY = "rexadb:secure-migration-cleanup-pending";
@@ -84,13 +85,19 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
     }
   }
   if (migrated) markCleanupPending();
-  if (migrated || isCleanupPending()) {
+  let cleanupPending = isCleanupPending();
+  if (migrated || cleanupPending) {
     try {
       await runSecureCleanup();
       clearCleanupPending();
+      cleanupPending = false;
     } catch {
       markCleanupPending();
+      cleanupPending = true;
     }
+  }
+  if (cleanupPending) {
+    secured.forEach((connection) => { connection.secureCleanupPending = true; });
   }
   return secured;
 }
