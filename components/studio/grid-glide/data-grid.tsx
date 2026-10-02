@@ -27,6 +27,7 @@ import { computeAutoColumnWidths, buildGridColumns } from "./columns";
 import { REXA_HEADER_ICONS, HEADER_ICON_KEYS } from "./header-icons";
 import { NoResultsState, WhimsicalEmptyState } from "./states";
 import { PaginationFooter } from "./pagination-footer";
+import { JsonCellEditorSheet, type JsonCellEditorState } from "./json-cell-editor-sheet";
 import {
   buildEnumByName,
   classifyColumnType,
@@ -47,6 +48,14 @@ import {
   FK_PREVIEW_BUTTON_SIZE,
   FK_PREVIEW_BUTTON_MARGIN,
 } from "./rexa-cell-renderer";
+
+type ActiveJsonCellEditor = JsonCellEditorState & {
+  rowId: string;
+  columnType: string;
+  oldValue: any;
+  cancelEditor: () => void;
+  discardChange: (() => void) | null;
+};
 import { AddColumnSheet } from "../grid/add-column-sheet";
 import { EditColumnSheet } from "../grid/edit-column-sheet";
 import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
@@ -181,6 +190,8 @@ export const DataGrid = React.memo(function DataGrid({
   pageSize,
   page,
   totalCount,
+  fastTableLoading = false,
+  countUnavailable = false,
   onPageChange,
   onPageSizeChange,
   onOpenInsertSheet,
@@ -227,6 +238,8 @@ export const DataGrid = React.memo(function DataGrid({
   const hoverColors = useGlideHoverColors();
   const gridRef = useRef<DataEditorRef>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [expandedJsonEditor, setExpandedJsonEditor] = useState<ActiveJsonCellEditor | null>(null);
+  const [expandedJsonError, setExpandedJsonError] = useState<string | null>(null);
   // Glide measures its host element on mount / via its own ResizeObserver.
   // In the SQL editor the grid lives inside a percentage-height split pane,
   // so `height: 100%` can resolve against a not-yet-settled or zeroed size
@@ -906,6 +919,21 @@ export const DataGrid = React.memo(function DataGrid({
             });
           }
         : null;
+      const openJsonEditor = /jsonb?/i.test(columnType) && rowId
+        ? (text: string, cancelEditor: () => void) => {
+            setExpandedJsonError(null);
+            setExpandedJsonEditor({
+              columnName,
+              value: text,
+              isModified: !!pending,
+              rowId,
+              columnType,
+              oldValue: pending ? pending.old : rowData[columnName],
+              cancelEditor,
+              discardChange,
+            });
+          }
+        : undefined;
       const isPendingDelete =
         pendingDeleteState.deletedColumns.has(columnName) ||
         isRowPendingDelete(rowData, rowId, pendingDeleteState);
@@ -976,6 +1004,7 @@ export const DataGrid = React.memo(function DataGrid({
         relativeDateLabel,
         originalValue,
         discardChange,
+        openJsonEditor,
         rowSpacing,
       };
 
@@ -1019,6 +1048,8 @@ export const DataGrid = React.memo(function DataGrid({
       columnMaxValues,
       hoverColors,
       setPendingChanges,
+      setExpandedJsonEditor,
+      setExpandedJsonError,
       rowSpacing,
       selectedCell,
       activeSelectionRects,
@@ -1051,6 +1082,47 @@ export const DataGrid = React.memo(function DataGrid({
     },
     [columns, rows, getRowId, tableStructByName, pendingChanges, handleUpdateRow],
   );
+
+  const closeExpandedJsonEditor = useCallback(() => {
+    const current = expandedJsonEditor;
+    setExpandedJsonEditor(null);
+    setExpandedJsonError(null);
+    current?.cancelEditor();
+  }, [expandedJsonEditor]);
+
+  const saveExpandedJsonEditor = useCallback(() => {
+    if (!expandedJsonEditor) return;
+    try {
+      const nextValue = JSON.parse(expandedJsonEditor.value);
+      void handleUpdateRow(
+        expandedJsonEditor.rowId,
+        expandedJsonEditor.columnName,
+        expandedJsonEditor.oldValue,
+        nextValue,
+        expandedJsonEditor.columnType,
+      );
+      closeExpandedJsonEditor();
+    } catch {
+      setExpandedJsonError("Invalid JSON. Fix the syntax before saving.");
+    }
+  }, [expandedJsonEditor, handleUpdateRow, closeExpandedJsonEditor]);
+
+  const setExpandedJsonNull = useCallback(() => {
+    if (!expandedJsonEditor) return;
+    void handleUpdateRow(
+      expandedJsonEditor.rowId,
+      expandedJsonEditor.columnName,
+      expandedJsonEditor.oldValue,
+      null,
+      expandedJsonEditor.columnType,
+    );
+    closeExpandedJsonEditor();
+  }, [expandedJsonEditor, handleUpdateRow, closeExpandedJsonEditor]);
+
+  const discardExpandedJsonChange = useCallback(() => {
+    expandedJsonEditor?.discardChange?.();
+    closeExpandedJsonEditor();
+  }, [expandedJsonEditor, closeExpandedJsonEditor]);
 
   const onColumnResize = useCallback(
     (column: { id?: string }, newSize: number) => {
@@ -1847,11 +1919,25 @@ export const DataGrid = React.memo(function DataGrid({
           document.body,
         )}
       </div>
+      <JsonCellEditorSheet
+        editor={expandedJsonEditor}
+        error={expandedJsonError}
+        onValueChange={(value) => {
+          setExpandedJsonEditor((current) => current ? { ...current, value } : current);
+          setExpandedJsonError(null);
+        }}
+        onSave={saveExpandedJsonEditor}
+        onCancel={closeExpandedJsonEditor}
+        onSetNull={setExpandedJsonNull}
+        onDiscard={discardExpandedJsonChange}
+      />
       {showPaginationFooter ? (
         <PaginationFooter
           page={page}
           pageSize={pageSize}
           totalCount={totalCount}
+          fastTableLoading={fastTableLoading}
+          countUnavailable={countUnavailable}
           loading={loading}
           recordCount={rows.length}
           onPageChange={onPageChange}

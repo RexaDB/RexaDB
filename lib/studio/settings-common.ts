@@ -5,6 +5,7 @@ const COMMON_SETTING_PAIRS = [
   ["vimMode", "setVimMode"],
   ["slashAiTrigger", "setSlashAiTrigger"],
   ["resultTabsEnabled", "setResultTabsEnabled"],
+  ["fastTableLoading", "setFastTableLoading"],
   ["sqlFormatTabWidth", "setSqlFormatTabWidth"],
   ["sqlFormatUseTabs", "setSqlFormatUseTabs"],
   ["sqlFormatKeywordCase", "setSqlFormatKeywordCase"],

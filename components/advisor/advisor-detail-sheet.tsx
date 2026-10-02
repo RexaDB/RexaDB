@@ -1,11 +1,14 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+} from "@/components/common/studio-sheet";
+
 import type { AdvisorResult } from "@/lib/db/advisor/types";
 import {
   Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import {
   Sparkles,
@@ -29,8 +32,6 @@ function categoryBadgeClass(category: string) {
       return "text-purple-400 border-purple-400/40 bg-purple-400/5";
   }
 }
-
-
 
 function getIssueText(checkId: string, entity: string): string {
   switch (checkId) {

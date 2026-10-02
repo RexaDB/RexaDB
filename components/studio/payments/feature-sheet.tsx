@@ -1,13 +1,17 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetHeader as SheetHeader,
+} from "@/components/common/studio-sheet";
+
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -83,7 +87,8 @@ export function FeatureSheet({
         minResizeWidth={360}
         showCloseButton={false}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-6 py-4">
+        <SheetHeader>
+
           <SheetTitle className="text-xl font-semibold tracking-tight">
             {title}
           </SheetTitle>
@@ -96,7 +101,7 @@ export function FeatureSheet({
           >
             <X className="size-4" />
           </Button>
-        </div>
+        </SheetHeader>
 
         <div className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-6">
           <label className="flex flex-col gap-1.5">

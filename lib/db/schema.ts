@@ -20,6 +20,8 @@ export const connections = sqliteTable("connections", {
   password: text("password"),
   sslMode: text("ssl_mode"),
   authToken: text("auth_token"),
+  credentialRef: text("credential_ref"),
+  credentialSecret: text("credential_secret"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   sortOrder: integer("sort_order"),
   environment: text("environment"),

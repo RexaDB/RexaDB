@@ -24,6 +24,11 @@ import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseE
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
 import * as neonCliRunner from "../lib/neon-cli/cli-runner";
+import {
+  cacheConnectionCredential,
+  clearCachedConnectionCredentials,
+} from "../lib/credentials/connection-credential-cache";
+import { stripConnectionSecrets } from "../lib/credentials/connection-secret-utils";
 
 // Packaged/prod desktop builds are launched by the OS, not a terminal, so
 // process.env.PATH is missing Homebrew/nvm/npm-global dirs — enrich it
@@ -596,10 +601,55 @@ app.get("/api/connections", async (req, res) => {
   try {
     const workspaceUrl = req.query.workspace as string | undefined;
     const result = await mod.getConnections(workspaceUrl || undefined);
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: result.map((connection: any) => connection.credentialRef ? {
+      ...connection,
+      connectionString: stripConnectionSecrets(connection.connectionString || ""),
+      password: null,
+      authToken: null,
+    } : connection) });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }
+});
+
+app.get("/api/connections/vault/config", async (_req, res) => {
+  const result = await mod.getCredentialVaultConfig();
+  res.status(result.success ? 200 : 500).json(result);
+});
+
+app.post("/api/connections/vault/config", async (req, res) => {
+  const { salt, verifier } = req.body || {};
+  const result = await mod.createCredentialVaultConfig(salt, verifier);
+  res.status(result.success ? 201 : 409).json(result);
+});
+
+app.post("/api/connections/secure-migration/complete", async (_req, res) => {
+  try {
+    res.json(await mod.completeConnectionSecretMigration());
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post("/api/connections/credential-cache", (req, res) => {
+  const { reference, secret } = req.body || {};
+  const allowedFields = ["connectionString", "password", "authToken"];
+  const fields = secret && typeof secret === "object" ? Object.keys(secret) : [];
+  const validSecret = Boolean(secret) && typeof secret === "object" && !Array.isArray(secret) &&
+    fields.every((field) => allowedFields.includes(field)) &&
+    fields.every((field) => secret[field] === null || typeof secret[field] === "string") &&
+    Buffer.byteLength(JSON.stringify(secret || {})) <= 256_000;
+  if (typeof reference !== "string" || !/^(?:[A-Za-z0-9-]{1,80}|vault:[A-Za-z0-9-]{1,80})$/.test(reference) || !validSecret) {
+    res.status(400).json({ success: false, error: "Invalid credential cache entry." });
+    return;
+  }
+  cacheConnectionCredential(reference, secret);
+  res.json({ success: true });
+});
+
+app.post("/api/connections/credential-cache/lock", (_req, res) => {
+  clearCachedConnectionCredentials();
+  res.json({ success: true });
 });
 
 // Connection groups (MUST be before /:id routes to avoid param capture)
@@ -621,7 +671,13 @@ app.post("/api/connections/groups/delete", simplePostRoute(body => mod.deleteCon
 app.get("/api/connections/:id", async (req, res) => {
   try {
     const result = await mod.getConnection(Number(req.params.id));
-    res.json({ success: true, data: result || null });
+    const safe = result?.credentialRef ? {
+      ...result,
+      connectionString: stripConnectionSecrets(result.connectionString || ""),
+      password: null,
+      authToken: null,
+    } : result;
+    res.json({ success: true, data: safe || null });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }
@@ -629,11 +685,11 @@ app.get("/api/connections/:id", async (req, res) => {
 
 app.post("/api/connections", async (req, res) => {
   try {
-    const { name, connectionString, connectionType, environment, color, groups, group, isFavorite, host, port, database, username, password, sslMode, authToken } = req.body;
+    const { name, connectionString, connectionType, environment, color, groups, group, isFavorite, host, port, database, username, password, sslMode, authToken, credentialRef, credentialSecret, credentialStorageMode } = req.body;
     const resolvedGroups = Array.isArray(groups) ? groups : (group ? [group] : []);
     const result = await mod.addConnection(name, connectionString, connectionType, {
       environment, color, groups: resolvedGroups, group: resolvedGroups[0] || null, isFavorite,
-      host, port, database, username, password, sslMode, authToken
+      host, port, database, username, password, sslMode, authToken, credentialRef, credentialSecret, credentialStorageMode
     });
     res.json(result);
   } catch (e: any) {
@@ -673,12 +729,12 @@ app.post("/api/connections/test", async (req, res) => {
   try {
     const { connectionString, connectionType } = req.body;
     logToFile("POST /api/connections/test body keys:", Object.keys(req.body).join(","));
-    logToFile("POST /api/connections/test connectionType:", connectionType, "connectionString:", String(connectionString).slice(0, 100));
+    logToFile("POST /api/connections/test connectionType:", connectionType);
     const result = await mod.testConnection(connectionString, connectionType);
-    logToFile("POST /api/connections/test result success:", result.success, "error:", result.error);
+    logToFile("POST /api/connections/test result success:", result.success);
     res.json(result);
   } catch (e: any) {
-    logToFile("testConnection error:", e.message || e.code || String(e));
+    logToFile("testConnection failed");
     res.json({ success: false, error: e.message });
   }
 });
@@ -2287,6 +2343,11 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       connectionString,
       connectionId: resolved.connectionId ?? null,
       persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
+      notifyStudioTagsChanged: () => {
+        if (!aborted && resolved.connectionId != null) {
+          res.write(`data: ${JSON.stringify({ type: "studio_tags_changed", connectionId: resolved.connectionId })}\n\n`);
+        }
+      },
       dbType,
       selectedNamespace: namespace,
       schemaContext,
@@ -3076,6 +3137,11 @@ app.post("/api/agents/chat/stream", async (req, res) => {
         connectionString: resolved.connectionString,
         connectionId: resolved.connectionId ?? null,
         persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
+        notifyStudioTagsChanged: () => {
+          if (!abortState.aborted && resolved.connectionId != null) {
+            res.write(`data: ${JSON.stringify({ type: "studio_tags_changed", connectionId: resolved.connectionId })}\n\n`);
+          }
+        },
         dbType: resolved.dbType,
         selectedNamespace: resolved.namespace,
         schemaContext: schemaTables.length > 0 ? schemaTables : resolved.schemaContext,

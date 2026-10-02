@@ -73,6 +73,8 @@ export interface DataGridProps {
   pageSize: number;
   page: number;
   totalCount: number | null;
+  fastTableLoading?: boolean;
+  countUnavailable?: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onDuplicateRow: (row: any) => void;

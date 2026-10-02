@@ -1,3 +1,5 @@
+import { darkMonacoSelection } from "@/lib/studio/monaco-selection";
+
 export type CustomEditorTheme = {
   id: string;
   name: string;
@@ -223,6 +225,9 @@ export function getStudioDarkTheme(): MonacoThemeDefinition {
     return parseCssColor(raw || fallback);
   };
   const selection = get("--studio-selection", "rgba(91, 141, 239, 0.22)");
+  const activeSelection = darkMonacoSelection(
+    get("--primary", "#3b82f6"), get("--foreground", "#e2e2e2"), get("--background", "#111113"),
+  );
   return {
     base: "vs-dark",
     inherit: true,
@@ -232,7 +237,8 @@ export function getStudioDarkTheme(): MonacoThemeDefinition {
       "editor.foreground": get("--studio-cell-text", "#e2e2e2"),
       "editor.lineHighlightBackground": get("--studio-row-hover", "#202020"),
       "editorGutter.background": get("--studio-bg", "#111111"),
-      "editor.selectionBackground": selection,
+      "editor.selectionBackground": activeSelection.background,
+      "editor.selectionForeground": activeSelection.foreground,
       "editor.inactiveSelectionBackground": selection,
       "editor.selectionHighlightBackground": selection,
       "editor.wordHighlightBackground": selection,
@@ -265,6 +271,10 @@ export function buildMonacoThemeFromAppTheme(appTheme: {
   const muted = parseCssColor(pick("--studio-cell-muted", pick("--muted-foreground", "#9d9d9d")));
   const lineHighlight = parseCssColor(pick("--studio-row-hover", pick("--muted", "#202020")));
   const selection = parseCssColor(pick("--studio-selection", "rgba(91, 141, 239, 0.22)"));
+  const activeSelection = appTheme.base === "dark"
+    ? darkMonacoSelection(parseCssColor(pick("--primary", "#3b82f6")),
+        parseCssColor(pick("--foreground", "#e2e2e2")), parseCssColor(pick("--background", "#111113")))
+    : null;
   const border = parseCssColor(pick("--studio-border", pick("--border", "#2a2a2a")));
 
   // Prefer extracted syntax tokens, fall back to chart colors, then to hardcoded
@@ -294,7 +304,8 @@ export function buildMonacoThemeFromAppTheme(appTheme: {
       "editor.background": background,
       "editor.foreground": foreground,
       "editor.lineHighlightBackground": lineHighlight,
-      "editor.selectionBackground": selection,
+      "editor.selectionBackground": activeSelection?.background ?? selection,
+      ...(activeSelection && { "editor.selectionForeground": activeSelection.foreground }),
       "editor.inactiveSelectionBackground": selection,
       "editor.selectionHighlightBackground": selection,
       "editor.wordHighlightBackground": selection,

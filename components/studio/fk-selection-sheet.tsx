@@ -1,3 +1,11 @@
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import React from "react";
 import { useToggleRowSelection } from "@/hooks/use-selection-utils";
 import { Search, Loader2 } from "@/lib/icon-theme/lucide-react";
@@ -6,11 +14,6 @@ import { Input } from "@/components/ui/input";
 import { DataGridAg as DataGrid } from "./data-grid-ag";
 import {
   Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
 } from "@/components/ui/sheet";
 
 interface FKSelectionSheetProps {

@@ -20,6 +20,7 @@ import { ClientShim } from "@/components/client-shim";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
 import { SidecarGate } from "@/components/gates/sidecar-gate";
 import { ExtensionProvider } from "@/lib/extensions/react";
+import { CredentialVaultPrompt } from "@/components/providers/credential-vault-prompt";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -58,6 +59,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <ClientShim />
+            <CredentialVaultPrompt />
             <SettingsMigrationGate />
             <ZoomWrapper>
               <SidecarGate>

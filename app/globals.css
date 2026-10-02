@@ -297,6 +297,12 @@ body {
   background-color: var(--studio-selection, rgba(59, 130, 246, 0.3));
 }
 
+/* Keep browser text selection legible even when the theme's editor selection is subtle. */
+.dark ::selection {
+  background-color: color-mix(in srgb, var(--primary) 55%, var(--foreground) 45%);
+  color: var(--background);
+}
+
 :root {
   /* t3code work-log tokens (alias muted-foreground, same as t3code's index.css) */
   --secondary-label: var(--muted-foreground);

@@ -1,14 +1,16 @@
 "use client";
 
+import {
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+} from "@/components/common/studio-sheet";
+
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  SheetHeader,
-  SheetTitle,
-  SheetFooter,
-} from "@/components/ui/sheet";
+
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,

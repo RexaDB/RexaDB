@@ -1,11 +1,15 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetFooter as SheetFooter,
+} from "@/components/common/studio-sheet";
+
 import { useState, useMemo, useEffect } from "react";
 import {
   Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -604,7 +608,7 @@ export function AddRlsPolicySheet({
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 border-t border-border bg-muted/5 shrink-0 flex items-center justify-end gap-3">
+            <SheetFooter>
               <Button
                 variant="outline"
                 size="sm"
@@ -622,7 +626,7 @@ export function AddRlsPolicySheet({
               >
                 {isSaving ? "Saving…" : "Save policy"}
               </Button>
-            </div>
+            </SheetFooter>
           </div>
           )}
 

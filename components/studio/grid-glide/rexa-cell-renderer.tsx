@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { createPortal } from "react-dom";
 import {
   GridCellKind,
   roundedRect,
@@ -13,9 +12,14 @@ import { cn } from "@/lib/utils";
 import {
   CornerDownLeft,
   Maximize2,
-  Minimize2,
   Calendar as CalendarIcon,
 } from "@/lib/icon-theme/lucide-react";
+import {
+  StudioSheet,
+  StudioSheetHeader,
+  StudioSheetTitle,
+} from "@/components/common/studio-sheet";
+import { JsonCodeEditor, formatJsonText } from "./json-code-editor";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -562,24 +566,45 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
     return String(d.value);
   });
   const [isMaximized, setIsMaximized] = React.useState(false);
+  const [jsonError, setJsonError] = React.useState<string | null>(null);
+  const isJsonColumn = /jsonb?/i.test(d.columnType);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const handleSheetOpenChange = (open: boolean) => {
+    if (open && isJsonColumn) {
+      const formatted = formatJsonText(value);
+      setValue(formatted);
+      d.openJsonEditor?.(formatted, onCancel);
+      setJsonError(null);
+    }
+    setIsMaximized(open);
+  };
+
+  const commitExpandedValue = () => {
+    if (!isJsonColumn) {
+      onCommit(value);
+      return;
+    }
+    try {
+      onCommit(JSON.parse(value));
+      setJsonError(null);
+    } catch {
+      setJsonError("Invalid JSON. Fix the syntax before saving.");
+    }
+  };
 
   React.useEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
-    if (!isMaximized) {
-      node.style.height = "auto";
-      const baseHeight = rowSpacingToPx(d.rowSpacing);
-      const maxHeight = 240;
-      node.style.height = `${Math.min(maxHeight, Math.max(baseHeight, node.scrollHeight))}px`;
-    } else {
-      node.style.height = "100%";
-    }
+    node.style.height = "auto";
+    const baseHeight = rowSpacingToPx(d.rowSpacing);
+    const maxHeight = 240;
+    node.style.height = `${Math.min(maxHeight, Math.max(baseHeight, node.scrollHeight))}px`;
   }, [value, d.rowSpacing, isMaximized]);
 
   React.useEffect(() => {
     const node = textareaRef.current;
-    if (!node) return;
+    if (!node || isMaximized) return;
     const placeCursorAtEnd = () => {
       const end = node.value.length;
       node.focus();
@@ -590,7 +615,7 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
   }, [isMaximized]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isMaximized) {
       e.preventDefault();
       onCommit(value);
     } else if (e.altKey && e.code === "KeyN") {
@@ -604,7 +629,7 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
       else onCancel();
     } else if (e.altKey && e.key === "m") {
       e.preventDefault();
-      setIsMaximized((v) => !v);
+      handleSheetOpenChange(!isMaximized);
     }
   };
 
@@ -612,14 +637,10 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
     <div
       className={cn(
         "z-[100] border border-studio-border shadow-2xl flex flex-col overflow-hidden",
-        isMaximized
-          ? "fixed inset-x-[15%] inset-y-[15%] rounded-lg bg-studio-bg"
-          : "w-full rounded-b-md rounded-t-none bg-studio-bg",
+        "w-full rounded-b-md rounded-t-none bg-studio-bg",
       )}
       style={{
-        backgroundColor: isMaximized
-          ? "var(--studio-bg)"
-          : "color-mix(in srgb, var(--studio-row-hover) 85%, var(--studio-bg))",
+        backgroundColor: "color-mix(in srgb, var(--studio-row-hover) 85%, var(--studio-bg))",
         // Glide's own overlay wrapper (data-grid-overlay-editor-style.tsx)
         // is `width: max-content; min-width: <cell width>px; max-width:
         // 400px` — a *minimum*, not a fixed size, so it grows to fit
@@ -633,7 +654,8 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
         // *definite* value, so it contributes nothing to that max-content
         // computation; `minWidth: 100%` then fills whatever width Glide's
         // wrapper ends up with once its own min-width has been applied.
-        ...(isMaximized ? null : { width: 0, minWidth: "100%" }),
+        width: 0,
+        minWidth: "100%",
       }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -644,7 +666,6 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
           className={cn(
             "w-full px-3 py-2 bg-transparent outline-none border-none text-xs text-foreground resize-none leading-relaxed overflow-y-auto",
             d.isRtl && "self-end text-right",
-            isMaximized && "text-sm p-8",
           )}
           dir="auto"
           value={value}
@@ -668,34 +689,68 @@ function TextEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
         onDiscardChange={onDiscardChange}
         extra={
           <button
-            onClick={() => setIsMaximized((v) => !v)}
+            type="button"
+            // Keep focus in the editor until the click handler opens the sheet;
+            // otherwise Glide can finish editing during pointer-down first.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => handleSheetOpenChange(!isMaximized)}
             className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium tracking-normal text-foreground/80 transition-colors hover:text-foreground p-1 hover:bg-muted rounded"
-            title={isMaximized ? "Minimize (Alt+M)" : "Maximize (Alt+M)"}
+            title="Open editing sheet (Alt+M)"
           >
-            {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            <Maximize2 className="w-3.5 h-3.5" />
           </button>
         }
       />
     </div>
   );
 
-  if (isMaximized) {
-    return createPortal(
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center"
-        style={{ backgroundColor: "rgba(0, 0, 0, 0.4)", backdropFilter: "blur(8px)" }}
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsMaximized(false);
+  return (
+    <>
+      {!isMaximized && editorContent}
+      <StudioSheet
+        open={isMaximized && !isJsonColumn}
+        onOpenChange={handleSheetOpenChange}
+        modal={false}
+        contentProps={{
+          side: "right",
+          contained: true,
+          className: "w-[min(800px,92vw)] sm:max-w-none",
         }}
       >
-        {editorContent}
-      </div>,
-      document.body,
-    );
-  }
-
-  return editorContent;
+          <StudioSheetHeader>
+            <StudioSheetTitle>Edit {d.columnName}</StudioSheetTitle>
+          </StudioSheetHeader>
+          {isJsonColumn ? (
+            <JsonCodeEditor value={value} onChange={setValue} />
+          ) : (
+            <textarea
+              autoFocus
+              className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-sm text-foreground outline-none"
+              dir="auto"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              style={{
+                unicodeBidi: "plaintext",
+                fontFamily: d.isRtl ? "var(--font-arabic)" : "var(--font-mono)",
+              }}
+            />
+          )}
+          {jsonError && (
+            <div className="border-t border-destructive/30 px-4 py-2 text-xs text-destructive">
+              {jsonError}
+            </div>
+          )}
+          <EditorFooter
+            isModified={isModified}
+            onCommit={commitExpandedValue}
+            onCancel={onCancel}
+            onSetNull={onSetNull}
+            onDiscardChange={onDiscardChange}
+          />
+      </StudioSheet>
+    </>
+  );
 }
 
 const INLINE_TYPED_OPTIONS_MAX = 8;

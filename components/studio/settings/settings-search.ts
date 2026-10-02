@@ -84,6 +84,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "mcp-client-setup", section: "mcp", title: "MCP Client Setup", description: "Copy-paste setup snippets for Claude Desktop, Cursor, and Claude Code.", keywords: ["mcp", "claude", "cursor", "setup", "snippet", "client"] },
 
   // ---- Security ----
+  { id: "credential-storage", section: "security", title: "Connection Credential Storage", description: "Choose the operating-system keychain, encrypted local vault, or plaintext storage for saved credentials.", keywords: ["credentials", "password", "keychain", "vault", "encrypt", "secret", "plaintext", "storage"] },
   { id: "execution-mode", section: "security", title: "Execution Mode", description: "Direct execution or review queries in a panel first.", keywords: ["security", "execution", "review", "direct", "confirm", "safe"] },
 
   // ---- Keybindings ----
@@ -101,6 +102,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "json-inspector", section: "advanced", title: "Rich JSON Inspector", description: "Formatted mini-pill for JSON objects with tooltip.", keywords: ["json", "inspector", "tooltip", "object"] },
   { id: "data-bars", section: "advanced", title: "Data Bars", description: "Inline background progress bar for numeric columns.", keywords: ["bars", "numeric", "progress", "visualization", "columns"] },
   { id: "skeleton-loaders", section: "advanced", title: "Skeleton Loaders", description: "Animated skeleton rows during data loading.", keywords: ["skeleton", "loading", "placeholder", "shimmer"] },
+  { id: "fast-table-loading", section: "advanced", title: "Fast table loading", description: "Show SQL table rows before the exact row count finishes.", keywords: ["table", "performance", "count", "filter", "speed", "pagination"] },
   { id: "schema-explorer", section: "advanced", title: "Schema Explorer", description: "Show tables, functions, triggers, and indexes in a unified explorer.", keywords: ["schema", "explorer", "tables", "functions", "triggers", "indexes"] },
   { id: "database-explorer", section: "advanced", title: "Database Explorer", description: "Browse all schemas and object types in a hierarchical tree view.", keywords: ["database", "explorer", "tree", "schemas", "browse"] },
   { id: "table-expansion", section: "advanced", title: "Table Expansion", description: "Show expand/collapse arrows next to table names to view columns inline.", keywords: ["tables", "expand", "collapse", "columns", "sidebar"] },

@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+} from "@/components/common/studio-sheet";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
@@ -38,7 +45,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+} from "@/components/ui/sheet";
 import { runQuery } from "@/lib/api/actions-client";
 import { useConfirm } from "@/hooks/use-confirm";
 import {
@@ -1049,7 +1058,7 @@ export function StorageBucketView({
           >
             {selectedFile ? (
               <div className="flex h-full flex-col overflow-hidden">
-                <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4 pr-12">
+                <SheetHeader>
                   <SheetTitle
                     className="truncate text-sm font-medium text-foreground"
                     title={selectedFile.fullPath}
@@ -1057,7 +1066,7 @@ export function StorageBucketView({
                     {selectedFile.fullPath.split("/").pop() ||
                       selectedFile.fullPath}
                   </SheetTitle>
-                </div>
+                </SheetHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4">
               <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/20">
                 {previewIsImage && previewUrl ? (
@@ -1103,39 +1112,36 @@ export function StorageBucketView({
                 </div>
               </div>
 
-              <div className="mt-4 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleDownloadFile(selectedFile.fullPath)
-                  }
-                >
-                  <Download className="mr-1.5 size-3.5" />
-                  Download
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleGetUrl(selectedFile.fullPath)}
-                >
-                  <Copy className="mr-1.5 size-3.5" />
-                  Get URL
-                </Button>
-              </div>
-
-              <div className="my-4 h-px bg-border" />
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => void handleDeleteFile()}
-              >
-                <Trash2 className="mr-1.5 size-3.5" />
-                Delete file
-              </Button>
             </div>
+              <SheetFooter>
+                <div className="mr-auto flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDownloadFile(selectedFile.fullPath)}
+                  >
+                    <Download className="mr-1.5 size-3.5" />
+                    Download
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleGetUrl(selectedFile.fullPath)}
+                  >
+                    <Copy className="mr-1.5 size-3.5" />
+                    Get URL
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => void handleDeleteFile()}
+                >
+                  <Trash2 className="mr-1.5 size-3.5" />
+                  Delete file
+                </Button>
+              </SheetFooter>
               </div>
             ) : (
               <SheetTitle className="sr-only">File preview</SheetTitle>

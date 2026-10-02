@@ -16,6 +16,7 @@ import {
 import { executeMongoQuery, getMongoCollections } from "@/lib/db/mongo-client";
 import { executeRedisCommand } from "@/lib/db/redis-client";
 import { buildDashboardRef } from "@/lib/ai/dashboard-refs";
+import { createStudioTagTools } from "@/lib/ai/studio-tag-tools";
 import type { AgentWorkflowContext, LightDashboardContext } from "@/lib/ai/types";
 import { parseAppThemeJson, BUILTIN_APP_THEMES, type CustomAppTheme } from "@/lib/studio/app-themes";
 import { parseThemeJson, createThemeId, type CustomEditorTheme } from "@/lib/studio/editor-themes";
@@ -47,6 +48,7 @@ export type PiToolContext = {
   dashboardContext?: LightDashboardContext[];
   workflowContext?: AgentWorkflowContext;
   emitStep: (message: string) => void;
+  notifyStudioTagsChanged?: () => void;
   /** Exa web-search key (Settings → AI → Web search). Tools report a setup hint when missing. */
   exaApiKey?: string | null;
   /** Persist a new workflow row; injected server-side so create_workflow is durable. */
@@ -197,6 +199,7 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
   const namespace = (value?: string) => value || context.defaultNamespace || "";
 
   const tools: ToolDefinition[] = [
+    ...createStudioTagTools(context),
     defineTool({
       name: "describe_connection_capabilities",
       label: "Describe connection capabilities",

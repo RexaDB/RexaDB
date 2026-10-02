@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,11 +15,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
 } from "@/components/ui/sheet";
 import { Loader2, Check, X, Trash2 } from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";

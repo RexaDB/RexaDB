@@ -15,6 +15,7 @@ import {
   stripSecretsFromStudioSettings,
 } from "@/lib/supabase/settings-sync";
 import type { SettingsSyncPayloadV1 } from "@/lib/studio/settings-sync-events";
+import { migrateFastTableLoading } from "@/lib/studio/fast-table-loading";
 
 export async function collectLocalSettingsSyncPayload(): Promise<SettingsSyncPayloadV1> {
   const [studioRes, appThemeRes, editorThemeRes, fontRes, keybindingsRes] =
@@ -30,7 +31,7 @@ export async function collectLocalSettingsSyncPayload(): Promise<SettingsSyncPay
 
   if (studioRes?.success && studioRes.data && typeof studioRes.data === "object") {
     payload.studioSettings = stripSecretsFromStudioSettings(
-      studioRes.data as Record<string, unknown>,
+      migrateFastTableLoading(studioRes.data as Record<string, unknown>),
     );
   }
 
@@ -89,7 +90,7 @@ export async function applySettingsSyncPayloadLocally(
           payload.studioSettings,
           localData,
         );
-        await saveGlobalStudioSettings(merged);
+        await saveGlobalStudioSettings(migrateFastTableLoading(merged));
       })(),
     );
   }

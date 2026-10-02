@@ -29,6 +29,7 @@ tauri-plugin-process = "2"
 tauri-plugin-window-state = "2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 futures-util = "0.3"
 url = "2"
 urlencoding = "2"

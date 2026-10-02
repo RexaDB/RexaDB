@@ -1,6 +1,15 @@
 "use client";
 
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
+import {
+  Sheet,
+} from "@/components/ui/sheet";
 import type { AuthProviderConfig } from "@/lib/studio/auth-provider-types";
 import { AuthCustomProviderForm } from "./auth-custom-provider-form";
 

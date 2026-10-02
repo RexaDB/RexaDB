@@ -111,6 +111,7 @@ import { useAppUpdate } from "@/hooks/use-app-update";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
+import { CredentialStorageSetting } from "@/components/studio/settings/credential-storage-setting";
 
 function AddThemeMenu({
   onBrowseThemes,
@@ -349,6 +350,8 @@ interface StudioSettingsModel {
   setDataBars: (value: boolean) => void;
   skeletonLoaders: boolean;
   setSkeletonLoaders: (value: boolean) => void;
+  fastTableLoading: boolean;
+  setFastTableLoading: (value: boolean) => void;
   sleekLayout: boolean;
   setSleekLayout: (value: boolean) => void;
   activeSleekLayout: boolean;
@@ -804,6 +807,8 @@ export function SettingsView({
     setDataBars,
     skeletonLoaders,
     setSkeletonLoaders,
+    fastTableLoading,
+    setFastTableLoading,
     showPendingChangesBanner,
     setShowPendingChangesBanner,
     previewTabs,
@@ -2019,6 +2024,9 @@ export function SettingsView({
               <h2 className="text-sm font-semibold">Security</h2>
 
               <div className="space-y-4">
+                <div data-setting-id="credential-storage">
+                  <CredentialStorageSetting />
+                </div>
                 <SelectSetting
                   settingId="execution-mode"
                   title="Execution Mode"
@@ -2590,6 +2598,13 @@ export function SettingsView({
                     description="Animated skeleton rows during data loading."
                     value={skeletonLoaders}
                     onChange={setSkeletonLoaders}
+                  />
+                  <SwitchSetting
+                    settingId="fast-table-loading"
+                    title="Fast table loading"
+                    description="Show SQL table rows before the exact count finishes. Pagination totals may appear later."
+                    value={fastTableLoading}
+                    onChange={setFastTableLoading}
                   />
                 </div>
 

@@ -1,7 +1,8 @@
 "use client";
 
+import { StudioSheet } from "@/components/common/studio-sheet";
+
 import type { ReactNode } from "react";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 /**
  * Outer container shared by Add/Edit column sheets.
@@ -24,16 +25,19 @@ export function ColumnSheetShell({
   children: ReactNode;
 }) {
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange} modal={false}>
-      <SheetContent
-        side="right"
-        contained
-        onInteractOutside={handleInteractOutside}
-        className={className}
-      >
-        {confirmDialog}
-        <div className="flex flex-col h-full">{children}</div>
-      </SheetContent>
-    </Sheet>
+    <StudioSheet
+      open={isOpen}
+      onOpenChange={onOpenChange}
+      modal={false}
+      contentProps={{
+        side: "right",
+        contained: true,
+        onInteractOutside: handleInteractOutside,
+        className,
+      }}
+    >
+      {confirmDialog}
+      <div className="flex flex-col h-full">{children}</div>
+    </StudioSheet>
   );
 }

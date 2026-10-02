@@ -1,11 +1,14 @@
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import React, { useState, useEffect } from "react";
 import {
   Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,7 +121,7 @@ export function AddFKSheet({
       >
         {ConfirmDialog}
         <SheetHeader className="p-6 border-b shrink-0">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Link2 className="w-5 h-5 text-primary" />
             <SheetTitle>Create Foreign Key</SheetTitle>
           </div>

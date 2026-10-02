@@ -112,6 +112,47 @@ fn auth_storage_remove(app: tauri::AppHandle, key: String) -> Result<(), String>
     write_auth_storage(&app, &storage)
 }
 
+fn validate_credential_reference(reference: &str) -> Result<(), String> {
+    if reference.is_empty()
+        || reference.len() > 80
+        || !reference.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    {
+        return Err("Invalid credential reference".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn connection_credential_set(reference: String, value: String) -> Result<(), String> {
+    validate_credential_reference(&reference)?;
+    keyring::Entry::new("com.rexa-db.connection", &reference)
+        .map_err(|e| format!("Could not access the operating-system keychain: {e}"))?
+        .set_password(&value)
+        .map_err(|e| format!("Could not save credentials to the operating-system keychain: {e}"))
+}
+
+#[tauri::command]
+fn connection_credential_get(reference: String) -> Result<String, String> {
+    validate_credential_reference(&reference)?;
+    keyring::Entry::new("com.rexa-db.connection", &reference)
+        .map_err(|e| format!("Could not access the operating-system keychain: {e}"))?
+        .get_password()
+        .map_err(|e| format!("Could not retrieve credentials from the operating-system keychain: {e}"))
+}
+
+#[tauri::command]
+fn connection_credential_delete(reference: String) -> Result<(), String> {
+    validate_credential_reference(&reference)?;
+    match keyring::Entry::new("com.rexa-db.connection", &reference)
+        .map_err(|e| format!("Could not access the operating-system keychain: {e}"))?
+        .delete_credential()
+    {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!("Could not remove credentials from the operating-system keychain: {error}")),
+    }
+}
+
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -818,6 +859,9 @@ pub fn run() {
             auth_storage_get,
             auth_storage_set,
             auth_storage_remove,
+            connection_credential_set,
+            connection_credential_get,
+            connection_credential_delete,
             get_app_version,
             get_api_base_url,
             is_sidecar_ready,
