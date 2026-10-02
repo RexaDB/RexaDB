@@ -62,6 +62,7 @@ export interface RexaCellData {
   relativeDateLabel: string | null;
   originalValue: any;
   discardChange: (() => void) | null;
+  openJsonEditor?: (value: string, cancelEditor: () => void) => void;
   rowSpacing: "compact" | "standard" | "relaxed";
 }
 

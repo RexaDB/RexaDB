@@ -121,6 +121,10 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
 import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
 import {
+  deleteConnectionCredential,
+  protectConnectionPayload,
+} from "@/lib/credentials/connection-credentials";
+import {
   activateLocalUserProfile,
   loadStoredDisplayName,
   LOCAL_NAME_STORAGE_KEY,
@@ -1595,6 +1599,7 @@ export function ConnectionManager({
     password?: string;
     sslMode?: string;
     authToken?: string;
+    credentialRef?: string | null;
   }) => {
     if (workspaceMode) {
       try {
@@ -1633,10 +1638,15 @@ export function ConnectionManager({
         };
       }
     }
-    return await sidecarFetch("/api/connections", {
+    const protectedPayload = await protectConnectionPayload(payload);
+    const result = await sidecarFetch("/api/connections", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(protectedPayload),
     });
+    if (!result.success && protectedPayload.credentialRef) {
+      await deleteConnectionCredential(protectedPayload.credentialRef).catch(() => undefined);
+    }
+    return result;
   };
 
   const updateConnection = async (
@@ -1658,6 +1668,7 @@ export function ConnectionManager({
       password?: string;
       sslMode?: string;
       authToken?: string;
+      credentialRef?: string | null;
     }>,
   ) => {
     if (workspaceMode) {
@@ -1683,10 +1694,22 @@ export function ConnectionManager({
         };
       }
     }
-    return await sidecarFetch(`/api/connections/${id}`, {
+    const oldReference = payload.credentialRef;
+    const protectedPayload = await protectConnectionPayload(payload);
+    const result = await sidecarFetch(`/api/connections/${id}`, {
       method: "PUT",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(protectedPayload),
     });
+    if (!result.success && protectedPayload.credentialRef && protectedPayload.credentialRef !== oldReference) {
+      await deleteConnectionCredential(protectedPayload.credentialRef).catch(() => undefined);
+    }
+    if (result.success && oldReference && oldReference !== protectedPayload.credentialRef) {
+      await deleteConnectionCredential(oldReference).catch(() => undefined);
+    }
+    if (result.success && result.warning) {
+      toast.error("Credentials were removed from the live database, but SQLite cleanup did not finish. Retry after closing other database tools.");
+    }
+    return result;
   };
 
   const removeConnection = async (id: number) => {
@@ -1702,7 +1725,13 @@ export function ConnectionManager({
         };
       }
     }
-    return await sidecarFetch(`/api/connections/${id}`, { method: "DELETE" });
+    const result = await sidecarFetch(`/api/connections/${id}`, { method: "DELETE" });
+    const reference = connections.find((connection) => connection.id === id)?.credentialRef;
+    if (result.success && reference) {
+      await deleteConnectionCredential(reference).catch(() => toast.error("Connection removed, but its keychain entry could not be deleted."));
+    }
+    if (result.success && result.warning) toast.error("Connection removed, but SQLite cleanup did not finish. Retry after closing other database tools.");
+    return result;
   };
 
   const updateConnectionOrder = async (orderedIds: number[]) => {
@@ -1913,6 +1942,11 @@ export function ConnectionManager({
         fetchConnectionGroups(),
       ]);
       setConnections(conns);
+      if (conns.some((conn: any) => conn.credentialError || conn.secureCleanupPending)) {
+        toast.error(
+          "Some saved credentials could not be unlocked or their SQLite cleanup did not finish. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
+        );
+      }
       setConnectionGroups(groups);
     } finally {
       // Always clear the loading gate, even on an unexpected failure —
@@ -2685,11 +2719,6 @@ export function ConnectionManager({
     terminalLog("group", "[handleAdd] Start saving connection");
     terminalLog("log", "Selected Provider:", selectedProvider);
     terminalLog("log", "Editing Connection:", editingConnection?.id ?? null);
-    terminalLog(
-      "log",
-      "Candidate Connection String:",
-      candidateConnectionString,
-    );
     terminalLog("log", "Plan maxConnections:", plan.maxConnections);
     terminalLog("log", "Visible UI connections count:", connections.length);
     terminalLog(
@@ -2752,11 +2781,6 @@ export function ConnectionManager({
 
       terminalLog("group", "[handleAdd] About to create connection");
       terminalLog("log", "Final Connection Name:", finalName);
-      terminalLog(
-        "log",
-        "Normalized Connection String:",
-        normalizedConnectionString,
-      );
       terminalLog("log", "Editing connection:", editingConnection?.id ?? null);
       terminalLog("groupEnd");
 
@@ -2814,6 +2838,7 @@ export function ConnectionManager({
           isFavorite,
           lastActive,
           ...connectionFields,
+          credentialRef: editingConnection.credentialRef,
         });
         terminalLog("log", "[handleAdd] updateConnection response:", res);
         if (res.success) {
@@ -6302,10 +6327,13 @@ export function ConnectionManager({
                                 <ShieldCheck className="w-3.5 h-3.5" />
                                 <span>
                                   {pgEnableKeychain
-                                    ? "Disable keychain"
-                                    : "Enable keychain"}
+                                    ? "Disable PostgreSQL client keychain integration"
+                                    : "Enable PostgreSQL client keychain integration"}
                                 </span>
                               </button>
+                              <p className="text-xs text-muted-foreground">
+                                This client setting does not control saved credential storage.
+                              </p>
                             </div>
                           </div>
 
@@ -6499,10 +6527,13 @@ export function ConnectionManager({
                                         <ShieldCheck className="w-3.5 h-3.5" />
                                         <span>
                                           {pgSshEnableKeychain
-                                            ? "Disable keychain"
-                                            : "Enable keychain"}
+                                            ? "Disable SSH client keychain integration"
+                                            : "Enable SSH client keychain integration"}
                                         </span>
                                       </button>
+                                      <p className="text-xs text-muted-foreground">
+                                        This client setting does not control saved credential storage.
+                                      </p>
                                     </div>
                                   )}
                                 </div>

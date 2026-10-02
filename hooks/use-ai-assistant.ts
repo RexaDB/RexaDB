@@ -14,6 +14,7 @@ import {
 } from "@/lib/api/studio-chat-storage";
 import { subscribeGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 import { readSseStream } from "@/lib/ai/read-sse-stream";
+import { publishStudioTagsChanged } from "@/lib/studio/studio-tag-events";
 import type {
   AgentProvider,
   AgentChatRequest,
@@ -240,6 +241,10 @@ export function useAiAssistant(input: {
       let finalMessage = "";
 
       for await (const payload of readSseStream(reader)) {
+        if (payload.type === "studio_tags_changed" && payload.connectionId === input.connectionId) {
+          publishStudioTagsChanged(input.connectionId);
+          continue;
+        }
         if (payload.type === "step") {
           setSteps((prev) => [...prev, payload.message]);
           continue;

@@ -1,16 +1,15 @@
+import {
+  StudioSheet,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
 import React, { useEffect, useMemo } from 'react';
 import { Key, Link as LinkIcon, Plus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from '@/components/ui/sheet';
 import { useSheetCloseConfirm } from '@/hooks/use-sheet-close-confirm';
 import { useGlobalStudioSettings } from '@/hooks/use-global-studio-settings';
 
@@ -69,10 +68,19 @@ export function InsertRowSheet({
   };
 
   return (
-    <Sheet open={isInsertSheetOpen} onOpenChange={(open) => { setIsInsertSheetOpen(open); if (!open) setInsertData({}); }} modal={false}>
-      <SheetContent side="right" contained onInteractOutside={handleSheetInteractOutside} className={`bg-background text-foreground flex flex-col p-0 gap-0${hidden ? " hidden" : ""}`}>
-        {ConfirmDialog}
-        <div className="flex flex-col h-full">
+    <StudioSheet
+      open={isInsertSheetOpen}
+      onOpenChange={(open) => { setIsInsertSheetOpen(open); if (!open) setInsertData({}); }}
+      modal={false}
+      contentProps={{
+        side: "right",
+        contained: true,
+        onInteractOutside: handleSheetInteractOutside,
+        className: `bg-background text-foreground flex flex-col p-0 gap-0${hidden ? " hidden" : ""}`,
+      }}
+    >
+      {ConfirmDialog}
+      <div className="flex flex-col h-full">
           <SheetHeader className="h-12 border-b shrink-0 flex items-center px-4">
             <SheetTitle className="sr-only">Insert row{selectedTable ? ` into ${selectedTable}` : ""}</SheetTitle>
             <SheetDescription className="text-xs text-muted-foreground">
@@ -150,25 +158,26 @@ export function InsertRowSheet({
             ))}
           </div>
           
-          <SheetFooter className="p-4 border-t border-border bg-muted/5 mt-auto flex-row justify-end gap-3 shrink-0">
+          <SheetFooter className="mt-auto flex-row justify-end gap-2 border-t border-border bg-studio-bg/95 px-3 py-2.5 shrink-0">
             <Button 
               variant="ghost" 
               onClick={() => { setIsInsertSheetOpen(false); setInsertData({}); }}
-              className="text-xs font-medium h-9 text-muted-foreground hover:text-foreground hover:bg-secondary"
+              size="sm"
+              className="h-7 px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground hover:bg-secondary"
             >
               Cancel
             </Button>
             <Button 
               onClick={handleInsertRow} 
               disabled={loading}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold px-6 h-9 gap-2"
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-xs font-normal bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
               Save Row
             </Button>
           </SheetFooter>
-        </div>
-      </SheetContent>
-    </Sheet>
+      </div>
+    </StudioSheet>
   );
 }

@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Workflow, Plus } from "lucide-react";
 import { getWorkflow, createWorkflow } from "@/lib/api/actions-client";
@@ -7,11 +15,6 @@ import { WorkflowEditor } from "./workflow-editor";
 import type { WorkflowRow } from "./workflow-types";
 import {
   Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

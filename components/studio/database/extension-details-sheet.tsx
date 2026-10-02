@@ -1,14 +1,17 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { Box, Check, ExternalLink, RefreshCw } from "@/lib/icon-theme/lucide-react";
@@ -60,56 +63,42 @@ export function ExtensionDetailsSheet({
         contained
         className="w-[min(520px,95vw)] bg-studio-bg border-studio-border text-foreground p-0"
       >
-        <SheetHeader className="border-b border-studio-border/80 px-4 sm:px-5 py-3 sm:py-4">
-          <div className="flex items-start gap-2 sm:gap-3 pr-10 sm:pr-12">
+        <SheetHeader>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div
               className={cn(
-                "flex h-9 w-9 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg sm:rounded-lg",
+                "flex size-7 shrink-0 items-center justify-center rounded-md",
                 isInstalled
                   ? "bg-primary/10 text-primary"
                   : "bg-muted text-muted-foreground",
               )}
             >
-              <Box className="h-4 w-4 sm:h-5 sm:w-5" />
+              <Box className="size-4" />
             </div>
-            <div className="min-w-0 space-y-1 sm:space-y-2">
-              <SheetTitle className="truncate text-sm sm:text-sm font-semibold">
-                {extension.name}
-              </SheetTitle>
-              <SheetDescription className="text-xs sm:text-xs text-muted-foreground">
-                {extension.comment ||
-                  "No extension description is available for this package."}
-              </SheetDescription>
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <Badge
-                  variant={isInstalled ? "secondary" : "outline"}
-                  className={cn(
-                    "h-4 sm:h-5 px-1.5 sm:px-2 text-xs sm:text-xs",
-                    isInstalled &&
-                      "bg-emerald-500/10 text-emerald-500 border-none",
-                  )}
-                >
-                  {isInstalled ? (
-                    <>
-                      <Check className="mr-0.5 sm:mr-1 h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                      Installed
-                    </>
-                  ) : (
-                    "Available"
-                  )}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="h-4 sm:h-5 px-1.5 sm:px-2 font-mono text-xs sm:text-xs"
-                >
-                  v{extension.installed_version || extension.default_version}
-                </Badge>
-              </div>
-            </div>
+            <SheetTitle className="truncate">{extension.name}</SheetTitle>
+            <Badge
+              variant={isInstalled ? "secondary" : "outline"}
+              className={cn(
+                "h-5 shrink-0 px-1.5 text-xs",
+                isInstalled && "border-none bg-emerald-500/10 text-emerald-500",
+              )}
+            >
+              {isInstalled ? "Installed" : "Available"}
+            </Badge>
+            <Badge
+              variant="outline"
+              className="h-5 shrink-0 px-1.5 font-mono text-xs"
+            >
+              v{extension.installed_version || extension.default_version}
+            </Badge>
           </div>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-3 sm:py-4">
+          <p className="mb-4 text-xs text-muted-foreground">
+            {extension.comment ||
+              "No extension description is available for this package."}
+          </p>
           <div className="mb-4 sm:mb-5 flex flex-wrap gap-1.5 sm:gap-2">
             <a
               href={searchHref}

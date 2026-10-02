@@ -1,6 +1,13 @@
 "use client";
 
 import {
+  StudioSheetContent as SheetContent,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetFooter as SheetFooter,
+} from "@/components/common/studio-sheet";
+
+import {
   Search,
   FunctionSquare,
   Code2,
@@ -52,7 +59,9 @@ import type {
   CustomEditorTheme,
   MonacoThemeRef,
 } from "@/lib/studio/editor-themes";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+} from "@/components/ui/sheet";
 
 interface DatabaseFunction {
   schema: string;
@@ -569,36 +578,26 @@ export function FunctionsList({
           maxResizeWidth={MAX_SHEET_WIDTH}
           resizeHandleLabel="Resize function definition panel"
         >
-            <SheetTitle className="sr-only">
-              {selectedFunction?.name || "Function definition"}
-            </SheetTitle>
-            <div className="p-6 border-b border-border shrink-0">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                  <FunctionSquare className="w-5 h-5 text-primary" />
+            <SheetHeader>
+              <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                  <FunctionSquare className="size-4 text-primary" />
                 </div>
-                <div className="flex flex-col">
-                  <h2 className="text-sm font-bold">
-                    {selectedFunction?.name}
-                  </h2>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge
-                      variant="secondary"
-                      className="text-xs tracking-wider bg-primary/10 text-primary border-none"
-                    >
-                      {selectedFunction?.type}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1 tracking-wider font-medium">
-                      <Terminal className="w-3 h-3" />
-                      {selectedFunction?.language}
-                    </span>
-                    <span className="text-xs text-muted-foreground px-2 py-0.5 bg-muted/50 rounded tracking-wider font-medium">
-                      Returns: {selectedFunction?.return_type}
-                    </span>
-                  </div>
-                </div>
+                <SheetTitle className="min-w-0 truncate">
+                  {selectedFunction?.name}
+                </SheetTitle>
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 border-none bg-primary/10 text-xs text-primary"
+                >
+                  {selectedFunction?.type}
+                </Badge>
+                <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                  <Terminal className="size-3" />
+                  {selectedFunction?.language}
+                </span>
               </div>
-            </div>
+            </SheetHeader>
 
             <div className="flex-1 overflow-hidden p-6 pt-4 flex flex-col gap-4">
               <div className="flex-1 flex flex-col rounded-lg border border-border overflow-hidden bg-card/60">
@@ -653,7 +652,7 @@ export function FunctionsList({
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-border bg-background/95 flex flex-row items-center justify-end gap-2 shrink-0">
+            <SheetFooter>
               {isMssql && (
                 <span className="text-xs text-muted-foreground mr-auto">
                   MSSQL routines are read-only in this view.
@@ -677,7 +676,7 @@ export function FunctionsList({
                 <Save className="w-3.5 h-3.5 mr-1" />
                 {isSavingDefinition ? "Saving..." : "Save"}
               </Button>
-            </div>
+            </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>

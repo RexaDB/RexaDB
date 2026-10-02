@@ -134,6 +134,7 @@ export type AgentStreamEvent =
   | { type: "assistant_delta"; message: string }
   | { type: "assistant_done"; message: string }
   | { type: "error"; message: string }
+  | { type: "studio_tags_changed"; connectionId: number }
   | { type: "tool_start"; tool: string; command: string }
   | { type: "tool_output"; output: string }
   | { type: "tool_end"; exitCode: number }

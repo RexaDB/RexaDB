@@ -4,6 +4,7 @@ import {
   getMongoDatabaseFromConnectionString,
 } from "./connection-type";
 import type { QueryResult } from "./client-types";
+import { hasConnectionSecret } from "@/lib/credentials/connection-secret-utils";
 import {
   SQLITE_BUSY_RETRY_ATTEMPTS,
   SQLITE_BUSY_BASE_DELAY_MS,
@@ -1214,6 +1215,30 @@ async function syncConnectionGroupMembers(connId: number, groupNames: string[]) 
   }
 }
 
+function assertCredentialStorageChoice(
+  mode: string | undefined,
+  reference?: string | null,
+  envelope?: string | null,
+) {
+  if (mode === "plaintext") {
+    if (reference || envelope) throw new Error("Plaintext storage cannot use a credential reference.");
+    return;
+  }
+  if (mode === "vault" && !reference?.startsWith("vault:")) {
+    throw new Error("Encrypted-vault storage requires a vault credential reference.");
+  }
+  if (mode === "keychain" && reference?.startsWith("vault:")) {
+    throw new Error("A vault reference cannot be used with keychain storage.");
+  }
+  if (reference?.startsWith("vault:")) {
+    if (!envelope || !/^v1\.[A-Za-z0-9+/=]{16}\.[A-Za-z0-9+/=]{20,200000}$/.test(envelope)) {
+      throw new Error("Encrypted-vault credentials must use a valid AES-GCM envelope.");
+    }
+  } else if (envelope) {
+    throw new Error("Encrypted-vault data requires a vault credential reference.");
+  }
+}
+
 export async function addConnection(
   name: string,
   connectionString: string,
@@ -1228,14 +1253,21 @@ export async function addConnection(
     port?: string;
     database?: string;
     username?: string;
-    password?: string;
+    password?: string | null;
     sslMode?: string;
-    authToken?: string;
+    authToken?: string | null;
+    credentialRef?: string;
+    credentialSecret?: string | null;
+    credentialStorageMode?: string;
   },
 ) {
   const { client } = await import("./index");
 
   try {
+    if (hasConnectionSecret({ connectionString, password: options?.password, authToken: options?.authToken }) && options?.credentialStorageMode !== "plaintext") {
+      throw new Error("Inline credentials require an explicit plaintext-storage choice in Security settings.");
+    }
+    assertCredentialStorageChoice(options?.credentialStorageMode, options?.credentialRef, options?.credentialSecret);
     await ensureCoreTables();
     const newId = Date.now();
     await client.connections.create({
@@ -1251,6 +1283,8 @@ export async function addConnection(
         password: options?.password,
         sslMode: options?.sslMode,
         authToken: options?.authToken,
+        credentialRef: options?.credentialRef,
+        credentialSecret: options?.credentialSecret,
         environment: options?.environment,
         color: options?.color,
         group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
@@ -1277,6 +1311,7 @@ export async function addConnection(
 export async function getConnections(workspaceUrl?: string) {
   const { client } = await import("./index");
   const { sql } = await import("drizzle-orm");
+  const { getCachedConnectionCredential } = await import("../credentials/connection-credential-cache");
 
   try {
     await ensureCoreTables();
@@ -1304,6 +1339,7 @@ export async function getConnections(workspaceUrl?: string) {
 
     return conns.map((conn) => ({
       ...conn,
+      ...(conn.credentialRef ? getCachedConnectionCredential(conn.credentialRef) : {}),
       groups: groupsByConnId.get(conn.id) || [],
     }));
   } catch (error) {
@@ -1314,25 +1350,55 @@ export async function getConnections(workspaceUrl?: string) {
 
 export async function getConnection(id: number) {
   const { client } = await import("./index");
+  const { getCachedConnectionCredential } = await import("../credentials/connection-credential-cache");
 
   try {
     await ensureCoreTables();
-    return await client.connections.findFirst({ where: { id } });
+    const connection = await client.connections.findFirst({ where: { id } });
+    return connection ? {
+      ...connection,
+      ...(connection.credentialRef ? getCachedConnectionCredential(connection.credentialRef) : {}),
+    } : null;
   } catch (error) {
     console.error("Failed to get connection:", error);
     return null;
   }
 }
 
+async function clearConnectionStringCaches(connectionString: string) {
+  const { db } = await import("./index");
+  const { sql } = await import("drizzle-orm");
+  const cacheTables = [
+    "schema_cache_meta", "schema_cache_schemas", "schema_cache_tables",
+    "schema_cache_columns", "search_index_entries", "search_index_meta",
+  ];
+  const rows = await db.all<{ name: string }>(sql`
+    SELECT name FROM sqlite_master WHERE type = 'table'
+      AND name IN (${sql.join(cacheTables.map((name) => sql`${name}`), sql`, `)})
+  `);
+  for (const { name } of rows) {
+    await db.run(sql`DELETE FROM ${sql.raw(`"${name}"`)} WHERE connection_string = ${connectionString}`);
+  }
+}
+
 export async function deleteConnectionsByPrefix(prefix: string) {
   const { client } = await import("./index");
+  const { removeCachedConnectionCredential } = await import("../credentials/connection-credential-cache");
 
   try {
     await ensureCoreTables();
+    const affected = await client.connections.findMany({ where: { connectionString: { startsWith: prefix } } });
+    for (const connection of affected) await clearConnectionStringCaches(connection.connectionString);
     await client.connections.deleteMany({
       where: { connectionString: { startsWith: prefix } },
     });
-    return { success: true };
+    affected.forEach((connection) => connection.credentialRef && removeCachedConnectionCredential(connection.credentialRef));
+    try {
+      await completeConnectionSecretMigration();
+      return { success: true };
+    } catch {
+      return { success: true, warning: "SQLite cleanup could not finish." };
+    }
   } catch (error) {
     console.error("Failed to delete connections by prefix:", error);
     return { success: false };
@@ -1341,11 +1407,20 @@ export async function deleteConnectionsByPrefix(prefix: string) {
 
 export async function deleteConnection(id: number) {
   const { client } = await import("./index");
+  const { removeCachedConnectionCredential } = await import("../credentials/connection-credential-cache");
 
   try {
     await ensureCoreTables();
+    const existing = await client.connections.findFirst({ where: { id } });
+    if (existing) await clearConnectionStringCaches(existing.connectionString);
     await client.connections.delete({ where: { id } });
-    return { success: true };
+    if (existing?.credentialRef) removeCachedConnectionCredential(existing.credentialRef);
+    try {
+      await completeConnectionSecretMigration();
+      return { success: true };
+    } catch {
+      return { success: true, warning: "SQLite cleanup could not finish." };
+    }
   } catch (error) {
     console.error("Failed to delete connection:", error);
     return { success: false };
@@ -1354,9 +1429,22 @@ export async function deleteConnection(id: number) {
 
 export async function updateConnection(id: number, data: Record<string, any>) {
   const { client } = await import("./index");
+  const { removeCachedConnectionCredential } = await import("../credentials/connection-credential-cache");
 
   try {
+    if (hasConnectionSecret({ connectionString: data.connectionString, password: data.password, authToken: data.authToken }) && data.credentialStorageMode !== "plaintext") {
+      throw new Error("Inline credentials require an explicit plaintext-storage choice in Security settings.");
+    }
+    assertCredentialStorageChoice(data.credentialStorageMode, data.credentialRef, data.credentialSecret);
     await ensureCoreTables();
+    const existing = await client.connections.findFirst({ where: { id } });
+    const replacingLegacySecret = existing && hasConnectionSecret(existing) && (
+      data.credentialRef !== undefined || data.password === null || data.authToken === null ||
+      (data.connectionString && existing.connectionString !== data.connectionString)
+    );
+    if (existing && data.connectionString && existing.connectionString !== data.connectionString) {
+      await clearConnectionStringCaches(existing.connectionString);
+    }
     await client.connections.update({
       where: { id },
       data: {
@@ -1371,6 +1459,8 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         password: data.password,
         sslMode: data.sslMode,
         authToken: data.authToken,
+        credentialRef: data.credentialRef,
+        credentialSecret: data.credentialSecret,
         environment: data.environment,
         color: data.color,
         group: Array.isArray(data.groups) ? data.groups[0] || null : (data.group || null),
@@ -1378,10 +1468,21 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         lastActive: data.lastActive ? new Date(data.lastActive) : undefined,
       },
     });
+    if (data.credentialRef !== undefined && existing?.credentialRef && existing.credentialRef !== data.credentialRef) {
+      removeCachedConnectionCredential(existing.credentialRef);
+    }
     if (data.groups !== undefined) {
       await syncConnectionGroupMembers(id, data.groups || []);
     }
-    return { success: true };
+    let warning: string | undefined;
+    if (replacingLegacySecret && !data.secureMigration) {
+      try {
+        await completeConnectionSecretMigration();
+      } catch {
+        warning = "SQLite cleanup could not finish.";
+      }
+    }
+    return { success: true, warning };
   } catch (error) {
     console.error("Failed to update connection:", error);
     return {
@@ -1390,6 +1491,57 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         (error as Error)?.message || error || "Failed to update connection",
       ),
     };
+  }
+}
+
+/** Checkpoint and rebuild the SQLite file after legacy secrets have been redacted. */
+export async function completeConnectionSecretMigration() {
+  const { db } = await import("./index");
+  const { sql } = await import("drizzle-orm");
+  await db.run(sql.raw("PRAGMA secure_delete = ON"));
+  await checkpointConnectionDatabase(db, sql);
+  await db.run(sql.raw("VACUUM"));
+  await checkpointConnectionDatabase(db, sql);
+  return { success: true };
+}
+
+async function ensureCredentialVaultTable() {
+  const { db } = await import("./index");
+  const { sql } = await import("drizzle-orm");
+  await db.run(sql.raw(`CREATE TABLE IF NOT EXISTS credential_vault (
+    id INTEGER PRIMARY KEY CHECK (id = 1), salt TEXT NOT NULL,
+    verifier TEXT NOT NULL, created_at INTEGER NOT NULL
+  )`));
+  return { db, sql };
+}
+
+export async function getCredentialVaultConfig() {
+  try {
+    const { db, sql } = await ensureCredentialVaultTable();
+    const rows = await db.all<{ salt: string; verifier: string }>(sql`SELECT salt, verifier FROM credential_vault WHERE id = 1`);
+    return { success: true, data: rows[0] || null };
+  } catch {
+    return { success: false, error: "Could not read encrypted-vault settings." };
+  }
+}
+
+export async function createCredentialVaultConfig(salt: string, verifier: string) {
+  if (!/^[A-Za-z0-9+/=]{20,64}$/.test(salt) || !/^v1\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+$/.test(verifier)) {
+    return { success: false, error: "Invalid encrypted-vault settings." };
+  }
+  try {
+    const { db, sql } = await ensureCredentialVaultTable();
+    await db.run(sql`INSERT INTO credential_vault (id, salt, verifier, created_at) VALUES (1, ${salt}, ${verifier}, ${Date.now()})`);
+    return { success: true };
+  } catch {
+    return { success: false, error: "A credential vault already exists or could not be created." };
+  }
+}
+
+async function checkpointConnectionDatabase(db: any, sql: any) {
+  const result = await db.all(sql.raw("PRAGMA wal_checkpoint(TRUNCATE)"));
+  if (Number(result?.[0]?.busy ?? 0) !== 0) {
+    throw new Error("Could not safely truncate the SQLite write-ahead log.");
   }
 }
 

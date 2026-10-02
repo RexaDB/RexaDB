@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { apiFetch } from "@/lib/api-base";
 import { readSseStream } from "@/lib/ai/read-sse-stream";
+import { publishStudioTagsChanged } from "@/lib/studio/studio-tag-events";
 import type { AgentChatRequest } from "@/lib/ai/types";
 import {
   buildLightSchemaContext,
@@ -70,6 +71,10 @@ export function useSqlAiGeneration(input: {
       let finalMessage = "";
 
       for await (const payload of readSseStream(reader)) {
+        if (payload.type === "studio_tags_changed" && payload.connectionId === input.connectionId) {
+          publishStudioTagsChanged(input.connectionId);
+          continue;
+        }
         if (payload.type === "assistant_delta") {
           finalMessage += payload.message;
           continue;

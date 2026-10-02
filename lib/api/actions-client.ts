@@ -11,6 +11,7 @@ import type { HistoryEntry } from "@/lib/api/history-entry-types";
 import { emitGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 import { API_BASE } from "@/lib/api-base";
 import { isDesktopRuntime } from "@/lib/desktop";
+import { migrateAndHydrateConnections } from "@/lib/credentials/connection-migration";
 
 type ApiResult<T> = { success: boolean; data?: T; error?: string } & Record<
   string,
@@ -109,7 +110,8 @@ function callAction<T = any>(action: string, args: unknown[] = []) {
 
 export async function getConnections(): Promise<any[]> {
   const res = await request<any[]>(buildUrl("/api/connections"));
-  return res.success && Array.isArray(res.data) ? res.data : [];
+  if (!res.success || !Array.isArray(res.data)) return [];
+  return migrateAndHydrateConnections(res.data);
 }
 
 export function upsertUserProfile(payload: {
@@ -396,13 +398,16 @@ export function saveStudioFolders(connectionId: number, payload: any[]) {
   });
 }
 
-export function getStudioBootstrap(
+export async function getStudioBootstrap(
   connectionId: number,
   requestedSchema?: string | null,
 ) {
-  return request<StudioBootstrapResponse>(
+  const result = await request<StudioBootstrapResponse>(
     buildUrl(`/studio/${connectionId}/bootstrap`, { s: requestedSchema || "" }),
   );
+  if (!result.success || !result.data?.connection) return result;
+  const [connection] = await migrateAndHydrateConnections([result.data.connection]);
+  return { ...result, data: { ...result.data, connection: connection as Connection } };
 }
 
 export function getStudioSnippets(connectionId: number) {
@@ -1322,4 +1327,3 @@ export function listWorkflowRuns(id: string, limit = 20) {
 export function getWorkflowRun(id: string, runId: string) {
   return request<WorkflowRunRow>(buildUrl(`/api/workflows/${id}/runs/${runId}`));
 }
-

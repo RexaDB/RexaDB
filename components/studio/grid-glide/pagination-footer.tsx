@@ -7,6 +7,7 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { canAdvanceFastPage } from "@/lib/studio/fast-table-count";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,8 @@ export function PaginationFooter({
   page,
   pageSize,
   totalCount,
+  fastTableLoading = false,
+  countUnavailable = false,
   loading,
   recordCount,
   onPageChange,
@@ -32,6 +35,8 @@ export function PaginationFooter({
   page: number;
   pageSize: number;
   totalCount: number | null;
+  fastTableLoading?: boolean;
+  countUnavailable?: boolean;
   loading: boolean;
   recordCount: number;
   onPageChange: (page: number) => void;
@@ -87,7 +92,7 @@ export function PaginationFooter({
   const recordLabel =
     totalCount !== null
       ? `${totalCount} ${totalCount === 1 ? "record" : "records"}`
-      : `${recordCount} ${recordCount === 1 ? "record" : "records"}`;
+      : fastTableLoading ? (countUnavailable ? "Count unavailable" : "Counting records…") : `${recordCount} ${recordCount === 1 ? "record" : "records"}`;
 
   return (
     <div className="shrink-0 border-t border-border bg-studio-bg/95 px-3 py-1.5">
@@ -119,7 +124,9 @@ export function PaginationFooter({
             className="h-7 w-7 rounded border-border/70 bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground"
             onClick={handleNextPage}
             disabled={
-              (totalCount !== null && (page + 1) * pageSize >= totalCount) ||
+              (fastTableLoading
+                ? !canAdvanceFastPage(page, pageSize, recordCount, totalCount)
+                : totalCount !== null && (page + 1) * pageSize >= totalCount) ||
               loading
             }
           >

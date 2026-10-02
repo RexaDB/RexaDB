@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetHeader as SheetHeader,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetDescription as SheetDescription,
+} from "@/components/common/studio-sheet";
+
 import "leaflet/dist/leaflet.css";
 import {
   CSSProperties,
@@ -24,11 +32,6 @@ import {
 } from "@/lib/api/actions-client";
 import {
   Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { TintColorPicker } from "./tint-color-picker";

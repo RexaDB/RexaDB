@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  StudioSheetContent as SheetContent,
+  StudioSheetFooter as SheetFooter,
+  StudioSheetTitle as SheetTitle,
+  StudioSheetHeader as SheetHeader,
+} from "@/components/common/studio-sheet";
+
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,9 +25,6 @@ import {
 } from "@/components/ui/popover";
 import {
   Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Check, ChevronDown, ChevronsUpDown, CircleAlert, X } from "lucide-react";
@@ -199,7 +203,8 @@ export function ProductSheet({
         minResizeWidth={420}
         showCloseButton={false}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-6 py-4">
+        <SheetHeader>
+
           <SheetTitle className="text-xl font-semibold tracking-tight">
             {title}
           </SheetTitle>
@@ -223,7 +228,7 @@ export function ProductSheet({
               <X className="size-4" />
             </Button>
           </span>
-        </div>
+        </SheetHeader>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-6">

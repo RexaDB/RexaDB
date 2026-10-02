@@ -40,6 +40,7 @@ export type PiAgentInput = {
   connectionString: string;
   connectionId?: number | null;
   persistWorkflow?: PiToolContext["persistWorkflow"];
+  notifyStudioTagsChanged?: PiToolContext["notifyStudioTagsChanged"];
   dbType: string;
   selectedNamespace?: string;
   schemaContext?: LightSchemaContextTable[];
@@ -182,7 +183,7 @@ function buildPiSystemPrompt(input: Pick<PiAgentInput, "dbType" | "selectedNames
     "Use these tools to inspect schemas, run queries, and retrieve data from the connected database.",
     "Edge Function tools (list/get/create/deploy/update/delete/logs/invocations/secrets) are only for Supabase project connections — otherwise they return 'not available'.",
     "web_search / fetch_web_content search the live web — they work out of the box via a free daily quota, with richer results when an Exa API key is set (Settings → AI → Web search). Use them for current events, docs, versions, and anything beyond the database. Only cite URLs actually returned by these tools.",
-    "DB access is read-only, but Edge Function create/deploy/update/delete/secret tools ARE mutating and pre-approved — call them directly when asked.",
+    "DB access is read-only. Studio tag tools only manage local RexaDB table-organization metadata; they do not write database rows or schema. Tag changes and Edge Function create/deploy/update/delete/secret tools are pre-approved — call them directly when asked.",
     "All listed DB tools are pre-approved — call them directly, never ask the user for permission, and never report 'user rejected permission'. If a tool fails, report its exact error.",
     "For SQLite, the only namespace is 'main' — use it or leave namespace empty. Never try to read the .db file with read/bash; use list_tables / get_table_schema / sample_rows / run_readonly_query instead.",
     "Never fabricate tool results. If a tool fails, report the error message to the user.",
@@ -217,6 +218,7 @@ export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ sess
     emitStep: input.emitStep,
     exaApiKey: input.settings.providers?.["exa"]?.apiKey ?? null,
     persistWorkflow: input.persistWorkflow,
+    notifyStudioTagsChanged: input.notifyStudioTagsChanged,
   };
   const tools = createPiDbTools(toolContext);
 

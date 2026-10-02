@@ -52,6 +52,7 @@ import { normalizeJsonColumnValue } from "@/lib/studio/data-utils";
 import { isDatabaseTabType, TAB_TYPE_TO_DATABASE_VIEW } from "@/lib/studio/tab-types";
 import { getViewMode, getTabConfig } from "@/lib/studio/tab-registry";
 import { useInitialStudioData } from "./use-initial-studio-data";
+import { useStudioTagSync } from "./use-studio-tag-sync";
 import { useSchemaDataLoader } from "./use-schema-data-loader";
 import { useStudioPersistence } from "./use-studio-persistence";
 import { useConnectionDataLoader } from "./use-connection-data-loader";
@@ -61,6 +62,8 @@ import { useFunctionManagement } from "./use-function-management";
 import { useAgentChatMessages } from "./use-agent-chat-messages";
 import { useStudioDataPersistence } from "./use-studio-data-persistence";
 import { useGlobalStudioSettings } from "./use-global-studio-settings";
+import { FastTableCountCache } from "@/lib/studio/fast-table-count";
+import { waitForTableCount } from "@/lib/studio/fast-table-loading";
 import { useTableDataMutations } from "./use-table-data-mutations";
 import { useTimerCleanup } from "./use-timer-cleanup";
 import { useTabPerformanceLogger } from "./use-tab-performance-logger";
@@ -124,6 +127,8 @@ type TableTabSnapshot = {
   page: number;
   pageSize: number;
   totalCount?: number | null;
+  countUnavailable?: boolean;
+  fastTableLoading?: boolean;
   permissionContext?: TablePermissionContext;
 };
 
@@ -510,6 +515,9 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [tabDataCache, setTabDataCache] = useState<Record<string, TableTabSnapshot>>({});
   const tableTabSnapshotRef = useRef<Record<string, TableTabSnapshot>>({});
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [countUnavailable, setCountUnavailable] = useState(false);
+  const fastCountCacheRef = useRef(new FastTableCountCache());
+  const fastRequestsRef = useRef(new Map<string, Promise<void>>());
   const [pendingActions, setPendingActions] = useState<Array<{
     id: string;
     type: 'add_column' | 'delete_column' | 'rename_column' | 'edit_column' | 'create_table' | 'delete_table' | 'create_enum' | 'delete_enum' | 'create_index' | 'delete_index' | 'create_trigger' | 'delete_trigger' | 'create_schema' | 'delete_schema' | 'create_database' | 'delete_database' | 'delete_row' | 'insert_row' | 'duplicate_row' | 'duplicate_table' | 'empty_table' | 'delete_function' | 'update_function' | 'create_rls_policy' | 'update_rls_policy' | 'delete_rls_policy' | 'add_fk' | 'redis_command';
@@ -1148,6 +1156,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     autoClosePane,
     autoSaveQueries,
     resultTabsEnabled,
+    fastTableLoading,
     previewTabs,
     sqlFormatTabWidth,
     sqlFormatUseTabs,
@@ -1161,6 +1170,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     sqlFormatDenseOperators,
     sqlFormatNewlineBeforeSemicolon,
   } = studioSettings;
+
+  const fastTableLoadingRef = useRef(fastTableLoading);
+  fastTableLoadingRef.current = fastTableLoading;
+  useEffect(() => {
+    fastCountCacheRef.current.clear();
+    fastRequestsRef.current.clear();
+  }, [fastTableLoading]);
 
   useEffect(() => {
     autoSaveQueriesRef.current = autoSaveQueries;
@@ -1454,6 +1470,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     setIsHistoryLoaded,
     delayedUiRestoreBlockedRef,
   });
+  useStudioTagSync(connection.id, setTags, setTableTags);
 
   const loadLocalSnippets = useCallback(async () => {
     const [foldersRes, snippetsRes] = await Promise.all([
@@ -1733,8 +1750,10 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     page,
     pageSize,
     totalCount,
+    countUnavailable,
+    fastTableLoading: fastTableLoading && dbType !== "mongodb",
     permissionContext: tablePermissionContext,
-  }), [results, tableStructure, foreignKeys, filterQuery, sortConfig, page, pageSize, totalCount, tablePermissionContext]);
+  }), [results, tableStructure, foreignKeys, filterQuery, sortConfig, page, pageSize, totalCount, countUnavailable, fastTableLoading, dbType, tablePermissionContext]);
 
   const snapshotTableTabState = useCallback((tabId: string | null) => {
     if (!tabId) return;
@@ -1758,6 +1777,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         && current.page === nextEntry.page
         && current.pageSize === nextEntry.pageSize
         && current.totalCount === nextEntry.totalCount
+        && current.countUnavailable === nextEntry.countUnavailable
+        && current.fastTableLoading === nextEntry.fastTableLoading
         && areTablePermissionContextsEqual(current.permissionContext ?? null, nextEntry.permissionContext ?? null);
       if (unchanged) return prev;
       return {
@@ -3073,6 +3094,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   const resetTableResults = useCallback(() => {
     setResults(null);
+    setCountUnavailable(false);
     setTableStructure([]);
     setForeignKeys([]);
     setPage(0);
@@ -3122,14 +3144,23 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       clearTableData();
       return;
     }
+    const fastMode = fastTableLoading && dbType !== "mongodb";
+    const countKey = JSON.stringify([dbType, currentConnectionString, schema, tableName, filter || "", queryExecutionContext]);
+    const fastRequestKey = JSON.stringify([tabId, countKey, sort, pSize ?? pageSize, pPage ?? page]);
+    const existingFastRequest = fastRequestsRef.current.get(fastRequestKey);
+    if (fastMode && debugReason === "selected-table-effect" && existingFastRequest) return existingFastRequest;
     const requestId = ++tableRefreshRequestIdRef.current;
+    let finishFastRequest: (() => void) | undefined;
+    const fastRequest = fastMode ? new Promise<void>((resolve) => { finishFastRequest = resolve; }) : null;
+    if (fastRequest) fastRequestsRef.current.set(fastRequestKey, fastRequest);
     const tabRequestId = (tabRefreshRequestIdsRef.current[tabId] || 0) + 1;
     tabRefreshRequestIdsRef.current[tabId] = tabRequestId;
 
     const isCurrentTarget = () =>
       activeTabIdRef.current === tabId
       && selectedSchemaRef.current === schema
-      && selectedTableRef.current === tableName;
+      && selectedTableRef.current === tableName
+      && fastTableLoadingRef.current === fastTableLoading;
     const shouldUpdateVisibleState = isCurrentTarget();
     const shouldLogDebug = splitView.enabled || !!targetTabId || !!debugReason;
     const debugPayload = {
@@ -3238,33 +3269,51 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         return;
       }
 
-      // Fetch total count first if it's not set or if filter/table changed
+      // In fast mode the count runs independently; legacy mode still waits for it.
       const countSql = `SELECT COUNT(*) as count FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
-      const countRes = await runQuery(currentConnectionString, countSql, [], undefined, queryExecutionContext);
-      
-      addHistoryEntry({
-        query: countSql,
-        duration: countRes.data?.executionTime || 0,
-        status: countRes.success ? 'success' : 'error',
-        error: countRes.error,
-        rowsCount: countRes.data?.rows?.length || 0,
-        caller: 'system',
-      });
-
-      if (countRes.success && countRes.data?.rows && countRes.data.rows.length > 0) {
-        updateTabStructureCache(tabId, tabRequestId, {
-        totalCount: parseInt(countRes.data.rows[0].count),
-        filterQuery: filter || "",
-        sortConfig: sort || null,
-        page: pPage !== undefined ? pPage : page,
-        pageSize: limit,
-        permissionContext: effectivePermissionContext,
-      });
-
+      const fetchCount = async () => {
+        const countRes = await runQuery(currentConnectionString, countSql, [], undefined, queryExecutionContext);
+        addHistoryEntry({
+          query: countSql,
+          duration: countRes.data?.executionTime || 0,
+          status: countRes.success ? 'success' : 'error',
+          error: countRes.error,
+          rowsCount: countRes.data?.rows?.length || 0,
+          caller: 'system',
+        });
+        if (!countRes.success || !countRes.data?.rows?.length) return null;
+        const count = Number(countRes.data.rows[0].count);
+        return Number.isFinite(count) ? count : null;
+      };
+      const updateCount = (count: number | null) => {
+        if (tabRefreshRequestIdsRef.current[tabId] !== tabRequestId || fastTableLoadingRef.current !== fastTableLoading) return;
+        updateTabStructureCache(tabId, tabRequestId, { totalCount: count, countUnavailable: fastMode && count === null });
         if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
-          setTotalCount(parseInt(countRes.data.rows[0].count));
+          if (count !== null) setTotalCount(count);
+          setCountUnavailable(fastMode && count === null);
+        }
+      };
+      if (fastMode) {
+        const shouldInvalidate = !["selected-table-effect", "column-toggle", "column-visibility-load", "switch-tab-stale-guard"].includes(debugReason || "");
+        if (shouldInvalidate) fastCountCacheRef.current.clear();
+        const cachedCount = fastCountCacheRef.current.get(countKey);
+        updateTabStructureCache(tabId, tabRequestId, {
+          totalCount: cachedCount,
+          countUnavailable: false,
+          results: null,
+          fastTableLoading: true,
+          filterQuery: filter || "",
+          sortConfig: sort || null,
+          page: pPage !== undefined ? pPage : page,
+          pageSize: limit,
+          permissionContext: effectivePermissionContext,
+        });
+        if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
+          setTotalCount(cachedCount);
+          setCountUnavailable(false);
         }
       }
+      if (!fastMode) await waitForTableCount(false, fetchCount(), updateCount);
 
       const currentStructure = tableStructureRef.current;
       const currentHidden = hiddenColumnNamesRef.current;
@@ -3296,7 +3345,12 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
         sql += ` LIMIT ${limit} OFFSET ${offset};`;
       }
-      const res = await runQuery(currentConnectionString, sql, [], undefined, queryExecutionContext);
+      // Dispatch the row request first so an expensive count cannot hold up its start.
+      const rowRequest = runQuery(currentConnectionString, sql, [], undefined, queryExecutionContext);
+      if (fastMode) {
+        void waitForTableCount(true, fastCountCacheRef.current.load(countKey, fetchCount), updateCount);
+      }
+      const res = await rowRequest;
 
       addHistoryEntry({
         query: sql,
@@ -3339,6 +3393,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
         updateTabStructureCache(tabId, tabRequestId, {
           results: normalizedData,
+          fastTableLoading: fastMode,
           filterQuery: filter || "",
           sortConfig: sort || null,
           page: pPage !== undefined ? pPage : page,
@@ -3366,6 +3421,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         setResults(null);
       }
     } finally {
+      if (fastRequest && fastRequestsRef.current.get(fastRequestKey) === fastRequest) fastRequestsRef.current.delete(fastRequestKey);
       // Clear loading state if this is still the latest request for this specific tab
       if (tabRefreshRequestIdsRef.current[tabId] === tabRequestId) {
         setTableLoadingById((prev) => (prev[tabId] ? { ...prev, [tabId]: false } : prev));
@@ -3387,8 +3443,9 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           tabRequestId,
         });
       }
+      finishFastRequest?.();
     }
-  }, [pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery]);
+  }, [pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery, fastTableLoading]);
 
   const toggleColumn = useCallback((columnName: string) => {
     setHiddenColumnNames(prev => {
@@ -4414,8 +4471,8 @@ END $$;`.trim();
         return;
       }
 
-      // If we have cached results and the filters match, use them
-        const filtersMatch = cached &&
+      // A count-only entry (or one from a different loading mode) is not a page cache hit.
+        const filtersMatch = cached?.results && (cached.fastTableLoading ?? false) === (fastTableLoading && dbType !== "mongodb") &&
         cached.filterQuery === filterQuery &&
         JSON.stringify(cached.sortConfig) === JSON.stringify(sortConfig) &&
         cached.page === page &&
@@ -4427,9 +4484,11 @@ END $$;`.trim();
         const nextStructure = cached.tableStructure || [];
         const nextForeignKeys = cached.foreignKeys || [];
         const nextTotalCount = cached.totalCount ?? null;
+        const nextCountUnavailable = cached.countUnavailable ?? false;
         setTableStructure((prev) => (prev === nextStructure ? prev : nextStructure));
         setForeignKeys((prev) => (prev === nextForeignKeys ? prev : nextForeignKeys));
         setTotalCount((prev) => (prev === nextTotalCount ? prev : nextTotalCount));
+        setCountUnavailable((prev) => (prev === nextCountUnavailable ? prev : nextCountUnavailable));
         if (tabSwitchPerfRef.current && !tabSwitchPerfRef.current.ended && tabSwitchPerfRef.current.toTabId === tabId) {
           tabSwitchPerfRef.current.ended = true;
           logTabPerf("table-ready-cache", {
@@ -4541,7 +4600,7 @@ END $$;`.trim();
     } else {
       clearTableData();
     }
-  }, [selectedTable, selectedSchema, filterQuery, sortConfig, pageSize, page, viewMode, tabDataCache, activeTabId, openTabs, refreshTableData, resolveActiveTableTabId, getTabBaseId, splitView.enabled, tablePermissionContext]);
+  }, [selectedTable, selectedSchema, filterQuery, sortConfig, pageSize, page, viewMode, tabDataCache, activeTabId, openTabs, refreshTableData, resolveActiveTableTabId, getTabBaseId, splitView.enabled, tablePermissionContext, fastTableLoading, dbType]);
 
 // fallow-ignore-next-line code-duplication
   const columnVisibilityLoadedRef = useRef<Record<string, boolean>>({});
@@ -4758,7 +4817,7 @@ END $$;`.trim();
       ));
       
       // STALE TAB GUARD: If the tab is stuck loading or has no data, force a refresh on activation
-      if (!cached?.results || tableLoadingById[tabId]) {
+      if (!cached?.results || (cached.fastTableLoading ?? false) !== (fastTableLoading && dbType !== "mongodb") || tableLoadingById[tabId]) {
         logStudioDebug("switch-tab-stale-guard", {
           tabId,
           targetPaneId,
@@ -4767,7 +4826,7 @@ END $$;`.trim();
           hasCachedResults: !!cached?.results,
           isLoading: !!tableLoadingById[tabId],
         });
-        refreshTableData(tab.name, tab.schema || "", undefined, undefined, undefined, undefined, tabId, "switch-tab-stale-guard", nextPermissionContext);
+        refreshTableData(tab.name, tab.schema || "", cached?.filterQuery, cached?.sortConfig, cached?.pageSize, cached?.page, tabId, "switch-tab-stale-guard", nextPermissionContext);
       }
 
       if (cached) {
@@ -4782,7 +4841,10 @@ END $$;`.trim();
         setSortConfig((prev) => (JSON.stringify(prev) === JSON.stringify(nextSort) ? prev : nextSort));
         setPage((prev) => (prev === nextPage ? prev : nextPage));
         setPageSize((prev) => (prev === nextPageSize ? prev : nextPageSize));
-        setResults((prev: unknown) => (prev === cached.results ? prev : cached.results));
+        const validResults = (cached.fastTableLoading ?? false) === (fastTableLoading && dbType !== "mongodb") ? cached.results : null;
+        setResults((prev: unknown) => (prev === validResults ? prev : validResults));
+        setTotalCount(validResults ? (cached.totalCount ?? null) : null);
+        setCountUnavailable(validResults ? !!cached.countUnavailable : false);
         setTableStructure((prev) => (prev === nextStructure ? prev : nextStructure));
         setForeignKeys((prev) => (prev === nextForeignKeys ? prev : nextForeignKeys));
         logTabPerf("switch-table-cache-restore", {
@@ -9410,6 +9472,7 @@ END $$;`.trim();
     pageSize,
     page,
     totalCount,
+    countUnavailable,
     handlePageChange,
     handlePageSizeChange,
     schemaData,

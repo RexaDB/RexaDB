@@ -17,6 +17,11 @@ import type {
 } from "@/lib/studio/types";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import {
+  DEFAULT_FAST_TABLE_LOADING,
+  FAST_TABLE_LOADING_DEFAULT_MIGRATION_KEY,
+  resolveFastTableLoading,
+} from "@/lib/studio/fast-table-loading";
+import {
   emitSettingsSyncLocalChanged,
   subscribeSettingsSyncApplied,
 } from "@/lib/studio/settings-sync-events";
@@ -45,6 +50,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   richJsonInspector: boolean;
   dataBars: boolean;
   skeletonLoaders: boolean;
+  fastTableLoading: boolean;
   sleekLayout: boolean;
   showTabIndicator: boolean;
   iconThemeId: string;
@@ -107,6 +113,7 @@ export function useGlobalStudioSettings(persist = false) {
   const [richJsonInspector, setRichJsonInspector] = useState<boolean>(false);
   const [dataBars, setDataBars] = useState<boolean>(false);
   const [skeletonLoaders, setSkeletonLoaders] = useState<boolean>(false);
+  const [fastTableLoading, setFastTableLoading] = useState<boolean>(DEFAULT_FAST_TABLE_LOADING);
   const [sleekLayout, setSleekLayout] = useState<boolean>(false);
   const [activeSleekLayout, setActiveSleekLayout] = useState<boolean>(false);
   const [showTabIndicator, setShowTabIndicator] = useState<boolean>(true);
@@ -196,6 +203,7 @@ export function useGlobalStudioSettings(persist = false) {
     if (d.dataBars !== undefined) setDataBars(d.dataBars);
     if (d.skeletonLoaders !== undefined)
       setSkeletonLoaders(d.skeletonLoaders);
+    setFastTableLoading(resolveFastTableLoading(d));
     if (d.showTabIndicator !== undefined)
       setShowTabIndicator(d.showTabIndicator);
     if (typeof d.iconThemeId === "string" && d.iconThemeId.trim())
@@ -361,6 +369,8 @@ export function useGlobalStudioSettings(persist = false) {
       richJsonInspector,
       dataBars,
       skeletonLoaders,
+      fastTableLoading,
+      [FAST_TABLE_LOADING_DEFAULT_MIGRATION_KEY]: true,
       sleekLayout,
       showTabIndicator,
       iconThemeId,
@@ -425,6 +435,7 @@ export function useGlobalStudioSettings(persist = false) {
     richJsonInspector,
     dataBars,
     skeletonLoaders,
+    fastTableLoading,
     sleekLayout,
     showTabIndicator,
     iconThemeId,
@@ -530,6 +541,8 @@ export function useGlobalStudioSettings(persist = false) {
     setDataBars,
     skeletonLoaders,
     setSkeletonLoaders,
+    fastTableLoading,
+    setFastTableLoading,
     sleekLayout,
     setSleekLayout,
     activeSleekLayout,

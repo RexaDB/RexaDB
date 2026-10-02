@@ -196,6 +196,8 @@ export async function ensureCoreTables() {
         { column: "password", statement: "ALTER TABLE connections ADD COLUMN password TEXT" },
         { column: "ssl_mode", statement: "ALTER TABLE connections ADD COLUMN ssl_mode TEXT" },
         { column: "auth_token", statement: "ALTER TABLE connections ADD COLUMN auth_token TEXT" },
+        { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
+        { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
       ]).then(() => db.run(sql`UPDATE connections SET sort_order = created_at WHERE sort_order IS NULL`)),
       ...coreMigrationPromises(),
     ]);
@@ -216,6 +218,12 @@ export async function ensureCoreTables() {
     { name: '"group"', type: "TEXT" },
     { name: "is_favorite", type: "INTEGER", constraints: "DEFAULT 0" },
     { name: "last_active", type: "INTEGER" },
+    { name: "credential_ref", type: "TEXT" },
+    { name: "credential_secret", type: "TEXT" },
+  ]);
+  await ensureColumns("connections", [
+    { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
+    { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
   ]);
   await createTableIfNotExists("folders", [
     { name: "id", type: "TEXT", constraints: "PRIMARY KEY NOT NULL" },

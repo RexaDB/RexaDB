@@ -16,6 +16,7 @@ import {
   type RexaAgentAppMode,
 } from "@/lib/agents/app-modes";
 import { describeToolUse } from "@/lib/agents/work-log";
+import { publishStudioTagsChanged } from "@/lib/studio/studio-tag-events";
 
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -435,7 +436,9 @@ export function useAgentHarness(input: {
             try {
               const data: AgentStreamEvent = JSON.parse(line.slice(5).trim());
 
-              if ((data.type === "text_delta" || data.type === "assistant_delta") && (data.content || data.message)) {
+              if (data.type === "studio_tags_changed" && data.connectionId === input.connectionId) {
+                publishStudioTagsChanged(input.connectionId);
+              } else if ((data.type === "text_delta" || data.type === "assistant_delta") && (data.content || data.message)) {
                 const delta = data.content ?? data.message ?? "";
                 fullContent += delta;
                 setMessages((prev) =>

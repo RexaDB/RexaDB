@@ -167,14 +167,12 @@ export function useSchemaDataLoader({
         console.error("Failed to fetch schema data:", res.error, {
           dbType,
           schema: selectedSchema,
-          connectionString: rawConnectionString,
         });
       }
     } catch (err) {
       console.error("Error in loadSchemaData:", err, {
         dbType,
         schema: selectedSchema,
-        connectionString: rawConnectionString,
       });
     }
   }, [currentConnectionString, dbType, selectedSchema]);

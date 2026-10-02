@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { StudioSheetFooter } from "@/components/common/studio-sheet";
 import type { AuthProviderConfig } from "@/lib/studio/auth-provider-types";
 import { AuthCustomProviderBasic } from "./auth-custom-provider-basic";
 import { AuthCustomProviderCredentials } from "./auth-custom-provider-credentials";
@@ -29,7 +30,8 @@ export function AuthCustomProviderForm({
   });
   const isEditMode = Boolean(config);
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6 text-sm">
+    <div className="flex min-h-0 flex-1 flex-col text-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6">
       {error ? (
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
           {error}
@@ -50,11 +52,12 @@ export function AuthCustomProviderForm({
       ) : null}
       <AuthCustomProviderCredentials state={state} onChange={setState} />
       <AuthCustomProviderScopes state={state} onChange={setState} />
-      <div className="flex justify-end">
+      </div>
+      <StudioSheetFooter>
         <Button onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save Provider"}
         </Button>
-      </div>
+      </StudioSheetFooter>
     </div>
   );
 }

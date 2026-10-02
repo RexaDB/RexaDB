@@ -58,6 +58,7 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  closeButtonClassName = "absolute top-3 right-3",
   resizable = side === "right" || side === "left",
   minResizeWidth = 360,
   maxResizeWidth,
@@ -66,10 +67,12 @@ function SheetContent({
   contained = false,
   noOverlay = false,
   onInteractOutside: onInteractOutsideProp,
+  onPointerDownOutside: onPointerDownOutsideProp,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  closeButtonClassName?: string
   resizable?: boolean
   minResizeWidth?: number
   maxResizeWidth?: number
@@ -107,6 +110,12 @@ function SheetContent({
       return
     }
     onInteractOutsideProp?.(event)
+    if (event.defaultPrevented) return
+    // Contained sheets are persistent side panels: outside clicks may
+    // interact with the workspace, but must not dismiss the open sheet.
+    // Regular modal sheets (mobile sidebar, edit dialogs) must still
+    // dismiss on backdrop click.
+    if (contained) event.preventDefault()
   }, [contained, onInteractOutsideProp])
 
   const getViewportMaxWidth = React.useCallback(() => {
@@ -186,6 +195,14 @@ function SheetContent({
       <SheetPrimitive.Content
         ref={contentRef}
         onInteractOutside={handleInteractOutside}
+        onPointerDownOutside={(event) => {
+          onPointerDownOutsideProp?.(event)
+          if (event.defaultPrevented) return
+          // Block dismissal at the pointer event itself only for persistent
+          // contained sheets. This also protects docked sheets while the
+          // resize sash receives pointer input.
+          if (contained) event.preventDefault()
+        }}
         data-slot="sheet-content"
         data-side={side}
         className={cn(
@@ -237,7 +254,7 @@ function SheetContent({
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
-            <Button variant="ghost" className="absolute top-3 right-3" size="icon-sm">
+            <Button variant="ghost" className={closeButtonClassName} size="icon-sm">
               <XIcon
               />
               <span className="sr-only">Close</span>

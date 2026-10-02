@@ -52,7 +52,7 @@ export interface AgentChatMessage {
 }
 
 export interface AgentStreamEvent {
-  type: "text_delta" | "assistant_delta" | "tool_start" | "tool_output" | "error" | "done" | "assistant_done";
+  type: "text_delta" | "assistant_delta" | "tool_start" | "tool_output" | "error" | "done" | "assistant_done" | "studio_tags_changed";
   content?: string;
   message?: string;
   tool?: string;
@@ -65,6 +65,7 @@ export interface AgentStreamEvent {
   label?: string;
   /** tool_output: whether the tool result reports a failure. */
   isError?: boolean;
+  connectionId?: number;
 }
 
 /** One agent activity entry — ported from t3code's WorkLogEntry, trimmed to what we consume. */
