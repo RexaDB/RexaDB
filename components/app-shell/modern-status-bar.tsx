@@ -12,6 +12,7 @@ import { Clock, MessagesSquare, Sparkles, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSettingsSyncStatus } from "@/hooks/use-settings-sync-status";
 import { useExtensions } from "@/lib/extensions/react";
+import { countPendingCellEdits } from "@/lib/studio/pending-changes-utils";
 
 /**
  * VS Code-style status bar for the Modern UI — the real footer of the window.
@@ -95,7 +96,9 @@ export function ModernStatusBar({
     studio?.pendingChanges && typeof studio.pendingChanges === "object"
       ? (studio.pendingChanges as Record<string, unknown>)
       : {};
-  const pendingChangesCount = Object.keys(pendingChangesRecord).length;
+  const pendingChangesCount = countPendingCellEdits(
+    pendingChangesRecord as Record<string, Record<string, unknown>>,
+  );
   const pendingActionsCount = Array.isArray(studio?.pendingActions)
     ? studio.pendingActions.length
     : 0;

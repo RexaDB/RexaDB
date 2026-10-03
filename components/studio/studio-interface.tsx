@@ -933,6 +933,9 @@ export function StudioInterface({
         onOpenChange={studio.setIsReviewSheetOpen}
         pendingChanges={studio.pendingChanges}
         pendingActions={studio.pendingActions}
+        selectedSchema={studio.selectedSchema ?? undefined}
+        selectedTable={studio.selectedTable}
+        dbType={studio.dbType}
         onCommit={studio.handleCommitChanges}
         onCancelCommit={studio.handleCancelCommit}
         loading={studio.isDeleting}
