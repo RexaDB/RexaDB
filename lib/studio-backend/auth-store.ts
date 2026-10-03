@@ -18,11 +18,14 @@ async function fetchConfig() {
 }
 
 async function postConfig(config: { studioUrl: string; studioToken: string; userId: string }) {
-  await apiFetch("/api/studio-config", {
+  const res = await apiFetch("/api/studio-config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
   });
+  if (!res.ok) throw new Error(`Could not save local workspace config (${res.status})`);
+  const result = await res.json();
+  if (result.success !== true) throw new Error(result.error || "Could not save local workspace config");
 }
 
 async function deleteConfig() {
@@ -54,6 +57,9 @@ export async function initStudioAuth(): Promise<void> {
       if (config) {
         cachedAuth = { userId: config.userId, studioToken: config.studioToken };
         cachedUrl = config.studioUrl;
+        const recovered = await recoverLocalStudioUrl(config);
+        cachedAuth = { userId: recovered.userId, studioToken: recovered.studioToken };
+        cachedUrl = recovered.studioUrl;
         await ensureActiveWorkspaceInList();
       }
     } catch {
@@ -61,6 +67,35 @@ export async function initStudioAuth(): Promise<void> {
     }
   })();
   return initPromise;
+}
+
+async function recoverLocalStudioUrl(config: { studioUrl: string; studioToken: string; userId: string }) {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const server = await invoke<{ id: string; name: string; url: string | null } | null>("local_studio_recover", {
+      studioUrl: config.studioUrl,
+      userId: config.userId,
+    });
+    if (!server?.url || server.url === config.studioUrl) return config;
+
+    const updated = { ...config, studioUrl: server.url };
+    cachedUrl = updated.studioUrl;
+    const replaceResponse = await apiFetch("/api/workspaces/replace-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldUrl: config.studioUrl, workspace: { ...updated, name: server.name } }),
+    });
+    const replaceResult = await replaceResponse.json();
+    if (!replaceResponse.ok || replaceResult.success !== true) {
+      throw new Error(replaceResult.error || `Could not update saved workspace URL (${replaceResponse.status})`);
+    }
+    await postConfig(updated);
+    console.info(`[workspace-auth] restored local RexaDB Studio URL for server ${server.id}: ${config.studioUrl} -> ${server.url}`);
+    return updated;
+  } catch (error) {
+    console.warn(`[workspace-auth] local server URL recovery did not run: ${error instanceof Error ? error.message : String(error)}`);
+    return config;
+  }
 }
 
 export function loadStudioAuth(): StudioAuth | null {

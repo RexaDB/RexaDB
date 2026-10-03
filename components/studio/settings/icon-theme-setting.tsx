@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,11 @@ export function IconThemeSetting({
   setCustomIconThemes,
 }: IconThemeSettingProps) {
   const [isImporting, setIsImporting] = useState(false);
-  const canUseDesktop = isDesktopRuntime();
+  // Hydration-safe: match SSR (`false`) on first render, resolve after mount.
+  const [canUseDesktop, setCanUseDesktop] = useState(false);
+  useEffect(() => {
+    setCanUseDesktop(isDesktopRuntime());
+  }, []);
 
   const handleImportTheme = async () => {
     if (!canUseDesktop || isImporting) return;

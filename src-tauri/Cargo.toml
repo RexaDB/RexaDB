@@ -27,6 +27,16 @@ tauri-plugin-fs = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-window-state = "2"
+axum = { version = "0.8", features = ["json"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+bcrypt = "0.17"
+jsonwebtoken = "9"
+aes-gcm = "0.10"
+rand = "0.8"
+hmac = "0.12"
+sha1 = "0.10"
+chrono = { version = "0.4", features = ["clock"] }
+tower-http = { version = "0.6", features = ["cors"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }

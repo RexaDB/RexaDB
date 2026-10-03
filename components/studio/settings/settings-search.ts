@@ -115,6 +115,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "command-menu", section: "advanced", title: "Command Menu Customization", description: "Reorder or show/hide sections in the command menu (⌘K).", keywords: ["command", "menu", "palette", "cmdk", "reorder", "sections"] },
 
   // ---- Workspace ----
+  { id: "workspace-local-server", section: "workspace", title: "Local RexaDB Studio Server", description: "Set up, start, or stop a rexadb-studio server on this computer.", keywords: ["workspace", "server", "local", "start", "setup"] },
   { id: "workspace-connect", section: "workspace", title: "Connect Workspace", description: "Connect to a rexadb-studio workspace to manage shared connections.", keywords: ["workspace", "connect", "studio", "shared", "team"] },
   { id: "workspace-invite", section: "workspace", title: "Accept Invite", description: "Join a workspace with an invite token.", keywords: ["invite", "token", "join", "workspace"] },
   { id: "workspace-signin", section: "workspace", title: "Workspace Sign In", description: "Sign in to a workspace with email and password.", keywords: ["sign in", "login", "email", "password", "workspace", "totp", "2fa"] },
