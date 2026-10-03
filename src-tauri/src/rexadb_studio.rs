@@ -40,6 +40,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0005_white_mantis", include_str!("../migrations/rexadb-studio/0005_white_mantis.sql")),
     ("0006_motionless_lenny_balinger", include_str!("../migrations/rexadb-studio/0006_motionless_lenny_balinger.sql")),
     ("0007_blue_longshot", include_str!("../migrations/rexadb-studio/0007_blue_longshot.sql")),
+    ("0008_avatar_store", include_str!("../migrations/rexadb-studio/0008_avatar_store.sql")),
 ];
 
 const PERMISSIONS: &[(&str, &str, &str)] = &[
@@ -300,6 +301,8 @@ pub async fn start_named(app: &tauri::AppHandle, data_dir: PathBuf, sidecar_api:
         .route("/api/roles/{id}", get(role_get).put(role_update).delete(role_delete))
         .route("/api/users", get(users_list))
         .route("/api/users/{id}", axum::routing::patch(user_update).delete(user_delete))
+        .route("/api/users/{id}/avatar", axum::routing::put(user_avatar_upload).delete(user_avatar_delete))
+        .route("/api/avatars/{name}", get(avatar_get))
         .route("/api/users/{id}/role", axum::routing::patch(user_assign_role))
         .route("/api/connections", get(connections_list).post(connection_create))
         .route("/api/connections/{id}", get(connection_get).put(connection_update).delete(connection_delete))
@@ -1097,6 +1100,158 @@ async fn user_delete(State(state): State<ApiState>, headers: HeaderMap, AxumPath
     }
 }
 
+const AVATAR_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+fn avatar_extension(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/avif" => Some("avif"),
+        _ => None,
+    }
+}
+
+async fn user_avatar_upload(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    AxumPath(target_id): AxumPath<String>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let caller = match token_user_id(&headers, &state) {
+        Ok(id) => id,
+        Err(status) => return app_error(status, "Invalid or expired workspace token.").into_response(),
+    };
+    if body.is_empty() {
+        return app_error(StatusCode::BAD_REQUEST, "Image data is required.").into_response();
+    }
+    if body.len() > AVATAR_MAX_BYTES {
+        return app_error(StatusCode::PAYLOAD_TOO_LARGE, "Image must be under 5MB.").into_response();
+    }
+    let mime = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
+        .unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let Some(extension) = avatar_extension(&mime) else {
+        return app_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Only JPEG, PNG, GIF, WebP, and AVIF images are allowed.").into_response();
+    };
+    {
+        let db = state.db.lock().unwrap();
+        if !is_user_active(&db, &caller) {
+            return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+        }
+        let target_exists: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?1)",
+            [&target_id],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        if !target_exists {
+            return app_error(StatusCode::NOT_FOUND, "User not found.").into_response();
+        }
+    }
+    if caller != target_id {
+        if let Err((status, error)) = require_permission(&headers, &state, "users.manage") {
+            return app_error(status, error).into_response();
+        }
+    }
+    let filename = format!("avatar_{target_id}_{}.{}", random_hex(8), extension);
+    let now = chrono_like_now();
+    let previous = {
+        let db = state.db.lock().unwrap();
+        let previous: Option<String> = db.query_row(
+            "SELECT avatar_url FROM users WHERE id = ?1",
+            [&target_id],
+            |row| row.get(0),
+        ).unwrap_or(None);
+        if let Err(error) = db.execute(
+            "INSERT INTO avatars (filename, user_id, mime, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![filename, target_id, mime, body.as_ref(), now],
+        ) {
+            return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
+        if let Err(error) = db.execute("UPDATE users SET avatar_url = ?1 WHERE id = ?2", params![filename, target_id]) {
+            return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
+        previous
+    };
+    if let Some(old_filename) = previous.filter(|name| *name != filename) {
+        let db = state.db.lock().unwrap();
+        let _ = db.execute("DELETE FROM avatars WHERE filename = ?1", [&old_filename]);
+    }
+    (StatusCode::OK, Json(json!({ "data": { "avatarUrl": filename } }))).into_response()
+}
+
+async fn user_avatar_delete(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    AxumPath(target_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let caller = match token_user_id(&headers, &state) {
+        Ok(id) => id,
+        Err(status) => return app_error(status, "Invalid or expired workspace token.").into_response(),
+    };
+    {
+        let db = state.db.lock().unwrap();
+        if !is_user_active(&db, &caller) {
+            return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+        }
+        let target_exists: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?1)",
+            [&target_id],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        if !target_exists {
+            return app_error(StatusCode::NOT_FOUND, "User not found.").into_response();
+        }
+    }
+    if caller != target_id {
+        if let Err((status, error)) = require_permission(&headers, &state, "users.manage") {
+            return app_error(status, error).into_response();
+        }
+    }
+    let db = state.db.lock().unwrap();
+    let current: Option<String> = db.query_row(
+        "SELECT avatar_url FROM users WHERE id = ?1",
+        [&target_id],
+        |row| row.get(0),
+    ).unwrap_or(None);
+    let Some(current) = current.filter(|name| !name.is_empty()) else {
+        return app_error(StatusCode::NOT_FOUND, "Avatar not found.").into_response();
+    };
+    if let Err(error) = db.execute("UPDATE users SET avatar_url = NULL WHERE id = ?1", [&target_id]) {
+        return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+    let _ = db.execute("DELETE FROM avatars WHERE filename = ?1", [&current]);
+    (StatusCode::OK, Json(json!({ "data": { "success": true } }))).into_response()
+}
+
+async fn avatar_get(State(state): State<ApiState>, AxumPath(name): AxumPath<String>) -> impl IntoResponse {
+    // Served to plain `<img>` tags without an auth header, so this stays
+    // public; filenames are unguessable (`avatar_<uuid>_<rand>.<ext>`).
+    let valid = !name.is_empty() && name.len() <= 128 && !name.contains("..")
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'_' || byte == b'-');
+    if !valid {
+        return app_error(StatusCode::NOT_FOUND, "Avatar not found.").into_response();
+    }
+    let db = state.db.lock().unwrap();
+    let row: Option<(String, Vec<u8>)> = db.query_row(
+        "SELECT mime, content FROM avatars WHERE filename = ?1",
+        [&name],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().unwrap_or(None);
+    match row {
+        Some((mime, content)) => {
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_str(&mime).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+            );
+            response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400"));
+            (StatusCode::OK, response_headers, content).into_response()
+        }
+        None => app_error(StatusCode::NOT_FOUND, "Avatar not found.").into_response(),
+    }
+}
+
 async fn connections_list(State(state): State<ApiState>, headers: HeaderMap) -> impl IntoResponse {
     let user_id = match require_permission(&headers, &state, "connections.read") {
         Ok(id) => id,
@@ -1200,9 +1355,16 @@ fn kv_has_global_manage(db: &Connection, user_id: &str) -> bool {
     db.query_row("SELECT EXISTS(SELECT 1 FROM users u JOIN role_permissions rp ON rp.role_id = u.role_id JOIN permissions p ON p.id = rp.permission_id WHERE u.id = ?1 AND u.is_active = 1 AND p.code = 'kv_store.manage')", [user_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
 }
 
+fn is_user_active(db: &Connection, user_id: &str) -> bool {
+    db.query_row("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?1 AND is_active = 1)", [user_id], |row| row.get::<_, bool>(0)).unwrap_or(false)
+}
+
 fn kv_can_access(db: &Connection, id: &str, user_id: Option<&str>, action: &str) -> rusqlite::Result<bool> {
     let owner = db.query_row("SELECT owner_id FROM kv_store WHERE id = ?1", [id], |row| row.get::<_, String>(0)).optional()?;
     let Some(owner) = owner else { return Ok(false); };
+    // A deactivated account's token must stop working: treat inactive callers
+    // as anonymous so owner checks and explicit grants no longer apply.
+    let user_id = user_id.filter(|candidate| is_user_active(db, candidate));
     let Some(user_id) = user_id else {
         if action != "read" { return Ok(false); }
         return db.query_row("SELECT EXISTS(SELECT 1 FROM kv_store_permissions WHERE kv_id = ?1 AND action = 'read' AND grantee_type = 'public')", [id], |row| row.get(0));
@@ -1296,6 +1458,14 @@ async fn kv_get(State(state): State<ApiState>, headers: HeaderMap, AxumPath(id):
 
 async fn kv_update(State(state): State<ApiState>, headers: HeaderMap, AxumPath(id): AxumPath<String>, Json(body): Json<Value>) -> impl IntoResponse {
     let user_id = match token_user_id(&headers, &state) { Ok(id) => id, Err(status) => return app_error(status, "Invalid or expired workspace token.").into_response() };
+    // Owner equality below would otherwise let a deactivated owner keep
+    // managing an entry's sharing permissions.
+    {
+        let db = state.db.lock().unwrap();
+        if !is_user_active(&db, &user_id) {
+            return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+        }
+    }
     let has_value = body.get("key").is_some() || body.get("value").is_some();
     let has_permissions = body.get("permissions").is_some();
     if !has_value && !has_permissions { return app_error(StatusCode::BAD_REQUEST, "No fields to update.").into_response(); }
@@ -1325,6 +1495,14 @@ async fn kv_update(State(state): State<ApiState>, headers: HeaderMap, AxumPath(i
 
 async fn kv_delete(State(state): State<ApiState>, headers: HeaderMap, AxumPath(id): AxumPath<String>) -> impl IntoResponse {
     let user_id = match token_user_id(&headers, &state) { Ok(id) => id, Err(status) => return app_error(status, "Invalid or expired workspace token.").into_response() };
+    // Owner equality inside `kv_can_access` would otherwise let a deactivated
+    // owner keep deleting entries.
+    {
+        let db = state.db.lock().unwrap();
+        if !is_user_active(&db, &user_id) {
+            return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+        }
+    }
     let db = state.db.lock().unwrap();
     match kv_can_access(&db, &id, Some(&user_id), "delete") {
         Ok(false) => app_error(StatusCode::FORBIDDEN, "You do not have permission to delete this entry.").into_response(),
@@ -1471,10 +1649,18 @@ async fn team_member_add(State(state): State<ApiState>, headers: HeaderMap, Axum
     let user_id = body.get("userId").and_then(Value::as_str).unwrap_or("");
     let role = body.get("role").and_then(Value::as_str).filter(|role| *role == "admin").unwrap_or("member");
     let now = chrono_like_now();
-    let is_team_admin = {
+    let (caller_active, is_team_admin) = {
         let db = state.db.lock().unwrap();
-        db.query_row("SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = ?1 AND user_id = ?2 AND role = 'admin')", params![team_id, caller], |row| row.get::<_, bool>(0)).unwrap_or(false)
+        (
+            is_user_active(&db, &caller),
+            db.query_row("SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = ?1 AND user_id = ?2 AND role = 'admin')", params![team_id, caller], |row| row.get::<_, bool>(0)).unwrap_or(false),
+        )
     };
+    // Team-admin membership bypasses the global permission check, so a
+    // deactivated team admin must be rejected before that bypass applies.
+    if !caller_active {
+        return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+    }
     if !is_team_admin {
         if let Err((status, error)) = require_permission(&headers, &state, "teams.manage_members") {
             return app_error(status, error).into_response();
@@ -1496,10 +1682,18 @@ async fn team_member_remove(State(state): State<ApiState>, headers: HeaderMap, A
         Ok(id) => id,
         Err(status) => return app_error(status, "Invalid or expired workspace token.").into_response(),
     };
-    let is_team_admin = {
+    let (caller_active, is_team_admin) = {
         let db = state.db.lock().unwrap();
-        db.query_row("SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = ?1 AND user_id = ?2 AND role = 'admin')", params![team_id, caller], |row| row.get::<_, bool>(0)).unwrap_or(false)
+        (
+            is_user_active(&db, &caller),
+            db.query_row("SELECT EXISTS(SELECT 1 FROM team_members WHERE team_id = ?1 AND user_id = ?2 AND role = 'admin')", params![team_id, caller], |row| row.get::<_, bool>(0)).unwrap_or(false),
+        )
     };
+    // Team-admin membership bypasses the global permission check, so a
+    // deactivated team admin must be rejected before that bypass applies.
+    if !caller_active {
+        return app_error(StatusCode::FORBIDDEN, "User is not active.").into_response();
+    }
     if !is_team_admin {
         if let Err((status, error)) = require_permission(&headers, &state, "teams.manage_members") {
             return app_error(status, error).into_response();
@@ -1664,11 +1858,26 @@ async fn connection_create(State(state): State<ApiState>, headers: HeaderMap, Js
     };
     let id = uuid_like();
     let now = chrono_like_now();
-    let db = state.db.lock().unwrap();
-    match db.execute(
-        "INSERT INTO connections (id, name, type, host, port, database, username, encrypted_password, ssl, created_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
-        params![id, name, db_type, host, port, database, username, encrypted, body.get("ssl").and_then(Value::as_bool).unwrap_or(false), user_id, now],
-    ) {
+    let mut db = state.db.lock().unwrap();
+    // Grant the creator's role full access to the new connection. Querying a
+    // connection requires `connections.manage_access` or an explicit access
+    // grant, so without this a creator without that permission (e.g. a
+    // developer) could create a connection but never query it or share it.
+    let created = (|| -> rusqlite::Result<i64> {
+        let tx = db.transaction()?;
+        tx.execute(
+            "INSERT INTO connections (id, name, type, host, port, database, username, encrypted_password, ssl, created_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+            params![id, name, db_type, host, port, database, username, encrypted, body.get("ssl").and_then(Value::as_bool).unwrap_or(false), user_id, now],
+        )?;
+        let role_id: i64 = tx.query_row("SELECT role_id FROM users WHERE id = ?1", [&user_id], |row| row.get(0))?;
+        tx.execute(
+            "INSERT INTO connection_access (connection_id, role_id, team_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, ?2, NULL, 'FULL_ACCESS', NULL, NULL)",
+            params![id, role_id],
+        )?;
+        tx.commit()?;
+        Ok(role_id)
+    })();
+    match created {
         Ok(_) => (StatusCode::CREATED, Json(json!({ "data": { "id": id, "name": name, "type": db_type, "createdBy": user_id, "createdAt": now, "updatedAt": now } }))).into_response(),
         Err(error) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
@@ -1941,7 +2150,86 @@ async fn connection_query(State(state): State<ApiState>, headers: HeaderMap, Axu
     (status, Json(result)).into_response()
 }
 
+/// Returns true when `sql` contains a statement terminator (`;`) followed by
+/// more SQL. String literals (`'...'`, `"..."`, `` `...` `` with `''` escape),
+/// line comments (`-- ...`) and block comments (`/* ... */`) are skipped so a
+/// semicolon inside them does not count. A trailing semicolon with nothing
+/// after it is a single statement.
+fn has_multiple_statements(sql: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    let mut quote: Option<u8> = None;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if line_comment {
+            if byte == b'\n' { line_comment = false; }
+        } else if block_comment {
+            if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                block_comment = false;
+                index += 1;
+            }
+        } else if let Some(quote_byte) = quote {
+            if byte == quote_byte {
+                if bytes.get(index + 1) == Some(&quote_byte) {
+                    index += 1; // escaped quote ('')
+                } else {
+                    quote = None;
+                }
+            }
+        } else if byte == b'\'' || byte == b'"' || byte == b'`' {
+            quote = Some(byte);
+        } else if byte == b'-' && bytes.get(index + 1) == Some(&b'-') {
+            line_comment = true;
+            index += 1;
+        } else if byte == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            block_comment = true;
+            index += 1;
+        } else if byte == b';' {
+            return remainder_has_sql(bytes, index + 1);
+        }
+        index += 1;
+    }
+    false
+}
+
+fn remainder_has_sql(bytes: &[u8], mut index: usize) -> bool {
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if line_comment {
+            if byte == b'\n' { line_comment = false; }
+        } else if block_comment {
+            if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                block_comment = false;
+                index += 1;
+            }
+        } else if byte == b'\'' || byte == b'"' || byte == b'`' {
+            // A string literal after `;` is still SQL content.
+            return true;
+        } else if byte == b'-' && bytes.get(index + 1) == Some(&b'-') {
+            line_comment = true;
+            index += 1;
+        } else if byte == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            block_comment = true;
+            index += 1;
+        } else if !byte.is_ascii_whitespace() && byte != b';' {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
 fn is_read_query(sql: &str) -> bool {
+    // Stacked statements (e.g. `SELECT 1; DELETE FROM t`) must never count as
+    // read-only: the permission check sees the first statement while the query
+    // engine would receive the whole string.
+    if has_multiple_statements(sql) {
+        return false;
+    }
     let stripped = sql.lines().map(|line| line.split("--").next().unwrap_or(""))
         .collect::<Vec<_>>().join(" ").to_ascii_uppercase();
     let first = stripped.trim_start().split(|character: char| !character.is_ascii_alphanumeric()).next().unwrap_or("");

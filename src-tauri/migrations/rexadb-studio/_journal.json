@@ -57,6 +57,13 @@
       "when": 1779868884502,
       "tag": "0007_blue_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1779990000000,
+      "tag": "0008_avatar_store",
+      "breakpoints": true
     }
   ]
 }

@@ -79,7 +79,6 @@ async function recoverLocalStudioUrl(config: { studioUrl: string; studioToken: s
     if (!server?.url || server.url === config.studioUrl) return config;
 
     const updated = { ...config, studioUrl: server.url };
-    cachedUrl = updated.studioUrl;
     const replaceResponse = await apiFetch("/api/workspaces/replace-url", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -90,6 +89,9 @@ async function recoverLocalStudioUrl(config: { studioUrl: string; studioToken: s
       throw new Error(replaceResult.error || `Could not update saved workspace URL (${replaceResponse.status})`);
     }
     await postConfig(updated);
+    // Only point the in-memory URL at the recovered server after both writes
+    // succeeded; on failure the caller keeps using the old URL.
+    cachedUrl = updated.studioUrl;
     console.info(`[workspace-auth] restored local RexaDB Studio URL for server ${server.id}: ${config.studioUrl} -> ${server.url}`);
     return updated;
   } catch (error) {

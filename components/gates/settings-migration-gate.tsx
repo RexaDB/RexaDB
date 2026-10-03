@@ -18,7 +18,18 @@ export function SettingsMigrationGate() {
       .finally(() => {
         if (!cancelled) setEnabled(true);
       });
-    return () => { cancelled = true; };
+    // The sidecar respawns automatically on crash, possibly on a different
+    // port. Keep resyncing in the background so the app never stays stuck
+    // talking to a stale port for the rest of the session.
+    const resync = setInterval(() => {
+      void import("@/lib/api-base")
+        .then((mod) => mod.refreshApiBase())
+        .catch(() => {});
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(resync);
+    };
   }, []);
 
   if (!enabled) return null;

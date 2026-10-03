@@ -952,6 +952,12 @@ export function SettingsView({
 
   const handleSearchNavigate = useCallback((entry: SettingsSearchEntry) => {
     setActiveSection(entry.section);
+    // Workspace connect/invite/sign-in/local-server settings live on the Add
+    // page while the saved-workspaces list lives on the list page. Switch to
+    // the right page or the scroll target below won't exist.
+    if (entry.section === "workspace") {
+      setWorkspacePage(entry.id === "workspace-saved" ? "list" : "add");
+    }
     setSearchQuery("");
     // Wait a tick for the section to render, then deep-scroll to the setting.
     setTimeout(() => {
@@ -2131,6 +2137,10 @@ export function SettingsView({
                       variant="destructive"
                       size="sm"
                       onClick={async () => {
+                        // Forget must also drop the saved entry, otherwise
+                        // switching back restores the token without sign-in.
+                        const urlToForget = getStudioUrl();
+                        if (urlToForget) await removeWorkspace(urlToForget);
                         await clearAllStudioData();
                         setWorkspaceAuth(null);
                         setWorkspaceActive(false);
@@ -2143,6 +2153,7 @@ export function SettingsView({
                             detail: { connected: false },
                           }),
                         );
+                        loadSavedWorkspaces();
                         toast.success("Forgotten workspace credentials");
                       }}
                     >
@@ -2446,7 +2457,7 @@ export function SettingsView({
                                 <Button variant="secondary" size="sm" onClick={() => { setWorkspaceActive(false); disconnectStudioWorkspace(); toast.success("Switched to local connections"); }} className="h-7 flex-1 text-xs">
                                   <LogOut className="mr-1 h-3.5 w-3.5" /> Deactivate
                                 </Button>
-                                <Button variant="destructive" size="sm" onClick={async () => { await clearAllStudioData(); setWorkspaceAuth(null); setWorkspaceActive(false); if (typeof window !== "undefined") window.sessionStorage.removeItem("workspace:active"); window.dispatchEvent(new CustomEvent("workspace:changed", { detail: { connected: false } })); toast.success("Forgotten workspace credentials"); }} className="h-7 text-xs">Forget</Button>
+                                <Button variant="destructive" size="sm" onClick={async () => { const urlToForget = getStudioUrl(); if (urlToForget) await removeWorkspace(urlToForget); await clearAllStudioData(); setWorkspaceAuth(null); setWorkspaceActive(false); if (typeof window !== "undefined") window.sessionStorage.removeItem("workspace:active"); window.dispatchEvent(new CustomEvent("workspace:changed", { detail: { connected: false } })); loadSavedWorkspaces(); toast.success("Forgotten workspace credentials"); }} className="h-7 text-xs">Forget</Button>
                               </>
                             ) : (
                               <>

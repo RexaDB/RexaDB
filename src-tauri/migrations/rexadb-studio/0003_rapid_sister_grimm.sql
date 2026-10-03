@@ -60,7 +60,7 @@ CREATE TABLE `__new_connection_access` (
 	FOREIGN KEY (`team_id`) REFERENCES `teams`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-INSERT INTO `__new_connection_access`("id", "connection_id", "role_id", "team_id", "access_type", "query_pattern", "allowed_query_ids") SELECT "id", "connection_id", "role_id", "team_id", "access_type", "query_pattern", "allowed_query_ids" FROM `connection_access`;--> statement-breakpoint
+INSERT INTO `__new_connection_access`("id", "connection_id", "role_id", "team_id", "access_type", "query_pattern", "allowed_query_ids") SELECT "id", "connection_id", "role_id", NULL, "access_type", "query_pattern", "allowed_query_ids" FROM `connection_access`;--> statement-breakpoint
 DROP TABLE `connection_access`;--> statement-breakpoint
 ALTER TABLE `__new_connection_access` RENAME TO `connection_access`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;
