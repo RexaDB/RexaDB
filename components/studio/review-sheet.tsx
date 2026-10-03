@@ -19,7 +19,7 @@ import {
 import { Loader2, Check, X, Trash2 } from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";
 import { interpolateSqlParamsForDisplay } from "@/lib/studio/general-utils";
-import { buildPendingEditsSql, countPendingCellEdits } from "@/lib/studio/pending-changes-utils";
+import { buildPendingEditsSql, countPendingCellEdits, countUnsaveablePendingRows, isNonSqlPreviewDbType } from "@/lib/studio/pending-changes-utils";
 
 interface PendingAction {
   id: string;
@@ -64,6 +64,12 @@ export function ReviewSheet({
     () => buildPendingEditsSql(pendingChanges, selectedSchema, selectedTable, dbType),
     [pendingChanges, selectedSchema, selectedTable, dbType],
   );
+  const unsaveableRowsCount = useMemo(
+    () => countUnsaveablePendingRows(pendingChanges),
+    [pendingChanges],
+  );
+  const isNonSqlPreview = isNonSqlPreviewDbType(dbType);
+  const hasMissingTable = !selectedTable?.trim();
   const pendingActionsCount = pendingActions.length;
   const totalItems = pendingChangesCount + pendingActionsCount;
 
@@ -122,6 +128,21 @@ export function ReviewSheet({
                         {sql}
                       </pre>
                     ))}
+                  </div>
+                )}
+                {pendingEditSql.length === 0 && isNonSqlPreview && (
+                  <div className="text-xs text-muted-foreground">
+                    SQL preview isn&apos;t available for {dbType} — these edits commit through the native driver.
+                  </div>
+                )}
+                {pendingEditSql.length === 0 && !isNonSqlPreview && hasMissingTable && (
+                  <div className="text-xs text-muted-foreground">
+                    Select a table to preview these edits — switching schemas cleared the table selection but kept the pending edits.
+                  </div>
+                )}
+                {unsaveableRowsCount > 0 && !isNonSqlPreview && !hasMissingTable && (
+                  <div className="text-xs text-muted-foreground">
+                    {unsaveableRowsCount} row{unsaveableRowsCount !== 1 ? "s" : ""} without a primary key can&apos;t be saved — commit will reject them.
                   </div>
                 )}
               </div>

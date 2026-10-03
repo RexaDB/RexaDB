@@ -934,7 +934,7 @@ export function StudioInterface({
         pendingChanges={studio.pendingChanges}
         pendingActions={studio.pendingActions}
         selectedSchema={studio.selectedSchema ?? undefined}
-        selectedTable={studio.selectedTable}
+        selectedTable={studio.selectedTable ?? undefined}
         dbType={studio.dbType}
         onCommit={studio.handleCommitChanges}
         onCancelCommit={studio.handleCancelCommit}
