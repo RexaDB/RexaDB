@@ -1,4 +1,5 @@
 mod dictionary;
+mod rexadb_studio;
 mod spacetimedb;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,96 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater;
+
+#[tauri::command]
+fn local_studio_status(state: tauri::State<rexadb_studio::EmbeddedStudioState>) -> Vec<rexadb_studio::ServerStatus> {
+    rexadb_studio::list_servers(&state)
+}
+
+#[tauri::command]
+async fn local_studio_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, rexadb_studio::EmbeddedStudioState>,
+    server_id: String,
+) -> Result<Vec<rexadb_studio::ServerStatus>, String> {
+    let data_dir = get_app_data_dir(&app);
+    let server = rexadb_studio::list_servers(&state).into_iter().find(|server| server.id == server_id).ok_or("Local server not found.")?;
+    let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
+    rexadb_studio::start_named(&app, data_dir, format!("http://127.0.0.1:{sidecar_port}"), server.id, server.name).await?;
+    Ok(rexadb_studio::list_servers(&state))
+}
+
+#[tauri::command]
+async fn local_studio_recover(
+    app: tauri::AppHandle,
+    studio_url: String,
+    user_id: String,
+) -> Result<Option<rexadb_studio::ServerStatus>, String> {
+    let data_dir = get_app_data_dir(&app);
+    let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
+    let status = rexadb_studio::recover_server_for_user(&app, data_dir, format!("http://127.0.0.1:{sidecar_port}"), &studio_url, &user_id).await?;
+    Ok(status)
+}
+
+#[tauri::command]
+async fn local_studio_stop(state: tauri::State<'_, rexadb_studio::EmbeddedStudioState>, server_id: String) -> Result<Vec<rexadb_studio::ServerStatus>, String> {
+    rexadb_studio::stop_server(&state, &server_id)?;
+    Ok(rexadb_studio::list_servers(&state))
+}
+
+#[tauri::command]
+fn local_studio_add(state: tauri::State<rexadb_studio::EmbeddedStudioState>, app: tauri::AppHandle, name: String) -> Result<Vec<rexadb_studio::ServerStatus>, String> {
+    let id = rexadb_studio::new_server_id();
+    rexadb_studio::add_server(&state, id, name, &get_app_data_dir(&app))?;
+    Ok(rexadb_studio::list_servers(&state))
+}
+
+#[tauri::command]
+async fn local_studio_create(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, rexadb_studio::EmbeddedStudioState>,
+    name: String,
+    admin_email: String,
+    admin_password: String,
+) -> Result<Vec<rexadb_studio::ServerStatus>, String> {
+    let id = rexadb_studio::new_server_id();
+    let data_dir = get_app_data_dir(&app);
+    rexadb_studio::add_server(&state, id.clone(), name.trim().to_string(), &data_dir)?;
+    let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
+    if let Err(error) = rexadb_studio::start_named(&app, data_dir, format!("http://127.0.0.1:{sidecar_port}"), id.clone(), name.trim().to_string()).await {
+        let _ = rexadb_studio::delete_server(&state, &id);
+        return Err(error);
+    }
+    let server = rexadb_studio::list_servers(&state).into_iter().find(|server| server.id == id).ok_or("Local server was not registered.")?;
+    let url = server.url.ok_or("Local server did not start.")?;
+    if let Err(error) = rexadb_studio::setup_from_app(&url, rexadb_studio::SetupInput { admin_email: admin_email.clone(), admin_password }).await {
+        let _ = rexadb_studio::delete_server(&state, &id);
+        return Err(error);
+    }
+    Ok(rexadb_studio::list_servers(&state))
+}
+
+#[tauri::command]
+fn local_studio_delete(state: tauri::State<rexadb_studio::EmbeddedStudioState>, server_id: String) -> Result<Vec<rexadb_studio::ServerStatus>, String> {
+    rexadb_studio::delete_server(&state, &server_id)?;
+    Ok(rexadb_studio::list_servers(&state))
+}
+
+#[tauri::command]
+async fn local_studio_setup(
+    state: tauri::State<'_, rexadb_studio::EmbeddedStudioState>,
+    server_id: String,
+    admin_email: String,
+    admin_password: String,
+) -> Result<serde_json::Value, String> {
+    let server = rexadb_studio::list_servers(&state).into_iter().find(|server| server.id == server_id).ok_or("Local server not found.")?;
+    let url = server.url.ok_or("Embedded workspace API is not running.")?;
+    let result = rexadb_studio::setup_from_app(&url, rexadb_studio::SetupInput {
+        admin_email,
+        admin_password,
+    }).await?;
+    Ok(result)
+}
 
 fn rust_log(msg: &str) {
     let line = format!("[{}] [rust] {}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0), msg);
@@ -822,6 +913,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(SidecarState::new())
+        .manage(rexadb_studio::EmbeddedStudioState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -853,6 +945,14 @@ pub fn run() {
             fs::create_dir_all(&data_dir).ok();
             spawn_sidecar(app.handle());
 
+            let studio_app = app.handle().clone();
+            let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = rexadb_studio::start(&studio_app, data_dir, format!("http://127.0.0.1:{sidecar_port}")).await {
+                    log::error!("Could not start embedded RexaDB Studio API: {error}");
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -867,6 +967,14 @@ pub fn run() {
             is_sidecar_ready,
             get_sidecar_status,
             get_sidecar_log,
+            local_studio_status,
+            local_studio_recover,
+            local_studio_start,
+            local_studio_stop,
+            local_studio_add,
+            local_studio_create,
+            local_studio_delete,
+            local_studio_setup,
             open_in_editor,
             list_editors,
             spacetimedb::spacetimedb_query,

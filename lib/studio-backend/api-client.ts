@@ -1,6 +1,6 @@
 "use client";
 
-import { apiFetch } from "@/lib/api-base";
+import { API_BASE, apiFetch } from "@/lib/api-base";
 import { getStudioToken, getStudioUrl, clearAllStudioData, disconnectStudioWorkspace } from "./auth-store";
 
 export function toggleRowSelection(
@@ -27,19 +27,21 @@ export async function handleStudio401Error(err: unknown): Promise<boolean> {
 export class StudioApiError extends Error {
   status: number;
   code?: string;
+  requestId?: string;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, requestId?: string) {
     super(message);
     this.name = "StudioApiError";
     this.status = status;
     this.code = code;
+    this.requestId = requestId;
   }
 }
 
 const BASE_PROXY_PATH = "/api/studio-proxy";
 
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (res.status === 401) {
+async function handleResponse<T>(res: Response, clearSessionOn401 = true): Promise<T> {
+  if (res.status === 401 && clearSessionOn401) {
     await clearAllStudioData();
     if (typeof window !== "undefined") {
       await disconnectStudioWorkspace();
@@ -47,7 +49,13 @@ async function handleResponse<T>(res: Response): Promise<T> {
     throw new StudioApiError("Studio session expired", 401, "SESSION_EXPIRED");
   }
 
-  const json = await res.json();
+  let json: Record<string, unknown>;
+  try {
+    json = await res.json() as Record<string, unknown>;
+  } catch {
+    const requestId = res.headers.get("X-Studio-Request-Id") || undefined;
+    throw new StudioApiError(`Workspace API returned an invalid response (HTTP ${res.status})${requestId ? ` [${requestId}]` : ""}`, res.status, undefined, requestId);
+  }
 
   if (!res.ok) {
     let message = json.error || "Studio API error";
@@ -59,7 +67,8 @@ async function handleResponse<T>(res: Response): Promise<T> {
         .join("; ");
       if (fieldErrors) message = fieldErrors;
     }
-    throw new StudioApiError(message, res.status, json.code);
+    const requestId = typeof json.requestId === "string" ? json.requestId : (res.headers.get("X-Studio-Request-Id") || undefined);
+    throw new StudioApiError(`${message}${requestId ? ` [${requestId}]` : ""}`, res.status, typeof json.code === "string" ? json.code : undefined, requestId);
   }
 
   return json as T;
@@ -81,13 +90,27 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await apiFetch(`${BASE_PROXY_PATH}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await apiFetch(`${BASE_PROXY_PATH}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[studio-api] ${method} ${path} network failure; sidecar=${API_BASE}; workspace=${studioUrl}; error=${message}`);
+    throw new Error(`Could not reach RexaDB sidecar at ${API_BASE} for ${path} (workspace ${studioUrl}): ${message}`);
+  }
 
-  return handleResponse<T>(res);
+  try {
+    const isPublicAuthRequest = method === "POST" && ["/auth/login", "/auth/login/totp", "/invites/accept"].includes(path);
+    return await handleResponse<T>(res, !isPublicAuthRequest);
+  } catch (error) {
+    const requestId = res.headers.get("X-Studio-Request-Id");
+    console.error(`[studio-api] ${method} ${path} failed; sidecar=${API_BASE}; workspace=${studioUrl}; status=${res.status}; requestId=${requestId || (error instanceof StudioApiError ? error.requestId : "none")}; error=${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
 }
 
 async function putBinary<T>(

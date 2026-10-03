@@ -22,7 +22,11 @@ export function HistoryDebugViewer() {
   const [logPath, setLogPath] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
-  const isDesktop = isDesktopRuntime();
+  // Hydration-safe: match SSR (`false`) on first render, resolve after mount.
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    setIsDesktop(isDesktopRuntime());
+  }, []);
 
   const loadLogs = async () => {
     if (!isDesktop) return;

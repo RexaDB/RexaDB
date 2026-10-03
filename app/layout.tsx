@@ -18,7 +18,6 @@ import { AppUpdateProvider } from "@/components/providers/app-update-context";
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider";
 import { ClientShim } from "@/components/client-shim";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
-import { SidecarGate } from "@/components/gates/sidecar-gate";
 import { ExtensionProvider } from "@/lib/extensions/react";
 import { CredentialVaultPrompt } from "@/components/providers/credential-vault-prompt";
 
@@ -62,8 +61,7 @@ export default function RootLayout({
             <CredentialVaultPrompt />
             <SettingsMigrationGate />
             <ZoomWrapper>
-              <SidecarGate>
-                <ConfirmProvider>
+              <ConfirmProvider>
                   <AppUpdateProvider>
                     <UpdateNotificationProvider>
                     <SettingsSyncProvider>
@@ -87,8 +85,7 @@ export default function RootLayout({
                     </SettingsSyncProvider>
                   </UpdateNotificationProvider>
                   </AppUpdateProvider>
-                </ConfirmProvider>
-              </SidecarGate>
+              </ConfirmProvider>
             </ZoomWrapper>
           </ThemeProvider>
         </IconThemeProvider>

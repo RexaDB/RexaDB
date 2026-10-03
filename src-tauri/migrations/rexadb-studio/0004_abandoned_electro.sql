@@ -1,0 +1,1 @@
+ALTER TABLE `audit_logs` ADD `user_id` text;

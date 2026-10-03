@@ -5,11 +5,24 @@ import { isDesktopRuntime, isMacDesktopRuntime, isWindowsDesktopRuntime, isWayla
 
 export function useDesktopWindow() {
   const [isMaximized, setIsMaximized] = useState(false);
-  const canUseDesktop = isDesktopRuntime();
-  const isMac = isMacDesktopRuntime();
-  const isWindows = isWindowsDesktopRuntime();
-  const isWayland = isWaylandDesktop();
-  const isLinuxCloseOnly = isLinuxDesktopCloseOnly();
+  // Hydration-safe: SSR renders with `false` (matching `isDesktopRuntime()`
+  // returning false when `window` is undefined), and the real values are
+  // resolved in an effect after mount. Computing `isDesktopRuntime()` during
+  // render would return `true` on the first client render inside Tauri while
+  // the server rendered `false`, causing a hydration mismatch.
+  const [canUseDesktop, setCanUseDesktop] = useState(false);
+  const [isMac, setIsMac] = useState(false);
+  const [isWindows, setIsWindows] = useState(false);
+  const [isWayland, setIsWayland] = useState(false);
+  const [isLinuxCloseOnly, setIsLinuxCloseOnly] = useState(false);
+
+  useEffect(() => {
+    setCanUseDesktop(isDesktopRuntime());
+    setIsMac(isMacDesktopRuntime());
+    setIsWindows(isWindowsDesktopRuntime());
+    setIsWayland(isWaylandDesktop());
+    setIsLinuxCloseOnly(isLinuxDesktopCloseOnly());
+  }, []);
 
   useEffect(() => {
     if (!canUseDesktop) return;

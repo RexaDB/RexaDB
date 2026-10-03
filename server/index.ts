@@ -101,7 +101,8 @@ const corsMiddleware = cors({
     callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'X-Studio-Url'],
+  exposedHeaders: ['X-Studio-Request-Id'],
 });
 
 app.use(corsMiddleware);
@@ -113,6 +114,15 @@ app.use(corsMiddleware);
 app.use(
   "/api/supabase-mgmt/proxy",
   express.raw({ type: "multipart/*", limit: "20mb" }),
+);
+
+// Binary passthrough for Studio avatar uploads (PUT image/* to the embedded
+// server via /api/studio-proxy). Must run BEFORE express.json — the JSON
+// parser would drop the bytes. Non-matching content types skip this and fall
+// through to the JSON parser below.
+app.use(
+  "/api/studio-proxy",
+  express.raw({ type: ["image/*", "application/octet-stream"], limit: "5mb" }),
 );
 
 // Limit JSON body to 1MB (reduced from 50MB to prevent memory exhaustion)
@@ -2071,6 +2081,49 @@ app.post("/api/workspaces", async (req, res) => {
   }
 });
 
+app.post("/api/workspaces/replace-url", async (req, res) => {
+  try {
+    const { oldUrl, workspace } = req.body || {};
+    const { studioUrl, studioToken, userId, name } = workspace || {};
+    if (!oldUrl || !studioUrl || !studioToken || !userId) {
+      res.json({ success: false, error: "Missing required workspace fields" });
+      return;
+    }
+    const activeConfig = studioConfig;
+
+    const { getWorkspaceList, saveWorkspaceList } = await import("../lib/db/actions");
+    const list = await getWorkspaceList();
+    if (!list.success) throw new Error(list.error || "Could not load workspace list");
+    const originalData = [...list.data];
+    const oldEntry = list.data.find((entry: any) => entry.studioUrl === oldUrl && entry.userId === userId);
+    const replacement = { studioUrl, studioToken, userId, name: name || oldEntry?.name || studioUrl };
+    list.data = list.data.filter((entry: any) => entry.studioUrl !== oldUrl && entry.studioUrl !== studioUrl);
+    list.data.push(replacement);
+    const saved = await saveWorkspaceList(list.data);
+    if (!saved.success) throw new Error(saved.error || "Could not save workspace list");
+
+    if (activeConfig && activeConfig.studioUrl === oldUrl && activeConfig.userId === userId) {
+      const updatedConfig = { studioUrl, studioToken, userId };
+      const { saveStudioBackendConfig } = await import("../lib/db/actions");
+      const configSaved = await saveStudioBackendConfig(updatedConfig);
+      if (!configSaved.success) {
+        // Roll back the list write so saved and active state can't diverge:
+        // the caller keeps the old URL on failure.
+        studioConfig = activeConfig;
+        const rolledBack = await saveWorkspaceList(originalData);
+        if (!rolledBack.success) {
+          logToFile(`[workspace-replace-url] ROLLBACK FAILED oldUrl=${oldUrl} newUrl=${studioUrl}: ${rolledBack.error || "unknown error"}`);
+        }
+        throw new Error(configSaved.error || "Could not save active workspace config");
+      }
+      studioConfig = updatedConfig;
+    }
+    res.json({ success: true });
+  } catch (e: any) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 app.delete("/api/workspaces", async (req, res) => {
   try {
     const { studioUrl } = req.body || {};
@@ -2487,18 +2540,20 @@ app.get("/api/updates/check", async (_req, res) => {
 // Bun v1.3.14+ ships with path-to-regexp v8+ which rejects wildcard strings;
 // use a regex to bypass path-to-regexp entirely
 app.all(/^\/api\/studio-proxy(?:\/|$)/, async (req, res) => {
+  const requestId = `studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  res.setHeader("X-Studio-Request-Id", requestId);
   const studioUrl = (req.headers["x-studio-url"] as string || "").replace(/\/+$/, "");
-  log(`[proxy] ${req.method} ${req.path} x-studio-url="${req.headers["x-studio-url"]}"`);
-  if (!studioUrl) {
-    log(`[proxy] MISSING X-Studio-Url header`);
-    res.status(400).json({ error: "Missing X-Studio-Url header" });
-    return;
-  }
-
   const targetPath = req.path.replace(/^\/api\/studio-proxy\//, "");
   const cleanPath = targetPath.replace(/^api\//, "");
-  const targetUrl = `${studioUrl}/api/${cleanPath}`;
-  log(`[proxy] targetUrl="${targetUrl}"`);
+  const targetUrl = studioUrl ? `${studioUrl}/studio-api/api/${cleanPath}` : "";
+  const isBinaryBody = Buffer.isBuffer(req.body);
+  const bodyKeys = isBinaryBody ? [] : (req.body && typeof req.body === "object" ? Object.keys(req.body) : []);
+  logToFile(`[${requestId}] studio proxy request method=${req.method} path=${req.path} target=${targetUrl || "<missing X-Studio-Url>"} authorization=${Boolean(req.headers.authorization)} bodyKeys=${bodyKeys.join(",")}${isBinaryBody ? ` binaryBytes=${req.body.length}` : ""}`);
+  if (!studioUrl) {
+    logToFile(`[${requestId}] studio proxy rejected: missing X-Studio-Url header`);
+    res.status(400).json({ error: "Missing X-Studio-Url header", requestId });
+    return;
+  }
 
   const headers: Record<string, string> = {
     "Content-Type": req.headers["content-type"] as string || "application/json",
@@ -2508,29 +2563,43 @@ app.all(/^\/api\/studio-proxy(?:\/|$)/, async (req, res) => {
 
   try {
     const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    const body = ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body);
-    log(`[proxy] fetching ${req.method} ${targetUrl + query}`);
+    const isRead = ["GET", "HEAD"].includes(req.method);
+    const body = isRead ? undefined : (isBinaryBody ? req.body : JSON.stringify(req.body));
     const res_ = await fetch(targetUrl + query, {
       method: req.method,
       headers,
       body,
     });
+    const upstreamContentType = res_.headers.get("content-type") || "";
+    if (!upstreamContentType.includes("application/json")) {
+      // Binary responses (e.g. GET /api/avatars/:name) are forwarded as-is
+      // instead of going through the JSON error path below.
+      const buffer = Buffer.from(await res_.arrayBuffer());
+      logToFile(`[${requestId}] studio proxy binary response status=${res_.status} contentType=${upstreamContentType || "unknown"} bytes=${buffer.length}`);
+      res.status(res_.status).set("Content-Type", upstreamContentType || "application/octet-stream").send(buffer);
+      return;
+    }
     const text = await res_.text();
-    log(`[proxy] response status=${res_.status} body="${text.slice(0, 200)}"`);
     let json: unknown;
     try { json = JSON.parse(text); } catch {
-      log(`[proxy] NON-JSON response from ${studioUrl}`);
+      logToFile(`[${requestId}] studio proxy received non-JSON response status=${res_.status} contentType=${res_.headers.get("content-type") || "unknown"}`);
       res.status(502).json({
         error: `Workspace server returned non-JSON response (status ${res_.status}). Check that "${studioUrl}" is the correct workspace backend URL.`,
+        requestId,
       });
       return;
     }
+    const responseObject = json && typeof json === "object" ? json as Record<string, unknown> : {};
+    const responseData = responseObject.data && typeof responseObject.data === "object" ? Object.keys(responseObject.data as object) : [];
+    const safeError = typeof responseObject.error === "string" ? responseObject.error : "";
+    logToFile(`[${requestId}] studio proxy response status=${res_.status} dataKeys=${responseData.join(",")} error=${safeError.slice(0, 300) || "<none>"}`);
     res.status(res_.status).json(json);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Proxy request failed";
-    log(`[proxy] FETCH ERROR: ${message}`);
+    logToFile(`[${requestId}] studio proxy fetch error: ${message}`);
     res.status(502).json({
       error: `Cannot reach workspace server at "${studioUrl}". ${message}`,
+      requestId,
     });
   }
 });

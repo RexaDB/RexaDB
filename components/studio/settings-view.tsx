@@ -20,6 +20,8 @@ import {
   User,
   CheckCircle2,
   ArrowRight,
+  ArrowLeft,
+  Plus,
   LogOut,
   Loader2,
   XCircle,
@@ -112,6 +114,7 @@ import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
 import { CredentialStorageSetting } from "@/components/studio/settings/credential-storage-setting";
+import { LocalStudioServerCard } from "@/components/studio/settings/local-studio-server-card";
 
 function AddThemeMenu({
   onBrowseThemes,
@@ -917,6 +920,7 @@ export function SettingsView({
     studioToken: string;
   } | null>(null);
   const [workspaceActive, setWorkspaceActive] = useState(false);
+  const [workspacePage, setWorkspacePage] = useState<"list" | "add">("list");
   const [workspaceUrl, setWorkspaceUrl] = useState("http://localhost:3000");
   const [workspaceToken, setWorkspaceToken] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
@@ -948,6 +952,12 @@ export function SettingsView({
 
   const handleSearchNavigate = useCallback((entry: SettingsSearchEntry) => {
     setActiveSection(entry.section);
+    // Workspace connect/invite/sign-in/local-server settings live on the Add
+    // page while the saved-workspaces list lives on the list page. Switch to
+    // the right page or the scroll target below won't exist.
+    if (entry.section === "workspace") {
+      setWorkspacePage(entry.id === "workspace-saved" ? "list" : "add");
+    }
     setSearchQuery("");
     // Wait a tick for the section to render, then deep-scroll to the setting.
     setTimeout(() => {
@@ -1036,6 +1046,7 @@ export function SettingsView({
       me.data.id,
       "Connected to workspace via sign-in!",
     );
+    setWorkspacePage("list");
   }, []);
 
   useEffect(() => {
@@ -1310,6 +1321,7 @@ export function SettingsView({
         toast.error("Unexpected login response.");
       }
     } catch (err) {
+      console.error(`[workspace-login] sign-in or profile load failed; workspace=${workspaceUrl.trim().replace(/\/+$/, "")}; error=${err instanceof Error ? err.message : String(err)}`);
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
       setWorkspaceLoggingIn(false);
@@ -2063,12 +2075,34 @@ export function SettingsView({
 
           {!isSearching && activeSection === "workspace" ? (
             <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Workspaces</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Connect to a RexaDB Studio workspace to manage shared connections.
+                  </p>
+                </div>
+                {workspacePage === "list" ? (
+                  <Button size="sm" onClick={() => setWorkspacePage("add")} className="h-8 shrink-0 gap-1.5 text-xs">
+                    <Plus className="h-3.5 w-3.5" /> Add workspace
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => setWorkspacePage("list")} className="h-8 shrink-0 gap-1.5 text-xs">
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back to workspaces
+                  </Button>
+                )}
+              </div>
+              {workspacePage === "add" ? <>
+              <LocalStudioServerCard
+                onReady={(url, email, password) => {
+                  setWorkspaceUrl(url);
+                  setWorkspaceLoginMode("login");
+                  setWorkspaceLoginEmail(email);
+                  setWorkspaceLoginPassword(password);
+                }}
+              />
               <div data-setting-id="workspace-connect" className="space-y-1">
-                <h2 className="text-sm font-semibold">Workspace</h2>
-                <p className="text-xs text-muted-foreground">
-                  Connect to a rexadb-studio workspace to manage shared
-                  connections.
-                </p>
+                <h3 className="text-xs font-semibold text-muted-foreground">Connect to an existing workspace</h3>
               </div>
               {!workspaceAuthLoaded ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -2103,6 +2137,10 @@ export function SettingsView({
                       variant="destructive"
                       size="sm"
                       onClick={async () => {
+                        // Forget must also drop the saved entry, otherwise
+                        // switching back restores the token without sign-in.
+                        const urlToForget = getStudioUrl();
+                        if (urlToForget) await removeWorkspace(urlToForget);
                         await clearAllStudioData();
                         setWorkspaceAuth(null);
                         setWorkspaceActive(false);
@@ -2115,6 +2153,7 @@ export function SettingsView({
                             detail: { connected: false },
                           }),
                         );
+                        loadSavedWorkspaces();
                         toast.success("Forgotten workspace credentials");
                       }}
                     >
@@ -2325,6 +2364,7 @@ export function SettingsView({
                               res.data.userId,
                               "Connected to workspace!",
                             );
+                            setWorkspacePage("list");
                           } catch (err) {
                             toast.error(
                               err instanceof Error
@@ -2390,94 +2430,45 @@ export function SettingsView({
                 </Card>
               )}
 
-              <div
-                data-setting-id="workspace-saved"
-                className="pt-4 border-t border-studio-border"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-muted-foreground">
-                    Saved Workspaces
-                  </h3>
-                  {workspacesLoading && (
-                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                  )}
+              </> : (
+              <div data-setting-id="workspace-saved" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-muted-foreground">Your workspaces</h3>
+                  {workspacesLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                 </div>
                 {savedWorkspaces.length === 0 ? (
-                  <p className="text-xs text-muted-foreground/50">
-                    No workspaces saved yet.
-                  </p>
+                  <p className="text-xs text-muted-foreground/50">No workspaces saved yet.</p>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {savedWorkspaces.map((ws) => {
-                      const isActiveWs =
-                        workspaceAuth !== null &&
-                        ws.studioUrl === getStudioUrl();
+                      const isActiveWs = workspaceAuth !== null && ws.studioUrl === getStudioUrl();
                       return (
-                        <div
-                          key={ws.studioUrl}
-                          className="flex items-center gap-3 px-3 py-2 rounded-lg border border-studio-border bg-studio-bg/30 group hover:bg-muted/10 transition-colors"
-                        >
-                          <div
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActiveWs ? "bg-emerald-500" : "bg-muted-foreground/20"}`}
-                          />
-                          <div className="min-w-0 flex-1">
+                        <div key={ws.studioUrl} className={`flex min-w-0 flex-col justify-between gap-3 rounded-lg border p-3 transition-colors ${isActiveWs ? "border-primary/30 bg-primary/[0.03]" : "border-studio-border bg-studio-bg/30 hover:bg-muted/10"}`}>
+                          <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium truncate">
-                                {ws.name}
-                              </span>
-                              {isActiveWs && (
-                                <span className="text-[10px] px-1 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium shrink-0">
-                                  Active
-                                </span>
-                              )}
+                              <span className="truncate text-sm font-medium">{ws.name}</span>
+                              {isActiveWs && <span className="shrink-0 rounded-full border border-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">Active</span>}
                             </div>
-                            <div className="text-[10px] text-muted-foreground/50 truncate font-mono">
-                              {ws.studioUrl}
-                            </div>
+                            <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground/60">{ws.studioUrl}</div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {!isActiveWs && (
-                              <button
-                                onClick={async () => {
-                                  setSwitchingWs(ws.studioUrl);
-                                  const ok = await switchWorkspace(
-                                    ws.studioUrl,
-                                  );
-                                  setSwitchingWs(null);
-                                  if (ok) {
-                                    toast.success("Switched workspace");
-                                    if (typeof window !== "undefined")
-                                      window.location.href = "/";
-                                  } else {
-                                    toast.error("Failed to switch workspace");
-                                  }
-                                }}
-                                disabled={switchingWs === ws.studioUrl}
-                                className="h-6 px-2 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                              >
-                                {switchingWs === ws.studioUrl ? (
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  "Switch"
-                                )}
-                              </button>
+                          <div className="flex items-center gap-1.5">
+                            {isActiveWs ? (
+                              <>
+                                <Button variant="secondary" size="sm" onClick={() => { setWorkspaceActive(false); disconnectStudioWorkspace(); toast.success("Switched to local connections"); }} className="h-7 flex-1 text-xs">
+                                  <LogOut className="mr-1 h-3.5 w-3.5" /> Deactivate
+                                </Button>
+                                <Button variant="destructive" size="sm" onClick={async () => { const urlToForget = getStudioUrl(); if (urlToForget) await removeWorkspace(urlToForget); await clearAllStudioData(); setWorkspaceAuth(null); setWorkspaceActive(false); if (typeof window !== "undefined") window.sessionStorage.removeItem("workspace:active"); window.dispatchEvent(new CustomEvent("workspace:changed", { detail: { connected: false } })); loadSavedWorkspaces(); toast.success("Forgotten workspace credentials"); }} className="h-7 text-xs">Forget</Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button variant="outline" size="sm" onClick={async () => { setSwitchingWs(ws.studioUrl); const ok = await switchWorkspace(ws.studioUrl); setSwitchingWs(null); if (ok) { toast.success("Switched workspace"); if (typeof window !== "undefined") window.location.href = "/"; } else toast.error("Failed to switch workspace"); }} disabled={switchingWs === ws.studioUrl} className="h-7 flex-1 border-border/70 bg-muted/60 text-xs text-foreground hover:bg-muted">
+                                  {switchingWs === ws.studioUrl ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ArrowRight className="mr-1 h-3 w-3" />} Switch
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={async () => { setRemovingWs(ws.studioUrl); await removeWorkspace(ws.studioUrl); setRemovingWs(null); loadSavedWorkspaces(); }} disabled={removingWs === ws.studioUrl} className="h-7 w-8 border-transparent bg-transparent p-0 text-muted-foreground/60 hover:border-transparent hover:bg-red-500/10 hover:text-red-500" title="Remove workspace" aria-label="Remove workspace">
+                                  {removingWs === ws.studioUrl ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                </Button>
+                              </>
                             )}
-                            <button
-                              onClick={async () => {
-                                setRemovingWs(ws.studioUrl);
-                                await removeWorkspace(ws.studioUrl);
-                                setRemovingWs(null);
-                                loadSavedWorkspaces();
-                              }}
-                              disabled={removingWs === ws.studioUrl}
-                              className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground/30 hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                            >
-                              {removingWs === ws.studioUrl ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-3 h-3" />
-                              )}
-                            </button>
                           </div>
                         </div>
                       );
@@ -2485,6 +2476,7 @@ export function SettingsView({
                   </div>
                 )}
               </div>
+              )}
             </section>
           ) : null}
 

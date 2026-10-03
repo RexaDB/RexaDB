@@ -1,0 +1,76 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1779283531558,
+      "tag": "0000_shallow_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779355760796,
+      "tag": "0001_burly_shiver_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779366869369,
+      "tag": "0002_vengeful_ben_urich",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1779473774599,
+      "tag": "0003_rapid_sister_grimm",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1779572728166,
+      "tag": "0004_abandoned_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1779573615523,
+      "tag": "0005_white_mantis",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1779652940586,
+      "tag": "0006_motionless_lenny_balinger",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1779868884502,
+      "tag": "0007_blue_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1779990000000,
+      "tag": "0008_avatar_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1780000000000,
+      "tag": "0009_connection_user_grant",
+      "breakpoints": true
+    }
+  ]
+}

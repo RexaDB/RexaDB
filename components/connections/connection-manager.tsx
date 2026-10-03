@@ -2998,7 +2998,7 @@ export function ConnectionManager({
           );
           const access: Record<string, AccessType> = {};
           for (const a of res.data || []) {
-            access[a.roleId] = a.accessType;
+            if (a.roleId != null) access[a.roleId] = a.accessType;
           }
           setFormAccess(access);
         } catch {
