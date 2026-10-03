@@ -19,6 +19,7 @@ import {
 import { Loader2, Check, X, Trash2 } from "@/lib/icon-theme/lucide-react";
 import { toast } from "sonner";
 import { interpolateSqlParamsForDisplay } from "@/lib/studio/general-utils";
+import { buildPendingEditsSql, countPendingCellEdits, countUnsaveablePendingRows, isNonSqlPreviewDbType } from "@/lib/studio/pending-changes-utils";
 
 interface PendingAction {
   id: string;
@@ -39,6 +40,9 @@ interface ReviewSheetProps {
   loading?: boolean;
   onClearPending: () => void;
   onRemoveAction?: (id: string) => void;
+  selectedSchema?: string;
+  selectedTable?: string;
+  dbType?: string;
 }
 
 export function ReviewSheet({
@@ -51,8 +55,21 @@ export function ReviewSheet({
   loading = false,
   onClearPending,
   onRemoveAction,
+  selectedSchema = "",
+  selectedTable = "",
+  dbType = "postgres",
 }: ReviewSheetProps) {
-  const pendingChangesCount = Object.keys(pendingChanges).length;
+  const pendingChangesCount = countPendingCellEdits(pendingChanges);
+  const pendingEditSql = useMemo(
+    () => buildPendingEditsSql(pendingChanges, selectedSchema, selectedTable, dbType),
+    [pendingChanges, selectedSchema, selectedTable, dbType],
+  );
+  const unsaveableRowsCount = useMemo(
+    () => countUnsaveablePendingRows(pendingChanges),
+    [pendingChanges],
+  );
+  const isNonSqlPreview = isNonSqlPreviewDbType(dbType);
+  const hasMissingTable = !selectedTable?.trim();
   const pendingActionsCount = pendingActions.length;
   const totalItems = pendingChangesCount + pendingActionsCount;
 
@@ -104,6 +121,30 @@ export function ReviewSheet({
                 <div className="text-xs text-muted-foreground">
                   {pendingChangesCount} cell edit{pendingChangesCount !== 1 ? "s" : ""} pending
                 </div>
+                {pendingEditSql.length > 0 && (
+                  <div className="space-y-2">
+                    {pendingEditSql.map((sql, index) => (
+                      <pre key={index} className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[10px] text-foreground">
+                        {sql}
+                      </pre>
+                    ))}
+                  </div>
+                )}
+                {pendingEditSql.length === 0 && isNonSqlPreview && (
+                  <div className="text-xs text-muted-foreground">
+                    SQL preview isn&apos;t available for {dbType} — these edits commit through the native driver.
+                  </div>
+                )}
+                {pendingEditSql.length === 0 && !isNonSqlPreview && hasMissingTable && (
+                  <div className="text-xs text-muted-foreground">
+                    Select a table to preview these edits — switching schemas cleared the table selection but kept the pending edits.
+                  </div>
+                )}
+                {unsaveableRowsCount > 0 && !isNonSqlPreview && !hasMissingTable && (
+                  <div className="text-xs text-muted-foreground">
+                    {unsaveableRowsCount} row{unsaveableRowsCount !== 1 ? "s" : ""} without a primary key can&apos;t be saved — commit will reject them.
+                  </div>
+                )}
               </div>
             )}
 

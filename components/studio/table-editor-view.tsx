@@ -4,6 +4,7 @@ import { DataTableToolbar } from "./data-table-toolbar";
 import { DataGridAg as DataGrid } from "./data-grid-ag";
 import { PendingChangesBanner } from "./pending-changes-banner";
 import { cn } from "@/lib/utils";
+import { countPendingCellEdits } from "@/lib/studio/pending-changes-utils";
 import type { ComponentProps } from "react";
 
 type TableEditorViewProps = {
@@ -25,7 +26,7 @@ export function TableEditorView({ toolbarProps, gridProps, showPendingChangesBan
 
   const pendingChanges = (gridProps as any).pendingChanges;
   const pendingActions = (gridProps as any).pendingActions;
-  const pendingChangesCount = pendingChanges ? Object.keys(pendingChanges).length : 0;
+  const pendingChangesCount = countPendingCellEdits(pendingChanges);
   const pendingActionsCount = pendingActions ? pendingActions.length : 0;
   const hasPendingItems = pendingChangesCount > 0 || pendingActionsCount > 0;
   const showBanner = showPendingChangesBanner && hasPendingItems;
