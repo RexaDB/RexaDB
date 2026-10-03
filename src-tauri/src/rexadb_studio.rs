@@ -41,6 +41,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0006_motionless_lenny_balinger", include_str!("../migrations/rexadb-studio/0006_motionless_lenny_balinger.sql")),
     ("0007_blue_longshot", include_str!("../migrations/rexadb-studio/0007_blue_longshot.sql")),
     ("0008_avatar_store", include_str!("../migrations/rexadb-studio/0008_avatar_store.sql")),
+    ("0009_connection_user_grant", include_str!("../migrations/rexadb-studio/0009_connection_user_grant.sql")),
 ];
 
 const PERMISSIONS: &[(&str, &str, &str)] = &[
@@ -323,6 +324,11 @@ pub async fn start_named(app: &tauri::AppHandle, data_dir: PathBuf, sidecar_api:
         .route("/api/teams/{id}/permissions", get(team_permissions_list).post(team_permission_add).delete(team_permission_remove))
         .fallback(api_not_found)
         .layer(middleware::from_fn(log_api_request))
+        // Axum rejects `Bytes` bodies over 2MB by default, which would break
+        // avatar uploads between 2MB and the 5MB limit enforced by
+        // `user_avatar_upload`. Raise the framework cap; per-endpoint checks
+        // remain authoritative.
+        .layer(axum::extract::DefaultBodyLimit::max(6 * 1024 * 1024))
         .layer(cors)
         .with_state(state.clone());
     let router = Router::new().nest("/studio-api", api_router.clone()).merge(api_router);
@@ -1265,7 +1271,7 @@ async fn connections_list(State(state): State<ApiState>, headers: HeaderMap) -> 
     let query = if can_see_all {
         "SELECT id, name, type, created_by, created_at, updated_at FROM connections ORDER BY created_at DESC"
     } else {
-        "SELECT c.id, c.name, c.type, c.created_by, c.created_at, c.updated_at FROM connections c WHERE EXISTS (SELECT 1 FROM connection_access a JOIN users u ON u.role_id = a.role_id WHERE a.connection_id = c.id AND u.id = ?1) OR EXISTS (SELECT 1 FROM connection_access a JOIN team_members tm ON tm.team_id = a.team_id WHERE a.connection_id = c.id AND tm.user_id = ?1) ORDER BY c.created_at DESC"
+        "SELECT c.id, c.name, c.type, c.created_by, c.created_at, c.updated_at FROM connections c WHERE EXISTS (SELECT 1 FROM connection_access a JOIN users u ON u.role_id = a.role_id WHERE a.connection_id = c.id AND u.id = ?1) OR EXISTS (SELECT 1 FROM connection_access a JOIN team_members tm ON tm.team_id = a.team_id WHERE a.connection_id = c.id AND tm.user_id = ?1) OR EXISTS (SELECT 1 FROM connection_access a WHERE a.connection_id = c.id AND a.user_id = ?1) ORDER BY c.created_at DESC"
     };
     let mut statement = match db.prepare(query) {
         Ok(statement) => statement,
@@ -1859,23 +1865,22 @@ async fn connection_create(State(state): State<ApiState>, headers: HeaderMap, Js
     let id = uuid_like();
     let now = chrono_like_now();
     let mut db = state.db.lock().unwrap();
-    // Grant the creator's role full access to the new connection. Querying a
-    // connection requires `connections.manage_access` or an explicit access
-    // grant, so without this a creator without that permission (e.g. a
-    // developer) could create a connection but never query it or share it.
-    let created = (|| -> rusqlite::Result<i64> {
+    // Grant the creator (and only the creator) full access to the new
+    // connection. Querying requires `connections.manage_access` or an explicit
+    // grant, so without this a creator without that permission could create a
+    // connection but never query it. The grant is scoped to the creator's user
+    // id rather than their role so teammates don't inherit access.
+    let created = (|| -> rusqlite::Result<()> {
         let tx = db.transaction()?;
         tx.execute(
             "INSERT INTO connections (id, name, type, host, port, database, username, encrypted_password, ssl, created_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
             params![id, name, db_type, host, port, database, username, encrypted, body.get("ssl").and_then(Value::as_bool).unwrap_or(false), user_id, now],
         )?;
-        let role_id: i64 = tx.query_row("SELECT role_id FROM users WHERE id = ?1", [&user_id], |row| row.get(0))?;
         tx.execute(
-            "INSERT INTO connection_access (connection_id, role_id, team_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, ?2, NULL, 'FULL_ACCESS', NULL, NULL)",
-            params![id, role_id],
+            "INSERT INTO connection_access (connection_id, role_id, team_id, user_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, NULL, NULL, ?2, 'FULL_ACCESS', NULL, NULL)",
+            params![id, user_id],
         )?;
-        tx.commit()?;
-        Ok(role_id)
+        tx.commit()
     })();
     match created {
         Ok(_) => (StatusCode::CREATED, Json(json!({ "data": { "id": id, "name": name, "type": db_type, "createdBy": user_id, "createdAt": now, "updatedAt": now } }))).into_response(),
@@ -1905,7 +1910,7 @@ async fn connection_get(State(state): State<ApiState>, headers: HeaderMap, AxumP
 fn user_can_access_connection(state: &ApiState, user_id: &str, connection_id: &str) -> bool {
     let db = state.db.lock().unwrap();
     db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM users u JOIN role_permissions rp ON rp.role_id = u.role_id JOIN permissions p ON p.id = rp.permission_id WHERE u.id = ?1 AND p.code = 'connections.manage_access') OR EXISTS (SELECT 1 FROM users u JOIN connection_access a ON a.role_id = u.role_id WHERE u.id = ?1 AND a.connection_id = ?2) OR EXISTS (SELECT 1 FROM team_members tm JOIN connection_access a ON a.team_id = tm.team_id WHERE tm.user_id = ?1 AND a.connection_id = ?2)",
+        "SELECT EXISTS (SELECT 1 FROM users u JOIN role_permissions rp ON rp.role_id = u.role_id JOIN permissions p ON p.id = rp.permission_id WHERE u.id = ?1 AND p.code = 'connections.manage_access') OR EXISTS (SELECT 1 FROM users u JOIN connection_access a ON a.role_id = u.role_id WHERE u.id = ?1 AND a.connection_id = ?2) OR EXISTS (SELECT 1 FROM team_members tm JOIN connection_access a ON a.team_id = tm.team_id WHERE tm.user_id = ?1 AND a.connection_id = ?2) OR EXISTS (SELECT 1 FROM connection_access a WHERE a.connection_id = ?2 AND a.user_id = ?1)",
         params![user_id, connection_id], |row| row.get::<_, bool>(0),
     ).unwrap_or(false)
 }
@@ -1936,14 +1941,15 @@ async fn connection_access_list(State(state): State<ApiState>, headers: HeaderMa
         return app_error(status, error).into_response();
     }
     let db = state.db.lock().unwrap();
-    let mut statement = match db.prepare("SELECT a.id, a.role_id, a.team_id, a.access_type, a.query_pattern, a.allowed_query_ids, r.name, r.description FROM connection_access a LEFT JOIN roles r ON r.id = a.role_id WHERE a.connection_id = ?1") {
+    let mut statement = match db.prepare("SELECT a.id, a.role_id, a.team_id, a.user_id, a.access_type, a.query_pattern, a.allowed_query_ids, r.name, r.description FROM connection_access a LEFT JOIN roles r ON r.id = a.role_id WHERE a.connection_id = ?1") {
         Ok(statement) => statement,
         Err(error) => return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     };
     let rows = statement.query_map([connection_id], |row| Ok(json!({
         "id": row.get::<_, i64>(0)?, "roleId": row.get::<_, Option<i64>>(1)?, "teamId": row.get::<_, Option<i64>>(2)?,
-        "accessType": row.get::<_, String>(3)?, "queryPattern": row.get::<_, Option<String>>(4)?, "allowedQueryIds": row.get::<_, Option<String>>(5)?,
-        "role": row.get::<_, Option<String>>(6)?.map(|name| json!({ "id": row.get::<_, Option<i64>>(1).unwrap_or(None), "name": name, "description": row.get::<_, Option<String>>(7).unwrap_or(None) })),
+        "userId": row.get::<_, Option<String>>(3)?,
+        "accessType": row.get::<_, String>(4)?, "queryPattern": row.get::<_, Option<String>>(5)?, "allowedQueryIds": row.get::<_, Option<String>>(6)?,
+        "role": row.get::<_, Option<String>>(7)?.map(|name| json!({ "id": row.get::<_, Option<i64>>(1).unwrap_or(None), "name": name, "description": row.get::<_, Option<String>>(8).unwrap_or(None) })),
     })));
     match rows {
         Ok(rows) => match rows.collect::<Result<Vec<_>, _>>() {
@@ -2075,6 +2081,9 @@ async fn connection_query(State(state): State<ApiState>, headers: HeaderMap, Axu
                 .optional().unwrap_or(None).or_else(|| {
                     db.query_row("SELECT a.access_type FROM connection_access a JOIN team_members tm ON tm.team_id = a.team_id WHERE a.connection_id = ?1 AND tm.user_id = ?2 LIMIT 1", params![id, user_id], |row| row.get::<_, String>(0))
                         .optional().unwrap_or(None)
+                }).or_else(|| {
+                    db.query_row("SELECT access_type FROM connection_access WHERE connection_id = ?1 AND user_id = ?2 LIMIT 1", params![id, user_id], |row| row.get::<_, String>(0))
+                        .optional().unwrap_or(None)
                 })
         }
     };
@@ -2150,8 +2159,49 @@ async fn connection_query(State(state): State<ApiState>, headers: HeaderMap, Axu
     (status, Json(result)).into_response()
 }
 
+/// Length of a PostgreSQL dollar-quote opening delimiter (`$$` or `$tag$`)
+/// starting at `bytes[index] == b'$'`, or `None` when this `$` does not open
+/// one (e.g. a `$1` placeholder or a bare `$`).
+fn dollar_quote_open_len(bytes: &[u8], index: usize) -> Option<usize> {
+    let first = *bytes.get(index + 1)?;
+    if first == b'$' {
+        return Some(2); // `$$`
+    }
+    // Tags follow identifier rules (and cannot contain `$`); a leading digit
+    // means this is a placeholder like `$1`, not a quote.
+    if !(first.is_ascii_alphabetic() || first == b'_') {
+        return None;
+    }
+    let mut end = index + 2;
+    while let Some(&byte) = bytes.get(end) {
+        if byte == b'$' {
+            return Some(end - index + 1);
+        }
+        if !(byte.is_ascii_alphanumeric() || byte == b'_') {
+            return None;
+        }
+        end += 1;
+    }
+    None
+}
+
+/// Byte index just past the closing delimiter matching the opening delimiter
+/// `bytes[open..open + open_len]`, or `None` when unterminated.
+fn dollar_quote_end(bytes: &[u8], open: usize, open_len: usize) -> Option<usize> {
+    let delimiter = bytes.get(open..open + open_len)?;
+    let mut index = open + open_len;
+    while index + delimiter.len() <= bytes.len() {
+        if &bytes[index..index + delimiter.len()] == delimiter {
+            return Some(index + delimiter.len());
+        }
+        index += 1;
+    }
+    None
+}
+
 /// Returns true when `sql` contains a statement terminator (`;`) followed by
 /// more SQL. String literals (`'...'`, `"..."`, `` `...` `` with `''` escape),
+/// PostgreSQL dollar-quoted strings (`$$...$$`, `$tag$...$tag$`),
 /// line comments (`-- ...`) and block comments (`/* ... */`) are skipped so a
 /// semicolon inside them does not count. A trailing semicolon with nothing
 /// after it is a single statement.
@@ -2180,6 +2230,14 @@ fn has_multiple_statements(sql: &str) -> bool {
             }
         } else if byte == b'\'' || byte == b'"' || byte == b'`' {
             quote = Some(byte);
+        } else if byte == b'$' {
+            if let Some(open_len) = dollar_quote_open_len(bytes, index) {
+                match dollar_quote_end(bytes, index, open_len) {
+                    Some(end) => { index = end; continue; }
+                    // Unterminated quote: the rest is string content.
+                    None => break,
+                }
+            }
         } else if byte == b'-' && bytes.get(index + 1) == Some(&b'-') {
             line_comment = true;
             index += 1;
@@ -2209,6 +2267,17 @@ fn remainder_has_sql(bytes: &[u8], mut index: usize) -> bool {
         } else if byte == b'\'' || byte == b'"' || byte == b'`' {
             // A string literal after `;` is still SQL content.
             return true;
+        } else if byte == b'$' {
+            if let Some(open_len) = dollar_quote_open_len(bytes, index) {
+                match dollar_quote_end(bytes, index, open_len) {
+                    // A dollar-quoted string after `;` is still SQL content.
+                    Some(_) => return true,
+                    // Unterminated: the rest is string content.
+                    None => return true,
+                }
+            } else if !byte.is_ascii_whitespace() {
+                return true;
+            }
         } else if byte == b'-' && bytes.get(index + 1) == Some(&b'-') {
             line_comment = true;
             index += 1;
@@ -2346,4 +2415,40 @@ pub async fn setup_from_app(url: &str, input: SetupInput) -> Result<Value, Strin
         return Err(body.get("error").and_then(Value::as_str).unwrap_or("Local workspace setup failed.").to_string());
     }
     Ok(body)
+}
+
+#[cfg(test)]
+mod statement_tests {
+    use super::*;
+
+    #[test]
+    fn single_statements_are_not_multiple() {
+        assert!(!has_multiple_statements("SELECT 1"));
+        assert!(!has_multiple_statements("SELECT 1;"));
+        assert!(!has_multiple_statements("SELECT 1;;"));
+        assert!(!has_multiple_statements("SELECT 1;  \n -- done"));
+        assert!(!has_multiple_statements("SELECT ';'"));
+        assert!(!has_multiple_statements("SELECT $$a; b$$"));
+        assert!(!has_multiple_statements("SELECT $body$a; b$body$"));
+        assert!(!has_multiple_statements("SELECT $1, $2"));
+        assert!(!has_multiple_statements("WITH x AS (SELECT 1) SELECT * FROM x"));
+    }
+
+    #[test]
+    fn stacked_statements_are_multiple() {
+        assert!(has_multiple_statements("SELECT 1; DELETE FROM t"));
+        assert!(has_multiple_statements("SELECT 1;SELECT 2"));
+        assert!(has_multiple_statements("SELECT $$a$$; DELETE FROM t"));
+        assert!(has_multiple_statements("SELECT 1; SELECT $$unterminated"));
+        assert!(has_multiple_statements("SELECT $tag$x$tag$; DROP TABLE t"));
+    }
+
+    #[test]
+    fn read_query_classification() {
+        assert!(is_read_query("SELECT 1"));
+        assert!(is_read_query("SELECT $$a; b$$"));
+        assert!(is_read_query("select $1"));
+        assert!(!is_read_query("SELECT 1; DELETE FROM t"));
+        assert!(!is_read_query("DELETE FROM t"));
+    }
 }

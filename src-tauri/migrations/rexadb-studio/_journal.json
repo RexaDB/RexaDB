@@ -64,6 +64,13 @@
       "when": 1779990000000,
       "tag": "0008_avatar_store",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1780000000000,
+      "tag": "0009_connection_user_grant",
+      "breakpoints": true
     }
   ]
 }
