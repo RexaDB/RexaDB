@@ -246,15 +246,27 @@ export function ConnectionList({ permissions }: { permissions?: Set<string> }) {
                       ) : (
                         (accessMap.get(conn.id) || []).map((a) => (
                           <Badge
-                            key={a.roleId}
+                            key={a.id}
                             variant={
                               a.accessType === "FULL_ACCESS"
                                 ? "default"
                                 : "outline"
                             }
                             className="text-[10px] px-1.5 py-0 h-4"
+                            title={
+                              a.userId
+                                ? `Personal grant for ${a.user?.name || a.user?.email || a.userId}`
+                                : undefined
+                            }
                           >
-                            {a.role.name}:{" "}
+                            {a.role?.name ??
+                              (a.teamName
+                                ? `Team ${a.teamName}`
+                                : null) ??
+                              (a.user?.name ||
+                                a.user?.email ||
+                                (a.userId ? `User ${a.userId.slice(0, 8)}` : "Direct grant"))}
+                            :{" "}
                             {a.accessType === "FULL_ACCESS"
                               ? "Full"
                               : a.accessType === "READ_ONLY"
@@ -294,7 +306,9 @@ export function ConnectionList({ permissions }: { permissions?: Set<string> }) {
                           }>(`/connections/${conn.id}/access`);
                           const access: Record<number, AccessType> = {};
                           for (const a of res.data || []) {
-                            access[a.roleId] = a.accessType;
+                            // Personal (user-scoped) and team grants are shown
+                            // as badges only; the role form leaves them alone.
+                            if (a.roleId != null) access[a.roleId] = a.accessType;
                           }
                           setFormAccess(access);
                         } catch {

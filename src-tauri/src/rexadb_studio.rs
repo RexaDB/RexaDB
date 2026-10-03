@@ -1941,7 +1941,7 @@ async fn connection_access_list(State(state): State<ApiState>, headers: HeaderMa
         return app_error(status, error).into_response();
     }
     let db = state.db.lock().unwrap();
-    let mut statement = match db.prepare("SELECT a.id, a.role_id, a.team_id, a.user_id, a.access_type, a.query_pattern, a.allowed_query_ids, r.name, r.description FROM connection_access a LEFT JOIN roles r ON r.id = a.role_id WHERE a.connection_id = ?1") {
+    let mut statement = match db.prepare("SELECT a.id, a.role_id, a.team_id, a.user_id, a.access_type, a.query_pattern, a.allowed_query_ids, r.name, r.description, u.name, u.email, t.name FROM connection_access a LEFT JOIN roles r ON r.id = a.role_id LEFT JOIN users u ON u.id = a.user_id LEFT JOIN teams t ON t.id = a.team_id WHERE a.connection_id = ?1") {
         Ok(statement) => statement,
         Err(error) => return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     };
@@ -1950,6 +1950,8 @@ async fn connection_access_list(State(state): State<ApiState>, headers: HeaderMa
         "userId": row.get::<_, Option<String>>(3)?,
         "accessType": row.get::<_, String>(4)?, "queryPattern": row.get::<_, Option<String>>(5)?, "allowedQueryIds": row.get::<_, Option<String>>(6)?,
         "role": row.get::<_, Option<String>>(7)?.map(|name| json!({ "id": row.get::<_, Option<i64>>(1).unwrap_or(None), "name": name, "description": row.get::<_, Option<String>>(8).unwrap_or(None) })),
+        "user": row.get::<_, Option<String>>(9)?.map(|name| json!({ "id": row.get::<_, Option<String>>(3).unwrap_or(None), "name": name, "email": row.get::<_, Option<String>>(10).unwrap_or(None) })),
+        "teamName": row.get::<_, Option<String>>(11)?,
     })));
     match rows {
         Ok(rows) => match rows.collect::<Result<Vec<_>, _>>() {
@@ -1965,23 +1967,67 @@ async fn connection_access_set(State(state): State<ApiState>, headers: HeaderMap
         return app_error(status, error).into_response();
     }
     let role_id = body.get("roleId").and_then(Value::as_i64).unwrap_or_default();
+    let user_id = body.get("userId").and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty());
     let access_type = body.get("accessType").and_then(Value::as_str).unwrap_or("");
-    if role_id <= 0 || !["FULL_ACCESS", "READ_ONLY", "READ_AND_REQUEST", "CUSTOM"].contains(&access_type) {
-        return app_error(StatusCode::BAD_REQUEST, "Role and valid access type are required.").into_response();
+    // "NONE" revokes the grant entirely instead of upserting it, so personal
+    // (user-scoped) grants such as the creator's can be withdrawn again.
+    let revoke = access_type == "NONE";
+    if !revoke && !["FULL_ACCESS", "READ_ONLY", "READ_AND_REQUEST", "CUSTOM"].contains(&access_type) {
+        return app_error(StatusCode::BAD_REQUEST, "Valid access type is required.").into_response();
     }
+    enum GrantTarget<'a> { Role(i64), User(&'a str) }
+    let target = match (role_id > 0, user_id) {
+        (true, None) => GrantTarget::Role(role_id),
+        (false, Some(uid)) => GrantTarget::User(uid),
+        _ => return app_error(StatusCode::BAD_REQUEST, "Specify exactly one of roleId or userId.").into_response(),
+    };
     let query_pattern = body.get("queryPattern").and_then(Value::as_str);
     let allowed_query_ids = body.get("allowedQueryIds").map(Value::to_string);
     let db = state.db.lock().unwrap();
-    let existing = db.query_row("SELECT id FROM connection_access WHERE connection_id = ?1 AND role_id = ?2 LIMIT 1", params![connection_id, role_id], |row| row.get::<_, i64>(0)).optional();
-    let result = match existing {
-        Ok(Some(id)) => db.execute("UPDATE connection_access SET access_type = ?1, query_pattern = ?2, allowed_query_ids = ?3 WHERE id = ?4", params![access_type, query_pattern, allowed_query_ids, id]),
-        Ok(None) => db.execute("INSERT INTO connection_access (connection_id, role_id, team_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, ?2, NULL, ?3, ?4, ?5)", params![connection_id, role_id, access_type, query_pattern, allowed_query_ids]),
-        Err(error) => return app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    if let GrantTarget::User(uid) = target {
+        let user_exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?1)", [uid], |row| row.get(0)).unwrap_or(false);
+        if !user_exists {
+            return app_error(StatusCode::NOT_FOUND, "User not found.").into_response();
+        }
+    }
+    let existing: rusqlite::Result<Option<i64>> = match target {
+        GrantTarget::Role(rid) => db.query_row("SELECT id FROM connection_access WHERE connection_id = ?1 AND role_id = ?2 LIMIT 1", params![connection_id, rid], |row| row.get(0)).optional(),
+        GrantTarget::User(uid) => db.query_row("SELECT id FROM connection_access WHERE connection_id = ?1 AND user_id = ?2 LIMIT 1", params![connection_id, uid], |row| row.get(0)).optional(),
     };
-    match result {
-        Ok(_) => (StatusCode::OK, Json(json!({ "data": { "connectionId": connection_id, "roleId": role_id, "accessType": access_type, "queryPattern": query_pattern, "allowedQueryIds": body.get("allowedQueryIds") } }))).into_response(),
-        Err(error) if error.to_string().contains("FOREIGN KEY") => app_error(StatusCode::NOT_FOUND, "Role or connection not found").into_response(),
-        Err(error) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    let grant_json = match target {
+        GrantTarget::Role(rid) => json!({ "connectionId": connection_id, "roleId": rid }),
+        GrantTarget::User(uid) => json!({ "connectionId": connection_id, "userId": uid }),
+    };
+    let with_access = |mut value: Value| {
+        if let Some(object) = value.as_object_mut() {
+            object.insert("accessType".into(), Value::String(access_type.to_string()));
+            object.insert("queryPattern".into(), query_pattern.map(Value::from).unwrap_or(Value::Null));
+            object.insert("allowedQueryIds".into(), body.get("allowedQueryIds").cloned().unwrap_or(Value::Null));
+        }
+        value
+    };
+    match (existing, revoke) {
+        (Err(error), _) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        (Ok(None), true) => app_error(StatusCode::NOT_FOUND, "Access grant not found.").into_response(),
+        (Ok(Some(id)), true) => match db.execute("DELETE FROM connection_access WHERE id = ?1", [id]) {
+            Ok(_) => (StatusCode::OK, Json(json!({ "data": with_access(grant_json) }))).into_response(),
+            Err(error) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        },
+        (Ok(Some(id)), false) => match db.execute("UPDATE connection_access SET access_type = ?1, query_pattern = ?2, allowed_query_ids = ?3 WHERE id = ?4", params![access_type, query_pattern, allowed_query_ids, id]) {
+            Ok(_) => (StatusCode::OK, Json(json!({ "data": with_access(grant_json) }))).into_response(),
+            Err(error) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        },
+        (Ok(None), false) => {
+            let insert = match target {
+                GrantTarget::Role(rid) => db.execute("INSERT INTO connection_access (connection_id, role_id, team_id, user_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?5)", params![connection_id, rid, access_type, query_pattern, allowed_query_ids]),
+                GrantTarget::User(uid) => db.execute("INSERT INTO connection_access (connection_id, role_id, team_id, user_id, access_type, query_pattern, allowed_query_ids) VALUES (?1, NULL, NULL, ?2, ?3, ?4, ?5)", params![connection_id, uid, access_type, query_pattern, allowed_query_ids]),
+            };
+            match insert {
+                Ok(_) => (StatusCode::OK, Json(json!({ "data": with_access(grant_json) }))).into_response(),
+                Err(error) if error.to_string().contains("FOREIGN KEY") => app_error(StatusCode::NOT_FOUND, "Role, user, or connection not found.").into_response(),
+                Err(error) => app_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+            }
+        }
     }
 }
 

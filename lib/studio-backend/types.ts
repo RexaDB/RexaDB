@@ -68,8 +68,12 @@ interface ConnectionInput {
 export interface ConnectionAccess {
   id: number;
   connectionId: string;
-  roleId: number;
-  role: { id: number; name: string; description: string };
+  roleId: number | null;
+  teamId?: number | null;
+  userId?: string | null;
+  role: { id: number; name: string; description: string } | null;
+  user?: { id: string; name: string; email: string | null } | null;
+  teamName?: string | null;
   accessType: "FULL_ACCESS" | "READ_ONLY" | "READ_AND_REQUEST" | "CUSTOM";
   queryPattern: string | null;
   allowedQueryIds: string | null;
