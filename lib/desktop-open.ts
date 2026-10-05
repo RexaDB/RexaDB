@@ -105,7 +105,35 @@ export async function openDatabaseTarget(
       );
     });
     if (match?.id != null) {
-      return { success: true, id: Number(match.id), name: match.name || name };
+      // Exact same string — reuse immediately.
+      if ((match as any).connectionString === trimmed) {
+        return { success: true, id: Number((match as any).id), name: (match as any).name || name };
+      }
+      // Same secret-stripped URL but different secrets (e.g. rotated password):
+      // persist the supplied credentials before reusing the id so Studio does
+      // not keep connecting with stale credentials.
+      try {
+        const { protectConnectionPayload } = await import(
+          "./credentials/connection-credentials"
+        );
+        const protectedUpdate = await protectConnectionPayload({
+          name: (match as any).name || name,
+          connectionString: trimmed,
+          connectionType: provider,
+        });
+        const putRes = await fetch(`${apiBase.API_BASE}/api/connections/${(match as any).id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(protectedUpdate),
+        });
+        const putJson = (await putRes.json().catch(() => null)) as any;
+        if (putRes.ok || putJson?.success) {
+          return { success: true, id: Number((match as any).id), name: (match as any).name || name };
+        }
+      } catch {
+        // Fall through — reuse the old id rather than failing the open.
+      }
+      return { success: true, id: Number((match as any).id), name: (match as any).name || name };
     }
 
     const { protectConnectionPayload } = await import(

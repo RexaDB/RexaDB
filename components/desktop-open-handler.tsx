@@ -45,6 +45,9 @@ export function DesktopOpenHandler() {
 
     const enqueue = (target: string) => {
       if (!target || cancelled) return;
+      // Opening the same target twice in a row resolves to the same
+      // connection — skip exact duplicates already queued.
+      if (queueRef.current.includes(target)) return;
       queueRef.current.push(target);
       void pump();
     };
@@ -52,14 +55,35 @@ export function DesktopOpenHandler() {
     let unlisten: (() => void) | null = null;
     (async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const pending = await invoke<string | null>("get_pending_open_url");
-        if (pending && !cancelled) enqueue(pending);
+        // Subscribe first so requests arriving during boot are caught via
+        // the live event; the pending stash covers anything before that.
         const { listen } = await import("@tauri-apps/api/event");
+        if (cancelled) return;
         unlisten = await listen<{ target: string }>("open-database", (event) => {
           const next = event?.payload?.target;
-          if (next) enqueue(next);
+          if (next) {
+            enqueue(next);
+            // Acknowledge the Rust-side stash so a later reload doesn't
+            // reopen the same request. A *different* stashed target is a
+            // newer request that arrived alongside — queue it too.
+            void import("@tauri-apps/api/core")
+              .then(({ invoke }) =>
+                invoke<string | null>("get_pending_open_url").then((stale) => {
+                  if (stale && stale !== next) enqueue(stale);
+                }),
+              )
+              .catch(() => undefined);
+          }
         });
+        if (cancelled) {
+          unlisten();
+          unlisten = null;
+          return;
+        }
+        const { invoke } = await import("@tauri-apps/api/core");
+        if (cancelled) return;
+        const pending = await invoke<string | null>("get_pending_open_url");
+        if (pending && !cancelled) enqueue(pending);
       } catch {
         // Not running inside Tauri (browser) — nothing to do.
       }

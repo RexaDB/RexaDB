@@ -128,12 +128,14 @@ struct PendingOpenUrl(Mutex<Option<String>>);
 /// Extract the `<target>` from CLI args shaped like `rexadb open <target>`.
 /// Launcher noise (`-psn_*` on macOS, flags) is ignored; the token right
 /// after the first bare `open` wins and is taken verbatim.
-fn parse_open_target(args: &[String]) -> Option<String> {
+/// `cwd` is the calling process's directory (single-instance forwards it);
+/// relative file paths resolve against it instead of the running app's cwd.
+fn parse_open_target(args: &[String], cwd: Option<&std::path::Path>) -> Option<String> {
     let mut iter = args.iter().skip(1);
     for arg in iter.by_ref() {
         if arg == "open" {
             if let Some(target) = iter.next() {
-                let normalized = normalize_open_target(target);
+                let normalized = normalize_open_target_in(target, cwd);
                 if !normalized.is_empty() {
                     return Some(normalized);
                 }
@@ -148,21 +150,60 @@ fn parse_open_target(args: &[String]) -> Option<String> {
 /// system paths are expanded (`~`) and absolutized so the frontend can
 /// treat them as sqlite-style connection strings.
 fn normalize_open_target(raw: &str) -> String {
+    normalize_open_target_in(raw, None)
+}
+
+fn normalize_open_target_in(raw: &str, cwd: Option<&std::path::Path>) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.starts_with('-') {
         return String::new();
     }
+    // SQLite special target — must not become a filename.
+    if trimmed.eq_ignore_ascii_case(":memory:") {
+        return trimmed.to_string();
+    }
+    // `file:` / `sqlite:` without `://` (e.g. `file:./data.db`): normalize
+    // only the file portion, keep scheme + query/fragment intact.
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("file:") || lower.starts_with("sqlite:") {
+        let colon = trimmed.find(':').unwrap_or(0);
+        let scheme = &trimmed[..colon + 1];
+        let rest = &trimmed[colon + 1..];
+        // Split path vs `?...` / `#...` suffix.
+        let split_at = rest.find(['?', '#']);
+        let (path_part, suffix) = match split_at {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        if path_part.is_empty() || path_part.eq_ignore_ascii_case(":memory:") {
+            return trimmed.to_string();
+        }
+        let normalized_path = absolutize_path(path_part, cwd);
+        return format!("{scheme}{normalized_path}{suffix}");
+    }
     if trimmed.contains("://") {
         return trimmed.to_string();
     }
-    let expanded = expand_tilde(trimmed);
-    let path = PathBuf::from(&expanded);
-    if let Ok(canonical) = std::fs::canonicalize(&path) {
+    absolutize_path(trimmed, cwd)
+}
+
+/// Expand `~` and resolve `path` to an absolute path string.
+/// Relative paths join against `cwd` (the invoker's directory) when given,
+/// otherwise fall back to the process working directory.
+fn absolutize_path(path: &str, cwd: Option<&std::path::Path>) -> String {
+    let expanded = expand_tilde(path);
+    let mut buf = PathBuf::from(&expanded);
+    if buf.is_relative() {
+        if let Some(base) = cwd {
+            buf = base.join(buf);
+        }
+    }
+    if let Ok(canonical) = std::fs::canonicalize(&buf) {
         return canonical.to_string_lossy().into_owned();
     }
-    match std::path::absolute(&path) {
+    match std::path::absolute(&buf) {
         Ok(abs) => abs.to_string_lossy().into_owned(),
-        Err(_) => expanded,
+        Err(_) => buf.to_string_lossy().into_owned(),
     }
 }
 
@@ -993,10 +1034,12 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             // A second `rexadb open <target>` while the app runs: adopt the
-            // request instead of spawning another window.
-            if let Some(target) = parse_open_target(&args) {
+            // request instead of spawning another window. Relative paths
+            // resolve against the caller's cwd, not the running app's cwd.
+            let cwd_path = std::path::PathBuf::from(&cwd);
+            if let Some(target) = parse_open_target(&args, Some(&cwd_path)) {
                 if let Some(state) = app.try_state::<PendingOpenUrl>() {
                     *state.0.lock().unwrap() = Some(target.clone());
                 }
@@ -1038,7 +1081,7 @@ pub fn run() {
             // `rexadb open <database-url-or-file-path>`: stash the target so
             // the frontend can pick it up via `get_pending_open_url` on boot.
             let launch_args: Vec<String> = std::env::args().collect();
-            if let Some(target) = parse_open_target(&launch_args) {
+            if let Some(target) = parse_open_target(&launch_args, None) {
                 *app.state::<PendingOpenUrl>().0.lock().unwrap() = Some(target);
             }
 
@@ -1119,7 +1162,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod open_target_tests {
-    use super::{normalize_open_target, parse_open_target};
+    use super::{normalize_open_target, normalize_open_target_in, parse_open_target};
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
@@ -1128,20 +1171,20 @@ mod open_target_tests {
     #[test]
     fn parses_open_subcommand() {
         assert_eq!(
-            parse_open_target(&args(&["rexadb", "open", "postgres://u@h:5432/db"])),
+            parse_open_target(&args(&["rexadb", "open", "postgres://u@h:5432/db"]), None),
             Some("postgres://u@h:5432/db".to_string())
         );
     }
 
     #[test]
     fn ignores_launcher_noise_and_flags() {
-        assert_eq!(parse_open_target(&args(&["rexadb", "-psn_0_12345"])), None);
+        assert_eq!(parse_open_target(&args(&["rexadb", "-psn_0_12345"]), None), None);
         assert_eq!(
-            parse_open_target(&args(&["rexadb", "--flag", "open", "mysql://h/db"])),
+            parse_open_target(&args(&["rexadb", "--flag", "open", "mysql://h/db"]), None),
             Some("mysql://h/db".to_string())
         );
-        assert_eq!(parse_open_target(&args(&["rexadb", "open"])), None);
-        assert_eq!(parse_open_target(&args(&["rexadb"])), None);
+        assert_eq!(parse_open_target(&args(&["rexadb", "open"]), None), None);
+        assert_eq!(parse_open_target(&args(&["rexadb"]), None), None);
     }
 
     #[test]
@@ -1158,5 +1201,30 @@ mod open_target_tests {
         // Rejects empty / flag-like targets.
         assert_eq!(normalize_open_target(""), "");
         assert_eq!(normalize_open_target("--help"), "");
+    }
+
+    #[test]
+    fn preserves_sqlite_special_targets() {
+        assert_eq!(normalize_open_target(":memory:"), ":memory:");
+        // `file:` scheme keeps its prefix; only the file portion is absolutized.
+        let out = normalize_open_target("file:./data.db");
+        assert!(out.starts_with("file:"), "got {out}");
+        assert!(out.ends_with("data.db"), "got {out}");
+        assert!(!out.starts_with("file:./"), "got {out}");
+        let out = normalize_open_target("sqlite:./data.db?mode=ro");
+        assert!(out.starts_with("sqlite:"), "got {out}");
+        assert!(out.contains("data.db"), "got {out}");
+        assert!(out.ends_with("?mode=ro"), "got {out}");
+        assert_eq!(normalize_open_target("file::memory:?cache=shared"), "file::memory:?cache=shared");
+    }
+
+    #[test]
+    fn resolves_relative_paths_against_caller_cwd() {
+        let cwd = std::path::Path::new("/tmp/caller-dir");
+        let out = normalize_open_target_in("./data.db", Some(cwd));
+        assert!(out.starts_with("/tmp/caller-dir"), "got {out}");
+        assert!(out.ends_with("data.db"), "got {out}");
+        let parsed = parse_open_target(&args(&["rexadb", "open", "./data.db"]), Some(cwd)).unwrap();
+        assert!(parsed.starts_with("/tmp/caller-dir"), "got {parsed}");
     }
 }

@@ -19,31 +19,119 @@ export function scopeCss(packId: string, css: string): string {
   if (trimmed.includes("data-rexadb-ui-pack=") || trimmed.includes("@rexadb-unscoped")) {
     return trimmed.replace(/\s*\/\*\s*@rexadb-unscoped\s*\*\//g, "").trim();
   }
-  // Prefix each top-level selector as a descendant of the active pack so
-  // `[data-slot=…]` and `.rexadb-shell-…` rules both work. Nested CSS
-  // (`html[…] { .class {…} }`) would miss classes on `<html>` itself.
   const attr = `html[data-rexadb-ui-pack="${packId}"]`;
-  return trimmed.replace(/(^|})\s*([^@}/\s][^{]*?)\s*\{/g, (_m, brace: string, selectors: string) => {
-    const scoped = selectors
-      .split(",")
-      .map((raw) => {
-        const s = raw.trim();
-        if (!s) return s;
-        if (s.startsWith(":root") || s.startsWith("html")) {
-          return s.replace(/^(:root|html)/, attr);
+  return scopeCssBlock(attr, trimmed);
+}
+
+function scopeSelectors(attr: string, selectors: string): string {
+  return selectors
+    .split(",")
+    .map((raw) => {
+      const s = raw.trim();
+      if (!s) return s;
+      if (s.startsWith(":root") || s.startsWith("html")) {
+        return s.replace(/^(:root|html)/, attr);
+      }
+      // Only classes actually placed on `<html>` by a shell (`rexadb-shell-*`)
+      // attach directly; every other leading class (e.g. `.card`) is a
+      // descendant and must keep its descendant combinator.
+      const shellClass = s.match(/^(\.[A-Za-z0-9_-]+)(\s+[\s\S]*)?$/);
+      if (shellClass && shellClass[1].startsWith(".rexadb-shell-")) {
+        return `${attr}${shellClass[1]}${shellClass[2] ?? ""}`;
+      }
+      // Also handle `html`-level shell class followed by descendants without
+      // requiring the full selector to be a single class, e.g.
+      // `.rexadb-shell-x [data-slot="shell"]`.
+      if (s.startsWith(".rexadb-shell-")) {
+        const spaceAt = s.search(/\s/);
+        if (spaceAt > 0) {
+          return `${attr}${s.slice(0, spaceAt)}${s.slice(spaceAt)}`;
         }
-        // Shell `className` lives on <html> — attach the leading class to the
-        // pack attribute (`html[pack].rexadb-shell-x …`), keep the rest.
-        const shellClass = s.match(/^(\.[A-Za-z0-9_-]+)(\s+[\s\S]*)?$/);
-        if (shellClass) {
-          return `${attr}${shellClass[1]}${shellClass[2] ?? ""}`;
+        return `${attr}${s}`;
+      }
+      return `${attr} ${s}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** CSS-aware scoping: leaves `@keyframes` steps alone, recurses into `@media`. */
+function scopeCssBlock(attr: string, css: string): string {
+  let out = "";
+  let i = 0;
+  const n = css.length;
+  const skipWs = () => {
+    while (i < n && /\s/.test(css[i]!)) i++;
+  };
+  while (i < n) {
+    skipWs();
+    if (i >= n) break;
+    // Preserve comments verbatim.
+    if (css.startsWith("/*", i)) {
+      const end = css.indexOf("*/", i + 2);
+      const stop = end < 0 ? n : end + 2;
+      out += css.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    const brace = css.indexOf("{", i);
+    if (brace < 0) {
+      out += css.slice(i);
+      break;
+    }
+    const selector = css.slice(i, brace).trim();
+    // Find matching close brace (handles nested blocks).
+    let depth = 0;
+    let j = brace;
+    let inStr: string | null = null;
+    for (; j < n; j++) {
+      const ch = css[j]!;
+      if (inStr) {
+        if (ch === "\\") {
+          j++;
+        } else if (ch === inStr) {
+          inStr = null;
         }
-        return `${attr} ${s}`;
-      })
-      .filter(Boolean)
-      .join(", ");
-    return `${brace}\n${scoped} {`;
-  });
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inStr = ch;
+      } else if (ch === "{") {
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    const inner = css.slice(brace + 1, j);
+    const lowerSel = selector.toLowerCase();
+    if (
+      lowerSel.startsWith("@keyframes") ||
+      lowerSel.startsWith("@-webkit-keyframes") ||
+      lowerSel.startsWith("@font-face") ||
+      lowerSel.startsWith("@import") ||
+      lowerSel.startsWith("@charset") ||
+      lowerSel.startsWith("@namespace")
+    ) {
+      // Steps like `from` / `to` / `50%` must not be rewritten.
+      out += `${selector} {${inner}}`;
+    } else if (
+      lowerSel.startsWith("@media") ||
+      lowerSel.startsWith("@supports") ||
+      lowerSel.startsWith("@layer") ||
+      lowerSel.startsWith("@container")
+    ) {
+      out += `${selector} {${scopeCssBlock(attr, inner)}}`;
+    } else if (selector.startsWith("@")) {
+      out += `${selector} {${inner}}`;
+    } else if (!selector) {
+      out += `{${inner}}`;
+    } else {
+      out += `${scopeSelectors(attr, selector)} {${inner}}`;
+    }
+    i = j + 1;
+  }
+  return out;
 }
 
 export function applyStylePack(
@@ -54,14 +142,18 @@ export function applyStylePack(
   const root = document.documentElement;
   const fqId = `${extensionId}:${pack.id}`;
 
-  // Clear previous pack vars / attribute.
+  // Clear previous pack vars / attribute (restores prior values).
   clearStylePackDom(false);
 
   root.dataset.rexadbUiPack = fqId;
+  const tracked: Array<{ name: string; prev: string | null }> = [];
   for (const [k, v] of Object.entries(pack.cssVariables ?? {})) {
     const name = k.startsWith("--") ? k : `--ui-${k}`;
+    const prev = root.style.getPropertyValue(name);
+    tracked.push({ name, prev: prev || null });
     root.style.setProperty(name, v);
   }
+  appliedPackVars = tracked;
 
   let el = document.getElementById(STYLE_ELEMENT_ID) as HTMLStyleElement | null;
   if (!el) {
@@ -88,9 +180,19 @@ export function applyStylePack(
   }
 }
 
+/** Variables set by the active pack + their pre-pack values (for restore). */
+let appliedPackVars: Array<{ name: string; prev: string | null }> = [];
+
 function clearStylePackDom(clearStorage: boolean): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  // Restore every variable this pack touched (including explicit `--accent`),
+  // not just the `--ui-*` namespace, so switching/clearing never leaks.
+  for (const { name, prev } of appliedPackVars.splice(0)) {
+    root.style.removeProperty(name);
+    if (prev) root.style.setProperty(name, prev);
+  }
+  // Legacy packs applied before var tracking: drop leftover `--ui-*` vars.
   for (const key of Array.from(root.style)) {
     if (key.startsWith("--ui-")) root.style.removeProperty(key);
   }

@@ -18,7 +18,20 @@ const SHIM_NAME: &str = "rexadb";
 const MARKER: &str = "rexa-db terminal command";
 
 /// Shell rc files to patch: (relative path, export line for that shell).
-fn rc_files() -> Vec<(PathBuf, String)> {
+/// The bash login file is resolved dynamically: bash reads only the first
+/// existing `~/.bash_profile` > `~/.bash_login` > `~/.profile`, so creating a
+/// new `.bash_profile` would shadow an existing `.profile`/`.bash_login`.
+/// Update the user's existing login config instead.
+fn bash_login_target(home: &Path) -> PathBuf {
+    for candidate in [".bash_profile", ".bash_login", ".profile"] {
+        if home.join(candidate).exists() {
+            return PathBuf::from(candidate);
+        }
+    }
+    PathBuf::from(".bash_profile")
+}
+
+fn rc_files(home: &Path) -> Vec<(PathBuf, String)> {
     vec![
         (
             PathBuf::from(".zshrc"),
@@ -29,7 +42,7 @@ fn rc_files() -> Vec<(PathBuf, String)> {
             "export PATH=\"$HOME/.local/bin:$PATH\"".to_string(),
         ),
         (
-            PathBuf::from(".bash_profile"),
+            bash_login_target(home),
             "export PATH=\"$HOME/.local/bin:$PATH\"".to_string(),
         ),
         (
@@ -68,7 +81,11 @@ fn ensure_rc_entry(rc_path: &Path, export_line: &str) -> std::io::Result<bool> {
             std::fs::create_dir_all(parent)?;
         }
     }
-    let existing = std::fs::read_to_string(rc_path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(rc_path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
     if has_marker(&existing) {
         return Ok(false);
     }
@@ -123,6 +140,19 @@ pub fn ensure_cli_shim() {
     }
 }
 
+/// Resolve the persistent binary to link: AppImage mounts are temporary, so
+/// `current_exe()` inside the mount would leave a broken link after exit.
+/// Prefer the `APPIMAGE` launcher path when present.
+fn resolve_shim_target(exe: &Path) -> PathBuf {
+    if let Ok(appimage) = std::env::var("APPIMAGE") {
+        if !appimage.trim().is_empty() {
+            return PathBuf::from(appimage);
+        }
+    }
+    // Canonicalize so the link survives being launched through another link.
+    std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf())
+}
+
 #[cfg(not(windows))]
 fn ensure_cli_shim_inner() -> std::io::Result<()> {
     let home = match home_dir() {
@@ -130,8 +160,7 @@ fn ensure_cli_shim_inner() -> std::io::Result<()> {
         None => return Ok(()),
     };
     let exe = std::env::current_exe()?;
-    // Canonicalize so the link survives being launched through another link.
-    let target = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let target = resolve_shim_target(&exe);
 
     let bin_dir = home.join(".local/bin");
     std::fs::create_dir_all(&bin_dir)?;
@@ -142,7 +171,7 @@ fn ensure_cli_shim_inner() -> std::io::Result<()> {
         Err(error) => log::warn!("Could not link rexadb terminal command: {error}"),
     }
 
-    for (relative, export_line) in rc_files() {
+    for (relative, export_line) in rc_files(&home) {
         let rc_path = home.join(relative);
         match ensure_rc_entry(&rc_path, &export_line) {
             Ok(true) => log::info!("Added ~/.local/bin to PATH in {}", rc_path.display()),
@@ -201,6 +230,7 @@ mod cli_shim_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn symlink_points_at_target_and_repairs_stale_links() {
         let dir = scratch_dir("link");

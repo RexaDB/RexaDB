@@ -212,16 +212,20 @@ export function ExtensionProvider({
   const [treeNodes, setTreeNodes] = useState<Record<string, RexaTreeItem[]>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activePanel, setActivePanel] = useState<ExtensionPanelState | null>(null);
+  const [recordsHydrated, setRecordsHydrated] = useState(false);
   const hostRef = useRef<ExtensionHost | null>(null);
   const runtimeCommandsRef = useRef<Map<string, { extensionId: string; title: string; group?: string }>>(new Map());
   const treeOwnerRef = useRef<Map<string, string>>(new Map());
   const stylePacksRef = useRef<ExtensionStylePackState[]>([]);
   const shellsRef = useRef<ExtensionShellState[]>([]);
+  /** Slot ids (`button`, `shell`, …) whose bindings this provider owns. */
+  const providerUiOwnedRef = useRef<Set<string>>(new Set());
   const dbBridgeRef = useRef(dbBridge);
   dbBridgeRef.current = dbBridge;
 
   const refresh = useCallback(() => {
     setRecords(loadInstalled());
+    setRecordsHydrated(true);
   }, []);
 
   // Seed static contributions from manifests (no code execution needed).
@@ -239,6 +243,7 @@ export function ExtensionProvider({
     const themeList: ExtensionContextValue["themes"] = [];
     const stylePackList: ExtensionStylePackState[] = [];
     const shellList: ExtensionShellState[] = [];
+    const wantedSlotBindings = new Map<string, React.ComponentType<any>>();
     for (const rec of records) {
       if (!rec.enabled) continue;
       const c = rec.manifest.contributes;
@@ -297,9 +302,9 @@ export function ExtensionProvider({
         }
       }
       for (const slot of c?.ui?.slots ?? []) {
-        if (slot.componentKey && peekUiComponent(slot.componentKey)) {
-          registerUiComponent(slot.slot, peekUiComponent(slot.componentKey)!);
-        }
+        if (!slot.componentKey) continue;
+        const Comp = peekUiComponent(slot.componentKey);
+        if (Comp) wantedSlotBindings.set(slot.slot, Comp);
       }
       const containerList: ExtensionContainerState[] = (c?.viewsContainers ?? []).map((vc) => ({
         extensionId: rec.manifest.id,
@@ -368,39 +373,80 @@ export function ExtensionProvider({
     shellsRef.current = shellList;
 
     // Re-apply persisted pack/shell if the contributing extension is still enabled.
-    const savedPack = getActiveStylePack();
-    if (savedPack) {
-      const pack = stylePackList.find((p) => p.extensionId === savedPack.extensionId && p.id === savedPack.packId);
-      if (pack) {
-        applyStylePack(pack, pack.extensionId);
-        setActiveStylePack(savedPack);
-      } else {
-        clearStylePack();
-        setActiveStylePack(null);
-      }
-    } else {
-      setActiveStylePack(null);
-    }
-    const savedShell = getActiveShell();
-    if (savedShell) {
-      const shell = shellList.find((s) => s.extensionId === savedShell.extensionId && s.id === savedShell.shellId);
-      if (shell) {
-        applyShell(shell, shell.extensionId, (packId) =>
-          stylePackList.find((p) => p.extensionId === shell.extensionId && p.id === packId),
-        );
-        if (shell.componentKey) {
-          const Comp = peekUiComponent(shell.componentKey) ?? peekUiComponent(`${shell.extensionId}:${shell.id}`);
-          if (Comp) registerUiComponent("shell", Comp);
+    // Shell first, then the saved pack wins so a refresh never swaps the
+    // user's chosen pack for the shell's linked pack. Guarded by hydration:
+    // `records` starts empty while `refresh()` loads, and clearing on that
+    // first empty pass would delete saved choices before they can restore.
+    if (recordsHydrated) {
+      const savedShell = getActiveShell();
+      let shellLinkedPack: { extensionId: string; packId: string } | null = null;
+      if (savedShell) {
+        const shell = shellList.find((s) => s.extensionId === savedShell.extensionId && s.id === savedShell.shellId);
+        if (shell) {
+          applyShell(shell, shell.extensionId, (packId) =>
+            stylePackList.find((p) => p.extensionId === shell.extensionId && p.id === packId),
+          );
+          if (shell.stylePackId) {
+            const linked = stylePackList.find(
+              (p) => p.extensionId === shell.extensionId && p.id === shell.stylePackId,
+            );
+            if (linked) shellLinkedPack = { extensionId: shell.extensionId, packId: shell.stylePackId };
+          }
+          if (shell.componentKey || peekUiComponent(`${shell.extensionId}:${shell.id}`)) {
+            const Comp =
+              (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
+              peekUiComponent(`${shell.extensionId}:${shell.id}`);
+            if (Comp) wantedSlotBindings.set("shell", Comp);
+          }
+          setActiveShell(savedShell);
+        } else {
+          clearShell();
+          providerUiOwnedRef.current.delete("shell");
+          setActiveShell(null);
         }
-        setActiveShell(savedShell);
       } else {
-        clearShell();
         setActiveShell(null);
       }
-    } else {
-      setActiveShell(null);
+      const savedPack = getActiveStylePack();
+      if (savedPack) {
+        const pack = stylePackList.find((p) => p.extensionId === savedPack.extensionId && p.id === savedPack.packId);
+        if (pack) {
+          applyStylePack(pack, pack.extensionId);
+          setActiveStylePack(savedPack);
+        } else if (shellLinkedPack) {
+          // Pack extension gone but shell linked pack applied — keep picker aligned.
+          setActiveStylePack(shellLinkedPack);
+        } else {
+          clearStylePack();
+          setActiveStylePack(null);
+        }
+      } else if (shellLinkedPack) {
+        setActiveStylePack(shellLinkedPack);
+      } else {
+        setActiveStylePack(null);
+      }
     }
-  }, [records]);
+    // Sync provider-owned slot/shell bindings: remove overrides whose
+    // extension was disabled/uninstalled or whose shell is no longer active.
+    {
+      const owned = providerUiOwnedRef.current;
+      for (const key of Array.from(owned)) {
+        if (!wantedSlotBindings.has(key)) {
+          unregisterUiComponent(key);
+          owned.delete(key);
+        }
+      }
+      for (const [key, Comp] of wantedSlotBindings) {
+        if (peekUiComponent(key) !== Comp) registerUiComponent(key, Comp);
+        owned.add(key);
+      }
+      // A CSS-only shell (no Comp) must drop a previous shell override.
+      if (!wantedSlotBindings.has("shell") && owned.has("shell")) {
+        unregisterUiComponent("shell");
+        owned.delete("shell");
+      }
+    }
+  }, [records, recordsHydrated]);
 
   const applyStylePackById = useCallback((extensionId: string, packId: string) => {
     const pack = stylePacksRef.current.find((p) => p.extensionId === extensionId && p.id === packId);
@@ -426,7 +472,13 @@ export function ExtensionProvider({
     const Comp =
       (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
       peekUiComponent(`${extensionId}:${shellId}`);
-    if (Comp) registerUiComponent("shell", Comp);
+    if (Comp) {
+      registerUiComponent("shell", Comp);
+      providerUiOwnedRef.current.add("shell");
+    } else {
+      unregisterUiComponent("shell");
+      providerUiOwnedRef.current.delete("shell");
+    }
     setActiveShell({ extensionId, shellId });
   }, []);
 
@@ -434,6 +486,7 @@ export function ExtensionProvider({
     clearShell({ clearStylePack: false });
     // Drop the shell React override so ModernUIShell returns.
     unregisterUiComponent("shell");
+    providerUiOwnedRef.current.delete("shell");
     setActiveShell(null);
   }, []);
 
@@ -618,12 +671,19 @@ export function ExtensionProvider({
           const Comp =
             (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
             peekUiComponent(`${extensionId}:${shellId}`);
-          if (Comp) registerUiComponent("shell", Comp);
+          if (Comp) {
+            registerUiComponent("shell", Comp);
+            providerUiOwnedRef.current.add("shell");
+          } else {
+            unregisterUiComponent("shell");
+            providerUiOwnedRef.current.delete("shell");
+          }
           setActiveShell({ extensionId, shellId });
         },
         clearShell: async () => {
           clearShell({ clearStylePack: false });
           unregisterUiComponent("shell");
+          providerUiOwnedRef.current.delete("shell");
           setActiveShell(null);
         },
         listStylePacks: async () =>
