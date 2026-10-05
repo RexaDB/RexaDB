@@ -877,15 +877,20 @@ function TypedEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCh
 
 function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {
   const hasTime = /time|timestamp/i.test(d.columnType);
+  // timestamptz / "timestamp with time zone": the stored value is an instant.
+  // The input shows it as browser-local wall time, so the commit must convert
+  // back to UTC. Naive timestamps commit wall-clock verbatim (no conversion).
+  const hasTimeZone = /timestamptz|timetz|with time zone/i.test(d.columnType);
   const toInputValue = (value: string) => {
     if (!value) return "";
     const date = safeParseDate(value);
     if (!date) return value;
     const pad = (part: number) => String(part).padStart(2, "0");
     const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-    return hasTime
-      ? `${datePart}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-      : datePart;
+    if (!hasTime) return datePart;
+    const ms = date.getMilliseconds();
+    const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${ms ? `.${String(ms).padStart(3, "0")}` : ""}`;
+    return `${datePart}T${timePart}`;
   };
   const [calendarOpen, setCalendarOpen] = React.useState(false);
   const [localValue, setLocalValue] = React.useState(
@@ -896,14 +901,22 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
       onCommit("");
       return;
     }
-    if (hasTime) {
-      // Keep the database's timestamp value explicit and preserve the
-      // selected wall-clock time instead of relying on a browser date picker.
-      onCommit(localValue.replace("T", " "));
-    } else {
+    if (!hasTime) {
+      // Plain `date`: commit the calendar day verbatim. Routing through a
+      // Date (midnight local → UTC) shifts the day for zones ahead of UTC.
+      onCommit(localValue);
+      return;
+    }
+    if (hasTimeZone) {
+      // Mirror the display conversion: the wall time was rendered in the
+      // browser zone, so interpret the edit there and store the UTC instant.
+      // A no-edit save therefore round-trips to the stored instant.
       const date = safeParseDate(localValue);
       onCommit(date ? date.toISOString() : localValue);
+      return;
     }
+    // Timezone-naive timestamp: keep the wall-clock value as displayed.
+    onCommit(localValue.includes("T") ? localValue.replace("T", " ") : localValue);
   };
   const selectedDate = React.useMemo(() => {
     if (!localValue) return undefined;
