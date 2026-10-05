@@ -1,6 +1,7 @@
 mod dictionary;
 mod rexadb_studio;
 mod spacetimedb;
+mod cli_shim;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -116,6 +117,140 @@ struct SidecarState {
     log: Mutex<String>,
     restart_count: Mutex<u32>,
     last_exit_code: Mutex<Option<i32>>,
+}
+
+/// Database targets passed via `rexadb open <database-url-or-file-path>`.
+/// A FIFO queue (not a single slot): rapid successive `open` invocations must
+/// each be delivered exactly once, even if the frontend hasn't drained the
+/// previous one yet. Stored when the process starts (or when a second `open`
+/// invocation is forwarded by the single-instance plugin) and consumed by
+/// the frontend via `get_pending_open_url`, which pops one request per call
+/// until the queue is empty.
+struct PendingOpenUrl(Mutex<Vec<String>>);
+
+/// Append an `open` target to the pending queue.
+fn stash_open_target(state: &PendingOpenUrl, target: String) {
+    state.0.lock().unwrap().push(target);
+}
+
+/// Pop the oldest pending `open` target, if any.
+fn pop_open_target(state: &PendingOpenUrl) -> Option<String> {
+    let mut queue = state.0.lock().unwrap();
+    if queue.is_empty() {
+        None
+    } else {
+        Some(queue.remove(0))
+    }
+}
+
+/// Extract the `<target>` from CLI args shaped like `rexadb open <target>`.
+/// Launcher noise (`-psn_*` on macOS, flags) is ignored; the token right
+/// after the first bare `open` wins and is taken verbatim.
+/// `cwd` is the calling process's directory (single-instance forwards it);
+/// relative file paths resolve against it instead of the running app's cwd.
+fn parse_open_target(args: &[String], cwd: Option<&std::path::Path>) -> Option<String> {
+    let mut iter = args.iter().skip(1);
+    for arg in iter.by_ref() {
+        if arg == "open" {
+            if let Some(target) = iter.next() {
+                let normalized = normalize_open_target_in(target, cwd);
+                if !normalized.is_empty() {
+                    return Some(normalized);
+                }
+            }
+            return None;
+        }
+    }
+    None
+}
+
+/// Normalize an `open` target: database URLs pass through untouched, file
+/// system paths are expanded (`~`) and absolutized so the frontend can
+/// treat them as sqlite-style connection strings.
+fn normalize_open_target(raw: &str) -> String {
+    normalize_open_target_in(raw, None)
+}
+
+fn normalize_open_target_in(raw: &str, cwd: Option<&std::path::Path>) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return String::new();
+    }
+    // SQLite special target — must not become a filename.
+    if trimmed.eq_ignore_ascii_case(":memory:") {
+        return trimmed.to_string();
+    }
+    // `file:` / `sqlite:` without `://` (e.g. `file:./data.db`): normalize
+    // only the file portion, keep scheme + query/fragment intact.
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("file:") || lower.starts_with("sqlite:") {
+        let colon = trimmed.find(':').unwrap_or(0);
+        let scheme = &trimmed[..colon + 1];
+        let rest = &trimmed[colon + 1..];
+        // Split path vs `?...` / `#...` suffix.
+        let split_at = rest.find(['?', '#']);
+        let (path_part, suffix) = match split_at {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        if path_part.is_empty() || path_part.eq_ignore_ascii_case(":memory:") {
+            return trimmed.to_string();
+        }
+        let normalized_path = absolutize_path(path_part, cwd);
+        return format!("{scheme}{normalized_path}{suffix}");
+    }
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    absolutize_path(trimmed, cwd)
+}
+
+/// Expand `~` and resolve `path` to an absolute path string.
+/// Relative paths join against `cwd` (the invoker's directory) when given,
+/// otherwise fall back to the process working directory.
+fn absolutize_path(path: &str, cwd: Option<&std::path::Path>) -> String {
+    let expanded = expand_tilde(path);
+    let mut buf = PathBuf::from(&expanded);
+    if buf.is_relative() {
+        if let Some(base) = cwd {
+            buf = base.join(buf);
+        }
+    }
+    if let Ok(canonical) = std::fs::canonicalize(&buf) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    match std::path::absolute(&buf) {
+        Ok(abs) => abs.to_string_lossy().into_owned(),
+        Err(_) => buf.to_string_lossy().into_owned(),
+    }
+}
+
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        if !home.is_empty() {
+            return format!("{home}/{rest}");
+        }
+    }
+    path.to_string()
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn get_pending_open_url(state: tauri::State<PendingOpenUrl>) -> Option<String> {
+    // Pops one request per call; the frontend drains in a loop until `None`,
+    // so every queued request is delivered exactly once and never replays
+    // after a reload.
+    pop_open_target(&state)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -913,12 +1048,28 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(SidecarState::new())
+        .manage(PendingOpenUrl(Mutex::new(Vec::new())))
         .manage(rexadb_studio::EmbeddedStudioState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            // A second `rexadb open <target>` while the app runs: adopt the
+            // request instead of spawning another window. Relative paths
+            // resolve against the caller's cwd, not the running app's cwd.
+            let cwd_path = std::path::PathBuf::from(&cwd);
+            if let Some(target) = parse_open_target(&args, Some(&cwd_path)) {
+                if let Some(state) = app.try_state::<PendingOpenUrl>() {
+                    stash_open_target(&state, target.clone());
+                }
+                let _ = app.emit("open-database", serde_json::json!({ "target": target }));
+                focus_main_window(app);
+            } else {
+                focus_main_window(app);
+            }
+        }))
         .setup(|app| {
             #[cfg(target_os = "linux")]
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -945,6 +1096,16 @@ pub fn run() {
             fs::create_dir_all(&data_dir).ok();
             spawn_sidecar(app.handle());
 
+            // Auto-install the `rexadb` terminal command (symlink + PATH).
+            cli_shim::ensure_cli_shim();
+
+            // `rexadb open <database-url-or-file-path>`: stash the target so
+            // the frontend can pick it up via `get_pending_open_url` on boot.
+            let launch_args: Vec<String> = std::env::args().collect();
+            if let Some(target) = parse_open_target(&launch_args, None) {
+                stash_open_target(&app.state::<PendingOpenUrl>(), target);
+            }
+
             let studio_app = app.handle().clone();
             let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
             tauri::async_runtime::spawn(async move {
@@ -964,6 +1125,7 @@ pub fn run() {
             connection_credential_delete,
             get_app_version,
             get_api_base_url,
+            get_pending_open_url,
             is_sidecar_ready,
             get_sidecar_status,
             get_sidecar_log,
@@ -1017,4 +1179,92 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod open_target_tests {
+    use super::{normalize_open_target, normalize_open_target_in, parse_open_target};
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_open_subcommand() {
+        assert_eq!(
+            parse_open_target(&args(&["rexadb", "open", "postgres://u@h:5432/db"]), None),
+            Some("postgres://u@h:5432/db".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_launcher_noise_and_flags() {
+        assert_eq!(parse_open_target(&args(&["rexadb", "-psn_0_12345"]), None), None);
+        assert_eq!(
+            parse_open_target(&args(&["rexadb", "--flag", "open", "mysql://h/db"]), None),
+            Some("mysql://h/db".to_string())
+        );
+        assert_eq!(parse_open_target(&args(&["rexadb", "open"]), None), None);
+        assert_eq!(parse_open_target(&args(&["rexadb"]), None), None);
+    }
+
+    #[test]
+    fn normalizes_file_paths() {
+        // URLs pass through untouched.
+        assert_eq!(
+            normalize_open_target("  redis://localhost:6379  "),
+            "redis://localhost:6379"
+        );
+        // Absolute paths are kept as-is when they exist or absolutized.
+        let abs = normalize_open_target("/tmp/rexadb-open-test.db");
+        assert!(abs.ends_with("rexadb-open-test.db"), "got {abs}");
+        assert!(abs.starts_with('/'), "got {abs}");
+        // Rejects empty / flag-like targets.
+        assert_eq!(normalize_open_target(""), "");
+        assert_eq!(normalize_open_target("--help"), "");
+    }
+
+    #[test]
+    fn preserves_sqlite_special_targets() {
+        assert_eq!(normalize_open_target(":memory:"), ":memory:");
+        // `file:` scheme keeps its prefix; only the file portion is absolutized.
+        let out = normalize_open_target("file:./data.db");
+        assert!(out.starts_with("file:"), "got {out}");
+        assert!(out.ends_with("data.db"), "got {out}");
+        assert!(!out.starts_with("file:./"), "got {out}");
+        let out = normalize_open_target("sqlite:./data.db?mode=ro");
+        assert!(out.starts_with("sqlite:"), "got {out}");
+        assert!(out.contains("data.db"), "got {out}");
+        assert!(out.ends_with("?mode=ro"), "got {out}");
+        assert_eq!(normalize_open_target("file::memory:?cache=shared"), "file::memory:?cache=shared");
+    }
+
+    #[test]
+    fn pending_queue_delivers_each_request_once_in_order() {
+        use super::{pop_open_target, stash_open_target, PendingOpenUrl};
+        use std::sync::Mutex;
+        let state = PendingOpenUrl(Mutex::new(Vec::new()));
+        assert_eq!(pop_open_target(&state), None);
+        stash_open_target(&state, "a".to_string());
+        stash_open_target(&state, "b".to_string());
+        // Rapid successive opens must not overwrite each other.
+        assert_eq!(pop_open_target(&state), Some("a".to_string()));
+        assert_eq!(pop_open_target(&state), Some("b".to_string()));
+        // Drained requests never replay.
+        assert_eq!(pop_open_target(&state), None);
+    }
+
+    #[test]
+    fn resolves_relative_paths_against_caller_cwd() {
+        use std::path::PathBuf;
+        let cwd = std::env::temp_dir().join("rexadb-caller-cwd-test");
+        let out = normalize_open_target_in("./data.db", Some(&cwd));
+        let out_path = PathBuf::from(&out);
+        assert_eq!(out_path.file_name().and_then(|s| s.to_str()), Some("data.db"), "got {out}");
+        assert!(out_path.starts_with(&cwd), "got {out}, cwd {}", cwd.display());
+        let parsed = parse_open_target(&args(&["rexadb", "open", "./data.db"]), Some(&cwd)).unwrap();
+        let parsed_path = PathBuf::from(&parsed);
+        assert_eq!(parsed_path.file_name().and_then(|s| s.to_str()), Some("data.db"), "got {parsed}");
+        assert!(parsed_path.starts_with(&cwd), "got {parsed}, cwd {}", cwd.display());
+    }
 }

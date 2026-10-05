@@ -1,8 +1,11 @@
+"use client";
+
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { useUiComponent } from "@/lib/extensions/ui-registry";
 
-const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
+const InputDefault = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
   ({ className, type, ...props }, ref) => {
     return (
       <input
@@ -18,6 +21,16 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
     );
   },
 );
+InputDefault.displayName = "InputDefault";
+
+/**
+ * App-wide Input. Style packs target `[data-slot="input"]`; trusted plugins
+ * can `registerUiComponent("input", MyInput)` (compose `InputDefault`).
+ */
+const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>((props, ref) => {
+  const Comp = useUiComponent("input", InputDefault);
+  return <Comp {...props} ref={ref} />;
+});
 Input.displayName = "Input";
 
-export { Input };
+export { Input, InputDefault };

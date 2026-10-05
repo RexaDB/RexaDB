@@ -1,6 +1,9 @@
+"use client";
+
 import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
+import { useUiComponent } from "@/lib/extensions/ui-registry";
 
 const buttonVariants = cva(
   "group/button focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:ring-3 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:ring-3 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -40,12 +43,15 @@ const buttonVariants = cva(
   }
 );
 
-function Button({
+export type ButtonProps = ButtonPrimitive.Props & VariantProps<typeof buttonVariants>;
+
+/** Default RexaDB button — used when no extension override is registered. */
+function ButtonDefault({
   className,
   variant = "default",
   size = "default",
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonProps) {
   return (
     <ButtonPrimitive
       data-slot="button"
@@ -55,4 +61,15 @@ function Button({
   );
 }
 
-export { Button, buttonVariants };
+/**
+ * App-wide Button. Extensions can restyle every instance via a style pack
+ * targeting `[data-slot="button"]`, or replace the React component by
+ * registering `registerUiComponent("button", MyButton)` (use `ButtonDefault`
+ * inside overrides to avoid recursion).
+ */
+function Button(props: ButtonProps) {
+  const Comp = useUiComponent("button", ButtonDefault);
+  return <Comp {...props} />;
+}
+
+export { Button, ButtonDefault, buttonVariants };

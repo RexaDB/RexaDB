@@ -22,7 +22,23 @@ import { cn } from "@/lib/utils";
  * contribution points, surface activation errors.
  */
 export function ExtensionsView() {
-  const { extensions, commands, views, panels, statusItems, errors, refresh } = useExtensions();
+  const {
+    extensions,
+    commands,
+    views,
+    panels,
+    statusItems,
+    stylePacks,
+    shells,
+    activeStylePack,
+    activeShell,
+    applyStylePackById,
+    clearActiveStylePack,
+    setActiveShellById,
+    clearActiveShell,
+    errors,
+    refresh,
+  } = useExtensions();
   const [bundleText, setBundleText] = useState("");
   const [filter, setFilter] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -133,6 +149,12 @@ export function ExtensionsView() {
                     {(rec.manifest.contributes?.themes?.length ?? 0) > 0 && (
                       <span>· {rec.manifest.contributes!.themes!.length} theme(s)</span>
                     )}
+                    {(rec.manifest.contributes?.ui?.stylePacks?.length ?? 0) > 0 && (
+                      <span>· {rec.manifest.contributes!.ui!.stylePacks!.length} style pack(s)</span>
+                    )}
+                    {(rec.manifest.contributes?.ui?.shells?.length ?? 0) > 0 && (
+                      <span>· {rec.manifest.contributes!.ui!.shells!.length} shell(s)</span>
+                    )}
                   </div>
                   {err && <div className="mt-1 text-[11px] text-destructive">Activation failed: {err}</div>}
                 </div>
@@ -165,6 +187,98 @@ export function ExtensionsView() {
           );
         })}
       </div>
+
+      {(stylePacks.length > 0 || shells.length > 0) && (
+        <div className="rounded-lg border p-3">
+          <div className="mb-2 text-[13px] font-semibold">Look &amp; feel</div>
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            Style packs restyle components everywhere via CSS (buttons, inputs, shell chrome).
+            Shells can swap the app chrome class / React override. Activate one at a time.
+          </p>
+          {shells.length > 0 && (
+            <div className="mb-3">
+              <div className="mb-1 text-[11px] font-medium text-muted-foreground">Shells</div>
+              <div className="flex flex-col gap-1.5">
+                {shells.map((s) => {
+                  const active =
+                    activeShell?.extensionId === s.extensionId && activeShell?.shellId === s.id;
+                  return (
+                    <div key={`${s.extensionId}:${s.id}`} className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium">{s.label}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {s.extensionId}:{s.id}
+                          {s.description ? ` — ${s.description}` : ""}
+                        </div>
+                      </div>
+                      <Button
+                        size="xs"
+                        variant={active ? "default" : "outline"}
+                        onClick={() => {
+                          try {
+                            if (active) clearActiveShell();
+                            else setActiveShellById(s.extensionId, s.id);
+                            setNotice(active ? "Restored default shell." : `Active shell: ${s.label}`);
+                          } catch (err) {
+                            setNotice(String((err as Error)?.message || err));
+                          }
+                        }}
+                      >
+                        {active ? "Active" : "Use"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {stylePacks.length > 0 && (
+            <div>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="text-[11px] font-medium text-muted-foreground">Style packs</div>
+                {activeStylePack && (
+                  <Button size="xs" variant="ghost" onClick={() => { clearActiveStylePack(); setNotice("Cleared style pack."); }}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {stylePacks.map((p) => {
+                  const active =
+                    activeStylePack?.extensionId === p.extensionId && activeStylePack?.packId === p.id;
+                  return (
+                    <div key={`${p.extensionId}:${p.id}`} className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium">{p.label}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {p.extensionId}:{p.id}
+                          {p.slots?.length ? ` · slots: ${p.slots.join(", ")}` : ""}
+                          {p.description ? ` — ${p.description}` : ""}
+                        </div>
+                      </div>
+                      <Button
+                        size="xs"
+                        variant={active ? "default" : "outline"}
+                        onClick={() => {
+                          try {
+                            if (active) clearActiveStylePack();
+                            else applyStylePackById(p.extensionId, p.id);
+                            setNotice(active ? "Cleared style pack." : `Active style pack: ${p.label}`);
+                          } catch (err) {
+                            setNotice(String((err as Error)?.message || err));
+                          }
+                        }}
+                      >
+                        {active ? "Active" : "Apply"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg border p-3">
         <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold">

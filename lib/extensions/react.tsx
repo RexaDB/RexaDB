@@ -4,7 +4,7 @@
  * React bridge between the extension host and RexaDB UI surfaces.
  * Aggregates static manifest contributions + runtime registrations into:
  * commands (Cmd+K), sidebar views, status bar items, languages, themes,
- * webviews, tree data, visualizers, AI tools.
+ * ui style packs / shells, webviews, tree data, visualizers, AI tools.
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -16,8 +16,20 @@ import {
 } from "./extension-registry";
 import { getExtensionDbBridge, onExtensionBridgeChange, type ExtensionDbBridge } from "./db-bridge";
 import { resolvePanelTarget } from "./panels";
+import {
+  applyShell,
+  applyStylePack,
+  clearShell,
+  clearStylePack,
+  getActiveShell,
+  getActiveStylePack,
+  planAppearanceRestore,
+} from "./ui-style-packs";
+import { peekUiComponent, registerUiComponent } from "./ui-registry";
 import type {
   ExtensionCommandContribution,
+  ExtensionShellContribution,
+  ExtensionStylePackContribution,
   InstalledExtensionRecord,
   RexaTreeItem,
 } from "./types";
@@ -92,6 +104,14 @@ export interface ExtensionPanelState {
   area?: "editor" | "panel" | "both";
 }
 
+export interface ExtensionStylePackState extends ExtensionStylePackContribution {
+  extensionId: string;
+}
+
+export interface ExtensionShellState extends ExtensionShellContribution {
+  extensionId: string;
+}
+
 export interface ExtensionContextValue {
   extensions: InstalledExtensionRecord[];
   host: ExtensionHost | null;
@@ -103,6 +123,16 @@ export interface ExtensionContextValue {
   statusItems: ExtensionStatusItem[];
   completions: Record<string, Array<{ label: string; detail?: string; insertText?: string }>>;
   themes: Array<{ extensionId: string; id: string; label: string; themeJson?: Record<string, unknown>; cssVariables?: Record<string, string> }>;
+  /** Look-and-feel style packs from `contributes.ui.stylePacks`. */
+  stylePacks: ExtensionStylePackState[];
+  /** Alternate shells from `contributes.ui.shells`. */
+  shells: ExtensionShellState[];
+  activeStylePack: { extensionId: string; packId: string } | null;
+  activeShell: { extensionId: string; shellId: string } | null;
+  applyStylePackById: (extensionId: string, packId: string) => void;
+  clearActiveStylePack: () => void;
+  setActiveShellById: (extensionId: string, shellId: string) => void;
+  clearActiveShell: () => void;
   webviewHtml: Record<string, string>;
   /** Free-form sidebar pages by container id (static manifest `html` or runtime `registerSidebarPage`). */
   sidebarHtml: Record<string, string>;
@@ -133,6 +163,14 @@ export function useExtensions(): ExtensionContextValue {
       statusItems: [],
       completions: {},
       themes: [],
+      stylePacks: [],
+      shells: [],
+      activeStylePack: null,
+      activeShell: null,
+      applyStylePackById: () => {},
+      clearActiveStylePack: () => {},
+      setActiveShellById: () => {},
+      clearActiveShell: () => {},
       webviewHtml: {},
       sidebarHtml: {},
       treeNodes: {},
@@ -166,20 +204,63 @@ export function ExtensionProvider({
   const [statusItems, setStatusItems] = useState<ExtensionStatusItem[]>([]);
   const [completions, setCompletions] = useState<ExtensionContextValue["completions"]>({});
   const [themes, setThemes] = useState<ExtensionContextValue["themes"]>([]);
+  const [stylePacks, setStylePacks] = useState<ExtensionStylePackState[]>([]);
+  const [shells, setShells] = useState<ExtensionShellState[]>([]);
+  const [activeStylePack, setActiveStylePack] = useState<{ extensionId: string; packId: string } | null>(null);
+  const [activeShell, setActiveShell] = useState<{ extensionId: string; shellId: string } | null>(null);
   const [webviewHtml, setWebviewHtml] = useState<Record<string, string>>({});
   const [sidebarHtml, setSidebarHtml] = useState<Record<string, string>>({});
   const [treeNodes, setTreeNodes] = useState<Record<string, RexaTreeItem[]>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activePanel, setActivePanel] = useState<ExtensionPanelState | null>(null);
+  const [recordsHydrated, setRecordsHydrated] = useState(false);
   const hostRef = useRef<ExtensionHost | null>(null);
   const runtimeCommandsRef = useRef<Map<string, { extensionId: string; title: string; group?: string }>>(new Map());
   const treeOwnerRef = useRef<Map<string, string>>(new Map());
+  const stylePacksRef = useRef<ExtensionStylePackState[]>([]);
+  const shellsRef = useRef<ExtensionShellState[]>([]);
+  /** Slot bindings this provider registered: key → guarded disposer. */
+  const providerUiOwnedRef = useRef(
+    new Map<string, { comp: React.ComponentType<any>; dispose: () => void }>(),
+  );
   const dbBridgeRef = useRef(dbBridge);
   dbBridgeRef.current = dbBridge;
 
   const refresh = useCallback(() => {
     setRecords(loadInstalled());
+    setRecordsHydrated(true);
   }, []);
+
+  /**
+   * Claim a slot binding for the provider. Replacement is guarded: if trusted
+   * host code replaced our binding after we registered it, the old disposer
+   * is a no-op and only our own component is ever removed.
+   */
+  const ownUiBinding = (key: string, comp: React.ComponentType<any>) => {
+    const owned = providerUiOwnedRef.current;
+    const prev = owned.get(key);
+    if (prev?.comp === comp && peekUiComponent(key) === comp) return;
+    if (prev) {
+      prev.dispose();
+      owned.delete(key);
+    }
+    if (peekUiComponent(key) !== comp) {
+      const dispose = registerUiComponent(key, comp);
+      owned.set(key, { comp, dispose });
+    }
+    // Else: host code already holds exactly the component we want — adopt
+    // without owning so cleanup never removes host-registered code.
+  };
+
+  /** Release a provider-owned binding; newer host bindings survive. */
+  const releaseUiBinding = (key: string) => {
+    const owned = providerUiOwnedRef.current;
+    const prev = owned.get(key);
+    if (prev) {
+      prev.dispose();
+      owned.delete(key);
+    }
+  };
 
   // Seed static contributions from manifests (no code execution needed).
   useEffect(() => {
@@ -194,6 +275,9 @@ export function ExtensionProvider({
     const panelList: ExtensionPanelState[] = [];
     const statusList: ExtensionStatusItem[] = [];
     const themeList: ExtensionContextValue["themes"] = [];
+    const stylePackList: ExtensionStylePackState[] = [];
+    const shellList: ExtensionShellState[] = [];
+    const wantedSlotBindings = new Map<string, React.ComponentType<any>>();
     for (const rec of records) {
       if (!rec.enabled) continue;
       const c = rec.manifest.contributes;
@@ -238,6 +322,23 @@ export function ExtensionProvider({
       }
       for (const t of c?.themes ?? []) {
         themeList.push({ extensionId: rec.manifest.id, id: t.id, label: t.label, themeJson: t.themeJson, cssVariables: t.cssVariables });
+      }
+      for (const pack of c?.ui?.stylePacks ?? []) {
+        stylePackList.push({ ...pack, extensionId: rec.manifest.id });
+      }
+      for (const shell of c?.ui?.shells ?? []) {
+        shellList.push({ ...shell, extensionId: rec.manifest.id });
+        // Trusted React shell override: if a component is already registered
+        // under componentKey or extensionId:shellId, also bind it to "shell"
+        // when this shell becomes the active selection (handled in setActive).
+        if (shell.componentKey && peekUiComponent(shell.componentKey)) {
+          /* registration is host-owned; nothing to do at aggregate time */
+        }
+      }
+      for (const slot of c?.ui?.slots ?? []) {
+        if (!slot.componentKey) continue;
+        const Comp = peekUiComponent(slot.componentKey);
+        if (Comp) wantedSlotBindings.set(slot.slot, Comp);
       }
       const containerList: ExtensionContainerState[] = (c?.viewsContainers ?? []).map((vc) => ({
         extensionId: rec.manifest.id,
@@ -300,7 +401,118 @@ export function ExtensionProvider({
       return statusList.map((s) => runtime.get(s.key) ?? s);
     });
     setThemes(themeList);
-  }, [records]);
+    setStylePacks(stylePackList);
+    setShells(shellList);
+    stylePacksRef.current = stylePackList;
+    shellsRef.current = shellList;
+
+    // Re-apply persisted pack/shell if the contributing extension is still enabled.
+    // Guarded by hydration: `records` starts empty while `refresh()` loads,
+    // and clearing on that first empty pass would delete saved choices before
+    // they can restore.
+    if (recordsHydrated) {
+      // Snapshot BOTH refs BEFORE applying anything: applyShell overwrites
+      // the persisted pack key with its linked pack, so re-reading storage
+      // afterwards would return the shell's pack instead of the user's choice.
+      const savedShell = getActiveShell();
+      const savedPack = getActiveStylePack();
+      const plan = planAppearanceRestore({
+        savedPack,
+        savedShell,
+        packs: stylePackList,
+        shells: shellList,
+      });
+      if (plan.shellToApply) {
+        const shell = shellList.find(
+          (s) => s.extensionId === plan.shellToApply!.extensionId && s.id === plan.shellToApply!.shellId,
+        )!;
+        applyShell(shell, shell.extensionId, (packId) =>
+          stylePackList.find((p) => p.extensionId === shell.extensionId && p.id === packId),
+        );
+        const Comp =
+          (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
+          peekUiComponent(`${shell.extensionId}:${shell.id}`);
+        if (Comp) wantedSlotBindings.set("shell", Comp);
+        // CSS-only shell: no binding wanted — the sync below drops a stale one.
+        setActiveShell(plan.shellToApply);
+      } else {
+        if (plan.clearShell) clearShell();
+        // NOTE: do not drop "shell" from providerUiOwned here — the sync
+        // below unregisters it, which actually removes a stale override.
+        setActiveShell(null);
+      }
+      if (plan.packToApply && !plan.packAppliedByShell) {
+        const pack = stylePackList.find(
+          (p) => p.extensionId === plan.packToApply!.extensionId && p.id === plan.packToApply!.packId,
+        );
+        if (pack) applyStylePack(pack, pack.extensionId);
+      } else if (plan.clearPack) {
+        clearStylePack();
+      }
+      // Picker stays aligned with what's actually applied.
+      setActiveStylePack(plan.packToApply);
+    }
+    // Sync provider-owned slot/shell bindings: remove overrides whose
+    // extension was disabled/uninstalled, whose shell is gone, or whose shell
+    // became CSS-only (no Comp wanted). Disposers are guarded: a binding that
+    // trusted host code replaced meanwhile is never removed by us.
+    {
+      const owned = providerUiOwnedRef.current;
+      for (const key of Array.from(owned.keys())) {
+        if (!wantedSlotBindings.has(key)) releaseUiBinding(key);
+      }
+      for (const [key, Comp] of wantedSlotBindings) ownUiBinding(key, Comp);
+    }
+  }, [records, recordsHydrated]);
+
+  // Release provider-owned overrides on unmount (HMR / tests / logout).
+  // Guarded: bindings the host replaced after us survive cleanup.
+  useEffect(() => {
+    const owned = providerUiOwnedRef.current;
+    return () => {
+      for (const [, entry] of owned) entry.dispose();
+      owned.clear();
+    };
+  }, []);
+
+  const applyStylePackById = useCallback((extensionId: string, packId: string) => {
+    const pack = stylePacksRef.current.find((p) => p.extensionId === extensionId && p.id === packId);
+    if (!pack) throw new Error(`style pack not found: ${extensionId}:${packId}`);
+    applyStylePack(pack, extensionId);
+    setActiveStylePack({ extensionId, packId });
+  }, []);
+
+  const clearActiveStylePack = useCallback(() => {
+    clearStylePack();
+    setActiveStylePack(null);
+  }, []);
+
+  const setActiveShellById = useCallback((extensionId: string, shellId: string) => {
+    const shell = shellsRef.current.find((s) => s.extensionId === extensionId && s.id === shellId);
+    if (!shell) throw new Error(`shell not found: ${extensionId}:${shellId}`);
+    applyShell(shell, extensionId, (packId) =>
+      stylePacksRef.current.find((p) => p.extensionId === extensionId && p.id === packId),
+    );
+    if (shell.stylePackId) {
+      setActiveStylePack({ extensionId, packId: shell.stylePackId });
+    }
+    const Comp =
+      (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
+      peekUiComponent(`${extensionId}:${shellId}`);
+    if (Comp) {
+      ownUiBinding("shell", Comp);
+    } else {
+      releaseUiBinding("shell");
+    }
+    setActiveShell({ extensionId, shellId });
+  }, []);
+
+  const clearActiveShell = useCallback(() => {
+    clearShell({ clearStylePack: false });
+    // Drop the shell React override so ModernUIShell returns.
+    releaseUiBinding("shell");
+    setActiveShell(null);
+  }, []);
 
   // Boot the sandbox host once; (re)load enabled extensions with code.
   useEffect(() => {
@@ -462,6 +674,46 @@ export function ExtensionProvider({
           requestOpenExtensionTab({ extensionId, viewId, title: opts?.title });
         },
       },
+      ui: {
+        applyStylePack: async (extensionId, packId) => {
+          const pack = stylePacksRef.current.find((p) => p.extensionId === extensionId && p.id === packId);
+          if (!pack) throw new Error(`style pack not found: ${extensionId}:${packId}`);
+          applyStylePack(pack, extensionId);
+          setActiveStylePack({ extensionId, packId });
+        },
+        clearStylePack: async () => {
+          clearStylePack();
+          setActiveStylePack(null);
+        },
+        setActiveShell: async (extensionId, shellId) => {
+          const shell = shellsRef.current.find((s) => s.extensionId === extensionId && s.id === shellId);
+          if (!shell) throw new Error(`shell not found: ${extensionId}:${shellId}`);
+          applyShell(shell, extensionId, (packId) =>
+            stylePacksRef.current.find((p) => p.extensionId === extensionId && p.id === packId),
+          );
+          if (shell.stylePackId) setActiveStylePack({ extensionId, packId: shell.stylePackId });
+          const Comp =
+            (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
+            peekUiComponent(`${extensionId}:${shellId}`);
+          if (Comp) {
+            ownUiBinding("shell", Comp);
+          } else {
+            releaseUiBinding("shell");
+          }
+          setActiveShell({ extensionId, shellId });
+        },
+        clearShell: async () => {
+          clearShell({ clearStylePack: false });
+          releaseUiBinding("shell");
+          setActiveShell(null);
+        },
+        listStylePacks: async () =>
+          stylePacksRef.current.map((p) => ({ extensionId: p.extensionId, id: p.id, label: p.label })),
+        listShells: async () =>
+          shellsRef.current.map((s) => ({ extensionId: s.extensionId, id: s.id, label: s.label })),
+        getActiveStylePack: async () => getActiveStylePack(),
+        getActiveShell: async () => getActiveShell(),
+      },
     };
 
     const host = new ExtensionHost(callbacks);
@@ -575,6 +827,14 @@ export function ExtensionProvider({
       statusItems: [...statusItems].sort((a, b) => b.priority - a.priority),
       completions,
       themes,
+      stylePacks,
+      shells,
+      activeStylePack,
+      activeShell,
+      applyStylePackById,
+      clearActiveStylePack,
+      setActiveShellById,
+      clearActiveShell,
       webviewHtml,
       sidebarHtml,
       treeNodes,
@@ -587,7 +847,36 @@ export function ExtensionProvider({
       activePanel,
       closePanel,
     }),
-    [records, commands, views, containers, railItems, panels, statusItems, completions, themes, webviewHtml, sidebarHtml, treeNodes, errors, refresh, executeCommand, expandTree, openPanel, openTab, activePanel, closePanel],
+    [
+      records,
+      commands,
+      views,
+      containers,
+      railItems,
+      panels,
+      statusItems,
+      completions,
+      themes,
+      stylePacks,
+      shells,
+      activeStylePack,
+      activeShell,
+      applyStylePackById,
+      clearActiveStylePack,
+      setActiveShellById,
+      clearActiveShell,
+      webviewHtml,
+      sidebarHtml,
+      treeNodes,
+      errors,
+      refresh,
+      executeCommand,
+      expandTree,
+      openPanel,
+      openTab,
+      activePanel,
+      closePanel,
+    ],
   );
 
   return <ExtensionContext.Provider value={value}>{children}</ExtensionContext.Provider>;

@@ -80,4 +80,31 @@ async function activate(rexa) {
     label: "Explain plan",
     description: "Explains the active query plan.",
   });
+
+  // 6. Look & feel — activate style packs / shells from contributes.ui.
+  await rexa.commands.registerCommand("hello-rexa.apply-pill-buttons", "Hello Rexa: Pill Buttons", "Hello Rexa");
+  await rexa.commands.registerCommand("hello-rexa.apply-flat-chrome", "Hello Rexa: Flat Chrome", "Hello Rexa");
+  await rexa.commands.registerCommand("hello-rexa.use-compact-shell", "Hello Rexa: Compact Shell", "Hello Rexa");
+  await rexa.commands.registerCommand("hello-rexa.reset-ui", "Hello Rexa: Reset Look & Feel", "Hello Rexa");
+  rexa.__registerHandler("command:hello-rexa.apply-pill-buttons", async () => {
+    await rexa.ui.applyStylePack("pill-buttons");
+    await rexa.window.showInformationMessage("Applied Pill Buttons style pack");
+    return "pill";
+  });
+  rexa.__registerHandler("command:hello-rexa.apply-flat-chrome", async () => {
+    await rexa.ui.applyStylePack("flat-chrome");
+    await rexa.window.showInformationMessage("Applied Flat Chrome style pack");
+    return "flat";
+  });
+  rexa.__registerHandler("command:hello-rexa.use-compact-shell", async () => {
+    await rexa.ui.setActiveShell("compact");
+    await rexa.window.showInformationMessage("Active shell: Hello Compact");
+    return "compact";
+  });
+  rexa.__registerHandler("command:hello-rexa.reset-ui", async () => {
+    await rexa.ui.clearShell();
+    await rexa.ui.clearStylePack();
+    await rexa.window.showInformationMessage("Restored default look & feel");
+    return "reset";
+  });
 }

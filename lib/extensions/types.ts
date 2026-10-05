@@ -14,9 +14,20 @@
  * - status bar items
  * - languages + grammars + formatters (Monaco)
  * - color themes (Monaco + CSS variables)
+ * - ui: style packs + shells + slot overrides (look & feel)
  * - db: drivers, cell renderers, result visualizers
  * - ai: tools / prompt templates
  */
+
+import type { ExtensionUiContribution } from "./ui-slots";
+export type {
+  ExtensionStylePackContribution,
+  ExtensionShellContribution,
+  ExtensionUiSlotContribution,
+  ExtensionUiContribution,
+  UiSlotId,
+} from "./ui-slots";
+export { UI_SLOTS, isKnownUiSlot } from "./ui-slots";
 
 export type ExtensionCapability =
   | "query:read"
@@ -166,6 +177,8 @@ export interface ExtensionContributes {
   statusBar?: ExtensionStatusBarContribution[];
   languages?: ExtensionLanguageContribution[];
   themes?: ExtensionThemeContribution[];
+  /** Look-and-feel: style packs, alternate shells, per-slot overrides. */
+  ui?: ExtensionUiContribution;
   resultVisualizers?: ExtensionResultVisualizerContribution[];
   cellRenderers?: ExtensionCellRendererContribution[];
   dbDrivers?: ExtensionDbDriverContribution[];
@@ -327,6 +340,22 @@ export interface RexaHostApi {
   };
   env: {
     clipboardWrite(text: string): Promise<void>;
+  };
+  /**
+   * Look-and-feel customization. Style packs / shells are contributed
+   * statically via `contributes.ui` and activated here at runtime.
+   * React component swaps for slots like `shell` / `button` are host-side
+   * (`registerUiComponent`) — sandboxed workers cannot ship React.
+   */
+  ui: {
+    applyStylePack(packId: string): Promise<void>;
+    clearStylePack(): Promise<void>;
+    setActiveShell(shellId: string): Promise<void>;
+    clearShell(): Promise<void>;
+    listStylePacks(): Promise<Array<{ extensionId: string; id: string; label: string }>>;
+    listShells(): Promise<Array<{ extensionId: string; id: string; label: string }>>;
+    getActiveStylePack(): Promise<{ extensionId: string; packId: string } | null>;
+    getActiveShell(): Promise<{ extensionId: string; shellId: string } | null>;
   };
 }
 
