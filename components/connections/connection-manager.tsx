@@ -1946,7 +1946,8 @@ export function ConnectionManager({
         toast.error(
           "Some saved credentials could not be unlocked. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
         );
-      } else if (conns.some((conn: any) => conn.secureCleanupPending)) {
+      }
+      if (conns.some((conn: any) => conn.secureCleanupPending)) {
         toast.warning(
           "Credentials were secured, but SQLite cleanup did not finish and will retry. Older database copies may still contain recoverable secrets until it succeeds.",
         );
