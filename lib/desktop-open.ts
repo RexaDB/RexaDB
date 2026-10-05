@@ -1,5 +1,5 @@
 import { detectConnectionDbType } from "./db/connection-type";
-import { stripConnectionSecrets } from "./credentials/connection-secret-utils";
+import { hasConnectionSecret, stripConnectionSecrets } from "./credentials/connection-secret-utils";
 
 /**
  * `rexadb open <database-url-or-file-path>` support (desktop only).
@@ -109,9 +109,13 @@ export async function openDatabaseTarget(
       if ((match as any).connectionString === trimmed) {
         return { success: true, id: Number((match as any).id), name: (match as any).name || name };
       }
-      // Same secret-stripped URL but different secrets (e.g. rotated password):
-      // persist the supplied credentials before reusing the id so Studio does
-      // not keep connecting with stale credentials.
+      // Same secret-stripped URL but different raw strings. Only persist when
+      // the caller actually supplies new secrets (e.g. rotated password) —
+      // a passwordless open of a saved plaintext connection must reuse it
+      // unchanged, otherwise the PUT would delete the saved password.
+      if (!hasConnectionSecret({ connectionString: trimmed })) {
+        return { success: true, id: Number((match as any).id), name: (match as any).name || name };
+      }
       try {
         const { protectConnectionPayload } = await import(
           "./credentials/connection-credentials"

@@ -1220,11 +1220,15 @@ mod open_target_tests {
 
     #[test]
     fn resolves_relative_paths_against_caller_cwd() {
-        let cwd = std::path::Path::new("/tmp/caller-dir");
-        let out = normalize_open_target_in("./data.db", Some(cwd));
-        assert!(out.starts_with("/tmp/caller-dir"), "got {out}");
-        assert!(out.ends_with("data.db"), "got {out}");
-        let parsed = parse_open_target(&args(&["rexadb", "open", "./data.db"]), Some(cwd)).unwrap();
-        assert!(parsed.starts_with("/tmp/caller-dir"), "got {parsed}");
+        use std::path::PathBuf;
+        let cwd = std::env::temp_dir().join("rexadb-caller-cwd-test");
+        let out = normalize_open_target_in("./data.db", Some(&cwd));
+        let out_path = PathBuf::from(&out);
+        assert_eq!(out_path.file_name().and_then(|s| s.to_str()), Some("data.db"), "got {out}");
+        assert!(out_path.starts_with(&cwd), "got {out}, cwd {}", cwd.display());
+        let parsed = parse_open_target(&args(&["rexadb", "open", "./data.db"]), Some(&cwd)).unwrap();
+        let parsed_path = PathBuf::from(&parsed);
+        assert_eq!(parsed_path.file_name().and_then(|s| s.to_str()), Some("data.db"), "got {parsed}");
+        assert!(parsed_path.starts_with(&cwd), "got {parsed}, cwd {}", cwd.display());
     }
 }
