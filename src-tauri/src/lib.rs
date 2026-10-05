@@ -119,11 +119,29 @@ struct SidecarState {
     last_exit_code: Mutex<Option<i32>>,
 }
 
-/// Database target passed via `rexadb open <database-url-or-file-path>`.
-/// Stored when the process starts (or when a second `open` invocation is
-/// forwarded by the single-instance plugin) and consumed by the frontend
-/// once it boots, so no request is lost if the webview isn't ready yet.
-struct PendingOpenUrl(Mutex<Option<String>>);
+/// Database targets passed via `rexadb open <database-url-or-file-path>`.
+/// A FIFO queue (not a single slot): rapid successive `open` invocations must
+/// each be delivered exactly once, even if the frontend hasn't drained the
+/// previous one yet. Stored when the process starts (or when a second `open`
+/// invocation is forwarded by the single-instance plugin) and consumed by
+/// the frontend via `get_pending_open_url`, which pops one request per call
+/// until the queue is empty.
+struct PendingOpenUrl(Mutex<Vec<String>>);
+
+/// Append an `open` target to the pending queue.
+fn stash_open_target(state: &PendingOpenUrl, target: String) {
+    state.0.lock().unwrap().push(target);
+}
+
+/// Pop the oldest pending `open` target, if any.
+fn pop_open_target(state: &PendingOpenUrl) -> Option<String> {
+    let mut queue = state.0.lock().unwrap();
+    if queue.is_empty() {
+        None
+    } else {
+        Some(queue.remove(0))
+    }
+}
 
 /// Extract the `<target>` from CLI args shaped like `rexadb open <target>`.
 /// Launcher noise (`-psn_*` on macOS, flags) is ignored; the token right
@@ -229,7 +247,10 @@ fn focus_main_window(app: &tauri::AppHandle) {
 
 #[tauri::command]
 fn get_pending_open_url(state: tauri::State<PendingOpenUrl>) -> Option<String> {
-    state.0.lock().unwrap().take()
+    // Pops one request per call; the frontend drains in a loop until `None`,
+    // so every queued request is delivered exactly once and never replays
+    // after a reload.
+    pop_open_target(&state)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1027,7 +1048,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(SidecarState::new())
-        .manage(PendingOpenUrl(Mutex::new(None)))
+        .manage(PendingOpenUrl(Mutex::new(Vec::new())))
         .manage(rexadb_studio::EmbeddedStudioState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -1041,7 +1062,7 @@ pub fn run() {
             let cwd_path = std::path::PathBuf::from(&cwd);
             if let Some(target) = parse_open_target(&args, Some(&cwd_path)) {
                 if let Some(state) = app.try_state::<PendingOpenUrl>() {
-                    *state.0.lock().unwrap() = Some(target.clone());
+                    stash_open_target(&state, target.clone());
                 }
                 let _ = app.emit("open-database", serde_json::json!({ "target": target }));
                 focus_main_window(app);
@@ -1082,7 +1103,7 @@ pub fn run() {
             // the frontend can pick it up via `get_pending_open_url` on boot.
             let launch_args: Vec<String> = std::env::args().collect();
             if let Some(target) = parse_open_target(&launch_args, None) {
-                *app.state::<PendingOpenUrl>().0.lock().unwrap() = Some(target);
+                stash_open_target(&app.state::<PendingOpenUrl>(), target);
             }
 
             let studio_app = app.handle().clone();
@@ -1216,6 +1237,21 @@ mod open_target_tests {
         assert!(out.contains("data.db"), "got {out}");
         assert!(out.ends_with("?mode=ro"), "got {out}");
         assert_eq!(normalize_open_target("file::memory:?cache=shared"), "file::memory:?cache=shared");
+    }
+
+    #[test]
+    fn pending_queue_delivers_each_request_once_in_order() {
+        use super::{pop_open_target, stash_open_target, PendingOpenUrl};
+        use std::sync::Mutex;
+        let state = PendingOpenUrl(Mutex::new(Vec::new()));
+        assert_eq!(pop_open_target(&state), None);
+        stash_open_target(&state, "a".to_string());
+        stash_open_target(&state, "b".to_string());
+        // Rapid successive opens must not overwrite each other.
+        assert_eq!(pop_open_target(&state), Some("a".to_string()));
+        assert_eq!(pop_open_target(&state), Some("b".to_string()));
+        // Drained requests never replay.
+        assert_eq!(pop_open_target(&state), None);
     }
 
     #[test]

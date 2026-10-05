@@ -287,3 +287,67 @@ export function getActiveShell(): ActiveShellRef | null {
     return null;
   }
 }
+
+export interface AppearanceRestorePlan {
+  /** Shell to apply (null = none active). */
+  shellToApply: ActiveShellRef | null;
+  /** Saved shell points at a missing/disabled extension → clear shell DOM. */
+  clearShell: boolean;
+  /**
+   * Pack that must end up applied. Applied AFTER the shell so an explicit
+   * user choice always wins over the shell's linked pack.
+   */
+  packToApply: ActiveStylePackRef | null;
+  /** True when the shell application already applied `packToApply`. */
+  packAppliedByShell: boolean;
+  /** Saved pack points at a missing extension (and the shell didn't cover it). */
+  clearPack: boolean;
+}
+
+/**
+ * Pure restore planner: given the persisted refs and the currently installed
+ * contributions, decide what to apply. Pure (no DOM/storage) so the
+ * precedence — explicit pack choice beats shell-linked pack, picker stays
+ * aligned with what's applied — is unit-testable.
+ *
+ * IMPORTANT: callers must snapshot `savedPack`/`savedShell` BEFORE applying
+ * anything: `applyShell` overwrites the persisted pack key with its linked
+ * pack, so re-reading storage afterwards returns the shell's pack instead of
+ * the user's choice.
+ */
+export function planAppearanceRestore(opts: {
+  savedPack: ActiveStylePackRef | null;
+  savedShell: ActiveShellRef | null;
+  packs: Array<{ extensionId: string; id: string }>;
+  shells: Array<{ extensionId: string; id: string; stylePackId?: string | null }>;
+}): AppearanceRestorePlan {
+  const { savedPack, savedShell, packs, shells } = opts;
+  const shellEntry = savedShell
+    ? shells.find((s) => s.extensionId === savedShell.extensionId && s.id === savedShell.shellId)
+    : undefined;
+  const shellToApply = shellEntry && savedShell ? savedShell : null;
+  const clearShell = Boolean(savedShell && !shellEntry);
+  const shellLinked: ActiveStylePackRef | null =
+    shellEntry?.stylePackId &&
+    packs.some((p) => p.extensionId === shellEntry.extensionId && p.id === shellEntry.stylePackId)
+      ? { extensionId: shellEntry.extensionId, packId: shellEntry.stylePackId }
+      : null;
+
+  const savedPackEntry = savedPack
+    ? packs.find((p) => p.extensionId === savedPack.extensionId && p.id === savedPack.packId)
+    : undefined;
+  if (savedPack && savedPackEntry) {
+    const sameAsShellLinked =
+      shellLinked !== null &&
+      shellLinked.extensionId === savedPack.extensionId &&
+      shellLinked.packId === savedPack.packId;
+    return { shellToApply, clearShell, packToApply: savedPack, packAppliedByShell: sameAsShellLinked, clearPack: false };
+  }
+  if (shellLinked) {
+    return { shellToApply, clearShell, packToApply: shellLinked, packAppliedByShell: true, clearPack: false };
+  }
+  if (savedPack) {
+    return { shellToApply, clearShell, packToApply: null, packAppliedByShell: false, clearPack: true };
+  }
+  return { shellToApply, clearShell, packToApply: null, packAppliedByShell: false, clearPack: false };
+}

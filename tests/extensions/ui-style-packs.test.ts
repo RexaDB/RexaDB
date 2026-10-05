@@ -7,6 +7,7 @@ import {
   applyShell,
   clearShell,
   getActiveShell,
+  planAppearanceRestore,
   scopeCss,
 } from "../../lib/extensions/ui-style-packs";
 import {
@@ -70,6 +71,64 @@ test("scopeCss prefixes selectors for pack attribute", () => {
   assert.ok(out.includes(`${attr} [data-slot="button"]`));
   assert.ok(out.includes(`${attr} [data-slot="input"]`));
   assert.ok(out.includes(`${attr}.rexadb-shell-x [data-slot="shell"]`));
+});
+
+test("planAppearanceRestore: explicit pack wins over shell-linked pack", () => {
+  const packs = [
+    { extensionId: "acme.look", id: "pill" },
+    { extensionId: "acme.look", id: "flat" },
+  ];
+  const shells = [{ extensionId: "acme.look", id: "compact", stylePackId: "flat" }];
+  const plan = planAppearanceRestore({
+    savedPack: { extensionId: "acme.look", packId: "pill" },
+    savedShell: { extensionId: "acme.look", shellId: "compact" },
+    packs,
+    shells,
+  });
+  assert.deepEqual(plan.shellToApply, { extensionId: "acme.look", shellId: "compact" });
+  // The user's pack (not the shell's linked "flat") must end up applied,
+  // and the picker must reflect it.
+  assert.deepEqual(plan.packToApply, { extensionId: "acme.look", packId: "pill" });
+  assert.equal(plan.packAppliedByShell, false);
+  assert.equal(plan.clearShell, false);
+  assert.equal(plan.clearPack, false);
+});
+
+test("planAppearanceRestore: shell-linked pack applies when no pack saved", () => {
+  const plan = planAppearanceRestore({
+    savedPack: null,
+    savedShell: { extensionId: "acme.look", shellId: "compact" },
+    packs: [{ extensionId: "acme.look", id: "flat" }],
+    shells: [{ extensionId: "acme.look", id: "compact", stylePackId: "flat" }],
+  });
+  assert.deepEqual(plan.packToApply, { extensionId: "acme.look", packId: "flat" });
+  assert.equal(plan.packAppliedByShell, true);
+});
+
+test("planAppearanceRestore: missing extensions clear without touching others", () => {
+  const gone = planAppearanceRestore({
+    savedPack: { extensionId: "gone.ext", packId: "pill" },
+    savedShell: { extensionId: "gone.ext", shellId: "compact" },
+    packs: [],
+    shells: [],
+  });
+  assert.equal(gone.shellToApply, null);
+  assert.equal(gone.clearShell, true);
+  assert.equal(gone.packToApply, null);
+  assert.equal(gone.clearPack, true);
+
+  const missingPackKeepsShellLink = planAppearanceRestore({
+    savedPack: { extensionId: "gone.ext", packId: "pill" },
+    savedShell: { extensionId: "acme.look", shellId: "compact" },
+    packs: [{ extensionId: "acme.look", id: "flat" }],
+    shells: [{ extensionId: "acme.look", id: "compact", stylePackId: "flat" }],
+  });
+  // Shell's linked pack stays applied and picker aligns to it.
+  assert.deepEqual(missingPackKeepsShellLink.packToApply, {
+    extensionId: "acme.look",
+    packId: "flat",
+  });
+  assert.equal(missingPackKeepsShellLink.clearPack, false);
 });
 
 test("style pack apply/clear is a no-op without document", () => {

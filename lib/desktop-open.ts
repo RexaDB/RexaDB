@@ -25,6 +25,24 @@ export function dbTypeToProvider(dbType: string): string {
   return dbType;
 }
 
+/**
+ * Decide whether opening `trimmed` must persist new credentials onto the
+ * matched saved connection. Pure/testable:
+ * - identical strings → reuse, nothing to update;
+ * - caller supplies no secrets (e.g. passwordless open of a saved plaintext
+ *   connection) → reuse unchanged so the saved password is never wiped;
+ * - caller supplies secrets for the same secret-stripped target (e.g. rotated
+ *   password) → update before reusing the id.
+ */
+export function shouldUpdateStoredCredentials(
+  storedConnectionString: string | undefined,
+  trimmed: string,
+): boolean {
+  if (!storedConnectionString || storedConnectionString === trimmed) return false;
+  if (stripConnectionSecrets(storedConnectionString) !== stripConnectionSecrets(trimmed)) return false;
+  return hasConnectionSecret({ connectionString: trimmed });
+}
+
 /** Human-friendly connection name derived from a URL or file path. */
 export function deriveOpenConnectionName(target: string): string {
   const trimmed = target.trim();
@@ -105,25 +123,26 @@ export async function openDatabaseTarget(
       );
     });
     if (match?.id != null) {
-      // Exact same string — reuse immediately.
-      if ((match as any).connectionString === trimmed) {
+      const storedCs = (match as any).connectionString as string | undefined;
+      // Exact same string, or caller supplies no new secrets (e.g. a
+      // passwordless open of a saved plaintext connection) → reuse unchanged
+      // so saved credentials are never wiped.
+      if (!shouldUpdateStoredCredentials(storedCs, trimmed)) {
         return { success: true, id: Number((match as any).id), name: (match as any).name || name };
       }
-      // Same secret-stripped URL but different raw strings. Only persist when
-      // the caller actually supplies new secrets (e.g. rotated password) —
-      // a passwordless open of a saved plaintext connection must reuse it
-      // unchanged, otherwise the PUT would delete the saved password.
-      if (!hasConnectionSecret({ connectionString: trimmed })) {
-        return { success: true, id: Number((match as any).id), name: (match as any).name || name };
-      }
+      // Same secret-stripped target with new secrets (e.g. rotated password):
+      // persist them before reusing the id so Studio stops using stale creds.
+      // Preserve the stored row's other attributes (name, type) — only the
+      // connection string (credentials) changes.
       try {
         const { protectConnectionPayload } = await import(
           "./credentials/connection-credentials"
         );
         const protectedUpdate = await protectConnectionPayload({
+          ...(match as any),
           name: (match as any).name || name,
           connectionString: trimmed,
-          connectionType: provider,
+          connectionType: (match as any).connectionType || provider,
         });
         const putRes = await fetch(`${apiBase.API_BASE}/api/connections/${(match as any).id}`, {
           method: "PUT",
@@ -135,9 +154,11 @@ export async function openDatabaseTarget(
           return { success: true, id: Number((match as any).id), name: (match as any).name || name };
         }
       } catch {
-        // Fall through — reuse the old id rather than failing the open.
+        // Fall through to distinguishing POST below.
       }
-      return { success: true, id: Number((match as any).id), name: (match as any).name || name };
+      // The update didn't stick: treat this as a distinct target with
+      // different credentials rather than silently reusing the stale id.
+      // (Falls through to the create path below.)
     }
 
     const { protectConnectionPayload } = await import(

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   dbTypeToProvider,
   deriveOpenConnectionName,
+  shouldUpdateStoredCredentials,
 } from "../../lib/desktop-open";
 
 test("dbTypeToProvider maps UI provider ids", () => {
@@ -45,4 +46,40 @@ test("deriveOpenConnectionName never leaks credentials or blanks", () => {
   assert.ok(!named.includes("s3cret"), named);
   assert.ok(!named.includes("admin"), named);
   assert.ok(deriveOpenConnectionName("   ").length > 0);
+});
+
+test("shouldUpdateStoredCredentials only updates on new secrets", () => {
+  // Identical strings → reuse.
+  assert.equal(
+    shouldUpdateStoredCredentials(
+      "postgres://u:p@host/db",
+      "postgres://u:p@host/db",
+    ),
+    false,
+  );
+  // Rotated password → update before reusing the id.
+  assert.equal(
+    shouldUpdateStoredCredentials(
+      "postgres://u:old@host/db",
+      "postgres://u:new@host/db",
+    ),
+    true,
+  );
+  // Passwordless open of a saved password connection → reuse unchanged,
+  // otherwise the saved password would be wiped.
+  assert.equal(
+    shouldUpdateStoredCredentials(
+      "postgres://u:old@host/db",
+      "postgres://u@host/db",
+    ),
+    false,
+  );
+  // Different target entirely → not an update (handled as a new connection).
+  assert.equal(
+    shouldUpdateStoredCredentials(
+      "postgres://u:p@host/db1",
+      "postgres://u:p@host/db2",
+    ),
+    false,
+  );
 });
