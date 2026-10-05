@@ -22,7 +22,7 @@ Two artifacts:
 
 - `manifest.json` — id (`publisher.name`), semver version,
   `engines.rexadb`, static `contributes` (commands, views, webviewPanels,
-  statusBar, languages, themes, resultVisualizers, cellRenderers, dbDrivers,
+  statusBar, languages, themes, ui, resultVisualizers, cellRenderers, dbDrivers,
   aiTools), `capabilities`.
 - `main.js` — **single bundled file, no imports**, declaring
   `async function activate(rexa) {...}`.
@@ -38,6 +38,7 @@ Two artifacts:
 | `rexa.rexaDb` | `getConnections`, `getActiveConnection`, `executeQuery`, `getSchema`, `readTable`, `getActiveQuery`, `setActiveQuery`, `openResultVisualizer` |
 | `rexa.ai` | `registerTool` |
 | `rexa.env` | `clipboardWrite` |
+| `rexa.ui` | `applyStylePack`, `clearStylePack`, `setActiveShell`, `clearShell`, `listStylePacks`, `listShells`, `getActiveStylePack`, `getActiveShell` |
 
 ### Data + schema access
 
@@ -90,6 +91,56 @@ Sidebar views and tab content are separate surfaces — never the same html:
   (`document.documentElement.dataset.rexaTheme`, `style.colorScheme`, and
   `acquireRexaApi().getState().theme`), so extension tabs/panels/views follow
   light/dark automatically.
+- **Look & feel (`contributes.ui`)**: restyle or replace app chrome.
+  - **Style packs** — CSS variables + raw CSS applied to `html[data-rexadb-ui-pack]`.
+    Target `[data-slot="button"]`, `[data-slot="input"]`, `[data-slot="shell"]`,
+    etc. so every instance updates (buttons, inputs, shell). Activate from the
+    Extensions tab **Look & feel** section or `await rexa.ui.applyStylePack(id)`.
+  - **Shells** — alternate app chrome: `className` on `<html>`, optional linked
+    style pack, optional trusted React override via `componentKey` + host-side
+    `registerUiComponent("shell", MyShell)`.
+  - **React overrides** (trusted / bundled only) — Workers cannot ship React.
+    Host code calls `registerUiComponent("button", MyButton)` /
+    `registerUiComponent("shell", MyShell)`. Studio renders `AppShell` from
+    `components/app-shell/resolved-shell.tsx`; `Button` resolves the same way.
+    Custom buttons should compose `ButtonDefault` to avoid recursion.
+
+```js
+// Manifest (static)
+"contributes": {
+  "ui": {
+    "stylePacks": [{
+      "id": "pill-buttons",
+      "label": "Pill Buttons",
+      "slots": ["button"],
+      "css": "[data-slot=\"button\"] { border-radius: 9999px !important; }"
+    }],
+    "shells": [{
+      "id": "compact",
+      "label": "Compact Shell",
+      "className": "rexadb-shell-compact",
+      "stylePackId": "pill-buttons"
+    }]
+  }
+}
+
+// Runtime
+await rexa.ui.applyStylePack("pill-buttons");
+await rexa.ui.setActiveShell("compact");
+await rexa.ui.clearStylePack();
+```
+
+```tsx
+// Trusted host plugin (not Worker code)
+import { registerUiComponent } from "@/lib/extensions/ui-registry";
+import { ButtonDefault } from "@/components/ui/button";
+import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
+
+registerUiComponent("button", (props) => (
+  <ButtonDefault {...props} className={`rounded-full ${props.className ?? ""}`} />
+));
+registerUiComponent("shell", MyCustomShell); // same props as ModernUIShell
+```
 
 ```js
 await rexa.window.createRailItem("my-tab", "My Panel", { viewId: "my-ext.view" });
@@ -142,6 +193,10 @@ the VS Code-like bridge:
 | `lib/extensions/db-bridge.ts` | Live studio bridge (`rexaDb.*`) + write-query guard |
 | `lib/extensions/react.tsx` | `ExtensionProvider`, aggregation hooks |
 | `lib/extensions/themes.ts` | Theme CSS-variable apply/clear |
+| `lib/extensions/ui-slots.ts` | UI slot ids + `contributes.ui` types |
+| `lib/extensions/ui-style-packs.ts` | Style pack / shell apply/clear |
+| `lib/extensions/ui-registry.tsx` | Trusted React component overrides |
+| `components/app-shell/resolved-shell.tsx` | `AppShell` — resolves extension shell |
 | `components/studio/extensions-view.tsx` | Manager UI (Extensions tab) |
 | `components/studio/extension-sidebar-section.tsx` | Sidebar views host (grouped by container) |
 | `components/studio/extension-tree-view.tsx` | Tree rendering |

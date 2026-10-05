@@ -80,6 +80,16 @@ export type HostCallbacks = {
     ): void;
   };
   tabs: { open(extensionId: string, viewId: string, opts?: { title?: string }): void };
+  ui: {
+    applyStylePack(extensionId: string, packId: string): Promise<void>;
+    clearStylePack(): Promise<void>;
+    setActiveShell(extensionId: string, shellId: string): Promise<void>;
+    clearShell(): Promise<void>;
+    listStylePacks(): Promise<Array<{ extensionId: string; id: string; label: string }>>;
+    listShells(): Promise<Array<{ extensionId: string; id: string; label: string }>>;
+    getActiveStylePack(): Promise<{ extensionId: string; packId: string } | null>;
+    getActiveShell(): Promise<{ extensionId: string; shellId: string } | null>;
+  };
 };
 
 type PendingCall = { resolve: (v: unknown) => void; reject: (e: Error) => void };
@@ -136,6 +146,16 @@ const rexa = {
   },
   ai: { registerTool: (tool) => __call("ai", "registerTool", [tool]) },
   env: { clipboardWrite: (text) => __call("env", "clipboardWrite", [text]) },
+  ui: {
+    applyStylePack: (packId) => __call("ui", "applyStylePack", [packId]),
+    clearStylePack: () => __call("ui", "clearStylePack", []),
+    setActiveShell: (shellId) => __call("ui", "setActiveShell", [shellId]),
+    clearShell: () => __call("ui", "clearShell", []),
+    listStylePacks: () => __call("ui", "listStylePacks", []),
+    listShells: () => __call("ui", "listShells", []),
+    getActiveStylePack: () => __call("ui", "getActiveStylePack", []),
+    getActiveShell: () => __call("ui", "getActiveShell", []),
+  },
 };
 // Tree provider + command handlers live in worker; host asks via "execute".
 rexa.__registerHandler = __registerHandler;
@@ -400,6 +420,22 @@ export class ExtensionHost {
         return true;
       case "env.clipboardWrite":
         return cb.env.clipboardWrite(args[0] as string);
+      case "ui.applyStylePack":
+        return cb.ui.applyStylePack(extensionId, args[0] as string);
+      case "ui.clearStylePack":
+        return cb.ui.clearStylePack();
+      case "ui.setActiveShell":
+        return cb.ui.setActiveShell(extensionId, args[0] as string);
+      case "ui.clearShell":
+        return cb.ui.clearShell();
+      case "ui.listStylePacks":
+        return cb.ui.listStylePacks();
+      case "ui.listShells":
+        return cb.ui.listShells();
+      case "ui.getActiveStylePack":
+        return cb.ui.getActiveStylePack();
+      case "ui.getActiveShell":
+        return cb.ui.getActiveShell();
       default:
         throw new Error(`unknown api: ${namespace}.${method}`);
     }
@@ -520,6 +556,16 @@ export async function runInProcess(
       },
     },
     env: { clipboardWrite: (t) => callbacks.env.clipboardWrite(t) },
+    ui: {
+      applyStylePack: (packId) => callbacks.ui.applyStylePack(extensionId, packId),
+      clearStylePack: () => callbacks.ui.clearStylePack(),
+      setActiveShell: (shellId) => callbacks.ui.setActiveShell(extensionId, shellId),
+      clearShell: () => callbacks.ui.clearShell(),
+      listStylePacks: () => callbacks.ui.listStylePacks(),
+      listShells: () => callbacks.ui.listShells(),
+      getActiveStylePack: () => callbacks.ui.getActiveStylePack(),
+      getActiveShell: () => callbacks.ui.getActiveShell(),
+    },
   };
 
   // Expose wrapped registration so extension code written for the Worker shim

@@ -14,7 +14,11 @@
       { "command": "hello-rexa.say-hello", "title": "Hello Rexa: Say Hello", "group": "Hello Rexa" },
       { "command": "hello-rexa.insert-select-star", "title": "Hello Rexa: Insert SELECT *", "group": "Hello Rexa" },
       { "command": "hello-rexa.open-dashboard", "title": "Hello Rexa: Open Dashboard Panel", "group": "Hello Rexa" },
-      { "command": "hello-rexa.show-schema", "title": "Hello Rexa: Show Schema Summary", "group": "Hello Rexa" }
+      { "command": "hello-rexa.show-schema", "title": "Hello Rexa: Show Schema Summary", "group": "Hello Rexa" },
+      { "command": "hello-rexa.apply-pill-buttons", "title": "Hello Rexa: Pill Buttons", "group": "Hello Rexa" },
+      { "command": "hello-rexa.apply-flat-chrome", "title": "Hello Rexa: Flat Chrome", "group": "Hello Rexa" },
+      { "command": "hello-rexa.use-compact-shell", "title": "Hello Rexa: Compact Shell", "group": "Hello Rexa" },
+      { "command": "hello-rexa.reset-ui", "title": "Hello Rexa: Reset Look & Feel", "group": "Hello Rexa" }
     ],
     "viewsContainers": [{ "id": "hello-rexa.group", "title": "Hello Rexa", "icon": "👋" }],
     "views": [
@@ -49,6 +53,39 @@
         "cssVariables": { "accent": "#f59e0b" }
       }
     ],
+    "ui": {
+      "stylePacks": [
+        {
+          "id": "pill-buttons",
+          "label": "Pill Buttons",
+          "description": "Fully rounded buttons everywhere",
+          "slots": ["button"],
+          "cssVariables": {
+            "button-radius": "9999px"
+          },
+          "css": "[data-slot=\"button\"] { border-radius: var(--ui-button-radius, 9999px) !important; box-shadow: none !important; }"
+        },
+        {
+          "id": "flat-chrome",
+          "label": "Flat Chrome",
+          "description": "Square corners + flat buttons/inputs across the app",
+          "slots": ["*"],
+          "css": "[data-slot=\"button\"], [data-slot=\"input\"], [data-slot=\"select-trigger\"], [data-slot=\"textarea\"] { border-radius: 0 !important; box-shadow: none !important; background-image: none !important; }\n.rexadb-shell-hello-compact [data-slot=\"shell\"] { --shell-sash-gap: 2px; }\n.rexadb-shell-hello-compact [data-slot=\"shell\"] nav { gap: 0.125rem !important; }"
+        }
+      ],
+      "shells": [
+        {
+          "id": "compact",
+          "label": "Hello Compact Shell",
+          "description": "Tighter chrome via CSS class + flat style pack",
+          "className": "rexadb-shell-hello-compact",
+          "stylePackId": "flat-chrome"
+        }
+      ],
+      "slots": [
+        { "slot": "button", "stylePackId": "pill-buttons" }
+      ]
+    },
     "resultVisualizers": [{ "id": "hello-rexa.json-tree", "label": "Hello JSON Tree", "selector": "*:json" }],
     "cellRenderers": [{ "id": "hello-rexa.uppercase", "label": "Hello Uppercase", "forTypes": ["text"] }],
     "aiTools": [{ "id": "hello-rexa.explain-plan", "label": "Explain plan", "description": "Explains the active query plan." }]

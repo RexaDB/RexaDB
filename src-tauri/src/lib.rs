@@ -1,6 +1,7 @@
 mod dictionary;
 mod rexadb_studio;
 mod spacetimedb;
+mod cli_shim;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -116,6 +117,78 @@ struct SidecarState {
     log: Mutex<String>,
     restart_count: Mutex<u32>,
     last_exit_code: Mutex<Option<i32>>,
+}
+
+/// Database target passed via `rexadb open <database-url-or-file-path>`.
+/// Stored when the process starts (or when a second `open` invocation is
+/// forwarded by the single-instance plugin) and consumed by the frontend
+/// once it boots, so no request is lost if the webview isn't ready yet.
+struct PendingOpenUrl(Mutex<Option<String>>);
+
+/// Extract the `<target>` from CLI args shaped like `rexadb open <target>`.
+/// Launcher noise (`-psn_*` on macOS, flags) is ignored; the token right
+/// after the first bare `open` wins and is taken verbatim.
+fn parse_open_target(args: &[String]) -> Option<String> {
+    let mut iter = args.iter().skip(1);
+    for arg in iter.by_ref() {
+        if arg == "open" {
+            if let Some(target) = iter.next() {
+                let normalized = normalize_open_target(target);
+                if !normalized.is_empty() {
+                    return Some(normalized);
+                }
+            }
+            return None;
+        }
+    }
+    None
+}
+
+/// Normalize an `open` target: database URLs pass through untouched, file
+/// system paths are expanded (`~`) and absolutized so the frontend can
+/// treat them as sqlite-style connection strings.
+fn normalize_open_target(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return String::new();
+    }
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    let expanded = expand_tilde(trimmed);
+    let path = PathBuf::from(&expanded);
+    if let Ok(canonical) = std::fs::canonicalize(&path) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    match std::path::absolute(&path) {
+        Ok(abs) => abs.to_string_lossy().into_owned(),
+        Err(_) => expanded,
+    }
+}
+
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        if !home.is_empty() {
+            return format!("{home}/{rest}");
+        }
+    }
+    path.to_string()
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn get_pending_open_url(state: tauri::State<PendingOpenUrl>) -> Option<String> {
+    state.0.lock().unwrap().take()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -913,12 +986,26 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(SidecarState::new())
+        .manage(PendingOpenUrl(Mutex::new(None)))
         .manage(rexadb_studio::EmbeddedStudioState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second `rexadb open <target>` while the app runs: adopt the
+            // request instead of spawning another window.
+            if let Some(target) = parse_open_target(&args) {
+                if let Some(state) = app.try_state::<PendingOpenUrl>() {
+                    *state.0.lock().unwrap() = Some(target.clone());
+                }
+                let _ = app.emit("open-database", serde_json::json!({ "target": target }));
+                focus_main_window(app);
+            } else {
+                focus_main_window(app);
+            }
+        }))
         .setup(|app| {
             #[cfg(target_os = "linux")]
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -945,6 +1032,16 @@ pub fn run() {
             fs::create_dir_all(&data_dir).ok();
             spawn_sidecar(app.handle());
 
+            // Auto-install the `rexadb` terminal command (symlink + PATH).
+            cli_shim::ensure_cli_shim();
+
+            // `rexadb open <database-url-or-file-path>`: stash the target so
+            // the frontend can pick it up via `get_pending_open_url` on boot.
+            let launch_args: Vec<String> = std::env::args().collect();
+            if let Some(target) = parse_open_target(&launch_args) {
+                *app.state::<PendingOpenUrl>().0.lock().unwrap() = Some(target);
+            }
+
             let studio_app = app.handle().clone();
             let sidecar_port = *app.state::<SidecarState>().port.lock().unwrap();
             tauri::async_runtime::spawn(async move {
@@ -964,6 +1061,7 @@ pub fn run() {
             connection_credential_delete,
             get_app_version,
             get_api_base_url,
+            get_pending_open_url,
             is_sidecar_ready,
             get_sidecar_status,
             get_sidecar_log,
@@ -1017,4 +1115,48 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod open_target_tests {
+    use super::{normalize_open_target, parse_open_target};
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_open_subcommand() {
+        assert_eq!(
+            parse_open_target(&args(&["rexadb", "open", "postgres://u@h:5432/db"])),
+            Some("postgres://u@h:5432/db".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_launcher_noise_and_flags() {
+        assert_eq!(parse_open_target(&args(&["rexadb", "-psn_0_12345"])), None);
+        assert_eq!(
+            parse_open_target(&args(&["rexadb", "--flag", "open", "mysql://h/db"])),
+            Some("mysql://h/db".to_string())
+        );
+        assert_eq!(parse_open_target(&args(&["rexadb", "open"])), None);
+        assert_eq!(parse_open_target(&args(&["rexadb"])), None);
+    }
+
+    #[test]
+    fn normalizes_file_paths() {
+        // URLs pass through untouched.
+        assert_eq!(
+            normalize_open_target("  redis://localhost:6379  "),
+            "redis://localhost:6379"
+        );
+        // Absolute paths are kept as-is when they exist or absolutized.
+        let abs = normalize_open_target("/tmp/rexadb-open-test.db");
+        assert!(abs.ends_with("rexadb-open-test.db"), "got {abs}");
+        assert!(abs.starts_with('/'), "got {abs}");
+        // Rejects empty / flag-like targets.
+        assert_eq!(normalize_open_target(""), "");
+        assert_eq!(normalize_open_target("--help"), "");
+    }
 }

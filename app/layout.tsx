@@ -17,6 +17,7 @@ import { UpdateNotificationProvider } from "@/components/providers/update-notifi
 import { AppUpdateProvider } from "@/components/providers/app-update-context";
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider";
 import { ClientShim } from "@/components/client-shim";
+import { DesktopOpenHandler } from "@/components/desktop-open-handler";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
 import { ExtensionProvider } from "@/lib/extensions/react";
 import { CredentialVaultPrompt } from "@/components/providers/credential-vault-prompt";
@@ -58,6 +59,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <ClientShim />
+            <DesktopOpenHandler />
             <CredentialVaultPrompt />
             <SettingsMigrationGate />
             <ZoomWrapper>

@@ -61,6 +61,16 @@ function makeCallbacks(): HostCallbacks & {
     env: { clipboardWrite: async () => {} },
     rail: { create: () => {} },
     tabs: { open: () => {} },
+    ui: {
+      applyStylePack: async () => {},
+      clearStylePack: async () => {},
+      setActiveShell: async () => {},
+      clearShell: async () => {},
+      listStylePacks: async () => [],
+      listShells: async () => [],
+      getActiveStylePack: async () => null,
+      getActiveShell: async () => null,
+    },
   };
   return Object.assign(callbacks, state);
 }
@@ -111,6 +121,30 @@ test("runInProcess supports worker-style __registerHandler", async () => {
   const result = await api.commands.executeCommand("demo.ping", "x");
   assert.equal(result, "pong:x");
   assert.ok(cb.providers.includes("demo.ext:demo.view"));
+});
+
+test("runInProcess routes rexa.ui style pack calls", async () => {
+  const applied: string[] = [];
+  const cb = makeCallbacks();
+  cb.ui.applyStylePack = async (extensionId, packId) => {
+    applied.push(`${extensionId}:${packId}`);
+  };
+  cb.ui.listStylePacks = async () => [{ extensionId: "demo.ext", id: "pill", label: "Pill" }];
+  const { api } = await runInProcess(
+    "demo.ext",
+    `
+async function activate(rexa) {
+  await rexa.ui.applyStylePack("pill");
+  const packs = await rexa.ui.listStylePacks();
+  rexa.__registerHandler("command:demo.packs", async () => packs);
+  await rexa.commands.registerCommand("demo.packs", "Packs");
+}
+`,
+    cb,
+  );
+  assert.deepEqual(applied, ["demo.ext:pill"]);
+  const packs = await api.commands.executeCommand("demo.packs");
+  assert.deepEqual(packs, [{ extensionId: "demo.ext", id: "pill", label: "Pill" }]);
 });
 
 test("write queries are blocked without the query:write capability", async () => {

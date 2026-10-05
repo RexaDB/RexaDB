@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
 import { STUDIO_TAB_ICONS, TAB_REGISTRY } from "@/lib/studio/tab-registry";
 import { resolvePaneForTab } from "@/lib/studio/split-layout";
-import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
+import { AppShell as ModernUIShell } from "@/components/app-shell/resolved-shell";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SettingsView } from "@/components/studio/settings-view";
 import { StudioShellSidebar } from "./studio-shell-sidebar";

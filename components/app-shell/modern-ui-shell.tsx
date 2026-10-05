@@ -387,7 +387,11 @@ export function ModernUIShell({
 
 	return (
 		<SheetDockContext.Provider value={dockContainer}>
-		<div className="overflow-hidden" data-translucent={noiseBgTranslucent ? "" : undefined}>
+		<div
+			className="overflow-hidden"
+			data-slot="shell"
+			data-translucent={noiseBgTranslucent ? "" : undefined}
+		>
 			<TooltipProvider>
 			<div className="relative flex h-svh min-w-0 flex-col bg-sidebar" ref={rootRef}>
 				{/* VS Code-style title bar: floats transparently over the top strip

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
 import { ConnectionAnalytics } from "@/components/connections/connection-analytics";
-import { ModernUIShell } from "@/components/app-shell/modern-ui-shell";
+import { AppShell as ModernUIShell } from "@/components/app-shell/resolved-shell";
 import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
