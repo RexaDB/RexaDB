@@ -62,10 +62,17 @@ export function hasConnectionSecret(payload: SecretBearingConnection): boolean {
 }
 
 export function restorePostgresPassword(connectionString: string, username: string, password: string) {
-  if (!/^postgres(?:ql)?:\/\//i.test(connectionString) || !password) return connectionString;
+  if (!password) return connectionString;
+  const normalized = String(connectionString || "").trim().replace(
+    /^((?:postgres(?:ql)?):)\/(?!\/)/i,
+    "$1//",
+  );
+  if (!/^postgres(?:ql)?:\/\//i.test(normalized)) return connectionString;
   try {
-    const url = new URL(connectionString);
+    const url = new URL(normalized);
     if (!url.username && username) url.username = username;
+    // URL setters percent-encode automatically, so raw values such as
+    // `12345` or `p@ss` survive the round-trip.
     if (!url.password) url.password = password;
     return url.toString();
   } catch {

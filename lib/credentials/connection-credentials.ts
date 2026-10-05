@@ -53,19 +53,46 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
   const raw = connection.credentialRef.startsWith("vault:")
     ? await decryptVaultSecret(connection.credentialRef, connection.credentialSecret || "")
     : await invoke<string>("connection_credential_get", { reference: connection.credentialRef });
-  const secret = JSON.parse(raw) as Record<string, unknown>;
+  let secret: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Invalid credential bundle.");
+    }
+    secret = parsed as Record<string, unknown>;
+  } catch {
+    throw new Error("Could not unlock saved credentials.");
+  }
+  // Only forward plain string secrets to the sidecar cache; never forward
+  // objects that would make node-postgres see a non-string password.
+  const cacheSecret: Record<string, string | null> = {};
+  for (const field of ["connectionString", "password", "authToken"] as const) {
+    const value = secret[field];
+    if (value === null || typeof value === "string") cacheSecret[field] = value;
+  }
   try {
     await fetch(new URL("/api/connections/credential-cache", API_BASE), {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference: connection.credentialRef, secret }),
+      body: JSON.stringify({ reference: connection.credentialRef, secret: cacheSecret }),
     });
   } catch {
     // The UI can still use its keychain-hydrated URL if the sidecar cache is unavailable.
   }
   const hydrated = { ...connection, ...secret } as T;
-  const connectionString = typeof hydrated.connectionString === "string" && typeof secret.password === "string"
-    ? restorePostgresPassword(hydrated.connectionString, String(hydrated.username || ""), secret.password)
-    : hydrated.connectionString;
+  const bundlePassword = typeof secret.password === "string" ? secret.password : "";
+  const rowPassword =
+    typeof (connection as Record<string, unknown>).password === "string"
+      ? String((connection as Record<string, unknown>).password)
+      : "";
+  const password = bundlePassword || rowPassword;
+  const connectionString =
+    typeof hydrated.connectionString === "string" && password
+      ? restorePostgresPassword(
+          hydrated.connectionString,
+          String((hydrated as Record<string, unknown>).username || ""),
+          password,
+        )
+      : hydrated.connectionString;
   return { ...hydrated, connectionString } as T;
 }
 

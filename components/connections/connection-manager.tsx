@@ -1942,9 +1942,14 @@ export function ConnectionManager({
         fetchConnectionGroups(),
       ]);
       setConnections(conns);
-      if (conns.some((conn: any) => conn.credentialError || conn.secureCleanupPending)) {
+      if (conns.some((conn: any) => conn.credentialError)) {
         toast.error(
-          "Some saved credentials could not be unlocked or their SQLite cleanup did not finish. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
+          "Some saved credentials could not be unlocked. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
+        );
+      }
+      if (conns.some((conn: any) => conn.secureCleanupPending)) {
+        toast.warning(
+          "Credentials were secured, but SQLite cleanup did not finish and will retry. Older database copies may still contain recoverable secrets until it succeeds.",
         );
       }
       setConnectionGroups(groups);
