@@ -25,10 +25,12 @@ export function PasswordInput({
         type={show ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="bg-background border-border/60 h-9 pr-8"
+        autoComplete="current-password"
+        className="bg-background border-border/60 h-9 pr-8 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
       />
       <button
         type="button"
+        aria-label={show ? "Hide password" : "Show password"}
         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
         onClick={onToggleShow}
       >

@@ -75,6 +75,15 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
       }
       secured.push(await hydrateConnection(safeRow));
     } catch {
+      // Do not destroy working inline credentials when migration itself fails
+      // (keychain unavailable, vault locked, user cancelled). The original row
+      // still contains a usable connection string, so keep it and retry on the
+      // next load instead of stripping the password (which breaks PostgreSQL
+      // with "SASL: ... client password must be a string").
+      if (!row.credentialRef && hasConnectionSecret(row)) {
+        secured.push({ ...row });
+        continue;
+      }
       secured.push({
         ...row,
         connectionString: stripConnectionSecrets(row.connectionString || ""),
