@@ -25,7 +25,7 @@ import {
   getActiveStylePack,
   planAppearanceRestore,
 } from "./ui-style-packs";
-import { peekUiComponent, registerUiComponent, unregisterUiComponent } from "./ui-registry";
+import { peekUiComponent, registerUiComponent } from "./ui-registry";
 import type {
   ExtensionCommandContribution,
   ExtensionShellContribution,
@@ -219,8 +219,10 @@ export function ExtensionProvider({
   const treeOwnerRef = useRef<Map<string, string>>(new Map());
   const stylePacksRef = useRef<ExtensionStylePackState[]>([]);
   const shellsRef = useRef<ExtensionShellState[]>([]);
-  /** Slot ids (`button`, `shell`, …) whose bindings this provider owns. */
-  const providerUiOwnedRef = useRef<Set<string>>(new Set());
+  /** Slot bindings this provider registered: key → guarded disposer. */
+  const providerUiOwnedRef = useRef(
+    new Map<string, { comp: React.ComponentType<any>; dispose: () => void }>(),
+  );
   const dbBridgeRef = useRef(dbBridge);
   dbBridgeRef.current = dbBridge;
 
@@ -228,6 +230,37 @@ export function ExtensionProvider({
     setRecords(loadInstalled());
     setRecordsHydrated(true);
   }, []);
+
+  /**
+   * Claim a slot binding for the provider. Replacement is guarded: if trusted
+   * host code replaced our binding after we registered it, the old disposer
+   * is a no-op and only our own component is ever removed.
+   */
+  const ownUiBinding = (key: string, comp: React.ComponentType<any>) => {
+    const owned = providerUiOwnedRef.current;
+    const prev = owned.get(key);
+    if (prev?.comp === comp && peekUiComponent(key) === comp) return;
+    if (prev) {
+      prev.dispose();
+      owned.delete(key);
+    }
+    if (peekUiComponent(key) !== comp) {
+      const dispose = registerUiComponent(key, comp);
+      owned.set(key, { comp, dispose });
+    }
+    // Else: host code already holds exactly the component we want — adopt
+    // without owning so cleanup never removes host-registered code.
+  };
+
+  /** Release a provider-owned binding; newer host bindings survive. */
+  const releaseUiBinding = (key: string) => {
+    const owned = providerUiOwnedRef.current;
+    const prev = owned.get(key);
+    if (prev) {
+      prev.dispose();
+      owned.delete(key);
+    }
+  };
 
   // Seed static contributions from manifests (no code execution needed).
   useEffect(() => {
@@ -421,28 +454,23 @@ export function ExtensionProvider({
     }
     // Sync provider-owned slot/shell bindings: remove overrides whose
     // extension was disabled/uninstalled, whose shell is gone, or whose shell
-    // became CSS-only (no Comp wanted). Only keys this provider previously
-    // registered are touched — host-registered keys are left alone.
+    // became CSS-only (no Comp wanted). Disposers are guarded: a binding that
+    // trusted host code replaced meanwhile is never removed by us.
     {
       const owned = providerUiOwnedRef.current;
-      for (const key of Array.from(owned)) {
-        if (!wantedSlotBindings.has(key)) {
-          unregisterUiComponent(key);
-          owned.delete(key);
-        }
+      for (const key of Array.from(owned.keys())) {
+        if (!wantedSlotBindings.has(key)) releaseUiBinding(key);
       }
-      for (const [key, Comp] of wantedSlotBindings) {
-        if (peekUiComponent(key) !== Comp) registerUiComponent(key, Comp);
-        owned.add(key);
-      }
+      for (const [key, Comp] of wantedSlotBindings) ownUiBinding(key, Comp);
     }
   }, [records, recordsHydrated]);
 
   // Release provider-owned overrides on unmount (HMR / tests / logout).
+  // Guarded: bindings the host replaced after us survive cleanup.
   useEffect(() => {
     const owned = providerUiOwnedRef.current;
     return () => {
-      for (const key of owned) unregisterUiComponent(key);
+      for (const [, entry] of owned) entry.dispose();
       owned.clear();
     };
   }, []);
@@ -472,11 +500,9 @@ export function ExtensionProvider({
       (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
       peekUiComponent(`${extensionId}:${shellId}`);
     if (Comp) {
-      registerUiComponent("shell", Comp);
-      providerUiOwnedRef.current.add("shell");
+      ownUiBinding("shell", Comp);
     } else {
-      unregisterUiComponent("shell");
-      providerUiOwnedRef.current.delete("shell");
+      releaseUiBinding("shell");
     }
     setActiveShell({ extensionId, shellId });
   }, []);
@@ -484,8 +510,7 @@ export function ExtensionProvider({
   const clearActiveShell = useCallback(() => {
     clearShell({ clearStylePack: false });
     // Drop the shell React override so ModernUIShell returns.
-    unregisterUiComponent("shell");
-    providerUiOwnedRef.current.delete("shell");
+    releaseUiBinding("shell");
     setActiveShell(null);
   }, []);
 
@@ -671,18 +696,15 @@ export function ExtensionProvider({
             (shell.componentKey ? peekUiComponent(shell.componentKey) : undefined) ??
             peekUiComponent(`${extensionId}:${shellId}`);
           if (Comp) {
-            registerUiComponent("shell", Comp);
-            providerUiOwnedRef.current.add("shell");
+            ownUiBinding("shell", Comp);
           } else {
-            unregisterUiComponent("shell");
-            providerUiOwnedRef.current.delete("shell");
+            releaseUiBinding("shell");
           }
           setActiveShell({ extensionId, shellId });
         },
         clearShell: async () => {
           clearShell({ clearStylePack: false });
-          unregisterUiComponent("shell");
-          providerUiOwnedRef.current.delete("shell");
+          releaseUiBinding("shell");
           setActiveShell(null);
         },
         listStylePacks: async () =>

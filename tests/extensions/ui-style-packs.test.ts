@@ -73,6 +73,27 @@ test("scopeCss prefixes selectors for pack attribute", () => {
   assert.ok(out.includes(`${attr}.rexadb-shell-x [data-slot="shell"]`));
 });
 
+test("ui registry disposer is guarded against newer bindings", () => {
+  function Old() {
+    return null;
+  }
+  function New() {
+    return null;
+  }
+  function Fallback() {
+    return null;
+  }
+  const disposeOld = registerUiComponent("shell", Old);
+  // Host replaces the binding after us…
+  registerUiComponent("shell", New);
+  // …so disposing our stale handle must NOT remove the newer binding.
+  disposeOld();
+  assert.equal(peekUiComponent("shell"), New);
+  assert.equal(resolveUiComponent("shell", Fallback), New);
+  unregisterUiComponent("shell");
+  assert.equal(peekUiComponent("shell"), undefined);
+});
+
 test("planAppearanceRestore: explicit pack wins over shell-linked pack", () => {
   const packs = [
     { extensionId: "acme.look", id: "pill" },

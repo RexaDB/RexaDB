@@ -75,11 +75,19 @@ export function DesktopOpenHandler() {
     const drainPending = async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        for (let i = 0; i < MAX_DRAIN_PER_PASS; i++) {
+        for (;;) {
           if (cancelled) return;
-          const next = await invoke<string | null>("get_pending_open_url");
-          if (!next) break;
-          enqueue(next);
+          let taken = 0;
+          for (; taken < MAX_DRAIN_PER_PASS; taken++) {
+            if (cancelled) return;
+            const next = await invoke<string | null>("get_pending_open_url");
+            if (!next) break;
+            enqueue(next);
+          }
+          // A full pass means more may be queued — yield, then go again so
+          // nothing stays stranded server-side.
+          if (taken < MAX_DRAIN_PER_PASS) break;
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
       } catch {
         // Not running inside Tauri (browser) — nothing to do.
