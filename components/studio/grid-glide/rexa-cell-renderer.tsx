@@ -21,7 +21,7 @@ import {
 } from "@/components/common/studio-sheet";
 import { JsonCodeEditor, formatJsonText } from "./json-code-editor";
 import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -875,10 +875,87 @@ function TypedEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCh
   );
 }
 
-function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {
-  const [localValue, setLocalValue] = React.useState(
-    d.value === null || d.value === undefined ? "" : String(d.value),
-  );
+/** Sub-second digits of a time value (`12:34:56.789123` → `"789123"`), if any. */
+function fractionOf(value: string): string | null {
+  const match = value.match(/\d{2}:\d{2}:\d{2}\.(\d+)/);
+  return match?.[1] ?? null;
+}
+
+function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {  const hasTime = /time|timestamp/i.test(d.columnType);
+  // timestamptz / "timestamp with time zone": the stored value is an instant.
+  // The input shows it as browser-local wall time, so the commit must convert
+  // back to UTC. Naive timestamps commit wall-clock verbatim (no conversion).
+  const hasTimeZone = /timestamptz|timetz|with time zone/i.test(d.columnType);
+  const toInputValue = (value: string) => {
+    if (!value) return "";
+    const date = safeParseDate(value);
+    if (!date) return value;
+    const pad = (part: number) => String(part).padStart(2, "0");
+    const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    if (!hasTime) return datePart;
+    const ms = date.getMilliseconds();
+    const timePart = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${ms ? `.${String(ms).padStart(3, "0")}` : ""}`;
+    return `${datePart}T${timePart}`;
+  };
+  const [calendarOpen, setCalendarOpen] = React.useState(false);
+  const initialRaw = d.value === null || d.value === undefined ? "" : String(d.value);
+  const [localValue, setLocalValue] = React.useState(toInputValue(initialRaw));
+  const [isDirty, setIsDirty] = React.useState(false);
+  const markValue = (next: string) => {
+    setLocalValue(next);
+    // Untouched input must round-trip the original string verbatim: parsing
+    // goes through JS Date (millisecond precision), so normalizing would erase
+    // sub-millisecond precision (e.g. Postgres microseconds) on no-edit saves.
+    setIsDirty(next !== toInputValue(initialRaw));
+  };
+  const restoreOriginalFraction = (committed: string): string => {
+    // Reattach sub-second digits the datetime control can't express (e.g.
+    // Postgres microseconds) when only the day changed: the carried time
+    // keeps millisecond precision at most. Never touch a time the user edited.
+    const rawFrac = fractionOf(initialRaw);
+    if (!rawFrac) return committed;
+    const curFrac = fractionOf(committed) ?? "";
+    if (curFrac.length > 3 || !rawFrac.startsWith(curFrac)) return committed;
+    if (rawFrac.length <= curFrac.length) return committed;
+    const wallOf = (v: string) => v.match(/(\d{2}:\d{2}:\d{2})/)?.[1] ?? null;
+    const originalWall = wallOf(toInputValue(initialRaw));
+    if (!originalWall || wallOf(localValue) !== originalWall) return committed;
+    return committed.replace(/(\d{2}:\d{2}:\d{2})(\.\d+)?/, `$1.${rawFrac}`);
+  };
+  const commitValue = () => {
+    if (!localValue) {
+      onCommit("");
+      return;
+    }
+    if (!isDirty) {
+      onCommit(initialRaw);
+      return;
+    }
+    if (!hasTime) {
+      // Plain `date`: commit the calendar day verbatim. Routing through a
+      // Date (midnight local → UTC) shifts the day for zones ahead of UTC.
+      onCommit(localValue);
+      return;
+    }
+    if (hasTimeZone) {
+      // Mirror the display conversion: the wall time was rendered in the
+      // browser zone, so interpret the edit there and store the UTC instant.
+      // A no-edit save therefore round-trips to the stored instant.
+      const date = safeParseDate(localValue);
+      onCommit(restoreOriginalFraction(date ? date.toISOString() : localValue));
+      return;
+    }
+    // Timezone-naive timestamp: keep the wall-clock value as displayed.
+    onCommit(restoreOriginalFraction(localValue.includes("T") ? localValue.replace("T", " ") : localValue));
+  };
+  const selectedDate = React.useMemo(() => {
+    if (!localValue) return undefined;
+    if (hasTime) {
+      const [datePart] = localValue.split("T");
+      return safeParseDate(datePart) || undefined;
+    }
+    return safeParseDate(localValue) || undefined;
+  }, [hasTime, localValue]);
 
   return (
     <div
@@ -895,38 +972,57 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex-1 flex items-center px-3 gap-2 py-2">
-        <Popover open onOpenChange={(open) => !open && onCommit(localValue)}>
-          <PopoverTrigger asChild>
-            <div className="flex items-center w-full h-full gap-2 cursor-pointer">
-              <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
-              <input
-                autoFocus
-                className={cn(
-                  "flex-1 h-full bg-transparent outline-none border-none text-xs text-foreground",
-                  d.isRtl && "text-right",
-                )}
-                dir="auto"
-                value={localValue}
-                onChange={(e) => setLocalValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onCommit(localValue);
-                  else if (e.altKey && e.code === "KeyN") onSetNull();
-                  else if (e.altKey && e.code === "KeyD" && isModified) onDiscardChange();
-                  else if (e.key === "Escape") onCancel();
-                }}
-                style={{
-                  unicodeBidi: "plaintext",
-                  fontFamily: d.isRtl ? "var(--font-arabic)" : undefined,
-                }}
-              />
-            </div>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0 bg-popover border-studio-border shadow-2xl" align="start" sideOffset={8}>
+        <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+          <div className="flex items-center w-full h-full gap-2">
+            <PopoverAnchor asChild>
+              <button
+                type="button"
+                aria-label="Open calendar"
+                className="shrink-0"
+                onClick={() => setCalendarOpen((open) => !open)}
+              >
+                <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
+              </button>
+            </PopoverAnchor>
+            <input
+              autoFocus
+              type={hasTime ? "datetime-local" : "date"}
+              step={hasTime ? 1 : undefined}
+              className={cn(
+                "flex-1 h-full bg-transparent outline-none border-none text-xs text-foreground",
+                d.isRtl && "text-right",
+              )}
+              dir="auto"
+              value={localValue}
+              onChange={(e) => markValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitValue();
+                else if (e.altKey && e.code === "KeyN") onSetNull();
+                else if (e.altKey && e.code === "KeyD" && isModified) onDiscardChange();
+                else if (e.key === "Escape") onCancel();
+              }}
+              style={{
+                unicodeBidi: "plaintext",
+                fontFamily: d.isRtl ? "var(--font-arabic)" : undefined,
+              }}
+            />
+          </div>
+          <PopoverContent className="click-outside-ignore w-auto p-0 bg-popover border-studio-border shadow-2xl" align="start" sideOffset={8}>
             <Calendar
               mode="single"
-              selected={safeParseDate(localValue) || undefined}
+              selected={selectedDate}
+              onMonthChange={() => setCalendarOpen(true)}
+              onPrevClick={() => setCalendarOpen(true)}
+              onNextClick={() => setCalendarOpen(true)}
               onSelect={(date) => {
-                if (date) onCommit(date.toISOString());
+                if (date) {
+                  const pad = (part: number) => String(part).padStart(2, "0");
+                  const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+                  markValue(hasTime
+                    ? `${datePart}T${localValue.split("T")[1] || "00:00:00"}`
+                    : datePart);
+                  setCalendarOpen(false);
+                }
               }}
               initialFocus
               className="bg-popover text-foreground"
@@ -941,7 +1037,7 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
       </div>
       <EditorFooter
         isModified={isModified}
-        onCommit={() => onCommit(localValue)}
+        onCommit={commitValue}
         onCancel={onCancel}
         onSetNull={onSetNull}
         onDiscardChange={onDiscardChange}
