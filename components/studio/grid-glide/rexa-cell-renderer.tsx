@@ -875,8 +875,13 @@ function TypedEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCh
   );
 }
 
-function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {
-  const hasTime = /time|timestamp/i.test(d.columnType);
+/** Sub-second digits of a time value (`12:34:56.789123` → `"789123"`), if any. */
+function fractionOf(value: string): string | null {
+  const match = value.match(/\d{2}:\d{2}:\d{2}\.(\d+)/);
+  return match?.[1] ?? null;
+}
+
+function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardChange }: EditorProps) {  const hasTime = /time|timestamp/i.test(d.columnType);
   // timestamptz / "timestamp with time zone": the stored value is an instant.
   // The input shows it as browser-local wall time, so the commit must convert
   // back to UTC. Naive timestamps commit wall-clock verbatim (no conversion).
@@ -903,6 +908,20 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
     // sub-millisecond precision (e.g. Postgres microseconds) on no-edit saves.
     setIsDirty(next !== toInputValue(initialRaw));
   };
+  const restoreOriginalFraction = (committed: string): string => {
+    // Reattach sub-second digits the datetime control can't express (e.g.
+    // Postgres microseconds) when only the day changed: the carried time
+    // keeps millisecond precision at most. Never touch a time the user edited.
+    const rawFrac = fractionOf(initialRaw);
+    if (!rawFrac) return committed;
+    const curFrac = fractionOf(committed) ?? "";
+    if (curFrac.length > 3 || !rawFrac.startsWith(curFrac)) return committed;
+    if (rawFrac.length <= curFrac.length) return committed;
+    const wallOf = (v: string) => v.match(/(\d{2}:\d{2}:\d{2})/)?.[1] ?? null;
+    const originalWall = wallOf(toInputValue(initialRaw));
+    if (!originalWall || wallOf(localValue) !== originalWall) return committed;
+    return committed.replace(/(\d{2}:\d{2}:\d{2})(\.\d+)?/, `$1.${rawFrac}`);
+  };
   const commitValue = () => {
     if (!localValue) {
       onCommit("");
@@ -923,11 +942,11 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
       // browser zone, so interpret the edit there and store the UTC instant.
       // A no-edit save therefore round-trips to the stored instant.
       const date = safeParseDate(localValue);
-      onCommit(date ? date.toISOString() : localValue);
+      onCommit(restoreOriginalFraction(date ? date.toISOString() : localValue));
       return;
     }
     // Timezone-naive timestamp: keep the wall-clock value as displayed.
-    onCommit(localValue.includes("T") ? localValue.replace("T", " ") : localValue);
+    onCommit(restoreOriginalFraction(localValue.includes("T") ? localValue.replace("T", " ") : localValue));
   };
   const selectedDate = React.useMemo(() => {
     if (!localValue) return undefined;
