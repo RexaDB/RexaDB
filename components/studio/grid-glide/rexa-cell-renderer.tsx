@@ -893,12 +893,23 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
     return `${datePart}T${timePart}`;
   };
   const [calendarOpen, setCalendarOpen] = React.useState(false);
-  const [localValue, setLocalValue] = React.useState(
-    toInputValue(d.value === null || d.value === undefined ? "" : String(d.value)),
-  );
+  const initialRaw = d.value === null || d.value === undefined ? "" : String(d.value);
+  const [localValue, setLocalValue] = React.useState(toInputValue(initialRaw));
+  const [isDirty, setIsDirty] = React.useState(false);
+  const markValue = (next: string) => {
+    setLocalValue(next);
+    // Untouched input must round-trip the original string verbatim: parsing
+    // goes through JS Date (millisecond precision), so normalizing would erase
+    // sub-millisecond precision (e.g. Postgres microseconds) on no-edit saves.
+    setIsDirty(next !== toInputValue(initialRaw));
+  };
   const commitValue = () => {
     if (!localValue) {
       onCommit("");
+      return;
+    }
+    if (!isDirty) {
+      onCommit(initialRaw);
       return;
     }
     if (!hasTime) {
@@ -964,7 +975,7 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
               )}
               dir="auto"
               value={localValue}
-              onChange={(e) => setLocalValue(e.target.value)}
+              onChange={(e) => markValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitValue();
                 else if (e.altKey && e.code === "KeyN") onSetNull();
@@ -988,8 +999,8 @@ function DateEditor({ d, isModified, onCommit, onCancel, onSetNull, onDiscardCha
                 if (date) {
                   const pad = (part: number) => String(part).padStart(2, "0");
                   const datePart = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-                  setLocalValue((current) => hasTime
-                    ? `${datePart}T${current.split("T")[1] || "00:00:00"}`
+                  markValue(hasTime
+                    ? `${datePart}T${localValue.split("T")[1] || "00:00:00"}`
                     : datePart);
                   setCalendarOpen(false);
                 }
