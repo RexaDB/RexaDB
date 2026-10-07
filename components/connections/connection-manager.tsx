@@ -4138,32 +4138,9 @@ export function ConnectionManager({
   };
 
 
-  // Plain (non-memoized) row handlers, forwarded through a ref so the
-  // memoized table columns below always call the current version without
-  // rebuilding on every render (which would reset an active sort).
-  const connLiveRef = useRef({
-    openConnection,
-    handleEdit,
-    handleDuplicate,
-    toggleFavorite,
-    handleCopyDetails,
-    openTransferForConnection,
-    handleViewCredentials,
-    renderFolderSubmenu,
-  });
-  connLiveRef.current = {
-    openConnection,
-    handleEdit,
-    handleDuplicate,
-    toggleFavorite,
-    handleCopyDetails,
-    openTransferForConnection,
-    handleViewCredentials,
-    renderFolderSubmenu,
-  };
-
-  const connectionColumns: TableColumn<Connection>[] = useMemo(
-    () => [
+  // Rebuilt each render on purpose: always-fresh closures, and the table
+  // keeps sort/selection state regardless of columns identity.
+  const connectionColumns: TableColumn<Connection>[] = [
       {
         key: "name",
         header: "Name",
@@ -4188,7 +4165,7 @@ export function ConnectionManager({
               <button
                 type="button"
                 onClick={(e) =>
-                  void connLiveRef.current.openConnection(conn, {
+                  void openConnection(conn, {
                     forceNewWindow:
                       e.metaKey || e.ctrlKey || e.shiftKey,
                   })
@@ -4302,7 +4279,7 @@ export function ConnectionManager({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    void connLiveRef.current.openConnection(conn);
+                    void openConnection(conn);
                   }}
                   className="gap-2 text-xs focus:bg-muted/50"
                 >
@@ -4312,7 +4289,7 @@ export function ConnectionManager({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      connLiveRef.current.handleEdit(conn);
+                      handleEdit(conn);
                     }}
                     className="gap-2 text-xs focus:bg-muted/50"
                   >
@@ -4323,7 +4300,7 @@ export function ConnectionManager({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      connLiveRef.current.handleDuplicate(conn);
+                      handleDuplicate(conn);
                     }}
                     className="gap-2 text-xs focus:bg-muted/50"
                   >
@@ -4334,7 +4311,7 @@ export function ConnectionManager({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      void connLiveRef.current.toggleFavorite(conn);
+                      void toggleFavorite(conn);
                     }}
                     className="gap-2 text-xs focus:bg-muted/50"
                   >
@@ -4344,7 +4321,7 @@ export function ConnectionManager({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    void connLiveRef.current.handleCopyDetails(conn);
+                    void handleCopyDetails(conn);
                   }}
                   className="gap-2 text-xs focus:bg-muted/50"
                 >
@@ -4353,19 +4330,19 @@ export function ConnectionManager({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    connLiveRef.current.openTransferForConnection(conn);
+                    openTransferForConnection(conn);
                   }}
                   className="gap-2 text-xs focus:bg-muted/50"
                 >
                   <ArrowRightLeft className="w-3.5 h-3.5" />
                   Transfer Project
                 </DropdownMenuItem>
-                {!workspaceMode && connLiveRef.current.renderFolderSubmenu(conn, "3")}
+                {!workspaceMode && renderFolderSubmenu(conn, "3")}
                 {workspaceMode && (
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
-                      void connLiveRef.current.handleViewCredentials(conn);
+                      void handleViewCredentials(conn);
                     }}
                     className="gap-2 text-xs focus:bg-muted/50"
                   >
@@ -4391,12 +4368,7 @@ export function ConnectionManager({
           </div>
         ),
       },
-    ],
-    // Plain row callbacks are forwarded through connLiveRef so they stay
-    // fresh; only genuinely memoized values are listed here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [workspaceMode, can, getProviderInfo, getConnectionTarget],
-  );
+  ];
   return (
     <div
       className={cn(
