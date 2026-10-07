@@ -47,13 +47,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  DatabaseTable,
-  DatabaseTableBody,
-  DatabaseTableCell,
-  DatabaseTableHead,
-  DatabaseTableHeader,
-  DatabaseTableRow,
-} from "./database/database-table";
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import { SchemaDropdown } from "./database/schema-dropdown";
 import { SelectFilter } from "./database/select-filter";
 import { EmptyStatePresentational } from "./database/empty-state-presentational";
@@ -1017,101 +1013,115 @@ export function DataCatalogView({
                             : "No columns loaded for this table."}
                         </p>
                       ) : (
-                        <DatabaseTable>
-                          <DatabaseTableHeader>
-                            <DatabaseTableRow>
-                              <DatabaseTableHead className="w-[220px]">Column</DatabaseTableHead>
-                              <DatabaseTableHead className="w-[150px]">Type</DatabaseTableHead>
-                              <DatabaseTableHead className="w-[90px]">Nullable</DatabaseTableHead>
-                              <DatabaseTableHead>Description</DatabaseTableHead>
-                              <DatabaseTableHead className="w-[170px] text-right">
-                                Display
-                              </DatabaseTableHead>
-                            </DatabaseTableRow>
-                          </DatabaseTableHeader>
-                          <DatabaseTableBody>
-                            {shownCols.map((col) => (
-                              <DatabaseTableRow key={col.column}>
-                                <DatabaseTableCell className="py-2.5">
-                                  <span className="flex items-center gap-1.5">
-                                    {col.isPrimary ? (
-                                      <KeyRound className="size-3.5 shrink-0 text-amber-400" />
-                                    ) : (
-                                      <Hash className="size-3.5 shrink-0 text-muted-foreground/50" />
-                                    )}
-                                    <span className="truncate text-xs font-medium">
-                                      {col.column}
-                                    </span>
-                                    {col.isForeignKey && (
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span>
-                                              <Link className="size-3 shrink-0 text-muted-foreground/60" />
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="top">Foreign key</TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                    )}
+                        <DataTable
+                          autoHeight
+                          rowSizing="content"
+                          data={shownCols}
+                          getRowId={(col) => col.column}
+                          columns={[
+                            {
+                              key: "column",
+                              header: "Column",
+                              width: "13rem",
+                              cell: (col) => (
+                                <span className="flex items-center gap-1.5">
+                                  {col.isPrimary ? (
+                                    <KeyRound className="size-3.5 shrink-0 text-amber-400" />
+                                  ) : (
+                                    <Hash className="size-3.5 shrink-0 text-muted-foreground/50" />
+                                  )}
+                                  <span className="truncate text-xs font-medium">
+                                    {col.column}
                                   </span>
-                                </DatabaseTableCell>
-                                <DatabaseTableCell className="py-2.5">
-                                  <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-xs">
-                                    {col.dataType}
-                                  </code>
-                                </DatabaseTableCell>
-                                <DatabaseTableCell className="py-2.5">
-                                  <span className="text-xs text-muted-foreground">
-                                    {col.isNullable ? "NULL" : "NOT NULL"}
+                                  {col.isForeignKey && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span>
+                                            <Link className="size-3 shrink-0 text-muted-foreground/60" />
+                                          </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top">Foreign key</TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
+                                </span>
+                              ),
+                            },
+                            {
+                              key: "type",
+                              header: "Type",
+                              width: "9rem",
+                              cell: (col) => (
+                                <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-xs">
+                                  {col.dataType}
+                                </code>
+                              ),
+                            },
+                            {
+                              key: "nullable",
+                              header: "Nullable",
+                              width: "6rem",
+                              cell: (col) => (
+                                <span className="text-xs text-muted-foreground">
+                                  {col.isNullable ? "NULL" : "NOT NULL"}
+                                </span>
+                              ),
+                            },
+                            {
+                              key: "description",
+                              header: "Description",
+                              cell: (col) => (
+                                <span className="flex items-center gap-1.5">
+                                  <span className="min-w-0 flex-1">
+                                    <DescriptionPopover
+                                      value={col.description}
+                                      source={col.descriptionSource}
+                                      placeholder="Add…"
+                                      onSave={(next) =>
+                                        saveColumn(entry.schema, entry.table, col.column, next)
+                                      }
+                                      onPush={
+                                        canPushNative
+                                          ? (desc) =>
+                                              handlePush(
+                                                `push-column:${entry.table}.${col.column}`,
+                                                {
+                                                  kind: "column",
+                                                  table: entry.table,
+                                                  column: col.column,
+                                                  comment: desc,
+                                                },
+                                              )
+                                          : undefined
+                                      }
+                                      pushing={
+                                        pushing ===
+                                        `push-column:${entry.table}.${col.column}`
+                                      }
+                                    />
                                   </span>
-                                </DatabaseTableCell>
-                                <DatabaseTableCell className="py-2.5">
-                                  <span className="flex items-center gap-1.5">
-                                    <span className="min-w-0 flex-1">
-                                      <DescriptionPopover
-                                        value={col.description}
-                                        source={col.descriptionSource}
-                                        placeholder="Add…"
-                                        onSave={(next) =>
-                                          saveColumn(entry.schema, entry.table, col.column, next)
-                                        }
-                                        onPush={
-                                          canPushNative
-                                            ? (desc) =>
-                                                handlePush(
-                                                  `push-column:${entry.table}.${col.column}`,
-                                                  {
-                                                    kind: "column",
-                                                    table: entry.table,
-                                                    column: col.column,
-                                                    comment: desc,
-                                                  },
-                                                )
-                                            : undefined
-                                        }
-                                        pushing={
-                                          pushing ===
-                                          `push-column:${entry.table}.${col.column}`
-                                        }
-                                      />
-                                    </span>
-                                    <SourceBadge source={col.descriptionSource} />
-                                  </span>
-                                </DatabaseTableCell>
-                                <DatabaseTableCell className="py-2.5 text-right">
-                                  <DecoratorCell
-                                    column={col.column}
-                                    initial={col.decorator}
-                                    onSave={(next) =>
-                                      saveDecorator(entry.schema, entry.table, col.column, next)
-                                    }
-                                  />
-                                </DatabaseTableCell>
-                              </DatabaseTableRow>
-                            ))}
-                          </DatabaseTableBody>
-                        </DatabaseTable>
+                                  <SourceBadge source={col.descriptionSource} />
+                                </span>
+                              ),
+                            },
+                            {
+                              key: "display",
+                              header: "Display",
+                              align: "right",
+                              width: "10rem",
+                              cell: (col) => (
+                                <DecoratorCell
+                                  column={col.column}
+                                  initial={col.decorator}
+                                  onSave={(next) =>
+                                    saveDecorator(entry.schema, entry.table, col.column, next)
+                                  }
+                                />
+                              ),
+                            },
+                          ]}
+                        />
                       )}
                     </div>
                   )}

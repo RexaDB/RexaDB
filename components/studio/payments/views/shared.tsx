@@ -3,6 +3,9 @@
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DataTable as NotraDataTable,
+} from "@/components/data-table/components/data-table";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 
 export function ViewShell({
@@ -113,33 +116,26 @@ export interface DataColumn {
 
 export function DataTable({ columns, rows }: { columns: DataColumn[]; rows: Record<string, any>[] }) {
   return (
-    <div className="overflow-auto rounded-xl border border-studio-border/60">
-      <table className="w-full min-w-[640px] border-collapse text-left text-xs">
-        <thead>
-          <tr className="border-b border-studio-border/60 bg-muted/30">
-            {columns.map((c) => (
-              <th key={c.key} className="px-3 py-2 font-medium text-muted-foreground">
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={i}
-              className="border-b border-studio-border/40 last:border-0 hover:bg-muted/20"
+    <NotraDataTable
+      autoHeight
+      rowSizing="content"
+      data={rows}
+      getRowId={(_, index) => String(index)}
+      columns={columns.map((c) => ({
+        key: c.key,
+        header: c.label,
+        cell: (row: Record<string, any>) =>
+          c.render ? (
+            c.render(row)
+          ) : (
+            <span
+              className={`block truncate ${c.mono ? "font-mono text-[11px] text-muted-foreground" : "text-muted-foreground"}`}
             >
-              {columns.map((c) => (
-                <td key={c.key} className={`max-w-[280px] truncate px-3 py-2 ${c.mono ? "font-mono text-[11px]" : ""}`}>
-                  {c.render ? c.render(row) : formatCell(row[c.key])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              {formatCell(row[c.key])}
+            </span>
+          ),
+      }))}
+    />
   );
 }
 

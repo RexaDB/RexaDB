@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -75,7 +76,7 @@ export function DbSearchInput({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-8 bg-background border-border text-xs pr-9"
+          className="h-7 bg-background border-border text-xs pr-9"
         />
         <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40 pointer-events-none" />
       </div>
@@ -88,7 +89,7 @@ export function DbSearchInput({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="pl-9 h-8 bg-background border-border text-xs"
+        className="pl-9 h-7 bg-background border-border text-xs"
       />
     </div>
   );
@@ -97,7 +98,7 @@ export function DbSearchInput({
 export function DbCreateButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <Button onClick={onClick} variant="default" className="ml-auto grow">
+      <Button onClick={onClick} variant="outline" size="sm" className="ml-auto grow">
         <Plus className="w-3.5 h-3.5" />
         {children}
       </Button>
@@ -144,7 +145,7 @@ export function DbListEmptyState({
   return (
     <div className="flex-1 flex flex-col justify-start supabase-theme">
       <EmptyStatePresentational icon={icon} title={title} description={description}>
-        <Button onClick={onAction} variant="default">
+        <Button onClick={onAction} variant="outline" size="sm">
           <Plus className="w-3.5 h-3.5" />
           {actionLabel}
         </Button>
@@ -171,5 +172,36 @@ export function DbCardTable({ children }: { children: ReactNode }) {
     <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex-1 flex flex-col supabase-theme">
       {children}
     </div>
+  );
+}
+
+/**
+ * Pearl-shaped cross-link to a table. Rests as plain primary text; on hover
+ * it becomes a tinted pill while an arrow slides in from the left.
+ */
+export function DbTableLink({
+  table,
+  schema,
+  onOpen,
+  className,
+}: {
+  table: string;
+  schema: string;
+  onOpen: (table: string, schema: string) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={`Open table ${table}`}
+      onClick={() => onOpen(table, schema)}
+      className={cn(
+        "group/dblink inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border border-transparent py-0.5 pl-2.5 pr-2 text-primary transition-all duration-200 hover:border-primary/25 hover:bg-primary/10",
+        className,
+      )}
+    >
+      <span className="truncate">{table}</span>
+      <ArrowRight className="size-3.5 shrink-0 -translate-x-1 opacity-0 transition-all duration-200 group-hover/dblink:translate-x-0 group-hover/dblink:opacity-100" />
+    </button>
   );
 }

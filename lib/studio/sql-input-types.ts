@@ -26,4 +26,6 @@ export interface BaseSqlInputProps {
   onFormat?: () => void;
   slashAiTrigger?: boolean;
   aiModeKeybinding?: string | null;
+  /** Disables editing and run shortcuts; the content stays selectable. */
+  readOnly?: boolean;
 }

@@ -34,6 +34,7 @@ export function SqlQueryInput({
   onSelectionChange,
   slashAiTrigger = true,
   aiModeKeybinding = null,
+  readOnly = false,
 }: SqlQueryInputProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const suggestionRef = useRef<HTMLDivElement | null>(null);
@@ -190,6 +191,12 @@ export function SqlQueryInput({
   }, [fontSize, query, suggestionRange]);
 
   const refreshSuggestions = () => {
+    if (readOnly) {
+      setSuggestions([]);
+      setSuggestionRange(null);
+      setActiveSuggestionIndex(0);
+      return;
+    }
     if (aiMode || isFindOpen) {
       setSuggestions([]);
       setSuggestionRange(null);
@@ -226,6 +233,7 @@ export function SqlQueryInput({
   };
 
   const applySuggestion = (item: SqlSuggestionItem) => {
+    if (readOnly) return;
     const textarea = textareaRef.current;
     if (!textarea || !suggestionRange) return;
     const nextValue = `${query.slice(0, suggestionRange.start)}${item.insertText}${query.slice(suggestionRange.end)}`;
@@ -279,6 +287,16 @@ export function SqlQueryInput({
       return;
     }
 
+    if (readOnly) {
+      // Read-only: keep find reachable, ignore everything that could
+      // mutate the draft or run it (suggestions, Tab insert, run).
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setIsFindOpen(true);
+      }
+      return;
+    }
+
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       setIsFindOpen(true);
@@ -311,7 +329,11 @@ export function SqlQueryInput({
       return;
     }
 
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (
+      !readOnly &&
+      (event.metaKey || event.ctrlKey) &&
+      event.key === "Enter"
+    ) {
       event.preventDefault();
       if (event.shiftKey) {
         onRunSelected();
@@ -368,6 +390,11 @@ export function SqlQueryInput({
 
   return (
     <div className="relative flex h-full min-h-0 bg-studio-bg">
+      {readOnly && (
+        <span className="pointer-events-none absolute top-2 right-3 z-20 font-mono text-[10px] font-semibold text-amber-500/70 select-none">
+          READ-ONLY
+        </span>
+      )}
       {isFindOpen && (
         <SqlQueryFind
           matchCount={matches.length}
@@ -430,6 +457,8 @@ export function SqlQueryInput({
 
         <textarea
           ref={textareaRef}
+          readOnly={readOnly}
+          aria-readonly={readOnly || undefined}
           className="relative z-10 h-full w-full min-w-full resize-none border-0 bg-transparent px-4 py-4 font-mono text-transparent caret-foreground outline-none placeholder:text-muted-foreground/40"
           cols={1}
           onChange={(event) => {

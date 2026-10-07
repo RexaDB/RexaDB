@@ -13,6 +13,11 @@ import { useRouter } from "next/navigation";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ConnectionsHeader } from "@/components/connections/connections-header";
@@ -69,6 +74,7 @@ import {
   GripVertical,
   LogOut,
   ArrowLeft,
+  ArrowRight,
   ArrowRightLeft,
   Eye,
   EyeOff,
@@ -4131,6 +4137,266 @@ export function ConnectionManager({
     );
   };
 
+
+  // Plain (non-memoized) row handlers, forwarded through a ref so the
+  // memoized table columns below always call the current version without
+  // rebuilding on every render (which would reset an active sort).
+  const connLiveRef = useRef({
+    openConnection,
+    handleEdit,
+    handleDuplicate,
+    toggleFavorite,
+    handleCopyDetails,
+    openTransferForConnection,
+    handleViewCredentials,
+    renderFolderSubmenu,
+  });
+  connLiveRef.current = {
+    openConnection,
+    handleEdit,
+    handleDuplicate,
+    toggleFavorite,
+    handleCopyDetails,
+    openTransferForConnection,
+    handleViewCredentials,
+    renderFolderSubmenu,
+  };
+
+  const connectionColumns: TableColumn<Connection>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1.4fr",
+        cell: (conn) => {
+          const { provider, providerCard, providerLogo } =
+            getProviderInfo(conn);
+          return (
+            <span className="flex items-center gap-2 min-w-0">
+              {provider === "spacetimedb" ? (
+                <SpacetimeDbLogo className="h-[18px] w-[18px] text-foreground shrink-0" />
+              ) : (
+                <Image
+                  src={providerCard?.logoSrc ?? providerLogo}
+                  alt=""
+                  width={18}
+                  height={18}
+                  className="rounded-lg shrink-0"
+                />
+              )}
+              <button
+                type="button"
+                onClick={(e) =>
+                  void connLiveRef.current.openConnection(conn, {
+                    forceNewWindow:
+                      e.metaKey || e.ctrlKey || e.shiftKey,
+                  })
+                }
+                title={conn.name}
+                className="group/dblink inline-flex min-w-0 max-w-[160px] cursor-pointer items-center gap-1 rounded-full border border-transparent py-0.5 pl-2.5 pr-2 text-primary transition-all duration-200 hover:border-primary/25 hover:bg-primary/10"
+              >
+                <span className="truncate text-sm font-medium">{conn.name}</span>
+                <ArrowRight className="size-3.5 shrink-0 -translate-x-1 opacity-0 transition-all duration-200 group-hover/dblink:translate-x-0 group-hover/dblink:opacity-100" />
+              </button>
+              {(conn as any).isFavorite && (
+                <Star className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" />
+              )}
+            </span>
+          );
+        },
+        sortValue: (conn) => conn.name,
+      },
+      {
+        key: "provider",
+        header: "Provider",
+        sortable: true,
+        width: "0.8fr",
+        cell: (conn) => (
+          <span className="block truncate text-xs text-muted-foreground">
+            {getProviderInfo(conn).providerCard?.label ?? "PostgreSQL"}
+          </span>
+        ),
+        sortValue: (conn) =>
+          getProviderInfo(conn).providerCard?.label ?? "PostgreSQL",
+      },
+      {
+        key: "target",
+        header: "Target",
+        width: "1fr",
+        cell: (conn) => (
+          <span
+            className="block truncate text-xs font-mono text-muted-foreground"
+            title={getConnectionTarget(conn)}
+          >
+            {getConnectionTarget(conn)}
+          </span>
+        ),
+        sortValue: (conn) => getConnectionTarget(conn),
+      },
+      {
+        key: "environment",
+        header: "Environment",
+        width: "0.7fr",
+        cell: (conn) => {
+          const { env } = getProviderInfo(conn);
+          return env ? (
+            <EnvironmentBadge environment={env} />
+          ) : (
+            <span className="text-xs text-muted-foreground/40">&mdash;</span>
+          );
+        },
+        sortValue: (conn) => getProviderInfo(conn).env ?? "",
+      },
+      {
+        key: "folders",
+        header: "Folders",
+        width: "1fr",
+        cell: (conn) => {
+          const connGroups = (conn as any).groups || [];
+          if (connGroups.length === 0) {
+            return (
+              <span className="text-xs text-muted-foreground/40">&mdash;</span>
+            );
+          }
+          return (
+            <span
+              className="flex items-center gap-1 flex-nowrap overflow-hidden"
+              title={connGroups.join(", ")}
+            >
+              {connGroups.map((g: string) => (
+                <Badge key={g} variant="outline" className="shrink-0">
+                  {g}
+                </Badge>
+              ))}
+            </span>
+          );
+        },
+        sortValue: (conn) => ((conn as any).groups || []).join(", "),
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "3rem",
+        cell: (conn) => (
+          <div className="flex items-center justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                asChild
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={`${conn.name} actions`}
+                >
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="bg-popover border-border text-foreground"
+              >
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void connLiveRef.current.openConnection(conn);
+                  }}
+                  className="gap-2 text-xs focus:bg-muted/50"
+                >
+                  Open
+                </DropdownMenuItem>
+                {can("connections.update") && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      connLiveRef.current.handleEdit(conn);
+                    }}
+                    className="gap-2 text-xs focus:bg-muted/50"
+                  >
+                    Edit
+                  </DropdownMenuItem>
+                )}
+                {can("connections.create") && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      connLiveRef.current.handleDuplicate(conn);
+                    }}
+                    className="gap-2 text-xs focus:bg-muted/50"
+                  >
+                    Duplicate
+                  </DropdownMenuItem>
+                )}
+                {can("connections.update") && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void connLiveRef.current.toggleFavorite(conn);
+                    }}
+                    className="gap-2 text-xs focus:bg-muted/50"
+                  >
+                    {(conn as any).isFavorite ? "Unfavorite" : "Favorite"}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void connLiveRef.current.handleCopyDetails(conn);
+                  }}
+                  className="gap-2 text-xs focus:bg-muted/50"
+                >
+                  Copy URI
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    connLiveRef.current.openTransferForConnection(conn);
+                  }}
+                  className="gap-2 text-xs focus:bg-muted/50"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  Transfer Project
+                </DropdownMenuItem>
+                {!workspaceMode && connLiveRef.current.renderFolderSubmenu(conn, "3")}
+                {workspaceMode && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void connLiveRef.current.handleViewCredentials(conn);
+                    }}
+                    className="gap-2 text-xs focus:bg-muted/50"
+                  >
+                    <Eye className="w-3 h-3" /> View Credentials
+                  </DropdownMenuItem>
+                )}
+                {can("connections.delete") && (
+                  <>
+                    <DropdownMenuSeparator className="bg-border/60" />
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingDeleteConnId(conn.id);
+                      }}
+                      className="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    >
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+      },
+    ],
+    // Plain row callbacks are forwarded through connLiveRef so they stay
+    // fresh; only genuinely memoized values are listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [workspaceMode, can, getProviderInfo, getConnectionTarget],
+  );
   return (
     <div
       className={cn(
@@ -5133,226 +5399,11 @@ export function ConnectionManager({
                             })}
                           </div>
                         ) : (
-                          <div className="border border-studio-border/60 rounded-lg overflow-hidden">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="border-b border-studio-border/60 bg-studio-bg/40">
-                                  <th className="text-left text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Name
-                                  </th>
-                                  <th className="text-left text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Provider
-                                  </th>
-                                  <th className="text-left text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Target
-                                  </th>
-                                  <th className="text-left text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Environment
-                                  </th>
-                                  <th className="text-left text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Folders
-                                  </th>
-                                  <th className="text-right text-xs font-bold text-muted-foreground/60 px-3 py-2.5 tracking-wider">
-                                    Actions
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {visibleConnections.map((conn) => {
-                                  const { provider, providerCard, providerLogo, env } =
-                                    getProviderInfo(conn);
-                                  const connGroups = (conn as any).groups || [];
-                                  return (
-                                    <tr
-                                      key={conn.id}
-                                      onClick={(e) =>
-                                        void openConnection(conn, {
-                                          forceNewWindow:
-                                            e.metaKey ||
-                                            e.ctrlKey ||
-                                            e.shiftKey,
-                                        })
-                                      }
-                                      className="border-b border-studio-border/30 hover:bg-studio-row-hover/60 cursor-pointer last:border-b-0"
-                                    >
-                                      <td className="px-3 py-2.5">
-                                        <div className="flex items-center gap-2.5">
-                                          {provider === "spacetimedb" ? (
-                                            <SpacetimeDbLogo className="h-[18px] w-[18px] text-foreground" />
-                                          ) : (
-                                            <Image
-                                              src={
-                                                providerCard?.logoSrc ??
-                                                providerLogo
-                                              }
-                                              alt=""
-                                              width={18}
-                                              height={18}
-                                              className="rounded-lg shrink-0"
-                                            />
-                                          )}
-                                          <div className="flex items-center gap-1.5 min-w-0">
-                                            <span className="text-sm font-medium text-foreground truncate max-w-[160px]">
-                                              {conn.name}
-                                            </span>
-                                            {(conn as any).isFavorite && (
-                                              <Star className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" />
-                                            )}
-                                          </div>
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-2.5 text-xs text-muted-foreground">
-                                        {providerCard?.label ?? "PostgreSQL"}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground truncate max-w-[200px]">
-                                        {getConnectionTarget(conn)}
-                                      </td>
-                                      <td className="px-3 py-2.5">
-                                        {env ? (
-                                          <EnvironmentBadge environment={env} />
-                                        ) : (
-                                          <span className="text-xs text-muted-foreground/40">
-                                            &mdash;
-                                          </span>
-                                        )}
-                                      </td>
-                                      <td className="px-3 py-2.5">
-                                        <div className="flex items-center gap-1 flex-wrap">
-                                          {connGroups.length > 0 ? (
-                                            connGroups.map((g: string) => (
-                                              <span
-                                                key={g}
-                                                className="text-xs text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded border border-border/40"
-                                              >
-                                                {g}
-                                              </span>
-                                            ))
-                                          ) : (
-                                            <span className="text-xs text-muted-foreground/40">
-                                              &mdash;
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right">
-                                        <DropdownMenu>
-                                          <DropdownMenuTrigger
-                                            asChild
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <Button
-                                              variant="ghost"
-                                              size="icon"
-                                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                            >
-                                              <MoreVertical className="w-3.5 h-3.5" />
-                                            </Button>
-                                          </DropdownMenuTrigger>
-                                          <DropdownMenuContent
-                                            align="end"
-                                            className="bg-popover border-border text-foreground"
-                                          >
-                                            <DropdownMenuItem
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                void openConnection(conn);
-                                              }}
-                                              className="gap-2 text-xs focus:bg-muted/50"
-                                            >
-                                              Open
-                                            </DropdownMenuItem>
-                                            {can("connections.update") && (
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleEdit(conn);
-                                                }}
-                                                className="gap-2 text-xs focus:bg-muted/50"
-                                              >
-                                                Edit
-                                              </DropdownMenuItem>
-                                            )}
-                                            {can("connections.create") && (
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDuplicate(conn);
-                                                }}
-                                                className="gap-2 text-xs focus:bg-muted/50"
-                                              >
-                                                Duplicate
-                                              </DropdownMenuItem>
-                                            )}
-                                            {can("connections.update") && (
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  void toggleFavorite(conn);
-                                                }}
-                                                className="gap-2 text-xs focus:bg-muted/50"
-                                              >
-                                                {(conn as any).isFavorite
-                                                  ? "Unfavorite"
-                                                  : "Favorite"}
-                                              </DropdownMenuItem>
-                                            )}
-                                            <DropdownMenuItem
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                void handleCopyDetails(conn);
-                                              }}
-                                              className="gap-2 text-xs focus:bg-muted/50"
-                                            >
-                                              Copy URI
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                openTransferForConnection(conn);
-                                              }}
-                                              className="gap-2 text-xs focus:bg-muted/50"
-                                            >
-                                              <ArrowRightLeft className="w-3.5 h-3.5" />
-                                              Transfer Project
-                                            </DropdownMenuItem>
-                                            {!workspaceMode && renderFolderSubmenu(conn, "3")}
-                                            {workspaceMode && (
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  void handleViewCredentials(
-                                                    conn,
-                                                  );
-                                                }}
-                                                className="gap-2 text-xs focus:bg-muted/50"
-                                              >
-                                                <Eye className="w-3 h-3" /> View
-                                                Credentials
-                                              </DropdownMenuItem>
-                                            )}
-                                            {can("connections.delete") && (
-                                              <>
-                                                <DropdownMenuSeparator className="bg-border/60" />
-                                                <DropdownMenuItem
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setPendingDeleteConnId(conn.id);
-                                                  }}
-                                                  className="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
-                                                >
-                                                  Delete
-                                                </DropdownMenuItem>
-                                              </>
-                                            )}
-                                          </DropdownMenuContent>
-                                        </DropdownMenu>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
+                          <DataTable<Connection>
+                            data={visibleConnections}
+                            getRowId={(conn) => String(conn.id)}
+                            columns={connectionColumns}
+                          />
                         )}
                       </div>
                     </>

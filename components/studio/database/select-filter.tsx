@@ -73,9 +73,10 @@ export function SelectFilter({
       <PopoverTrigger asChild>
         <Button
           variant="outline"
+          size="sm"
           className={cn(
             "min-w-20 relative group justify-between",
-            isActive ? "border-solid bg-muted" : "border-dashed",
+            isActive && "bg-muted",
             className,
           )}
         >

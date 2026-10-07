@@ -290,6 +290,58 @@ body {
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-shell: var(--shell);
+  --color-table-band: var(--table-band);
+  --color-table-row: var(--table-row);
+  --color-table-row-hover: var(--table-row-hover);
+  --shadow-lift: var(--surface-lift);
+  --animate-button-swap-in: button-swap-in 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-button-swap-out: button-swap-out 360ms cubic-bezier(0.45, 0, 0.25, 1) both;
+  --animate-button-dot: button-dot 1s ease-in-out infinite;
+  --animate-button-progress-out: button-progress-out 600ms ease-out both;
+  --surface-lift: var(--surface-lift);
+  @keyframes button-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.45em);
+    filter: blur(4px);
+    }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+    }
+  }
+  @keyframes button-swap-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+    }
+  to {
+    opacity: 0;
+    transform: translateY(-0.45em);
+    filter: blur(4px);
+    }
+  }
+  @keyframes button-dot {
+  0%, 60%, 100% {
+    opacity: 0.45;
+    transform: translateY(0);
+    }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.3em);
+    }
+  }
+  @keyframes button-progress-out {
+  0%, 50% {
+    opacity: 1;
+    }
+  100% {
+    opacity: 0;
+    }
+  }
 }
 
 /* Override browser default ::selection (color-scheme: dark causes red on Safari/macOS) */
@@ -499,6 +551,11 @@ body {
   --warning-foreground: var(--color-yellow-900);
   --invert: var(--color-zinc-900);
   --invert-foreground: var(--color-zinc-50);
+  --shell: hsl(240 6% 94.5%);
+  --table-band: hsl(240 6% 94.5%);
+  --table-row: #ffffff;
+  --table-row-hover: hsl(240 5% 96%);
+  --surface-lift: 0 1px 2px hsl(240 10% 10% / 0.06), 0 2px 8px -2px hsl(240 10% 10% / 0.06);
 }
 
 /* Sidebar buttons — base muted, hover/active white */
@@ -824,6 +881,11 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   --warning-foreground: var(--color-yellow-600);
   --invert: var(--color-zinc-700);
   --invert-foreground: var(--color-zinc-50);
+  --shell: hsl(240 5% 14.5%);
+  --table-band: #232327;
+  --table-row: #131316;
+  --table-row-hover: #1D1D1E;
+  --surface-lift: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(0 0% 0% / 0.4);
 }
 
 .tui-mode {

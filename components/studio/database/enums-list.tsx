@@ -1,7 +1,7 @@
 "use client";
 
 import { List, Edit2, Trash2, MoreVertical } from "@/lib/icon-theme/lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,13 +9,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  DatabaseTable,
-  DatabaseTableBody,
-  DatabaseTableCell,
-  DatabaseTableHead,
-  DatabaseTableHeader,
-  DatabaseTableRow,
-} from "./database-table";
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import {
   Tooltip,
   TooltipContent,
@@ -25,13 +21,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
-  DbCardTable,
   DbCreateButton,
   DbListEmptyState,
   DbListHeader,
   DbListPage,
   DbListToolbar,
-  DbNoResultsRow,
   DbSchemaFilter,
   DbSearchInput,
   DbToolbarFilters,
@@ -66,6 +60,7 @@ export function EnumsList({
   onSchemaChange,
 }: EnumsListProps) {
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const enumeratedTypes = (enums ?? []).filter((type) => type.values.length > 0);
 
@@ -75,6 +70,100 @@ export function EnumsList({
           (x) => x.schema === selectedSchema && x.name.toLowerCase().includes(search.toLowerCase())
         )
       : enumeratedTypes.filter((x) => x.schema === selectedSchema);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedSchema]);
+
+  const columns: TableColumn<EnumType>[] = useMemo(
+    () => [
+      {
+        key: "schema",
+        header: "Schema",
+        sortable: true,
+        width: "0.6fr",
+        cell: (enumType) => (
+          <p className="w-20 truncate text-muted-foreground">{enumType.schema}</p>
+        ),
+      },
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1fr",
+        cell: (enumType) => (
+          <span className="block truncate font-medium" title={enumType.name}>
+            {enumType.name}
+          </span>
+        ),
+      },
+      {
+        key: "values",
+        header: "Values",
+        width: "1.6fr",
+        cell: (enumType) => (
+          <span
+            className="block truncate text-muted-foreground"
+            title={enumType.values.join(", ")}
+          >
+            {enumType.values.join(", ")}
+          </span>
+        ),
+        sortValue: (enumType) => enumType.values.join(", "),
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "3rem",
+        cell: (enumType) => (
+          <div className="flex justify-end items-center space-x-2">
+            <DropdownMenu>
+              <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label={`${enumType.name} actions`}
+                    >
+                      <MoreVertical />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">More options</TooltipContent>
+              </Tooltip>
+              </TooltipProvider>
+              <DropdownMenuContent side="bottom" align="end" className="w-32">
+                <DropdownMenuItem
+                  className="space-x-2"
+                  onClick={() =>
+                    onOpenEditEnumTab(
+                      enumType.schema,
+                      enumType.name,
+                      enumType.values,
+                    )
+                  }
+                >
+                  <Edit2 size={14} />
+                  <p>Update type</p>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="space-x-2"
+                  onClick={() => onDeleteEnum(enumType.schema, enumType.name)}
+                >
+                  <Trash2 size={14} />
+                  <p>Delete type</p>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+      },
+    ],
+    [onDeleteEnum, onOpenEditEnumTab],
+  );
 
   if (fetchingEnums && enums.length === 0) {
     return (
@@ -127,7 +216,7 @@ export function EnumsList({
         <DbCreateButton onClick={onOpenCreateEnumTab}>Create type</DbCreateButton>
       </DbListToolbar>
 
-      <div className="px-8 flex-1 overflow-hidden flex flex-col">
+      <div className="px-8 flex-1 min-h-0 overflow-y-auto">
         {filteredEnums.length === 0 && search.length === 0 ? (
           <DbListEmptyState
             icon={List}
@@ -137,78 +226,28 @@ export function EnumsList({
             onAction={onOpenCreateEnumTab}
           />
         ) : (
-          <DbCardTable>
-            <DatabaseTable>
-              <DatabaseTableHeader>
-                <DatabaseTableRow>
-                  <DatabaseTableHead key="schema">Schema</DatabaseTableHead>
-                  <DatabaseTableHead key="name">Name</DatabaseTableHead>
-                  <DatabaseTableHead key="values">Values</DatabaseTableHead>
-                  <DatabaseTableHead key="actions" />
-                </DatabaseTableRow>
-              </DatabaseTableHeader>
-              <DatabaseTableBody>
-                {filteredEnums.length === 0 && search.length > 0 && (
-                  <DbNoResultsRow colSpan={4} search={search} />
-                )}
-                {filteredEnums.map((enumType) => (
-                  <DatabaseTableRow key={`${enumType.schema}.${enumType.name}`}>
-                    <DatabaseTableCell className="w-20">
-                      <p className="w-20 truncate text-muted-foreground">{enumType.schema}</p>
-                    </DatabaseTableCell>
-                    <DatabaseTableCell className="font-medium">{enumType.name}</DatabaseTableCell>
-                    <DatabaseTableCell className="text-muted-foreground">{enumType.values.join(", ")}</DatabaseTableCell>
-                    <DatabaseTableCell>
-                      <div className="flex justify-end items-center space-x-2">
-                        <DropdownMenu>
-                          <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  aria-label={`${enumType.name} actions`}
-                                >
-                                  <MoreVertical />
-                                </Button>
-                              </DropdownMenuTrigger>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">More options</TooltipContent>
-                          </Tooltip>
-                          </TooltipProvider>
-                          <DropdownMenuContent side="bottom" align="end" className="w-32">
-                            <DropdownMenuItem
-                              className="space-x-2"
-                              onClick={() =>
-                                onOpenEditEnumTab(
-                                  enumType.schema,
-                                  enumType.name,
-                                  enumType.values,
-                                )
-                              }
-                            >
-                              <Edit2 size={14} />
-                              <p>Update type</p>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="space-x-2"
-                              onClick={() => onDeleteEnum(enumType.schema, enumType.name)}
-                            >
-                              <Trash2 size={14} />
-                              <p>Delete type</p>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </DatabaseTableCell>
-                  </DatabaseTableRow>
-                ))}
-              </DatabaseTableBody>
-            </DatabaseTable>
-          </DbCardTable>
+          <div className="pb-8">
+            <DataTable<EnumType>
+              data={filteredEnums}
+              columns={columns}
+              getRowId={(enumType) => `${enumType.schema}.${enumType.name}`}
+              pagination={{
+                page,
+                pageSize: 10,
+                onPageChange: setPage,
+                itemLabel: "types",
+              }}
+              emptyState={
+                <div className="py-8 text-center">
+                  <p className="text-sm text-foreground">No results found</p>
+                  <p className="text-sm text-muted-foreground">
+                    Your search for &ldquo;{search}&rdquo; did not return any results
+                  </p>
+                </div>
+              }
+            />
+          </div>
         )}
-        <div className="h-8" />
       </div>
     </DbListPage>
   );

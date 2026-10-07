@@ -1,7 +1,7 @@
 "use client";
 
 import { Zap, Search, Check, X, MoreVertical, Edit2, Copy, Trash2, Plus } from "@/lib/icon-theme/lucide-react";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,13 +10,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  DatabaseTable,
-  DatabaseTableBody,
-  DatabaseTableCell,
-  DatabaseTableHead,
-  DatabaseTableHeader,
-  DatabaseTableRow,
-} from "./database-table";
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import {
   Tooltip,
   TooltipContent,
@@ -29,13 +25,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  DbCardTable,
   DbListHeader,
   DbListPage,
   DbListToolbar,
-  DbNoResultsRow,
   DbSchemaFilter,
   DbSearchInput,
+  DbTableLink,
   DbToolbarFilters,
 } from "./db-list-layout";
 
@@ -64,6 +59,7 @@ interface TriggersListProps {
   onEditTrigger?: (trigger: Trigger) => void;
   onDuplicateTrigger?: (trigger: Trigger) => void;
   onDeleteTrigger?: (trigger: Trigger) => void;
+  onOpenTable?: (table: string, schema: string) => void;
   onAskAI?: () => void;
   dbType?: string;
 }
@@ -78,6 +74,7 @@ export function TriggersList({
   onEditTrigger,
   onDuplicateTrigger,
   onDeleteTrigger,
+  onOpenTable,
   onAskAI,
   dbType = "postgres",
 }: TriggersListProps) {
@@ -106,6 +103,7 @@ export function TriggersList({
     [triggers],
   );
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [viewingDefinition, setViewingDefinition] = useState<Trigger | null>(null);
 
   const schemaTriggers = normalizedTriggers.filter((t) => t.schema === selectedSchema);
@@ -132,6 +130,166 @@ export function TriggersList({
     }
     return list;
   }, [schemaTriggers, search, tablesFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedSchema, tablesFilter]);
+
+  type TriggerRow = (typeof normalizedTriggers)[number];
+
+  const eventBadgeVariant = (
+    event: string,
+  ): "success" | "warning" | "destructive" | "outline" => {
+    const e = event.toUpperCase();
+    if (e.includes("INSERT")) return "success";
+    if (e.includes("UPDATE")) return "warning";
+    if (e.includes("DELETE") || e.includes("TRUNCATE")) return "destructive";
+    return "outline";
+  };
+  const columns: TableColumn<TriggerRow>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1.4fr",
+        cell: (t) => (
+          <span className="block truncate font-medium" title={t.name}>
+            {t.name}
+          </span>
+        ),
+      },
+      {
+        key: "table",
+        header: "Table",
+        sortable: true,
+        width: "1fr",
+        cell: (t) =>
+          onOpenTable ? (
+            <DbTableLink table={t.table} schema={t.schema} onOpen={onOpenTable} />
+          ) : (
+            <p className="truncate text-muted-foreground" title={t.table}>
+              {t.table}
+            </p>
+          ),
+      },
+      {
+        key: "function",
+        header: "Function",
+        width: "1fr",
+        cell: (t) =>
+          t.function_name ? (
+            <p className="truncate text-muted-foreground" title={t.function_name}>
+              {t.function_name}
+            </p>
+          ) : (
+            <p className="truncate text-muted-foreground">-</p>
+          ),
+        sortValue: (t) => t.function_name ?? "",
+      },
+      {
+        key: "events",
+        header: "Events",
+        width: "1.2fr",
+        cell: (t) => (
+          <div
+            className="flex gap-1.5 flex-nowrap overflow-hidden"
+            title={(t.events ?? []).map((event: string) => `${t.activation} ${event}`).join(", ")}
+          >
+            {(t.events ?? []).map((event: string) => (
+              <Badge key={event} variant={eventBadgeVariant(event)} className="shrink-0">
+                {t.activation} {event}
+              </Badge>
+            ))}
+          </div>
+        ),
+      },
+      {
+        key: "orientation",
+        header: "Orientation",
+        width: "0.8fr",
+        cell: (t) => (
+          <p className="truncate text-muted-foreground" title={t.orientation}>
+            {t.orientation}
+          </p>
+        ),
+        sortValue: (t) => t.orientation ?? "",
+      },
+      {
+        key: "enabled",
+        header: "Enabled",
+        align: "center",
+        width: "4.5rem",
+        cell: (t) => (
+          <div className="flex items-center justify-center">
+            {t.enabled_mode !== "DISABLED" ? (
+              <Check className="w-4 h-4 text-primary" />
+            ) : (
+              <X className="w-4 h-4 text-muted-foreground/40" />
+            )}
+          </div>
+        ),
+        sortValue: (t) => (t.enabled_mode !== "DISABLED" ? 1 : 0),
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "3rem",
+        cell: (t) => (
+          <div className="flex items-center justify-end">
+            <DropdownMenu>
+              <TooltipProvider><Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label={`${t.name} actions`}
+                    >
+                      <MoreVertical />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+              <TooltipContent side="bottom">More options</TooltipContent>
+            </Tooltip></TooltipProvider>
+              <DropdownMenuContent side="bottom" align="end" className="w-52">
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                  onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
+                >
+                  <Edit2 size={14} />
+                  <p>Edit trigger</p>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                  onClick={() => { if (!isMssql) onDuplicateTrigger?.(t); }}
+                >
+                  <Copy size={14} />
+                  <p>Duplicate trigger</p>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
+                  onClick={() => { if (!isMssql) onDeleteTrigger?.(t); }}
+                >
+                  <Trash2 size={14} />
+                  <p>Delete trigger</p>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+      },
+    ],
+    [isMssql, onDeleteTrigger, onDuplicateTrigger, onEditTrigger, onOpenTable],
+  );
 
   if (fetchingTriggers && triggers.length === 0) {
     return (
@@ -213,7 +371,7 @@ export function TriggersList({
               <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={onAskAI}>
+                  <Button variant="outline" size="icon-sm" onClick={onAskAI}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                   </Button>
@@ -225,7 +383,7 @@ export function TriggersList({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="ml-auto grow inline-flex">
-                    <Button variant="default" className="grow" disabled>
+                    <Button variant="outline" size="sm" className="grow" disabled>
                       <Plus className="w-3.5 h-3.5" />
                       New trigger
                     </Button>
@@ -241,7 +399,7 @@ export function TriggersList({
               <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={onAskAI}>
+                  <Button variant="outline" size="icon-sm" onClick={onAskAI}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                   </Button>
@@ -251,7 +409,8 @@ export function TriggersList({
               </TooltipProvider>
               <Button
                 onClick={onOpenCreateTriggerTab}
-                variant="default"
+                variant="outline"
+                size="sm"
                 className="ml-auto grow"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -261,7 +420,7 @@ export function TriggersList({
           </div>
         </DbListToolbar>
 
-        <div className="px-8 flex-1 overflow-hidden flex flex-col">
+        <div className="px-8 flex-1 min-h-0 overflow-y-auto">
           {schemaTriggers.length === 0 ? (
             <div className="flex-1 flex flex-col justify-start supabase-theme">
               <EmptyStatePresentational
@@ -278,7 +437,7 @@ export function TriggersList({
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button variant="outline" size="icon" onClick={onAskAI}>
+                          <Button variant="outline" size="icon-sm" onClick={onAskAI}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                           </Button>
@@ -286,7 +445,7 @@ export function TriggersList({
                         <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    <Button onClick={onOpenCreateTriggerTab} variant="default">
+                    <Button onClick={onOpenCreateTriggerTab} variant="outline" size="sm">
                       <Plus className="w-3.5 h-3.5" />
                       New trigger
                     </Button>
@@ -295,129 +454,32 @@ export function TriggersList({
               </EmptyStatePresentational>
             </div>
           ) : (
-            <DbCardTable>
-              <DatabaseTable>
-                <DatabaseTableHeader>
-                  <DatabaseTableRow>
-                    <DatabaseTableHead key="name">Name</DatabaseTableHead>
-                    <DatabaseTableHead key="table">Table</DatabaseTableHead>
-                    <DatabaseTableHead key="function">Function</DatabaseTableHead>
-                    <DatabaseTableHead key="events">Events</DatabaseTableHead>
-                    <DatabaseTableHead key="orientation">Orientation</DatabaseTableHead>
-                    <DatabaseTableHead key="enabled" className="w-20">Enabled</DatabaseTableHead>
-                    <DatabaseTableHead key="buttons" className="w-1/12" />
-                  </DatabaseTableRow>
-                </DatabaseTableHeader>
-                <DatabaseTableBody>
-                  {filteredTriggers.length === 0 && search.length > 0 && (
-                    <DbNoResultsRow colSpan={7} search={search} />
-                  )}
-                {filteredTriggers.map((t, i) => (
-                  <DatabaseTableRow key={t.id || `${t.schema}.${t.name}-${i}`}>
-                      <DatabaseTableCell className="space-x-2">
-                        <Button
-                          variant="ghost"
-                          className="text-sm font-medium p-0 hover:bg-transparent h-auto text-primary hover:text-primary/80 text-left"
-                          onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
-                          title={isMssql ? "Editing MSSQL triggers coming soon" : t.name}
-                        >
-                          {t.name}
-                        </Button>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <p className="truncate text-muted-foreground max-w-40" title={t.table}>
-                          {t.table}
-                        </p>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        {t.function_name ? (
-                          <p className="truncate text-muted-foreground max-w-40" title={t.function_name}>
-                            {t.function_name}
-                          </p>
-                        ) : (
-                          <p className="truncate text-muted-foreground">-</p>
-                        )}
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <div className="flex gap-2 flex-wrap">
-                          {(t.events ?? []).map((event: string) => (
-                            <Badge key={event} variant="outline" className="text-xs">
-                              {t.activation} {event}
-                            </Badge>
-                          ))}
-                        </div>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <p className="truncate text-muted-foreground" title={t.orientation}>
-                          {t.orientation}
-                        </p>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <div className="flex items-center justify-center">
-                          {t.enabled_mode !== "DISABLED" ? (
-                            <Check className="w-4 h-4 text-primary" />
-                          ) : (
-                            <X className="w-4 h-4 text-muted-foreground/40" />
-                          )}
-                        </div>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell className="text-right">
-                        <div className="flex items-center justify-end">
-                          <DropdownMenu>
-                            <TooltipProvider><Tooltip>
-                              <TooltipTrigger asChild>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    aria-label={`${t.name} actions`}
-                                  >
-                                    <MoreVertical />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                              </TooltipTrigger>
-                            <TooltipContent side="bottom">More options</TooltipContent>
-                          </Tooltip></TooltipProvider>
-                            <DropdownMenuContent side="bottom" align="end" className="w-52">
-                              <DropdownMenuItem
-                                className="space-x-2"
-                                disabled={isMssql}
-                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                                onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
-                              >
-                                <Edit2 size={14} />
-                                <p>Edit trigger</p>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="space-x-2"
-                                disabled={isMssql}
-                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                                onClick={() => { if (!isMssql) onDuplicateTrigger?.(t); }}
-                              >
-                                <Copy size={14} />
-                                <p>Duplicate trigger</p>
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="space-x-2"
-                                disabled={isMssql}
-                                title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                                onClick={() => { if (!isMssql) onDeleteTrigger?.(t); }}
-                              >
-                                <Trash2 size={14} />
-                                <p>Delete trigger</p>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </DatabaseTableCell>
-                    </DatabaseTableRow>
-                  ))}
-                </DatabaseTableBody>
-              </DatabaseTable>
-            </DbCardTable>
+            <div className="pb-8">
+              <DataTable<TriggerRow>
+                data={filteredTriggers}
+                columns={columns}
+                getRowId={(t) => t.id || `${t.schema}.${t.name}`}
+                pagination={{
+                  page,
+                  pageSize: 10,
+                  onPageChange: setPage,
+                  itemLabel: "triggers",
+                }}
+                isRowClickable={() => !isMssql}
+                onRowClick={(t) => {
+                  if (!isMssql) onEditTrigger?.(t as Trigger);
+                }}
+                emptyState={
+                  <div className="py-8 text-center">
+                    <p className="text-sm text-foreground">No results found</p>
+                    <p className="text-sm text-muted-foreground">
+                      Your search for &ldquo;{search}&rdquo; did not return any results
+                    </p>
+                  </div>
+                }
+              />
+            </div>
           )}
-          <div className="h-8" />
         </div>
       </DbListPage>
     </>
