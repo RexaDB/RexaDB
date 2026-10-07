@@ -191,6 +191,12 @@ export function SqlQueryInput({
   }, [fontSize, query, suggestionRange]);
 
   const refreshSuggestions = () => {
+    if (readOnly) {
+      setSuggestions([]);
+      setSuggestionRange(null);
+      setActiveSuggestionIndex(0);
+      return;
+    }
     if (aiMode || isFindOpen) {
       setSuggestions([]);
       setSuggestionRange(null);
@@ -227,6 +233,7 @@ export function SqlQueryInput({
   };
 
   const applySuggestion = (item: SqlSuggestionItem) => {
+    if (readOnly) return;
     const textarea = textareaRef.current;
     if (!textarea || !suggestionRange) return;
     const nextValue = `${query.slice(0, suggestionRange.start)}${item.insertText}${query.slice(suggestionRange.end)}`;
@@ -277,6 +284,16 @@ export function SqlQueryInput({
     if (aiMode && !query.trim() && event.key === "Escape") {
       event.preventDefault();
       onExitAiMode?.();
+      return;
+    }
+
+    if (readOnly) {
+      // Read-only: keep find reachable, ignore everything that could
+      // mutate the draft or run it (suggestions, Tab insert, run).
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setIsFindOpen(true);
+      }
       return;
     }
 
@@ -373,6 +390,11 @@ export function SqlQueryInput({
 
   return (
     <div className="relative flex h-full min-h-0 bg-studio-bg">
+      {readOnly && (
+        <span className="pointer-events-none absolute top-2 right-3 z-20 font-mono text-[10px] font-semibold text-amber-500/70 select-none">
+          READ-ONLY
+        </span>
+      )}
       {isFindOpen && (
         <SqlQueryFind
           matchCount={matches.length}
