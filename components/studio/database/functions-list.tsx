@@ -33,13 +33,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  DatabaseTable,
-  DatabaseTableBody,
-  DatabaseTableCell,
-  DatabaseTableHead,
-  DatabaseTableHeader,
-  DatabaseTableRow,
-} from "./database-table";
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import {
   Tooltip,
   TooltipContent,
@@ -183,6 +179,12 @@ export function FunctionsList({
     setDefinitionDraft(selectedFunction.definition || "");
   }, [selectedFunction]);
 
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedSchema, returnTypeFilter, routineTypeFilter, securityFilter]);
+
   const openFunctionViewer = (fn: DatabaseFunction) => {
     setSelectedFunction(fn);
     setDefinitionDraft(fn.definition || "");
@@ -195,6 +197,145 @@ export function FunctionsList({
   };
 
   const handleCancelEdit = () => closeFunctionViewer();
+
+  const columns: TableColumn<DatabaseFunction>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1.2fr",
+        cell: (fn) => (
+          <span className="block truncate font-medium" title={fn.name}>
+            {fn.name}
+          </span>
+        ),
+      },
+      {
+        key: "type",
+        header: "Type",
+        sortable: true,
+        width: "0.7fr",
+        cell: (fn) => (
+          <span className="text-muted-foreground capitalize">{fn.type}</span>
+        ),
+      },
+      {
+        key: "arguments",
+        header: "Arguments",
+        width: "1.2fr",
+        cell: (fn) => {
+          const argumentTypes = fn.argument_types || fn.arguments || "";
+          return (
+            <p
+              title={argumentTypes}
+              className={`truncate ${argumentTypes ? "text-muted-foreground" : "text-muted-foreground/60"}`}
+            >
+              {argumentTypes || "\u2013"}
+            </p>
+          );
+        },
+        sortValue: (fn) => fn.argument_types || fn.arguments || "",
+      },
+      {
+        key: "return_type",
+        header: "Return type",
+        sortable: true,
+        width: "0.9fr",
+        cell: (fn) =>
+          fn.return_type === "trigger" ? (
+            <span
+              className="text-primary cursor-pointer hover:underline"
+              title={fn.return_type}
+            >
+              {fn.return_type}
+            </span>
+          ) : (
+            <p
+              title={fn.return_type || ""}
+              className={`truncate ${!fn.return_type ? "text-muted-foreground/60" : "text-muted-foreground"}`}
+            >
+              {fn.return_type || "\u2013"}
+            </p>
+          ),
+      },
+      ...(!isMssql
+        ? [
+            {
+              key: "security",
+              header: "Security",
+              width: "0.7fr",
+              cell: (fn: DatabaseFunction) => (
+                <Badge variant={fn.security_definer ? "warning" : "outline"}>
+                  {fn.security_definer ? "Definer" : "Invoker"}
+                </Badge>
+              ),
+              sortValue: (fn: DatabaseFunction) =>
+                fn.security_definer ? "Definer" : "Invoker",
+            } as TableColumn<DatabaseFunction>,
+          ]
+        : []),
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "3rem",
+        cell: (fn) => (
+          <div className="flex items-center justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={`${fn.name} actions`}
+                >
+                  <MoreVertical />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="bottom" align="end" className="w-52">
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                  onClick={() => { if (!isMssql) openFunctionViewer(fn); }}
+                >
+                  <Edit2 size={14} />
+                  <p>{isMssql ? "View definition" : "Edit function"}</p>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                  onClick={() => {
+                    if (isMssql) return;
+                    const newFn = { ...fn, name: `${fn.name}_duplicate` };
+                    openFunctionViewer(newFn);
+                  }}
+                >
+                  <Copy size={14} />
+                  <p>Duplicate function</p>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="space-x-2"
+                  disabled={isMssql}
+                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                  onClick={() => {
+                    if (!isMssql)
+                      onDeleteFunction(fn.schema, fn.name, fn.arguments);
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <p>Delete function</p>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ),
+      },
+    ],
+    [isMssql, onDeleteFunction],
+  );
 
   const hasDefinitionChanges =
     !!selectedFunction &&
@@ -293,7 +434,7 @@ export function FunctionsList({
               placeholder="Search for a function"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-8 bg-background border-border text-xs"
+              className="pl-9 h-7 bg-background border-border text-xs"
             />
           </div>
           {uniqueReturnTypes.length > 0 && (
@@ -329,7 +470,7 @@ export function FunctionsList({
           <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" onClick={onAskAI}>
+              <Button variant="outline" size="icon-sm" onClick={onAskAI}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
               </Button>
@@ -342,7 +483,7 @@ export function FunctionsList({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="ml-auto grow lg:grow-0 inline-flex">
-                  <Button variant="default" className="grow lg:grow-0" disabled>
+                  <Button variant="outline" size="sm" className="grow lg:grow-0" disabled>
                     <Plus className="w-3.5 h-3.5" />
                     New function
                   </Button>
@@ -353,7 +494,8 @@ export function FunctionsList({
             </TooltipProvider>
           ) : (
           <Button
-            variant="default"
+            variant="outline"
+            size="sm"
             className="ml-auto grow lg:grow-0"
             onClick={() => {
               const newFn: DatabaseFunction = {
@@ -375,7 +517,7 @@ export function FunctionsList({
         </div>
       </div>
 
-      <div className="px-8 flex-1 overflow-hidden flex flex-col">
+      <div className="px-8 flex-1 min-h-0 overflow-y-auto">
         {schemaFunctions.length === 0 ? (
           <div className="flex-1 flex flex-col justify-start supabase-theme">
             <EmptyStatePresentational
@@ -391,7 +533,7 @@ export function FunctionsList({
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button variant="outline" size="icon" onClick={onAskAI}>
+                      <Button variant="outline" size="icon-sm" onClick={onAskAI}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/ai-agent.png" alt="" width={20} height={20} className="rounded-[3px] object-cover dark:invert" />
                       </Button>
@@ -401,7 +543,8 @@ export function FunctionsList({
                 </TooltipProvider>
                 {!isMssql && (
                 <Button
-                  variant="default"
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     const newFn: DatabaseFunction = {
                       schema: selectedSchema,
@@ -423,143 +566,31 @@ export function FunctionsList({
             </EmptyStatePresentational>
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex-1 flex flex-col supabase-theme">
-            <DatabaseTable className="table-fixed">
-              <DatabaseTableHeader>
-                <DatabaseTableRow>
-                  <DatabaseTableHead key="name">Name</DatabaseTableHead>
-                  <DatabaseTableHead key="type">Type</DatabaseTableHead>
-                  <DatabaseTableHead key="arguments">Arguments</DatabaseTableHead>
-                  <DatabaseTableHead key="return_type">Return type</DatabaseTableHead>
-                  {!isMssql && (
-                    <DatabaseTableHead key="security" className="w-[100px]">Security</DatabaseTableHead>
-                  )}
-                  <DatabaseTableHead key="buttons" className="w-1/6" />
-                </DatabaseTableRow>
-              </DatabaseTableHeader>
-              <DatabaseTableBody>
-                {filteredFunctions.length === 0 && search.length > 0 && (
-                  <DatabaseTableRow>
-                    <DatabaseTableCell colSpan={6}>
-                      <p className="text-sm text-foreground">No results found</p>
-                      <p className="text-sm text-muted-foreground">
-                        Your search for &ldquo;{search}&rdquo; did not return any results
-                      </p>
-                    </DatabaseTableCell>
-                  </DatabaseTableRow>
-                )}
-              {filteredFunctions.map((fn) => {
-                const argumentTypes = fn.argument_types || fn.arguments || "";
-                return (
-                  <DatabaseTableRow key={`${fn.schema}.${fn.name}(${fn.arguments || ""})`}>
-                    <DatabaseTableCell className="truncate">
-                      <Button
-                        variant="ghost"
-                        className="text-sm font-medium p-0 hover:bg-transparent h-auto text-primary hover:text-primary/80"
-                        onClick={() => openFunctionViewer(fn)}
-                        title={fn.name}
-                      >
-                        {fn.name}
-                      </Button>
-                    </DatabaseTableCell>
-                    <DatabaseTableCell className="text-muted-foreground capitalize">
-                      {fn.type}
-                    </DatabaseTableCell>
-                    <DatabaseTableCell>
-                      <p
-                        title={argumentTypes}
-                        className={`truncate ${argumentTypes ? "text-muted-foreground" : "text-muted-foreground/60"}`}
-                      >
-                        {argumentTypes || "\u2013"}
-                      </p>
-                    </DatabaseTableCell>
-                    <DatabaseTableCell>
-                      {fn.return_type === "trigger" ? (
-                        <span
-                          className="text-primary cursor-pointer hover:underline"
-                          title={fn.return_type}
-                        >
-                          {fn.return_type}
-                        </span>
-                      ) : (
-                        <p
-                          title={fn.return_type || (isMssql && fn.type === "PROCEDURE" ? "Procedure (no return value)" : "")}
-                          className={`truncate ${!fn.return_type ? "text-muted-foreground/60" : "text-muted-foreground"}`}
-                        >
-                          {fn.return_type || "\u2013"}
-                        </p>
-                      )}
-                    </DatabaseTableCell>
-                    {!isMssql && (
-                    <DatabaseTableCell>
-                      <p className="truncate text-muted-foreground">
-                        {fn.security_definer ? "Definer" : "Invoker"}
-                      </p>
-                    </DatabaseTableCell>
-                    )}
-                    <DatabaseTableCell className="text-right">
-                      <div className="flex items-center justify-end">
-                        <DropdownMenu>
-                          <TooltipProvider><Tooltip>
-                            <TooltipTrigger asChild>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  aria-label={`${fn.name} actions`}
-                                >
-                                  <MoreVertical />
-                                </Button>
-                              </DropdownMenuTrigger>
-                            </TooltipTrigger>
-                          <TooltipContent side="bottom">More options</TooltipContent>
-                        </Tooltip></TooltipProvider>
-                          <DropdownMenuContent side="bottom" align="end" className="w-52">
-                            <DropdownMenuItem
-                              className="space-x-2"
-                              disabled={isMssql}
-                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
-                              onClick={() => { if (!isMssql) openFunctionViewer(fn); }}
-                            >
-                              <Edit2 size={14} />
-                              <p>{isMssql ? "View definition" : "Edit function"}</p>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="space-x-2"
-                              disabled={isMssql}
-                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
-                              onClick={() => {
-                                if (isMssql) return;
-                                const newFn = { ...fn, name: `${fn.name}_duplicate` };
-                                openFunctionViewer(newFn);
-                              }}
-                            >
-                              <Copy size={14} />
-                              <p>Duplicate function</p>
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="space-x-2"
-                              disabled={isMssql}
-                              title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
-                              onClick={() => {
-                                if (!isMssql)
-                                  onDeleteFunction(fn.schema, fn.name, fn.arguments);
-                              }}
-                            >
-                              <Trash2 size={14} />
-                              <p>Delete function</p>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </DatabaseTableCell>
-                  </DatabaseTableRow>
-                );
-              })}
-            </DatabaseTableBody>
-          </DatabaseTable>
-        </div>
+          <div className="pb-8">
+            <DataTable<DatabaseFunction>
+              data={filteredFunctions}
+              columns={columns}
+              getRowId={(fn) => `${fn.schema}.${fn.name}(${fn.arguments || ""})`}
+              pagination={{
+                page,
+                pageSize: 10,
+                onPageChange: setPage,
+                itemLabel: "functions",
+              }}
+              isRowClickable={() => !isMssql}
+              onRowClick={(fn) => {
+                if (!isMssql) openFunctionViewer(fn);
+              }}
+              emptyState={
+                <div className="py-8 text-center">
+                  <p className="text-sm text-foreground">No results found</p>
+                  <p className="text-sm text-muted-foreground">
+                    Your search for &ldquo;{search}&rdquo; did not return any results
+                  </p>
+                </div>
+              }
+            />
+          </div>
         )}
         <div className="h-8" />
       </div>

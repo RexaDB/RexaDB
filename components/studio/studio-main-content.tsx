@@ -1436,6 +1436,7 @@ export function StudioMainContent({
                     onEditTrigger={(t) => studio.openEditTriggerTab(t)}
                     onDuplicateTrigger={(t) => studio.openDuplicateTriggerTab(t)}
                     onDeleteTrigger={(t) => studio.handleDeleteTrigger(t.schema, t.name)}
+                    onOpenTable={(table, schema) => handleTableClick(table, schema)}
                     schemas={schemas}
                     selectedSchema={selectedSchema}
                     onSchemaChange={setSelectedSchema}
@@ -1459,6 +1460,7 @@ export function StudioMainContent({
                     fetchingIndexes={fetchingIndexes}
                     onDeleteIndex={handleDeleteIndex}
                     onOpenCreateIndexTab={studio.openCreateIndexTab}
+                    onOpenTable={(table, schema) => handleTableClick(table, schema)}
                     onViewDefinition={(index: any) => {
                       const tabId = `sql-index-${index.name}`;
                       const newTab = {
@@ -1503,6 +1505,7 @@ export function StudioMainContent({
                     rlsPolicyTabEditor={studio.rlsPolicyTabEditor}
                     onOpenEditTab={studio.openRlsPolicyEditTab}
                     onOpenCreateTab={studio.openRlsPolicyCreateTab}
+                    onOpenTable={(table, schema) => handleTableClick(table, schema)}
                   />
                 ) : paneDatabaseView === "sessions" ? (
                   <SessionsList connectionString={currentConnectionString} />

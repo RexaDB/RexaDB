@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownWideNarrow,
   Copy,
   EdgeFunctionsIcon,
   RefreshCw,
@@ -11,6 +10,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyStatePresentational } from "@/components/studio/database/empty-state-presentational";
+import {
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import {
   edgeFunctionUrl,
   listEdgeFunctions,
@@ -32,7 +35,6 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"name" | "updated">("name");
 
   const loadFunctions = useCallback(async () => {
     if (!connectionString) return;
@@ -62,20 +64,13 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = q
-      ? functions.filter(
-          (f) =>
-            f.slug.toLowerCase().includes(q) ||
-            f.name.toLowerCase().includes(q),
-        )
-      : [...functions];
-    filtered.sort((a, b) =>
-      sortBy === "name"
-        ? a.slug.localeCompare(b.slug)
-        : (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+    if (!q) return [...functions];
+    return functions.filter(
+      (f) =>
+        f.slug.toLowerCase().includes(q) ||
+        f.name.toLowerCase().includes(q),
     );
-    return filtered;
-  }, [functions, search, sortBy]);
+  }, [functions, search]);
 
   function copyUrl(url: string) {
     void navigator.clipboard
@@ -83,6 +78,61 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
       .then(() => toast.success("Function URL copied."))
       .catch(() => toast.error("Failed to copy URL."));
   }
+
+  const columns: TableColumn<EdgeFunction>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1fr",
+        cell: (f) => (
+          <span className="block truncate font-medium" title={f.name || f.slug}>
+            {f.name || f.slug}
+          </span>
+        ),
+        sortValue: (f) => f.slug,
+      },
+      {
+        key: "url",
+        header: "URL",
+        width: "1.6fr",
+        cell: (f) => {
+          const url = projectRef ? edgeFunctionUrl(projectRef, f.slug) : "";
+          return (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={url}>
+                {url}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Copy URL for ${f.slug}`}
+                title="Copy URL"
+                onClick={() => copyUrl(url)}
+              >
+                <Copy className="size-3.5" />
+              </Button>
+            </span>
+          );
+        },
+      },
+      {
+        key: "updated",
+        header: "Updated",
+        sortable: true,
+        align: "right",
+        width: "0.7fr",
+        cell: (f) => (
+          <span className="block truncate text-muted-foreground">
+            {timeAgo(f.updated_at)}
+          </span>
+        ),
+        sortValue: (f) => f.updated_at ?? "",
+      },
+    ],
+    [projectRef],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-studio-bg">
@@ -99,21 +149,10 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() =>
-            setSortBy((s) => (s === "name" ? "updated" : "name"))
-          }
-          title={sortBy === "name" ? "Sorted by name" : "Sorted by updated"}
-        >
-          <ArrowDownWideNarrow className="mr-1.5 size-3.5" />
-          {sortBy === "name" ? "Sorted by name" : "Sorted by updated"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
           onClick={() => void loadFunctions()}
           disabled={loading}
         >
-          <RefreshCw className={cn("mr-1.5 size-3.5", loading && "animate-spin")} />
+          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           Refresh
         </Button>
         <span className="text-xs text-muted-foreground">
@@ -135,8 +174,8 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
             <p className="mt-1 break-words text-xs text-muted-foreground">
               {loadError}
             </p>
-            <Button size="sm" className="mt-3" onClick={() => void loadFunctions()}>
-              <RefreshCw className="mr-1.5 size-3.5" />
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => void loadFunctions()}>
+              <RefreshCw className="size-3.5" />
               Retry
             </Button>
           </div>
@@ -151,56 +190,20 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
             }
           />
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-[minmax(180px,1fr)_minmax(0,2fr)_140px] gap-2 border-b border-border bg-muted/30 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              <span>Name</span>
-              <span>URL</span>
-              <span className="text-right">Updated</span>
-            </div>
-            <div className="divide-y divide-border">
-              {visible.map((f) => {
-                const url = projectRef
-                  ? edgeFunctionUrl(projectRef, f.slug)
-                  : "";
-                return (
-                  <div
-                    key={f.slug}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => studio.openEdgeFunctionTab?.(f.slug)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        studio.openEdgeFunctionTab?.(f.slug);
-                    }}
-                    className="grid w-full grid-cols-[minmax(180px,1fr)_minmax(0,2fr)_140px] cursor-pointer items-center gap-2 px-4 py-3 text-left text-xs transition-colors hover:bg-muted/20"
-                  >
-                    <span className="truncate font-medium text-foreground">
-                      {f.name || f.slug}
-                    </span>
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-                        {url}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`Copy URL for ${f.slug}`}
-                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copyUrl(url);
-                        }}
-                      >
-                        <Copy className="size-3.5" />
-                      </button>
-                    </span>
-                    <span className="truncate text-right text-muted-foreground">
-                      {timeAgo(f.updated_at)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <DataTable<EdgeFunction>
+            data={visible}
+            columns={columns}
+            getRowId={(f) => f.slug}
+            onRowClick={(f) => studio.openEdgeFunctionTab?.(f.slug)}
+            emptyState={
+              <div className="py-8 text-center">
+                <p className="text-sm text-foreground">No results found</p>
+                <p className="text-sm text-muted-foreground">
+                  Your search for &ldquo;{search}&rdquo; did not return any results
+                </p>
+              </div>
+            }
+          />
         )}
       </div>
     </div>

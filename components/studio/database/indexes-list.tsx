@@ -1,17 +1,15 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { Plus, Search, Trash2, Layers, Database } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
-  DatabaseTable,
-  DatabaseTableBody,
-  DatabaseTableCell,
-  DatabaseTableHead,
-  DatabaseTableHeader,
-  DatabaseTableRow,
-} from "./database-table";
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
+import { DbTableLink } from "./db-list-layout";
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +35,7 @@ interface IndexesListProps {
   onDeleteIndex: (schema: string, name: string) => void;
   onViewDefinition: (index: Index) => void;
   onOpenCreateIndexTab?: () => void;
+  onOpenTable?: (table: string, schema: string) => void;
   schemas: string[];
   selectedSchema: string;
   onSchemaChange: (schema: string) => void;
@@ -48,11 +47,13 @@ export function IndexesList({
   onDeleteIndex,
   onViewDefinition,
   onOpenCreateIndexTab,
+  onOpenTable,
   schemas,
   selectedSchema,
   onSchemaChange,
 }: IndexesListProps) {
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const sortedIndexes = useMemo(() => {
     const filtered = indexes.filter((idx) => {
@@ -68,6 +69,90 @@ export function IndexesList({
     });
     return filtered.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   }, [indexes, search, selectedSchema]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedSchema]);
+
+  const columns: TableColumn<Index>[] = useMemo(
+    () => [
+      {
+        key: "table",
+        header: "Table",
+        sortable: true,
+        width: "1fr",
+        cell: (idx) =>
+          onOpenTable ? (
+            <DbTableLink table={idx.table_name} schema={idx.schema} onOpen={onOpenTable} />
+          ) : (
+            <p className="truncate" title={idx.table_name}>
+              {idx.table_name}
+            </p>
+          ),
+        sortValue: (idx) => idx.table_name,
+      },
+      {
+        key: "columns",
+        header: "Columns",
+        width: "1.2fr",
+        cell: (idx) => (
+          <p className="truncate text-muted-foreground" title={idx.columns.join(", ")}>
+            {idx.columns.join(", ")}
+          </p>
+        ),
+        sortValue: (idx) => idx.columns.join(", "),
+      },
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1fr",
+        cell: (idx) => (
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="truncate font-medium" title={idx.name}>
+              {idx.name}
+            </span>
+            {idx.is_unique ? (
+              <Badge variant="info" className="shrink-0">
+                Unique
+              </Badge>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "11rem",
+        cell: (idx) => (
+          <div className="flex justify-end items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onViewDefinition(idx)}
+            >
+              View definition
+            </Button>
+            <TooltipProvider><Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete index"
+                  onClick={() => onDeleteIndex(idx.schema, idx.name)}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Delete index</TooltipContent>
+            </Tooltip></TooltipProvider>
+          </div>
+        ),
+      },
+    ],
+    [onDeleteIndex, onViewDefinition, onOpenTable],
+  );
 
   if (fetchingIndexes && indexes.length === 0) {
     return (
@@ -130,13 +215,14 @@ export function IndexesList({
             placeholder="Search for an index"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 h-8 bg-background border-border text-xs"
+            className="pl-9 h-7 bg-background border-border text-xs"
           />
         </div>
         {onOpenCreateIndexTab && (
           <Button
             onClick={onOpenCreateIndexTab}
-            variant="default"
+            variant="outline"
+            size="sm"
             className="ml-auto grow lg:grow-0"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -145,7 +231,7 @@ export function IndexesList({
         )}
       </div>
 
-      <div className="px-8 flex-1 overflow-hidden flex flex-col">
+      <div className="px-8 flex-1 min-h-0 overflow-y-auto">
         {sortedIndexes.length === 0 && search.length === 0 ? (
           <div className="flex-1 flex flex-col justify-start supabase-theme">
             <EmptyStatePresentational
@@ -154,7 +240,7 @@ export function IndexesList({
               description={`There are no indexes found in the schema "${selectedSchema}"`}
             >
               {onOpenCreateIndexTab && (
-                <Button onClick={onOpenCreateIndexTab} variant="default">
+                <Button onClick={onOpenCreateIndexTab} variant="outline" size="sm">
                   <Plus className="w-3.5 h-3.5" />
                   Create index
                 </Button>
@@ -162,77 +248,28 @@ export function IndexesList({
             </EmptyStatePresentational>
           </div>
         ) : (
-          <div className="w-full overflow-hidden flex-1 flex flex-col">
-            <div className="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex-1 flex flex-col supabase-theme">
-              <DatabaseTable className="table-fixed">
-                <DatabaseTableHeader>
-                  <DatabaseTableRow>
-                    <DatabaseTableHead className="w-[20%]">Table</DatabaseTableHead>
-                    <DatabaseTableHead className="w-[35%]">Columns</DatabaseTableHead>
-                    <DatabaseTableHead className="w-[25%]">Name</DatabaseTableHead>
-                    <DatabaseTableHead className="w-[20%]" />
-                  </DatabaseTableRow>
-                </DatabaseTableHeader>
-                <DatabaseTableBody>
-                  {sortedIndexes.length === 0 && search.length > 0 && (
-                    <DatabaseTableRow>
-                      <DatabaseTableCell colSpan={4}>
-                        <p className="text-sm text-foreground">No results found</p>
-                        <p className="text-sm text-muted-foreground">
-                          Your search for &ldquo;{search}&rdquo; did not return any results
-                        </p>
-                      </DatabaseTableCell>
-                    </DatabaseTableRow>
-                  )}
-                  {sortedIndexes.map((idx) => (
-                    <DatabaseTableRow key={`${idx.schema}.${idx.name}`}>
-                      <DatabaseTableCell>
-                        <p className="truncate" title={idx.table_name}>
-                          {idx.table_name}
-                        </p>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <p className="truncate text-muted-foreground" title={idx.columns.join(", ")}>
-                          {idx.columns.join(", ")}
-                        </p>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <p className="truncate font-medium" title={idx.name}>
-                          {idx.name}
-                        </p>
-                      </DatabaseTableCell>
-                      <DatabaseTableCell>
-                        <div className="flex justify-end items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onViewDefinition(idx)}
-                          >
-                            View definition
-                          </Button>
-                          <TooltipProvider><Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label="Delete index"
-                                onClick={() => onDeleteIndex(idx.schema, idx.name)}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">Delete index</TooltipContent>
-                          </Tooltip></TooltipProvider>
-                        </div>
-                      </DatabaseTableCell>
-                    </DatabaseTableRow>
-                  ))}
-                </DatabaseTableBody>
-              </DatabaseTable>
-            </div>
+          <div className="pb-8">
+            <DataTable<Index>
+              data={sortedIndexes}
+              columns={columns}
+              getRowId={(idx) => `${idx.schema}.${idx.name}`}
+              pagination={{
+                page,
+                pageSize: 10,
+                onPageChange: setPage,
+                itemLabel: "indexes",
+              }}
+              emptyState={
+                <div className="py-8 text-center">
+                  <p className="text-sm text-foreground">No results found</p>
+                  <p className="text-sm text-muted-foreground">
+                    Your search for &ldquo;{search}&rdquo; did not return any results
+                  </p>
+                </div>
+              }
+            />
           </div>
         )}
-        <div className="h-8" />
       </div>
     </div>
   );

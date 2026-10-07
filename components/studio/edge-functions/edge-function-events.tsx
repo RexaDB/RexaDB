@@ -486,18 +486,16 @@ export function FunctionEventsExplorer({
                       <>
                         {e.status != null ? (
                           <Badge
-                            variant="secondary"
-                            className={cn(
-                              "shrink-0 font-mono text-[11px]",
-                              e.status >= 200 &&
-                                e.status < 300 &&
-                                "bg-emerald-400/10 text-emerald-400",
-                              e.status >= 500 &&
-                                "bg-destructive/10 text-destructive",
-                              e.status >= 400 &&
-                                e.status < 500 &&
-                                "bg-amber-400/10 text-amber-400",
-                            )}
+                            variant={
+                              e.status >= 200 && e.status < 300
+                                ? "success"
+                                : e.status >= 500
+                                  ? "destructive"
+                                  : e.status >= 400 && e.status < 500
+                                    ? "warning"
+                                    : "secondary"
+                            }
+                            className="shrink-0 font-mono"
                           >
                             {e.status}
                           </Badge>

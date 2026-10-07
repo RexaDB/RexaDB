@@ -39,10 +39,10 @@ export function SchemaDropdown({
       <PopoverTrigger asChild>
         <Button
           variant="outline"
+          size="sm"
           role="combobox"
           aria-expanded={open}
-          className="[&>span]:w-full pr-1! space-x-1 h-8"
-          size="sm"
+          className="[&>span]:w-full pr-1! space-x-1"
         >
           <div className="w-full flex gap-1">
             <span className="text-muted-foreground">schema</span>

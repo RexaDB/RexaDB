@@ -1,11 +1,63 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
+import {
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import type { AuthProviderConfig } from "@/lib/studio/auth-provider-types";
 
 interface AuthCustomProvidersTableProps {
   providers: AuthProviderConfig[];
   onManage: (provider: AuthProviderConfig) => void;
 }
+
+const columns: TableColumn<AuthProviderConfig>[] = [
+  {
+    key: "name",
+    header: "Name",
+    sortable: true,
+    width: "1.2fr",
+    cell: (provider) => (
+      <span className="block truncate font-medium" title={provider.name}>
+        {provider.name}
+      </span>
+    ),
+  },
+  {
+    key: "identifier",
+    header: "Identifier",
+    sortable: true,
+    width: "1.2fr",
+    cell: (provider) => (
+      <span className="block truncate text-muted-foreground" title={provider.identifier}>
+        {provider.identifier}
+      </span>
+    ),
+  },
+  {
+    key: "provider_type",
+    header: "Type",
+    sortable: true,
+    width: "0.8fr",
+    cell: (provider) => (
+      <span className="block truncate text-muted-foreground">
+        {provider.provider_type}
+      </span>
+    ),
+  },
+  {
+    key: "enabled",
+    header: "Enabled",
+    width: "0.7fr",
+    cell: (provider) => (
+      <Badge variant={provider.enabled ? "success" : "outline"}>
+        {provider.enabled ? "Enabled" : "Disabled"}
+      </Badge>
+    ),
+    sortValue: (provider) => (provider.enabled ? 1 : 0),
+  },
+];
 
 export function AuthCustomProvidersTable({
   providers,
@@ -21,42 +73,12 @@ export function AuthCustomProvidersTable({
 
   return (
     <div className="p-6">
-      <div className="overflow-hidden rounded-lg border border-studio-border">
-        <table className="w-full text-sm">
-          <thead className="bg-studio-bg/60 text-xstracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Identifier</th>
-              <th className="px-4 py-3 text-left">Type</th>
-              <th className="px-4 py-3 text-left">Enabled</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-studio-border">
-            {providers.map((provider) => (
-              <tr
-                key={provider.id}
-                onClick={() => onManage(provider)}
-                className="cursor-pointer hover:bg-studio-row-hover"
-              >
-                <td className="px-4 py-3 font-medium text-foreground">
-                  {provider.name}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {provider.identifier}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {provider.provider_type}
-                </td>
-                <td
-                  className={`px-4 py-3 text-xs font-semibold ${provider.enabled ? "text-emerald-400" : "text-muted-foreground"}`}
-                >
-                  {provider.enabled ? "Enabled" : "Disabled"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable<AuthProviderConfig>
+        data={providers}
+        columns={columns}
+        getRowId={(provider) => provider.id}
+        onRowClick={(provider) => onManage(provider)}
+      />
     </div>
   );
 }

@@ -13,19 +13,21 @@ export function LogTable({
   children: ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-studio-border text-left text-xs text-muted-foreground">
-            {headers.map((header) => (
-              <th key={header} className="px-4 py-3 font-medium">
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-studio-border">{children}</tbody>
-      </table>
+    <div className="rounded-2xl border border-black/10 bg-table-band p-0.5 dark:border-white/10">
+      <div className="overflow-x-auto rounded-[14px] border border-black/10 dark:border-white/[0.07]">
+        <table className="w-full border-separate border-spacing-0 text-sm tabular-nums">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground [&>th]:bg-table-band [&>th]:px-4 [&>th]:py-3 [&>th]:font-medium [&>th]:whitespace-nowrap">
+              {headers.map((header) => (
+                <th key={header}>{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="[&>tr>td]:border-b [&>tr>td]:border-border/60 [&>tr:last-child>td]:border-b-0 [&>tr]:bg-table-row [&>tr]:transition-colors [&>tr]:hover:bg-table-row-hover [&>tr>td]:px-4 [&>tr>td]:py-3">
+            {children}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

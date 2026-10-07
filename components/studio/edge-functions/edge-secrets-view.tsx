@@ -20,6 +20,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmptyStatePresentational } from "@/components/studio/database/empty-state-presentational";
+import {
+  DataTable,
+  type TableColumn,
+} from "@/components/data-table/components/data-table";
 import { useConfirm } from "@/hooks/use-confirm";
 import {
   deleteEdgeSecrets,
@@ -82,6 +86,77 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
     if (!q) return secrets;
     return secrets.filter((s) => s.name.toLowerCase().includes(q));
   }, [secrets, search]);
+
+  const columns: TableColumn<EdgeSecret>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        sortable: true,
+        width: "1.2fr",
+        cell: (s) => (
+          <span className="block truncate font-mono text-[11px] font-medium" title={s.name}>
+            {s.name}
+          </span>
+        ),
+      },
+      {
+        key: "value",
+        header: "Value",
+        width: "1fr",
+        cell: (s) => (
+          <span
+            className="block truncate font-mono text-[11px] text-muted-foreground"
+            title={s.value ? `sha256:${s.value.slice(0, 16)}…` : undefined}
+          >
+            ••••••••
+          </span>
+        ),
+      },
+      {
+        key: "updated",
+        header: "Updated",
+        sortable: true,
+        width: "0.8fr",
+        cell: (s) => (
+          <span className="block truncate text-muted-foreground">
+            {timeAgo(s.updated_at)}
+          </span>
+        ),
+        sortValue: (s) => s.updated_at ?? "",
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        width: "5.5rem",
+        cell: (s) => (
+          <div className="flex justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Edit ${s.name}`}
+              title="Update value"
+              onClick={() => openEdit(s)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Delete ${s.name}`}
+              title="Delete secret"
+              className="hover:text-destructive"
+              onClick={() => void handleDelete(s)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
 
   function openAdd() {
     setEditName(null);
@@ -171,11 +246,11 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
             onClick={() => void loadSecrets()}
             disabled={loading}
           >
-            <RefreshCw className={cn("mr-1.5 size-3.5", loading && "animate-spin")} />
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
             Refresh
           </Button>
-          <Button size="sm" onClick={openAdd}>
-            <Plus className="mr-1.5 size-3.5" />
+          <Button variant="outline" size="sm" onClick={openAdd}>
+            <Plus className="size-3.5" />
             Add secret
           </Button>
         </div>
@@ -188,7 +263,7 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search secrets…"
-            className="h-9 pl-9 text-xs"
+            className="h-7 pl-9 text-xs"
           />
         </div>
 
@@ -204,8 +279,8 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
             <p className="mt-1 break-words text-xs text-muted-foreground">
               {loadError}
             </p>
-            <Button size="sm" className="mt-3" onClick={() => void loadSecrets()}>
-              <RefreshCw className="mr-1.5 size-3.5" />
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => void loadSecrets()}>
+              <RefreshCw className="size-3.5" />
               Retry
             </Button>
           </div>
@@ -220,63 +295,27 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
             }
           >
             {!search && (
-              <Button size="sm" className="mt-2" onClick={openAdd}>
-                <Plus className="mr-1.5 size-3.5" />
+              <Button variant="outline" size="sm" className="mt-2" onClick={openAdd}>
+                <Plus className="size-3.5" />
                 Add secret
               </Button>
             )}
           </EmptyStatePresentational>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-[minmax(180px,1fr)_minmax(0,1fr)_140px_80px] gap-2 border-b border-border bg-muted/30 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              <span>Name</span>
-              <span>Value</span>
-              <span>Updated</span>
-              <span />
-            </div>
-            <div className="divide-y divide-border">
-              {visible.map((s) => (
-                <div
-                  key={s.name}
-                  className="grid grid-cols-[minmax(180px,1fr)_minmax(0,1fr)_140px_80px] items-center gap-2 px-4 py-3 text-xs hover:bg-muted/20"
-                >
-                  <span className="truncate font-mono text-[11px] font-medium text-foreground">
-                    {s.name}
-                  </span>
-                  <span
-                    className="truncate font-mono text-[11px] text-muted-foreground"
-                    title={
-                      s.value ? `sha256:${s.value.slice(0, 16)}…` : undefined
-                    }
-                  >
-                    ••••••••
-                  </span>
-                  <span className="truncate text-muted-foreground">
-                    {timeAgo(s.updated_at)}
-                  </span>
-                  <span className="flex justify-end gap-1">
-                    <button
-                      type="button"
-                      aria-label={`Edit ${s.name}`}
-                      title="Update value"
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() => openEdit(s)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Delete ${s.name}`}
-                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
-                      onClick={() => void handleDelete(s)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <DataTable<EdgeSecret>
+            data={visible}
+            columns={columns}
+            getRowId={(s) => s.name}
+            onRowClick={(s) => openEdit(s)}
+            emptyState={
+              <div className="py-8 text-center">
+                <p className="text-sm text-foreground">No results found</p>
+                <p className="text-sm text-muted-foreground">
+                  Your search for &ldquo;{search}&rdquo; did not return any results
+                </p>
+              </div>
+            }
+          />
         )}
       </div>
 
