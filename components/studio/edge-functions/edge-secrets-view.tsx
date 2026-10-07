@@ -87,6 +87,35 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
     return secrets.filter((s) => s.name.toLowerCase().includes(q));
   }, [secrets, search]);
 
+  const openEdit = useCallback((secret: EdgeSecret) => {
+    setEditName(secret.name);
+    setNameDraft(secret.name);
+    setValueDraft("");
+    setDialogOpen(true);
+  }, []);
+
+  const handleDelete = useCallback(
+    async (secret: EdgeSecret) => {
+      if (!access) return;
+      const ok = await confirm({
+        title: "Delete secret",
+        description: `Delete secret "${secret.name}"? Functions using it will break on next deploy.`,
+        variant: "destructive",
+        confirmText: "Delete",
+      });
+      if (!ok) return;
+      try {
+        const { error } = await deleteEdgeSecrets(access, [secret.name]);
+        if (error) throw new Error(error);
+        toast.success(`Secret "${secret.name}" deleted.`);
+        await loadSecrets();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to delete secret");
+      }
+    },
+    [access, confirm, loadSecrets],
+  );
+
   const columns: TableColumn<EdgeSecret>[] = useMemo(
     () => [
       {
@@ -155,19 +184,12 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
         ),
       },
     ],
-    [],
+    [openEdit, handleDelete],
   );
 
   function openAdd() {
     setEditName(null);
     setNameDraft("");
-    setValueDraft("");
-    setDialogOpen(true);
-  }
-
-  function openEdit(secret: EdgeSecret) {
-    setEditName(secret.name);
-    setNameDraft(secret.name);
     setValueDraft("");
     setDialogOpen(true);
   }
@@ -205,25 +227,6 @@ export function EdgeSecretsView({ studio }: { studio: any }) {
       toast.error(e instanceof Error ? e.message : "Failed to save secret");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleDelete(secret: EdgeSecret) {
-    if (!access) return;
-    const ok = await confirm({
-      title: "Delete secret",
-      description: `Delete secret "${secret.name}"? Functions using it will break on next deploy.`,
-      variant: "destructive",
-      confirmText: "Delete",
-    });
-    if (!ok) return;
-    try {
-      const { error } = await deleteEdgeSecrets(access, [secret.name]);
-      if (error) throw new Error(error);
-      toast.success(`Secret "${secret.name}" deleted.`);
-      await loadSecrets();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete secret");
     }
   }
 

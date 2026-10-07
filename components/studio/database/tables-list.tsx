@@ -256,6 +256,7 @@ export function TablesList({
         key: "table",
         header: isMongo ? "Collection" : "Table",
         sortable: true,
+        sortValue: (table) => table,
         width: "1.4fr",
         cell: (table) => (
           <span className="block truncate font-medium" title={table}>
@@ -273,9 +274,12 @@ export function TablesList({
             return <span className="text-xs text-muted-foreground/40">–</span>;
           }
           return (
-            <span className="flex items-center gap-1.5 flex-wrap">
+            <span
+              className="flex items-center gap-1.5 flex-nowrap overflow-hidden"
+              title={assigned.join(", ")}
+            >
               {assigned.map((name) => (
-                <Badge key={name} variant="outline">
+                <Badge key={name} variant="outline" className="shrink-0">
                   <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: colorByName.get(name) ?? "#94a3b8" }} />
                   {name}
                 </Badge>

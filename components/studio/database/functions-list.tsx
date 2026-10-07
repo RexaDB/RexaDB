@@ -295,9 +295,7 @@ export function FunctionsList({
               <DropdownMenuContent side="bottom" align="end" className="w-52">
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
-                  onClick={() => { if (!isMssql) openFunctionViewer(fn); }}
+                  onClick={() => { openFunctionViewer(fn); }}
                 >
                   <Edit2 size={14} />
                   <p>{isMssql ? "View definition" : "Edit function"}</p>
@@ -577,10 +575,7 @@ export function FunctionsList({
                 onPageChange: setPage,
                 itemLabel: "functions",
               }}
-              isRowClickable={() => !isMssql}
-              onRowClick={(fn) => {
-                if (!isMssql) openFunctionViewer(fn);
-              }}
+              onRowClick={(fn) => openFunctionViewer(fn)}
               emptyState={
                 <div className="py-8 text-center">
                   <p className="text-sm text-foreground">No results found</p>
