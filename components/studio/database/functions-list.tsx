@@ -341,6 +341,8 @@ export function FunctionsList({
 
   const handleSaveDefinition = async () => {
     if (!selectedFunction || !hasDefinitionChanges) return;
+    // MSSQL routines are read-only in this view; never send their SQL.
+    if (isMssql) return;
     setIsSavingDefinition(true);
     try {
       const saved = await onSaveFunctionDefinition(
@@ -673,6 +675,7 @@ export function FunctionsList({
                       onRunSelected={handleSaveDefinition}
                       onSaveSnippet={() => {}}
                       onSelectionChange={() => {}}
+                      readOnly={isMssql}
                     />
                   )}
                 </div>

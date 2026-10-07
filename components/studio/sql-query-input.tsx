@@ -34,6 +34,7 @@ export function SqlQueryInput({
   onSelectionChange,
   slashAiTrigger = true,
   aiModeKeybinding = null,
+  readOnly = false,
 }: SqlQueryInputProps) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const suggestionRef = useRef<HTMLDivElement | null>(null);
@@ -311,7 +312,11 @@ export function SqlQueryInput({
       return;
     }
 
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (
+      !readOnly &&
+      (event.metaKey || event.ctrlKey) &&
+      event.key === "Enter"
+    ) {
       event.preventDefault();
       if (event.shiftKey) {
         onRunSelected();
@@ -430,6 +435,8 @@ export function SqlQueryInput({
 
         <textarea
           ref={textareaRef}
+          readOnly={readOnly}
+          aria-readonly={readOnly || undefined}
           className="relative z-10 h-full w-full min-w-full resize-none border-0 bg-transparent px-4 py-4 font-mono text-transparent caret-foreground outline-none placeholder:text-muted-foreground/40"
           cols={1}
           onChange={(event) => {
