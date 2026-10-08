@@ -14,7 +14,7 @@ services:
     image: gvenzl/oracle-free:slim-faststart
     container_name: rexadb-oracle
     ports:
-      - "1521:1521"
+      - "127.0.0.1:1521:1521"
     environment:
       ORACLE_PASSWORD: rexadb
       APP_USER: rexadb

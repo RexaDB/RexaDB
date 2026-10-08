@@ -38,9 +38,6 @@ export async function executeOracleQuery(
     const obj: Record<string, any> = {};
     fields.forEach((col, i) => {
       obj[col.name] = row[i];
-      // Also expose lowercase keys for callers that expect PG-style names.
-      const lower = col.name.toLowerCase();
-      if (!(lower in obj)) obj[lower] = row[i];
     });
     return obj;
   });
@@ -51,10 +48,15 @@ export async function executeOracleQuery(
   };
 }
 
+function redactOracleConnectionString(connectionString: string): string {
+  // Never log passwords: oracle://user:secret@host:1521/SVC -> oracle://user:***@host:1521/SVC
+  return String(connectionString || "").replace(/(:\/\/[^/:@\s]+:)[^@\s]*(@)/, "$1***$2");
+}
+
 export async function testOracleConnection(
   connectionString: string,
 ): Promise<boolean> {
-  log("testOracleConnection", connectionString.slice(0, 80));
+  log("testOracleConnection", redactOracleConnectionString(connectionString));
   const config = connectionStringToBridgeConfig(connectionString);
   return oracleTestConnection(config);
 }
@@ -155,13 +157,26 @@ export async function getTableForeignKeys(
 }
 
 export async function getAllTablesWithColumns(connectionString: string) {
+  const config = connectionStringToBridgeConfig(connectionString);
   const schemas = await getSchemas(connectionString);
   const allRows: any[] = [];
-  for (const schema of schemas.slice(0, 50)) {
+  for (const schema of schemas) {
     const tables = await getOracleTablesDetailed(connectionString, schema);
     for (const table of tables) {
       const cols = await getTableStructure(connectionString, schema, table.name);
+      const fkByColumn = new Map<string, { pkSchema: string; pkTable: string; pkColumn: string }>();
+      try {
+        const fks = await oracleGetForeignKeys(config, schema, table.name);
+        for (const fk of fks) {
+          fkByColumn.set(String(fk.fkColumn).toUpperCase(), {
+            pkSchema: fk.pkSchema,
+            pkTable: fk.pkTable,
+            pkColumn: fk.pkColumn,
+          });
+        }
+      } catch {}
       for (const col of cols) {
+        const fk = fkByColumn.get(String(col.column_name).toUpperCase());
         allRows.push({
           table_schema: schema,
           table_name: table.name,
@@ -169,9 +184,9 @@ export async function getAllTablesWithColumns(connectionString: string) {
           data_type: col.data_type,
           is_primary: col.is_primary_key,
           is_nullable: col.is_nullable,
-          referenced_table_schema: null,
-          referenced_table_name: null,
-          referenced_column_name: null,
+          referenced_table_schema: fk?.pkSchema ?? null,
+          referenced_table_name: fk?.pkTable ?? null,
+          referenced_column_name: fk?.pkColumn ?? null,
         });
       }
     }
@@ -220,7 +235,7 @@ export async function getIndexes(
   schema?: string,
 ): Promise<OracleIndex[]> {
   const ownerFilter = schema
-    ? `AND i.owner = '${esc(schema.toUpperCase())}'`
+    ? `AND i.owner = '${esc(schema)}'`
     : "";
   const sql = `
     SELECT i.owner, i.index_name, i.table_name, i.uniqueness,
@@ -280,7 +295,7 @@ export async function getRoutines(
   connectionString: string,
   schema: string,
 ): Promise<OracleRoutine[]> {
-  const owner = esc(schema.toUpperCase());
+  const owner = esc(schema);
   // Standalone + package members from ALL_PROCEDURES.
   const sql = `
     SELECT owner, object_name, procedure_name, object_type
@@ -310,7 +325,7 @@ export async function getRoutines(
     if (objectType === "PACKAGE" && procedureName) {
       const member = String(procedureName);
       routines.push({
-        schema: schema.toUpperCase(),
+        schema: schema,
         name: `${objectName}.${member}`,
         arguments: "",
         type: "FUNCTION",
@@ -323,7 +338,7 @@ export async function getRoutines(
     }
 
     routines.push({
-      schema: schema.toUpperCase(),
+      schema: schema,
       name: objectName,
       arguments: "",
       type: objectType === "PROCEDURE" ? "PROCEDURE" : "FUNCTION",
@@ -374,7 +389,7 @@ export async function getPackages(
   connectionString: string,
   schema: string,
 ): Promise<OraclePackage[]> {
-  const owner = esc(schema.toUpperCase());
+  const owner = esc(schema);
   const sql = `
     SELECT object_name, status
     FROM all_objects
@@ -383,7 +398,7 @@ export async function getPackages(
   `;
   const rows = await queryObjects(connectionString, sql);
   const packages: OraclePackage[] = rows.map((r) => ({
-    schema: schema.toUpperCase(),
+    schema: schema,
     name: String(pick(r, "object_name") || ""),
     status: String(pick(r, "status") || "VALID"),
     definition: null,
@@ -430,7 +445,7 @@ export async function getTriggers(
   schema?: string,
 ): Promise<OracleTrigger[]> {
   const ownerFilter = schema
-    ? `AND owner = '${esc(schema.toUpperCase())}'`
+    ? `AND owner = '${esc(schema)}'`
     : "";
   const sql = `
     SELECT owner, trigger_name, table_owner, table_name,
@@ -486,12 +501,12 @@ export async function getSequences(
     SELECT sequence_owner, sequence_name, min_value, max_value,
            increment_by, last_number, cycle_flag
     FROM all_sequences
-    WHERE sequence_owner = '${esc(schema.toUpperCase())}'
+    WHERE sequence_owner = '${esc(schema)}'
     ORDER BY sequence_name
   `;
   const rows = await queryObjects(connectionString, sql);
   return rows.map((r) => ({
-    schema: String(pick(r, "sequence_owner") || schema.toUpperCase()),
+    schema: String(pick(r, "sequence_owner") || schema),
     name: String(pick(r, "sequence_name") || ""),
     min_value: Number(pick(r, "min_value") ?? null),
     max_value: Number(pick(r, "max_value") ?? null),
@@ -516,12 +531,12 @@ export async function getSynonyms(
   const sql = `
     SELECT owner, synonym_name, table_owner, table_name, db_link
     FROM all_synonyms
-    WHERE owner = '${esc(schema.toUpperCase())}'
+    WHERE owner = '${esc(schema)}'
     ORDER BY synonym_name
   `;
   const rows = await queryObjects(connectionString, sql);
   return rows.map((r) => ({
-    schema: String(pick(r, "owner") || schema.toUpperCase()),
+    schema: String(pick(r, "owner") || schema),
     name: String(pick(r, "synonym_name") || ""),
     table_owner: String(pick(r, "table_owner") || ""),
     table_name: String(pick(r, "table_name") || ""),
@@ -597,13 +612,13 @@ export async function getMaterializedViews(
     SELECT owner, mview_name, refresh_mode, refresh_method, build_mode,
            last_refresh_date, staleness, compile_state, query
     FROM all_mviews
-    WHERE owner = '${esc(schema.toUpperCase())}'
+    WHERE owner = '${esc(schema)}'
     ORDER BY mview_name
   `;
   try {
     const rows = await queryObjects(connectionString, sql);
     return rows.map((r) => ({
-      schema: String(pick(r, "owner") || schema.toUpperCase()),
+      schema: String(pick(r, "owner") || schema),
       name: String(pick(r, "mview_name") || ""),
       refresh_mode: (pick(r, "refresh_mode") as string) || null,
       refresh_method: (pick(r, "refresh_method") as string) || null,
@@ -628,9 +643,9 @@ export async function getObjectSource(
 ): Promise<string | null> {
   const sql = `
     SELECT text FROM all_source
-    WHERE owner = '${esc(schema.toUpperCase())}'
-      AND name = '${esc(name.toUpperCase())}'
-      AND type = '${esc(type.toUpperCase())}'
+    WHERE owner = '${esc(schema)}'
+      AND name = '${esc(name)}'
+      AND type = '${esc(type)}'
     ORDER BY line
   `;
   try {

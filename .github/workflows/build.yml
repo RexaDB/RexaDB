@@ -86,6 +86,16 @@ jobs:
 
       - run: bun run scripts/build-server.mjs
 
+      - name: Build Oracle bridge
+        shell: bash
+        run: bun run scripts/build-oracle-bridge.mjs
+
+      - name: Verify Oracle bridge resource
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="resources/oracle-bridge/rexadb-oracle-bridge.exe"; else BIN="resources/oracle-bridge/rexadb-oracle-bridge"; fi
+          if [ -f "$BIN" ]; then echo "  ✅ $BIN ($(wc -c < "$BIN") bytes)"; else echo "  ❌ MISSING: $BIN"; exit 1; fi
+
       - name: Verify sidecar binary (all platforms)
         shell: bash
         run: |

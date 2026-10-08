@@ -120,6 +120,34 @@ export async function deleteTableRows(
     }
   }
 
+  if (dbType === "oracle") {
+    const { executeOracleQuery, getTableStructure } = await import("./oracle-client");
+    try {
+      const structure = await getTableStructure(connectionString, schema, table);
+      const pkCol =
+        structure.find((c) => c.is_primary_key)?.column_name ??
+        Object.keys(pkValues[0] ?? {})[0];
+      if (!pkCol) {
+        return {
+          success: false,
+          error:
+            "No primary key found for this table. Deletion is only supported for tables with a primary key.",
+        };
+      }
+      const prefix = schema ? `"${schema}".` : "";
+      for (const row of pkValues) {
+        const val = row[pkCol];
+        if (val === undefined) continue;
+        const sql = `DELETE FROM ${prefix}"${table}" WHERE "${pkCol}" = ?`;
+        await executeOracleQuery(connectionString, sql, [val]);
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error("Failed to delete Oracle rows:", error);
+      return { success: false, error: error.message };
+    }
+  }
+
   const { deleteRows, getTablePrimaryKey } = await import("./pg-client");
 
   try {
@@ -231,6 +259,30 @@ export async function updateTableRows(
       return { success: true };
     } catch (error: any) {
       console.error("Failed to update supabase-mgmt rows:", error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  if (dbType === "oracle") {
+    const { executeOracleQuery } = await import("./oracle-client");
+    try {
+      const prefix = schema ? `"${schema}".` : "";
+      for (const u of updates) {
+        const setEntries = Object.entries(u.set);
+        const whereEntries = Object.entries(u.where);
+        if (setEntries.length === 0 || whereEntries.length === 0) continue;
+        const setClauses = setEntries.map(([k]) => `"${k}" = ?`).join(", ");
+        const whereClauses = whereEntries.map(([k]) => `"${k}" = ?`).join(" AND ");
+        const values = [
+          ...setEntries.map(([, v]) => v),
+          ...whereEntries.map(([, v]) => v),
+        ];
+        const sql = `UPDATE ${prefix}"${table}" SET ${setClauses} WHERE ${whereClauses}`;
+        await executeOracleQuery(connectionString, sql, values);
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error("Failed to update Oracle rows:", error);
       return { success: false, error: error.message };
     }
   }

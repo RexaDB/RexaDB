@@ -13,13 +13,14 @@
     "test": "bun test tests/**/*.test.ts tests/**/*.test.mjs",
     "server:dev": "bun run server/index.ts",
     "server:build": "bun run scripts/build-server.mjs",
+    "oracle-bridge:build": "bun run scripts/build-oracle-bridge.mjs",
     "server:install": "cd server && bun install",
     "mcp:rexadb": "bun run lib/agents/mcp/stdio.ts",
     "mcp:external": "bun run lib/agents/mcp/external-stdio.ts",
     "mcp:setup-harnesses": "bun run scripts/setup-mcp-harnesses.mjs",
     "tauri": "tauri",
     "tauri:dev": "bun run scripts/tauri-dev.mjs",
-    "tauri:build": "bun run server:build && tauri build"
+    "tauri:build": "bun run server:build && bun run oracle-bridge:build && tauri build"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.238",

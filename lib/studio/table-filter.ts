@@ -45,6 +45,24 @@ function escapeRegExpChar(c: string): string {
   return c.replace(/[.*+?^${}()|[\]\\]/, "\\$&");
 }
 
+/** Remove backslash escapes for literal %/_ (and \\) so substring search matches real names. */
+function unescapeLikeLiterals(query: string): string {
+  let out = "";
+  for (let i = 0; i < query.length; i++) {
+    const c = query[i];
+    if (c === "\\" && i + 1 < query.length) {
+      const next = query[i + 1];
+      if (next === "%" || next === "_" || next === "\\") {
+        out += next;
+        i++;
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+
 export function likeToRegExp(pattern: string, caseSensitive = false): RegExp {
   return new RegExp(`^${likeBodyToRegExpSource(pattern)}$`, caseSensitive ? "" : "i");
 }
@@ -59,7 +77,8 @@ export function matchesTableName(
   if (!q) return true;
   const name = tableName ?? "";
   if (mode === "substring") {
-    return caseSensitive ? name.includes(q) : name.toLowerCase().includes(q.toLowerCase());
+    const literal = unescapeLikeLiterals(q);
+    return caseSensitive ? name.includes(literal) : name.toLowerCase().includes(literal.toLowerCase());
   }
   if (mode === "pattern") {
     try {
@@ -77,7 +96,9 @@ export function matchesTableName(
       return false;
     }
   }
-  return caseSensitive ? name.includes(q) : name.toLowerCase().includes(q.toLowerCase());
+  // Unescape \% \_ \\ so escaped-only queries (e.g. PROJ\_) match PROJ_ORDERS.
+  const literal = unescapeLikeLiterals(q);
+  return caseSensitive ? name.includes(literal) : name.toLowerCase().includes(literal.toLowerCase());
 }
 
 export function effectiveNameFilterMode(query: string, mode: NameFilterMode): "substring" | "pattern" {

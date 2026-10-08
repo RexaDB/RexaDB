@@ -120,6 +120,25 @@ if [[ "$SKIP_BRIDGE" != true ]]; then
   success "Java bridge ready"
 fi
 
+# ── Step 0b: Build Oracle bridge (native thin-driver sidecar resource) ─────
+ORACLE_BRIDGE_BIN="resources/oracle-bridge/rexadb-oracle-bridge"
+if [[ "$SKIP_BRIDGE" == true ]]; then
+  log "Skipping Oracle bridge build (--skip-bridge)"
+elif [[ -f "$ORACLE_BRIDGE_BIN" ]]; then
+  log "Oracle bridge already built ($ORACLE_BRIDGE_BIN found)"
+else
+  log "Building Oracle bridge..."
+  bun run scripts/build-oracle-bridge.mjs
+fi
+
+if [[ "$SKIP_BRIDGE" != true ]]; then
+  if [[ ! -f "$ORACLE_BRIDGE_BIN" ]]; then
+    fail "Oracle bridge not found at $ORACLE_BRIDGE_BIN"
+    exit 1
+  fi
+  success "Oracle bridge ready"
+fi
+
 # ── Step 1: Tauri build ────────────────────────────────────────────────────
 TAURI_BIN="src-tauri/target/release/rexa-db"
 if [[ "$SKIP_TAURI_BUILD" == true ]]; then

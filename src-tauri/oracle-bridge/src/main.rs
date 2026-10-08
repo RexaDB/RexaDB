@@ -102,7 +102,13 @@ fn cell_to_json(row: &Row, index: usize, meta: &Metadata) -> Value {
         if let Ok(Some(n)) = row.get::<Option<OracleNumber>>(index) {
             let s = n.to_string();
             if let Ok(i) = s.parse::<i64>() {
-                return json!(i);
+                // JSON numbers lose precision above 2^53-1; keep large integers exact as strings.
+                const MAX_SAFE: i64 = 9_007_199_254_740_991;
+                const MIN_SAFE: i64 = -9_007_199_254_740_991;
+                if i >= MIN_SAFE && i <= MAX_SAFE {
+                    return json!(i);
+                }
+                return Value::String(s);
             }
             if let Ok(f) = s.parse::<f64>() {
                 return json!(f);
@@ -113,7 +119,12 @@ fn cell_to_json(row: &Row, index: usize, meta: &Metadata) -> Value {
             return json!(f);
         }
         if let Ok(Some(i)) = row.get::<Option<i64>>(index) {
-            return json!(i);
+            const MAX_SAFE: i64 = 9_007_199_254_740_991;
+            const MIN_SAFE: i64 = -9_007_199_254_740_991;
+            if i >= MIN_SAFE && i <= MAX_SAFE {
+                return json!(i);
+            }
+            return Value::String(i.to_string());
         }
         return Value::Null;
     }
@@ -152,7 +163,12 @@ fn cell_to_json(row: &Row, index: usize, meta: &Metadata) -> Value {
         return Value::String(n.to_string());
     }
     if let Ok(Some(i)) = row.get::<Option<i64>>(index) {
-        return json!(i);
+        const MAX_SAFE: i64 = 9_007_199_254_740_991;
+        const MIN_SAFE: i64 = -9_007_199_254_740_991;
+        if i >= MIN_SAFE && i <= MAX_SAFE {
+            return json!(i);
+        }
+        return Value::String(i.to_string());
     }
     if let Ok(Some(f)) = row.get::<Option<f64>>(index) {
         return json!(f);
@@ -187,8 +203,30 @@ fn fetch_cursor(cursor: oracledb::Cursor) -> Result<(Vec<Value>, Vec<Vec<Value>>
     Ok((columns, rows))
 }
 
+fn strip_leading_comments(sql: &str) -> &str {
+    let mut rest = sql.trim_start();
+    loop {
+        if rest.starts_with("--") {
+            match rest.find('\n') {
+                Some(pos) => rest = rest[pos + 1..].trim_start(),
+                None => return "",
+            }
+            continue;
+        }
+        if rest.starts_with("/*") {
+            match rest.find("*/") {
+                Some(pos) => rest = rest[pos + 2..].trim_start(),
+                None => return "",
+            }
+            continue;
+        }
+        break;
+    }
+    rest
+}
+
 fn is_select_like(sql: &str) -> bool {
-    let trimmed = sql.trim_start();
+    let trimmed = strip_leading_comments(sql);
     let upper = trimmed.to_ascii_uppercase();
     upper.starts_with("SELECT")
         || upper.starts_with("WITH")
@@ -196,6 +234,18 @@ fn is_select_like(sql: &str) -> bool {
         || upper.starts_with("DESCRIBE")
         || upper.starts_with("DESC ")
         || upper.starts_with("EXPLAIN")
+}
+
+fn strip_trailing_delimiter(sql: &str) -> String {
+    // Oracle rejects the trailing `;` client delimiter on plain SQL through
+    // the driver, so drop it (plus surrounding whitespace). PL/SQL blocks
+    // keep their internal semicolons; only the final delimiter is removed.
+    let mut out = sql.trim_end().to_string();
+    while out.ends_with(';') {
+        out.pop();
+        out = out.trim_end().to_string();
+    }
+    out
 }
 
 fn value_to_bind(value: &Value) -> Result<Box<dyn oracledb::ToDbValue + '_>, String> {
@@ -245,7 +295,10 @@ fn rewrite_qmark_binds(sql: &str) -> String {
 }
 
 fn run_query(conn: &Connection, sql: &str, params: &[Value]) -> Result<Value, String> {
-    let rewritten = rewrite_qmark_binds(sql);
+    // Plain SQL must not carry the trailing `;` client delimiter; PL/SQL
+    // keeps everything except the final delimiter.
+    let stripped = strip_trailing_delimiter(sql);
+    let rewritten = rewrite_qmark_binds(&stripped);
     let binds: Vec<Box<dyn oracledb::ToDbValue + '_>> = params
         .iter()
         .map(value_to_bind)

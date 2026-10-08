@@ -83,3 +83,11 @@ test("wildcardsEnabled=false treats % as literal", () => {
     1,
   );
 });
+
+test("escaped-only query falls back to literal substring", () => {
+  // PROJ\_ has no unescaped wildcard, so auto mode uses substring search
+  // over the unescaped literal PROJ_ (not the raw backslash text).
+  assert.equal(matchesTableName("PROJ_ORDERS", "PROJ\\_"), true);
+  assert.equal(matchesTableName("PROJECTS", "PROJ\\_"), false);
+  assert.equal(matchesTableName("PROJ_ORDERS", "PROJ\\_", { mode: "substring" }), true);
+});

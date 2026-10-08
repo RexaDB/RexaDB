@@ -61,6 +61,11 @@ BRIDGE_DIR="resources/java-bridge/dist"
 mv "$BRIDGE_DIR/jre" "$JRE_ARM64"
 success "ARM64 JRE + bridge.jar built"
 
+# ── Step 1b: Build Oracle bridge (native thin-driver sidecar resource) ─────
+log "Building Oracle bridge..."
+bun run scripts/build-oracle-bridge.mjs
+success "Oracle bridge built"
+
 # ── Step 2: Build x86_64 JRE (via downloaded x86_64 JDK) ──────────────────
 JRE_X64="resources/java-bridge/dist/jre-x86_64"
 if [ ! -d "$JRE_X64" ]; then

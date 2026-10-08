@@ -14,7 +14,8 @@ function log(...args: any[]) {
 
 let bridgeProcess: any = null;
 let bridgeChild: any = null;
-let bridgeInitialized = false;
+let bridgeReady = false;
+let bridgeStarting: Promise<void> | null = null;
 let shuttingDown = false;
 let requestIdCounter = 0;
 const pendingRequests = new Map<
@@ -104,12 +105,24 @@ function isTauri(): boolean {
 }
 
 async function ensureBridge() {
-  if (bridgeInitialized) return;
-  bridgeInitialized = true;
+  if (bridgeReady && bridgeChild) return;
+  if (bridgeStarting) {
+    await bridgeStarting;
+    if (bridgeReady && bridgeChild) return;
+    throw new Error("Oracle bridge failed to start");
+  }
 
+  bridgeStarting = startBridge();
+  try {
+    await bridgeStarting;
+  } finally {
+    bridgeStarting = null;
+  }
+}
+
+async function startBridge() {
   const binary = findOracleBridgeBinary();
   if (!binary) {
-    bridgeInitialized = false;
     throw new Error(
       "rexadb-oracle-bridge not found. Build it with: cargo build --manifest-path src-tauri/oracle-bridge/Cargo.toml",
     );
@@ -137,9 +150,9 @@ async function ensureBridge() {
     try {
       bridgeChild = await command.spawn();
     } catch (e: any) {
-      bridgeInitialized = false;
       throw new Error(`Failed to spawn oracle bridge: ${e.message}`);
     }
+    bridgeReady = true;
   } else {
     const { spawn } = (await Function('pkg', 'return import(pkg)')("bun")) as any;
     let proc: any;
@@ -150,11 +163,11 @@ async function ensureBridge() {
         stderr: "pipe",
       });
     } catch (e: any) {
-      bridgeInitialized = false;
       throw new Error(`Failed to spawn oracle bridge (${binary}): ${e.message}`);
     }
     bridgeProcess = proc;
     bridgeChild = proc;
+    bridgeReady = true;
 
     const reader = proc.stdout.getReader();
     const pumpStdout = async () => {
@@ -203,7 +216,7 @@ function cleanup() {
     p.reject(new Error(errMsg));
   }
   pendingRequests.clear();
-  bridgeInitialized = false;
+  bridgeReady = false;
   bridgeProcess = null;
   bridgeChild = null;
   lastStderr = "";
@@ -231,6 +244,9 @@ function processBuffer() {
 
 async function sendCommand(cmd: Record<string, any>): Promise<OracleBridgeResponse> {
   await ensureBridge();
+  if (!bridgeChild) {
+    throw new Error("Oracle bridge is not running");
+  }
   return new Promise((resolve, reject) => {
     const reqId = String(++requestIdCounter);
     cmd.reqId = reqId;

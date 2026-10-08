@@ -28,6 +28,8 @@ import {
   supportsIndexCatalog,
   supportsOracleExtraCatalog,
   supportsRoutineCatalog,
+  supportsRoutineWrite,
+  supportsTriggerWrite,
 } from "@/lib/db/connection-type";
 import { parseOracleConnectionString } from "@/lib/db/oracle-connection";
 import {
@@ -1387,6 +1389,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   const { handleDeleteFunction, handleUpdateFunctionDefinition } = useFunctionManagement({
     currentConnectionString,
+    dbType,
     executionMode,
     confirm,
     addHistoryEntry,
@@ -5608,6 +5611,10 @@ END $$;`.trim();
     orientation: string,
     functionName: string
   ) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger create is read-only for Oracle connections.");
+      return;
+    }
     const sql = `CREATE TRIGGER "${name}" ${timing} ${events.join(' OR ')} ON "${schema}"."${table}" FOR EACH ${orientation} EXECUTE FUNCTION ${functionName}();`;
     await runCreateAction({
       reviewAction: { type: 'create_trigger', description: `Create trigger "${name}" on ${schema}.${table}`, sql, metadata: { schema, table, name, events, timing, orientation, functionName } },
@@ -5625,6 +5632,10 @@ END $$;`.trim();
   };
 
   const handleDeleteTrigger = useCallback(async (schema: string, name: string) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger delete is read-only for Oracle connections.");
+      return;
+    }
     // Note: To drop a trigger, we need the table name. triggers-list has it, but this handler currently only gets schema/name.
     // However, in PostgreSQL, triggers are often dropped using: DROP TRIGGER [IF EXISTS] name ON table_name [CASCADE | RESTRICT]
     // Since we don't have the table name here easily without changing the signature, let's look at how loadTriggers gets them.
@@ -5661,7 +5672,7 @@ END $$;`.trim();
     } finally {
       setIsDeletingTrigger(false);
     }
-  }, [currentConnectionString, executionMode, confirm, loadTriggers, runQuery, triggers, addHistoryEntry]);
+  }, [currentConnectionString, executionMode, confirm, loadTriggers, runQuery, triggers, addHistoryEntry, dbType]);
 
   const runDeleteWithConfirm = useCallback(async (opts: {
     reviewAction: { type: string; description: string; sql: string; metadata?: any };
@@ -6169,6 +6180,10 @@ END $$;`.trim();
     orientation: string,
     functionName: string
   ) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger edit is read-only for Oracle connections.");
+      return;
+    }
     // Postgres has no ALTER TRIGGER — an edit is DROP + CREATE.
     // To avoid losing the trigger if CREATE fails, we use a transaction and temporary name
     const tempName = `__temp_trigger_${Date.now()}`;
@@ -6209,7 +6224,7 @@ END $$;`.trim();
     } finally {
       setIsCreatingTrigger(false);
     }
-  }, [addReviewAction, currentConnectionString, loadTriggers, runQuery, switchAwayFromTab, logQueryResult]);
+  }, [addReviewAction, currentConnectionString, loadTriggers, runQuery, switchAwayFromTab, logQueryResult, dbType]);
 
   const openCreateSchemaTab = useCallback(() => {
     openSimpleTab('create-schema', 'create-schema', 'New Schema', {
@@ -8642,7 +8657,8 @@ END $$;`.trim();
   }, [selectedTable, selectedRows, results, getRowId, executionMode, selectedSchema, currentConnectionString, refreshTableData, filterQuery, sortConfig, dbType, applyOptimisticRowDeletes, quoteIdentifier, quoteTableRef]);
 
   const buildInsertSql = (columnsSql: string, count: number) => {
-    const returnClause = (isMysql || isClickhouse) ? "" : (isMssql ? " OUTPUT INSERTED.*" : " RETURNING *");
+    // Oracle supports RETURNING ... INTO, not Postgres-style RETURNING *.
+    const returnClause = (isMysql || isClickhouse || isOracle) ? "" : (isMssql ? " OUTPUT INSERTED.*" : " RETURNING *");
     return `INSERT INTO ${quoteTableRef(selectedSchema!, selectedTable!)} (${columnsSql}) VALUES (${buildPlaceholders(count)})${returnClause};`;
   };
 

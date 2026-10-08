@@ -27,6 +27,23 @@ export function supportsOracleExtraCatalog(dbType: string | null | undefined): b
   return dbType === "oracle";
 }
 
+/**
+ * Trigger create/edit/delete is only wired for Postgres + MSSQL SQL shapes
+ * (e.g. DROP TRIGGER ... ON table, EXECUTE FUNCTION). Oracle uses different
+ * syntax, so its trigger catalog stays read-only until Oracle actions exist.
+ */
+export function supportsTriggerWrite(dbType: string | null | undefined): boolean {
+  return isPostgresCatalogDbType(dbType) || dbType === "mssql";
+}
+
+/**
+ * Routine delete treats standalone procedures and package members as
+ * functions; Oracle catalogs stay read-only until Oracle-aware actions exist.
+ */
+export function supportsRoutineWrite(dbType: string | null | undefined): boolean {
+  return isPostgresCatalogDbType(dbType) || dbType === "mssql";
+}
+
 function isLikelyTrinoHttpUrl(connectionString: string) {
   try {
     const parsed = new URL(String(connectionString || "").trim());
