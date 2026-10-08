@@ -11,6 +11,7 @@ export async function getDbSchemas(connectionString: string): Promise<any> {
   if (dbType === "trino") return (await import("../trino-client")).listSchemas(connectionString, getTrinoConnectionInfo(connectionString).catalog);
   if (dbType === "duckdb") return (await import("../duckdb-client")).getDuckdbSchemas(connectionString);
   if (dbType === "jdbc") return (await import("../jdbc-client")).getJdbcSchemas(connectionString);
+  if (dbType === "oracle") return (await import("../oracle-client")).getSchemas(connectionString);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).getSpacetimeDbSchemas(connectionString);
   if (dbType === "supabase-mgmt") {
     const { executeSupabaseMgmtQuery } = await import("../supabase-mgmt-client");
@@ -33,6 +34,7 @@ export async function getDbDatabases(connectionString: string): Promise<any> {
   if (dbType === "trino") return (await import("../trino-client")).listCatalogs(connectionString);
   if (dbType === "duckdb") return (await import("../duckdb-client")).getDuckdbDatabases(connectionString);
   if (dbType === "jdbc") return (await import("../jdbc-client")).getJdbcSchemas(connectionString);
+  if (dbType === "oracle") return (await import("../oracle-client")).getSchemas(connectionString);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).getSpacetimeDbDatabases(connectionString);
   if (dbType === "supabase-mgmt") return [];
   return (await import("../sql-engine")).getSqlEngineDatabases(connectionString);
@@ -49,6 +51,7 @@ export async function getDbTables(connectionString: string, schema: string): Pro
     const tables = await (await import("../jdbc-client")).getJdbcTables(connectionString, schema);
     return tables.filter(t => t.type === "TABLE").map(t => t.name);
   }
+  if (dbType === "oracle") return (await import("../oracle-client")).getTables(connectionString, schema);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).getSpacetimeDbTables(connectionString, schema);
   if (dbType === "supabase-mgmt") {
     const { executeSupabaseMgmtQuery } = await import("../supabase-mgmt-client");
@@ -66,6 +69,8 @@ export async function getDbFunctions(connectionString: string, schema: string): 
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "mssql")
     return (await import("../mssql-client")).getRoutines(connectionString, schema);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getRoutines(connectionString, schema);
   return [];
 }
 
@@ -80,6 +85,7 @@ export async function getDbViews(connectionString: string, schema: string): Prom
     const tables = await (await import("../jdbc-client")).getJdbcTables(connectionString, schema);
     return tables.filter(t => t.type === "VIEW").map(t => t.name);
   }
+  if (dbType === "oracle") return (await import("../oracle-client")).getViews(connectionString, schema);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).getSpacetimeDbViews(connectionString, schema);
   if (dbType === "supabase-mgmt") {
     const { executeSupabaseMgmtQuery } = await import("../supabase-mgmt-client");
@@ -97,5 +103,55 @@ export async function getDbTriggers(connectionString: string, schema: string): P
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "mssql")
     return (await import("../mssql-client")).getTriggers(connectionString, schema);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getTriggers(connectionString, schema);
+  return [];
+}
+
+export async function getDbIndexes(connectionString: string, schema?: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getIndexes(connectionString, schema);
+  return [];
+}
+
+export async function getDbPackages(connectionString: string, schema: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getPackages(connectionString, schema);
+  return [];
+}
+
+export async function getDbSequences(connectionString: string, schema: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getSequences(connectionString, schema);
+  return [];
+}
+
+export async function getDbSynonyms(connectionString: string, schema: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getSynonyms(connectionString, schema);
+  return [];
+}
+
+export async function getDbLinks(connectionString: string): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getDbLinks(connectionString);
+  return [];
+}
+
+export async function getDbMaterializedViews(
+  connectionString: string,
+  schema: string,
+): Promise<any> {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle")
+    return (await import("../oracle-client")).getMaterializedViews(
+      connectionString,
+      schema,
+    );
   return [];
 }

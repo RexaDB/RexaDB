@@ -1,6 +1,13 @@
 // Shared helpers for editing connections via individual fields (host, port,
 // database, username, password, ssl) instead of a hand-assembled URI.
 
+import {
+  buildOracleConnectionString,
+  parseOracleConnectionString,
+} from "./oracle-connection";
+
+export type OracleConnectMode = "service" | "sid";
+
 export type ConnectionFieldValues = {
   host: string;
   port: string;
@@ -10,6 +17,8 @@ export type ConnectionFieldValues = {
   sslMode: string;
   authToken: string;
   protocol: string;
+  /** Oracle only: Service Name vs SID (mutually exclusive). */
+  connectMode?: OracleConnectMode;
 };
 
 export type PlanetScaleProtocol = "mysql" | "postgresql";
@@ -27,7 +36,8 @@ export type FieldProviderId =
   | "mariadb"
   | "mssql"
   | "clickhouse"
-  | "redis";
+  | "redis"
+  | "oracle";
 
 export const FIELD_BASED_PROVIDERS: FieldProviderId[] = [
   "timescale",
@@ -43,6 +53,7 @@ export const FIELD_BASED_PROVIDERS: FieldProviderId[] = [
   "mssql",
   "clickhouse",
   "redis",
+  "oracle",
 ];
 
 export function isFieldBasedProvider(provider: string | null | undefined) {
@@ -92,6 +103,8 @@ export function getProviderFieldDefaults(
       return { scheme: "mongodb", port: "27017", username: "", sslMode: "disable", hosted: false, usesDatabasePath: true };
     case "redis":
       return { scheme: "redis", port: "6379", username: "", sslMode: "disable", hosted: false, usesDatabasePath: false };
+    case "oracle":
+      return { scheme: "oracle", port: "1521", username: "", sslMode: "disable", hosted: false, usesDatabasePath: true };
     default:
       return { scheme: "postgresql", port: "5432", username: "postgres", sslMode: "prefer", hosted: false, usesDatabasePath: true };
   }
@@ -108,6 +121,7 @@ export function emptyFieldValues(provider: FieldProviderId): ConnectionFieldValu
     sslMode: defaults.sslMode,
     authToken: "",
     protocol: defaults.protocol ?? "postgresql",
+    connectMode: provider === "oracle" ? "service" : undefined,
   };
 }
 
@@ -216,6 +230,20 @@ export function buildConnectionStringFromFields(
     return `${scheme}://${auth}${host}:${port}/${encode(dbIndex)}`;
   }
 
+  if (provider === "oracle") {
+    const connectMode =
+      fields.connectMode === "sid" ? "sid" : "service";
+    return buildOracleConnectionString({
+      host,
+      port,
+      username,
+      password,
+      connectMode,
+      target: database,
+      sslMode,
+    });
+  }
+
   return `${defaults.scheme}://${auth}${host}:${port}${pathname}`;
 }
 
@@ -319,6 +347,20 @@ export function parseFieldsFromConnectionString(
   provider: FieldProviderId,
   connectionString: string,
 ): ConnectionFieldValues {
+  if (provider === "oracle") {
+    const parts = parseOracleConnectionString(connectionString);
+    return {
+      host: parts.host,
+      port: parts.port,
+      database: parts.target,
+      username: parts.username,
+      password: parts.password,
+      sslMode: parts.sslMode,
+      authToken: "",
+      protocol: "oracle",
+      connectMode: parts.connectMode,
+    };
+  }
   return parseGenericConnectionString(provider, connectionString);
 }
 

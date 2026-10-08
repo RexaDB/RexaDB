@@ -813,6 +813,49 @@ export async function fetchIndexes(connectionString: string, schema?: string) {
   });
 }
 
+export async function fetchPackages(connectionString: string, schema: string) {
+  return request(buildUrl("/api/packages"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionString, schema }),
+  });
+}
+
+export async function fetchSequences(connectionString: string, schema: string) {
+  return request(buildUrl("/api/sequences"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionString, schema }),
+  });
+}
+
+export async function fetchSynonyms(connectionString: string, schema: string) {
+  return request(buildUrl("/api/synonyms"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionString, schema }),
+  });
+}
+
+export async function fetchDbLinks(connectionString: string) {
+  return request(buildUrl("/api/db-links"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionString }),
+  });
+}
+
+export async function fetchMaterializedViews(
+  connectionString: string,
+  schema: string,
+) {
+  return request(buildUrl("/api/materialized-views"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ connectionString, schema }),
+  });
+}
+
 export function deleteIndex(
   connectionString: string,
   schema: string,

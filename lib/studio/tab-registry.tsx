@@ -37,6 +37,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LayoutGrid,
+  Link2,
   List,
   Lock,
   Plus,
@@ -133,6 +134,8 @@ export const TAB_ICON_COMPONENTS: Record<string, LucideIcon> = {
   shield: Shield,
   clock: Clock,
   lock: Lock,
+  link: Link2,
+  globe: Globe,
   "scan-search": Search,
   archive: FileArchive,
   terminal: Terminal,
@@ -177,6 +180,11 @@ export const TAB_REGISTRY: {
   "database-triggers": TabTypeConfig;
   "database-enums": TabTypeConfig;
   "database-indexes": TabTypeConfig;
+  "database-packages": TabTypeConfig;
+  "database-sequences": TabTypeConfig;
+  "database-synonyms": TabTypeConfig;
+  "database-db-links": TabTypeConfig;
+  "database-materialized-views": TabTypeConfig;
   "database-rls-policies": TabTypeConfig;
   "database-catalog": TabTypeConfig;
   "database-sessions": TabTypeConfig;
@@ -554,6 +562,61 @@ export const TAB_REGISTRY: {
       return { id, type: "database-indexes", name: "Indexes" };
     },
     icon: "key",
+    group: "database",
+  },
+
+  "database-packages": {
+    type: "database-packages",
+    viewMode: "database",
+    defaultName: "Packages",
+    buildTabId: (meta) => `database-${(meta as { view?: string }).view ?? "packages"}`,
+    createTab: (id) => ({ id, type: "database-packages", name: "Packages" }),
+    icon: "boxes",
+    group: "database",
+  },
+
+  "database-sequences": {
+    type: "database-sequences",
+    viewMode: "database",
+    defaultName: "Sequences",
+    buildTabId: (meta) => `database-${(meta as { view?: string }).view ?? "sequences"}`,
+    createTab: (id) => ({ id, type: "database-sequences", name: "Sequences" }),
+    icon: "list-tree",
+    group: "database",
+  },
+
+  "database-synonyms": {
+    type: "database-synonyms",
+    viewMode: "database",
+    defaultName: "Synonyms",
+    buildTabId: (meta) => `database-${(meta as { view?: string }).view ?? "synonyms"}`,
+    createTab: (id) => ({ id, type: "database-synonyms", name: "Synonyms" }),
+    icon: "link",
+    group: "database",
+  },
+
+  "database-db-links": {
+    type: "database-db-links",
+    viewMode: "database",
+    defaultName: "DB Links",
+    buildTabId: (meta) => `database-${(meta as { view?: string }).view ?? "db-links"}`,
+    createTab: (id) => ({ id, type: "database-db-links", name: "DB Links" }),
+    icon: "globe",
+    group: "database",
+  },
+
+  "database-materialized-views": {
+    type: "database-materialized-views",
+    viewMode: "database",
+    defaultName: "Materialized Views",
+    buildTabId: (meta) =>
+      `database-${(meta as { view?: string }).view ?? "materialized-views"}`,
+    createTab: (id) => ({
+      id,
+      type: "database-materialized-views",
+      name: "Materialized Views",
+    }),
+    icon: "tables",
     group: "database",
   },
 

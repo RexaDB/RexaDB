@@ -220,7 +220,13 @@ export function StudioInterface({
         }
         const capped = Math.min(Math.max(1, limit), 1000);
         const ref = `${quoteIdent(s.dbType, schema)}.${quoteIdent(s.dbType, table)}`;
-        const res = await runStudioQuery(s.currentConnectionString, `SELECT * FROM ${ref} LIMIT ${capped}`);
+        const sql =
+          s.dbType === "mssql"
+            ? `SELECT TOP ${capped} * FROM ${ref}`
+            : s.dbType === "oracle"
+              ? `SELECT * FROM ${ref} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT ${capped} ROWS ONLY`
+              : `SELECT * FROM ${ref} LIMIT ${capped}`;
+        const res = await runStudioQuery(s.currentConnectionString, sql);
         if (!res.success) throw new Error(res.error || "Query failed");
         return { rows: res.data?.rows ?? [], fields: normalizeFields(res.data?.fields) };
       },

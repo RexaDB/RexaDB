@@ -1,12 +1,30 @@
-export type ConnectionDbType = "postgres" | "mongodb" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "redis" | "trino" | "duckdb" | "federated" | "spacetimedb" | "jdbc" | "supabase-mgmt";
+export type ConnectionDbType = "postgres" | "mongodb" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "redis" | "trino" | "duckdb" | "federated" | "spacetimedb" | "jdbc" | "oracle" | "supabase-mgmt";
 
 /**
  * Connections whose system catalogs speak Postgres (pg_catalog / information_schema
- * with pg semantics). Functions / triggers / enums / indexes loaders and the
- * schema-explorer sections only work against these — keep sidebar gating in sync.
+ * with pg semantics). Enums / RLS / extensions stay gated to these.
  */
 export function isPostgresCatalogDbType(dbType: string | null | undefined): boolean {
   return dbType === "postgres" || dbType === "supabase-mgmt";
+}
+
+/** Functions / procedures / triggers browsers (PG, MSSQL, Oracle). */
+export function supportsRoutineCatalog(dbType: string | null | undefined): boolean {
+  return (
+    isPostgresCatalogDbType(dbType) ||
+    dbType === "mssql" ||
+    dbType === "oracle"
+  );
+}
+
+/** Indexes browser (PG + Oracle; MSSQL not wired yet). */
+export function supportsIndexCatalog(dbType: string | null | undefined): boolean {
+  return isPostgresCatalogDbType(dbType) || dbType === "oracle";
+}
+
+/** Oracle-only extras: packages, sequences, synonyms, database links. */
+export function supportsOracleExtraCatalog(dbType: string | null | undefined): boolean {
+  return dbType === "oracle";
 }
 
 function isLikelyTrinoHttpUrl(connectionString: string) {
@@ -107,10 +125,14 @@ export function detectConnectionDbType(connectionString: string, savedType?: str
       return raw.startsWith("postgres://") || raw.startsWith("postgresql://") ? "postgres" : "mysql";
     }
     if (normalized === "jdbc") return "jdbc";
+    if (normalized === "oracle") return "oracle";
     return normalized as ConnectionDbType;
   }
   if (raw.startsWith("jdbc:")) {
     return "jdbc";
+  }
+  if (raw.startsWith("oracle://") || raw.startsWith("oracle:")) {
+    return "oracle";
   }
   if (raw.startsWith("federated://")) {
     return "federated";

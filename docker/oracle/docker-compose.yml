@@ -1,0 +1,37 @@
+# Local Oracle Database Free for RexaDB native driver testing.
+# Usage:
+#   docker compose -f docker/oracle/docker-compose.yml up -d
+# Wait until healthy, then:
+#   docker compose -f docker/oracle/docker-compose.yml exec oracle \
+#     sqlplus system/rexadb@//localhost/FREEPDB1 @/container-entrypoint-initdb.d/01-seed.sql
+#
+# Connection URLs (native RexaDB Oracle provider):
+#   Service Name: oracle://system:rexadb@localhost:1521/FREEPDB1?sslmode=disable
+#   SID:          oracle://system:rexadb@localhost:1521/?sid=FREE&sslmode=disable
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:slim-faststart
+    container_name: rexadb-oracle
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: rexadb
+      APP_USER: rexadb
+      APP_USER_PASSWORD: rexadb
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./init:/container-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "healthcheck.sh",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+
+volumes:
+  oracle-data:

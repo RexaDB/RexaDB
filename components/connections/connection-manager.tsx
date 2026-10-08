@@ -498,6 +498,7 @@ export function ConnectionManager({
     | "federated"
     | "spacetimedb"
     | "jdbc"
+    | "oracle"
     | "supabase-mgmt";
   type PgSslMode =
     | "disable"
@@ -623,6 +624,14 @@ export function ConnectionManager({
       logoSrc: "/providers/sqlserver.png",
       placeholder: "sqlserver://user:password@host:1433/database",
       hint: "Microsoft SQL Server",
+    },
+    {
+      id: "oracle",
+      label: "Oracle",
+      logoSrc: "/providers/Oracle.svg",
+      placeholder:
+        "oracle://user:password@host:1521/FREEPDB1?sslmode=disable",
+      hint: "Native Oracle — pick Service Name or SID",
     },
     {
       id: "clickhouse",
@@ -872,6 +881,8 @@ export function ConnectionManager({
     }
     if (normalized.startsWith("spacetimedb://")) return "spacetimedb";
     if (normalized.startsWith("jdbc:")) return "jdbc";
+    if (normalized.startsWith("oracle://") || normalized.startsWith("oracle:"))
+      return "oracle";
     if (
       normalized.startsWith("postgres://") ||
       normalized.startsWith("postgresql://") ||
@@ -1614,15 +1625,41 @@ export function ConnectionManager({
             ? "mysql"
             : payload.connectionType === "jdbc"
               ? "jdbc"
-              : "postgres";
-        const parsed = parsePostgresConnectionString(payload.connectionString);
-        const host = parsed?.host || pgHost || "localhost";
-        const port =
-          parsed?.port || pgPort || (type === "mysql" ? "3306" : "5432");
-        const database = parsed?.database || pgDatabase || "postgres";
-        const username = parsed?.username || pgUsername || "postgres";
-        const password = parsed?.password || pgPassword || "";
-        const ssl = pgSslMode === "require" || pgSslMode === "verify-full";
+              : payload.connectionType === "oracle"
+                ? "oracle"
+                : "postgres";
+        let host = payload.host || pgHost || "localhost";
+        let port =
+          payload.port ||
+          pgPort ||
+          (type === "mysql" ? "3306" : type === "oracle" ? "1521" : "5432");
+        let database = payload.database || pgDatabase || "postgres";
+        let username = payload.username || pgUsername || "postgres";
+        let password = payload.password || pgPassword || "";
+        let ssl = pgSslMode === "require" || pgSslMode === "verify-full";
+
+        if (type === "oracle") {
+          const oracleFields = parseFieldsFromConnectionString(
+            "oracle",
+            payload.connectionString,
+          );
+          host = payload.host || oracleFields.host || "localhost";
+          port = payload.port || oracleFields.port || "1521";
+          database = payload.database || oracleFields.database || "";
+          username = payload.username || oracleFields.username || "";
+          password = payload.password || oracleFields.password || "";
+          ssl =
+            (payload.sslMode || oracleFields.sslMode) === "require" ||
+            (payload.sslMode || oracleFields.sslMode) === "verify-full";
+        } else {
+          const parsed = parsePostgresConnectionString(payload.connectionString);
+          host = parsed?.host || host;
+          port = parsed?.port || port;
+          database = parsed?.database || database;
+          username = parsed?.username || username;
+          password = parsed?.password || password;
+        }
+
         const createdRes = await studioApi.post("/connections", {
           name: payload.name,
           type,
@@ -1682,13 +1719,29 @@ export function ConnectionManager({
         const updates: Record<string, unknown> = {};
         if (payload.name) updates.name = payload.name;
         if (payload.connectionString) {
-          const parsed = parsePostgresConnectionString(
-            payload.connectionString,
-          );
-          updates.host = parsed?.host || pgHost || "localhost";
-          updates.port = Number(parsed?.port || pgPort || 5432);
-          updates.database = parsed?.database || pgDatabase || "postgres";
-          updates.username = parsed?.username || pgUsername || "postgres";
+          if (payload.connectionType === "oracle") {
+            const oracleFields = parseFieldsFromConnectionString(
+              "oracle",
+              payload.connectionString,
+            );
+            updates.host = payload.host || oracleFields.host || "localhost";
+            updates.port = Number(
+              payload.port || oracleFields.port || 1521,
+            );
+            updates.database =
+              payload.database || oracleFields.database || "";
+            updates.username =
+              payload.username || oracleFields.username || "";
+            updates.type = "oracle";
+          } else {
+            const parsed = parsePostgresConnectionString(
+              payload.connectionString,
+            );
+            updates.host = parsed?.host || pgHost || "localhost";
+            updates.port = Number(parsed?.port || pgPort || 5432);
+            updates.database = parsed?.database || pgDatabase || "postgres";
+            updates.username = parsed?.username || pgUsername || "postgres";
+          }
         }
         await studioApi.put(`/connections/${id}`, updates);
         return { success: true };
@@ -3956,6 +4009,9 @@ export function ConnectionManager({
     const isRedis = provider === "redis";
     const isMongo = provider === "mongodb";
     const isPlanetScale = provider === "planetscale";
+    const isOracle = provider === "oracle";
+    const oracleConnectMode =
+      fieldValues.connectMode === "sid" ? "sid" : "service";
     const providerCard = providerCards.find(
       (card) => card.id === selectedProvider,
     );
@@ -3971,6 +4027,18 @@ export function ConnectionManager({
           : prev,
       );
     };
+    const switchOracleConnectMode = (mode: "service" | "sid") => {
+      if (!fieldValues) return;
+      const next = { ...fieldValues, connectMode: mode };
+      setFieldValues(next);
+      // Rebuild URI so Service Name and SID never share one string shape.
+      setConnectionString(buildConnectionStringFromFields("oracle", next));
+    };
+
+    const oracleUriPlaceholder =
+      oracleConnectMode === "sid"
+        ? "oracle://user:password@host:1521/?sid=ORCL&sslmode=disable"
+        : "oracle://user:password@host:1521/FREEPDB1?sslmode=disable";
 
     return (
       <div className="space-y-4">
@@ -4010,6 +4078,43 @@ export function ConnectionManager({
             </p>
           </div>
         )}
+
+        {isOracle && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Connection Type</Label>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-muted/40 p-1">
+              <button
+                type="button"
+                onClick={() => switchOracleConnectMode("service")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  oracleConnectMode === "service"
+                    ? "bg-background shadow-sm text-foreground border border-border/60"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Service Name
+              </button>
+              <button
+                type="button"
+                onClick={() => switchOracleConnectMode("sid")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium",
+                  oracleConnectMode === "sid"
+                    ? "bg-background shadow-sm text-foreground border border-border/60"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                SID
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Service Name and SID are mutually exclusive. Prefer Service Name
+              for modern Oracle (for example FREEPDB1 / XEPDB1).
+            </p>
+          </div>
+        )}
+
         <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
           <Label
             htmlFor="conn-uri-generic"
@@ -4023,8 +4128,10 @@ export function ConnectionManager({
           <Input
             id="conn-uri-generic"
             placeholder={
-              providerCard?.placeholder ??
-              "protocol://user:password@host:port/database"
+              isOracle
+                ? oracleUriPlaceholder
+                : (providerCard?.placeholder ??
+                  "protocol://user:password@host:port/database")
             }
             className="font-mono text-sm bg-background border-border/60"
             value={connectionString}
@@ -4041,6 +4148,13 @@ export function ConnectionManager({
               }
             }}
           />
+          {isOracle && (
+            <p className="text-xs text-muted-foreground">
+              {oracleConnectMode === "sid"
+                ? "SID URLs use ?sid=ORCL and an empty path."
+                : "Service Name URLs put the service in the path (/FREEPDB1)."}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -4074,13 +4188,26 @@ export function ConnectionManager({
 
         <div className="space-y-2">
           <Label htmlFor="f-db" className="text-sm font-medium">
-            {isRedis ? "Database Index" : "Database"}
+            {isRedis
+              ? "Database Index"
+              : isOracle
+                ? oracleConnectMode === "sid"
+                  ? "SID"
+                  : "Service Name"
+                : "Database"}
           </Label>
           <Input
             id="f-db"
             value={fieldValues.database}
             onChange={(e) => updateGenericField("database")(e.target.value)}
             className="bg-background border-border/60 h-9"
+            placeholder={
+              isOracle
+                ? oracleConnectMode === "sid"
+                  ? "ORCL"
+                  : "FREEPDB1"
+                : undefined
+            }
           />
           {isRedis && (
             <p className="text-xs text-muted-foreground">
@@ -4090,6 +4217,13 @@ export function ConnectionManager({
           {isMongo && (
             <p className="text-xs text-muted-foreground">
               Default database / auth source.
+            </p>
+          )}
+          {isOracle && (
+            <p className="text-xs text-muted-foreground">
+              {oracleConnectMode === "sid"
+                ? "Legacy System Identifier for the instance."
+                : "Listener service name. Run lsnrctl services on the server to list them."}
             </p>
           )}
         </div>

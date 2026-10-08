@@ -17,6 +17,7 @@ export async function executeDbQuery(
   if (dbType === "trino") return (await import("../trino-client")).executeTrinoQuery(connectionString, query);
   if (dbType === "duckdb") return (await import("../duckdb-client")).executeDuckdbQuery(connectionString, query, params);
   if (dbType === "jdbc") return (await import("../jdbc-client")).executeJdbcQuery(connectionString, query, params);
+  if (dbType === "oracle") return (await import("../oracle-client")).executeOracleQuery(connectionString, query, params);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).executeSpacetimeDbQuery(connectionString, query);
   if ((await import("../sql-engine")).isSupportedSqlEngine(connectionString)) {
     return (await import("../sql-engine")).executeSqlEngineQuery(connectionString, query, params, options);

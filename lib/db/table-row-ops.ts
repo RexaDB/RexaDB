@@ -304,6 +304,7 @@ export async function fetchTableStructure(
     dbType === "trino" ||
     dbType === "spacetimedb" ||
     dbType === "jdbc" ||
+    dbType === "oracle" ||
     dbType === "supabase-mgmt"
   ) {
     const { getDbTableStructure } = await import("./db-engine");
@@ -378,6 +379,7 @@ export async function fetchTableForeignKeys(
     dbType === "trino" ||
     dbType === "spacetimedb" ||
     dbType === "jdbc" ||
+    dbType === "oracle" ||
     dbType === "supabase-mgmt"
   ) {
     const { getDbTableForeignKeys } = await import("./db-engine");

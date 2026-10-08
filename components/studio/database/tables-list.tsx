@@ -7,6 +7,8 @@ import {
   Tag,
   Pencil,
   X,
+  Filter,
+  RefreshCw,
 } from "@/lib/icon-theme/lucide-react";
 import { Input } from "@/components/ui/input";
 import type {
@@ -55,11 +57,21 @@ import {
   DbListPage,
   DbListToolbar,
   DbSchemaFilter,
-  DbSearchInput,
   DbToolbarFilters,
 } from "./db-list-layout";
 import { SelectFilter } from "./select-filter";
+import { TablesFilterMenu } from "./tables-filter-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  filterTablesByNameAndType,
+  mergeTablesAndViews,
+  type TableTypeFilter,
+} from "@/lib/studio/table-filter";
 
 interface TablesListProps {
   dbType?: string;
@@ -94,6 +106,8 @@ interface TablesListProps {
   renameTag?: (oldName: string, newName: string) => void;
   sortMode?: "alphabetical" | "tags";
   onSortModeChange?: (mode: "alphabetical" | "tags") => void;
+  onRefreshTables?: () => void;
+  isRefreshingTables?: boolean;
 }
 
 export function TablesList({
@@ -122,10 +136,16 @@ export function TablesList({
   addTag,
   removeTag,
   renameTag,
+  onRefreshTables,
+  isRefreshingTables = false,
 }: TablesListProps) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [typeFilter, setTypeFilter] = useState<TableTypeFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [wildcardsEnabled, setWildcardsEnabled] = useState(true);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#38bdf8");
@@ -161,6 +181,13 @@ export function TablesList({
 
   const handleCopyItemName = (name: string) => copyItemName(name, itemNoun);
 
+  // Union base tables + views: Oracle/MSSQL/JDBC backends split them across
+  // getTables/getViews, so iterating `tables` alone hides every view.
+  const allTables = useMemo(
+    () => mergeTablesAndViews(tables, viewTables),
+    [tables, viewTables],
+  );
+
   // ---- Tags derived state ----
   const TAG_COLORS = ["#38bdf8", "#a78bfa", "#34d399", "#fbbf24", "#fb7185", "#f472b6", "#94a3b8"];
   const tagKeyFor = (table: string) => `${selectedSchema}.${table}`;
@@ -168,7 +195,7 @@ export function TablesList({
   const colorByName = new Map(tags.map((t) => [t.name, t.color]));
   const tablesByTag = new Map<string, string[]>();
   for (const tag of tags) {
-    tablesByTag.set(tag.name, tables.filter((t) => tagsForTable(t).includes(tag.name)));
+    tablesByTag.set(tag.name, allTables.filter((t) => tagsForTable(t).includes(tag.name)));
   }
   function handleCreateTag() {
     const name = newTagName.trim();
@@ -178,18 +205,25 @@ export function TablesList({
   }
 
   const filteredTables = useMemo(() => {
-    const q = search.toLowerCase();
-    return tables.filter((t) => {
-      if (q && !t.toLowerCase().includes(q)) return false;
-      if (tagFilter.length > 0 && !tagsForTable(t).some((tag) => tagFilter.includes(tag))) return false;
-      return true;
+    const nameFiltered = filterTablesByNameAndType(allTables, (t) => t, {
+      query: search,
+      mode: "auto",
+      caseSensitive,
+      wildcardsEnabled,
+      typeFilter,
+      viewSet: viewTableSet,
     });
+    if (tagFilter.length === 0) return nameFiltered;
+    return nameFiltered.filter((t) => tagsForTable(t).some((tag) => tagFilter.includes(tag)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tables, search, tagFilter, tableTags, selectedSchema]);
+  }, [allTables, search, tagFilter, tableTags, selectedSchema, typeFilter, caseSensitive, wildcardsEnabled, viewTables]);
+
+  const filtersActive =
+    typeFilter !== "all" || caseSensitive || !wildcardsEnabled;
 
   useEffect(() => {
     setPage(1);
-  }, [search, selectedSchema, tagFilter]);
+  }, [search, selectedSchema, tagFilter, typeFilter, caseSensitive, wildcardsEnabled]);
 
   const renderMenuItems = (
     table: string,
@@ -371,11 +405,49 @@ export function TablesList({
       <DbListToolbar>
         <DbToolbarFilters>
           <DbSchemaFilter schemas={normalizedSchemas} selectedSchema={selectedSchema} onSchemaChange={onSchemaChange} />
-          <DbSearchInput
-            value={search}
-            onChange={setSearch}
-            placeholder={isMongo ? "Search collections..." : "Search tables..."}
-          />
+          <div className="relative w-full lg:w-60">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={isMongo ? "Search collections..." : "Search tables..."}
+              className="h-7 bg-background border-border pl-3 pr-8 text-xs"
+            />
+            {!isMongo && (
+              <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Table filter options"
+                    title="Filter options"
+                    className={
+                      filtersActive
+                        ? "absolute right-2 top-1/2 -translate-y-1/2 text-primary hover:text-primary"
+                        : "absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-foreground"
+                    }
+                  >
+                    <Filter className="h-3.5 w-3.5" />
+                    {filtersActive && (
+                      <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" />
+                    )}
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-0">
+                  <TablesFilterMenu
+                    typeFilter={typeFilter}
+                    onTypeFilterChange={setTypeFilter}
+                    caseSensitive={caseSensitive}
+                    onCaseSensitiveChange={setCaseSensitive}
+                    wildcardsEnabled={wildcardsEnabled}
+                    onWildcardsEnabledChange={setWildcardsEnabled}
+                    onRefresh={onRefreshTables ? () => { onRefreshTables(); setFilterOpen(false); } : undefined}
+                    isRefreshing={isRefreshingTables}
+                    tablesCount={allTables.filter((t) => !viewTableSet.has(t)).length}
+                    viewsCount={allTables.filter((t) => viewTableSet.has(t)).length}
+                  />
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
           {tags.length > 0 && (
             <SelectFilter
               label="Tag"
@@ -387,6 +459,24 @@ export function TablesList({
           )}
         </DbToolbarFilters>
         <div className="flex items-center gap-2">
+          {onRefreshTables && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={onRefreshTables}
+                    disabled={isRefreshingTables}
+                    aria-label="Refresh tables and views"
+                  >
+                    <RefreshCw className={isRefreshingTables ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Refresh tables and views</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -411,11 +501,11 @@ export function TablesList({
               No tables found
             </h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-[200px]">
-              {search || tagFilter.length > 0
+              {search || tagFilter.length > 0 || typeFilter !== "all"
                 ? `No tables matching your filters`
                 : "This schema doesn't have any tables yet."}
             </p>
-            {onOpenCreateTableTab && !search && tagFilter.length === 0 && (
+            {onOpenCreateTableTab && !search && tagFilter.length === 0 && typeFilter === "all" && (
               <div className="mt-4">
                 <DbCreateButton onClick={onOpenCreateTableTab}>Create {itemNoun}</DbCreateButton>
               </div>

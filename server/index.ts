@@ -1085,6 +1085,16 @@ app.post("/api/enums", proxyOneArgRoute(mod.fetchEnums));
 
 app.post("/api/indexes", proxyTwoArgRoute(mod.fetchIndexes));
 
+app.post("/api/packages", proxyTwoArgRoute(mod.fetchPackages));
+
+app.post("/api/sequences", proxyTwoArgRoute(mod.fetchSequences));
+
+app.post("/api/synonyms", proxyTwoArgRoute(mod.fetchSynonyms));
+
+app.post("/api/db-links", proxyOneArgRoute(mod.fetchDbLinks));
+
+app.post("/api/materialized-views", proxyTwoArgRoute(mod.fetchMaterializedViews));
+
 app.post("/api/views", proxyTwoArgRoute(mod.fetchViews));
 
 app.post("/api/rls-policies", async (req, res) => {

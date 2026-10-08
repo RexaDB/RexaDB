@@ -8,7 +8,14 @@
  * - MSSQL                → [brackets] with doubled inside
  */
 
-export type SqlDialect = "postgres" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "duckdb";
+export type SqlDialect =
+  | "postgres"
+  | "sqlite"
+  | "mysql"
+  | "clickhouse"
+  | "mssql"
+  | "duckdb"
+  | "oracle";
 
 /**
  * Quote an identifier (table name, column name, etc.) for the given dialect.
@@ -27,6 +34,7 @@ export function quoteIdentifier(value: string, dialect: SqlDialect): string {
     case "postgres":
     case "sqlite":
     case "duckdb":
+    case "oracle":
       return `"${raw.replace(/"/g, '""')}"`;
 
     case "mysql":
@@ -50,6 +58,7 @@ export const quoteMysqlIdentifier = (v: string) => quoteIdentifier(v, "mysql");
 export const quoteClickhouseIdentifier = (v: string) => quoteIdentifier(v, "clickhouse");
 export const quoteMssqlIdentifier = (v: string) => quoteIdentifier(v, "mssql");
 export const quoteDuckdbIdentifier = (v: string) => quoteIdentifier(v, "duckdb");
+export const quoteOracleIdentifier = (v: string) => quoteIdentifier(v, "oracle");
 
 // ─── Query pattern helpers ──────────────────────────────────────────────
 
