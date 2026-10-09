@@ -1522,10 +1522,25 @@ export async function completeConnectionSecretMigration() {
   const { db } = await import("./index");
   const { sql } = await import("drizzle-orm");
   await db.run(sql.raw("PRAGMA secure_delete = ON"));
-  await checkpointConnectionDatabase(db, sql);
-  await db.run(sql.raw("VACUUM"));
-  await checkpointConnectionDatabase(db, sql);
-  return { success: true };
+
+  const attempts = 5;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await checkpointConnectionDatabase(db, sql);
+      await db.run(sql.raw("VACUUM"));
+      await checkpointConnectionDatabase(db, sql);
+      return { success: true };
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+
+  // VACUUM rebuilds the file so freed pages holding legacy secrets are
+  // actually erased. A checkpoint alone does not, so never report success
+  // without it — keep cleanup pending and let the caller retry.
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "SQLite cleanup could not finish."));
 }
 
 async function ensureCredentialVaultTable() {

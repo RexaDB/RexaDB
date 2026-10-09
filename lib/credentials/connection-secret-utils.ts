@@ -79,3 +79,93 @@ export function restorePostgresPassword(connectionString: string, username: stri
     return connectionString;
   }
 }
+
+// Query parameters that describe the local client setup rather than the
+// remote target (driver resolution, etc.). They must not count as a target
+// change when deciding whether a stored credential bundle still belongs to
+// a saved connection string — e.g. the JDBC jarPaths self-heal rewrites the
+// row without rotating the remote identity.
+const INCIDENTAL_QUERY_KEYS = /^(jarPaths|driverClass)$/i;
+
+// Well-known default ports per scheme, for comparison normalization.
+const DEFAULT_SCHEME_PORTS: Record<string, string> = {
+  postgresql: "5432",
+  postgres: "5432",
+  mysql: "3306",
+  mariadb: "3306",
+  mongodb: "27017",
+  redis: "6379",
+  rediss: "6379",
+  sqlserver: "1433",
+  mssql: "1433",
+};
+
+/**
+ * Redacted connection target for stale-bundle comparison: strips incidental
+ * client-side query parameters, then all secrets. Two strings that differ
+ * only by password (or by jarPaths/driverClass) compare equal; a changed
+ * host/database/user does not. Semantically identical representations
+ * (parameter order, explicit default port) are normalized so cosmetic edits
+ * don't force needless credential re-entry. Path characters are preserved
+ * verbatim: PostgreSQL treats a trailing slash as part of the database
+ * name, so `app/` and `app` are different targets.
+ */
+export function redactedTargetForComparison(value: string): string {
+  const jdbcPrefix = /^jdbc:/i.test(value) ? value.slice(0, 5) : "";
+  const parseable = jdbcPrefix ? value.slice(5) : value;
+  let normalized = value;
+  try {
+    const url = new URL(parseable);
+    for (const key of [...url.searchParams.keys()]) {
+      if (INCIDENTAL_QUERY_KEYS.test(key)) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    const scheme = url.protocol.replace(/:$/, "").toLowerCase();
+    const defaultPort = DEFAULT_SCHEME_PORTS[scheme];
+    if (defaultPort && url.port === defaultPort) url.port = "";
+    normalized = `${jdbcPrefix}${url.toString()}`;
+  } catch {
+    normalized = value.replace(/([?&])(?:jarPaths|driverClass)=[^;&?#]*/gi, "$1");
+  }
+  return stripConnectionSecrets(normalized);
+}
+
+const INCIDENTAL_QUERY_KEY_LIST = ["jarPaths", "driverClass"] as const;
+
+/**
+ * Row-wins merge of incidental client-side query parameters (driver
+ * settings) onto a stored bundle URL. When a user edits e.g. `jarPaths`
+ * while leaving the password blank, the saved row carries the new settings
+ * but the stored bundle still holds the old URL — replaying the bundle
+ * verbatim would revert the edit on reload. Returns the bundle URL
+ * unchanged when the incidental settings already match (or when either
+ * side is not URL-parseable).
+ */
+export function applyRowDriverSettings(bundleUrl: string, rowUrl: string): string {
+  const bundlePrefix = /^jdbc:/i.test(bundleUrl) ? bundleUrl.slice(0, 5) : "";
+  let bundle: URL;
+  let row: URL;
+  try {
+    bundle = new URL(bundlePrefix ? bundleUrl.slice(5) : bundleUrl);
+    row = new URL(/^jdbc:/i.test(rowUrl) ? rowUrl.slice(5) : rowUrl);
+  } catch {
+    return bundleUrl;
+  }
+  let changed = false;
+  for (const key of INCIDENTAL_QUERY_KEY_LIST) {
+    const lower = key.toLowerCase();
+    const rowEntry = [...row.searchParams.entries()].find(([k]) => k.toLowerCase() === lower);
+    const bundleEntries = [...bundle.searchParams.entries()].filter(([k]) => k.toLowerCase() === lower);
+    const same = rowEntry
+      ? bundleEntries.length === 1 &&
+        bundleEntries[0][0] === rowEntry[0] &&
+        bundleEntries[0][1] === rowEntry[1]
+      : bundleEntries.length === 0;
+    if (same) continue;
+    for (const [k] of bundleEntries) bundle.searchParams.delete(k);
+    if (rowEntry) bundle.searchParams.append(rowEntry[0], rowEntry[1]);
+    changed = true;
+  }
+  if (!changed) return bundleUrl;
+  return `${bundlePrefix}${bundle.toString()}`;
+}

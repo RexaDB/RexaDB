@@ -48,9 +48,25 @@ async function persistMigration(connection: SavedConnection) {
     if (!response.ok || !result.success) throw new Error("Could not migrate saved connection credentials.");
     return { ...connection, ...protectedData };
   } catch (error) {
-    await deleteConnectionCredential(protectedData.credentialRef!);
+    // Clean up only a freshly minted reference: protect may return the
+    // caller's existing ref (kept) or null (plaintext mode), and deleting
+    // those would orphan live credentials or throw on null.
+    const freshRef = protectedData.credentialRef;
+    if (typeof freshRef === "string" && freshRef && freshRef !== connection.credentialRef) {
+      await deleteConnectionCredential(freshRef).catch(() => undefined);
+    }
     throw error;
   }
+}
+
+function flagCredentialError(connection: SavedConnection): SavedConnection {
+  return {
+    ...connection,
+    connectionString: stripConnectionSecrets(connection.connectionString || ""),
+    password: null,
+    authToken: null,
+    credentialError: true,
+  };
 }
 
 export async function migrateAndHydrateConnections(rows: SavedConnection[]): Promise<SavedConnection[]> {
@@ -58,6 +74,8 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
   let migrated = 0;
   const secured: SavedConnection[] = [];
   for (const row of rows) {
+    let wroteMigration = false;
+    let migratedRow: SavedConnection | null = null;
     try {
       const oldReference = row.credentialRef || null;
       const inlineSecret = hasConnectionSecret(row);
@@ -69,28 +87,31 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
       const safeRow = needsModeChange ? await persistMigration(source) : row;
       if (safeRow !== row) {
         migrated++;
+        wroteMigration = true;
+        migratedRow = safeRow;
         if (oldReference && !oldReference.startsWith("vault:") && oldReference !== safeRow.credentialRef) {
           await deleteConnectionCredential(oldReference).catch(() => undefined);
         }
       }
       secured.push(await hydrateConnection(safeRow));
     } catch {
+      // If persistMigration already wrote a stripped row + new credentialRef,
+      // the original inline secret is gone from SQLite. Falling back to the
+      // pre-migration row only helps this session and strands the next load.
+      if (wroteMigration && migratedRow) {
+        secured.push(flagCredentialError(migratedRow));
+        continue;
+      }
       // Do not destroy working inline credentials when migration itself fails
-      // (keychain unavailable, vault locked, user cancelled). The original row
-      // still contains a usable connection string, so keep it and retry on the
-      // next load instead of stripping the password (which breaks PostgreSQL
-      // with "SASL: ... client password must be a string").
+      // before a new reference is written (keychain unavailable, vault locked,
+      // user cancelled). Keep the original row and retry on the next load
+      // instead of stripping the password (which breaks PostgreSQL with
+      // "SASL: ... client password must be a string").
       if (!row.credentialRef && hasConnectionSecret(row)) {
         secured.push({ ...row });
         continue;
       }
-      secured.push({
-        ...row,
-        connectionString: stripConnectionSecrets(row.connectionString || ""),
-        password: null,
-        authToken: null,
-        credentialError: true,
-      });
+      secured.push(flagCredentialError(row));
     }
   }
   if (migrated) markCleanupPending();
