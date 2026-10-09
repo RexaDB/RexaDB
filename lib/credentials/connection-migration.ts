@@ -48,7 +48,13 @@ async function persistMigration(connection: SavedConnection) {
     if (!response.ok || !result.success) throw new Error("Could not migrate saved connection credentials.");
     return { ...connection, ...protectedData };
   } catch (error) {
-    await deleteConnectionCredential(protectedData.credentialRef!);
+    // Clean up only a freshly minted reference: protect may return the
+    // caller's existing ref (kept) or null (plaintext mode), and deleting
+    // those would orphan live credentials or throw on null.
+    const freshRef = protectedData.credentialRef;
+    if (typeof freshRef === "string" && freshRef && freshRef !== connection.credentialRef) {
+      await deleteConnectionCredential(freshRef).catch(() => undefined);
+    }
     throw error;
   }
 }

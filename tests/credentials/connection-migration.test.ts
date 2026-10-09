@@ -99,4 +99,43 @@ describe("connection migration fallback (issue #21)", () => {
       hydrateSpy.mockRestore();
     }
   });
+
+  it("does not delete credentials when persist fails without minting a new reference", async () => {
+    const modeSpy = spyOn(localVault, "getCredentialStorageMode").mockReturnValue("plaintext");
+    const hydrateSpy = spyOn(connectionCredentials, "hydrateConnection").mockImplementation(async (conn: any) => ({
+      ...conn,
+      connectionString: "postgresql://postgres:s3cret@localhost:5432/mydb",
+      password: "s3cret",
+    }));
+    const deleteSpy = spyOn(connectionCredentials, "deleteConnectionCredential").mockResolvedValue(undefined);
+
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url.includes("/api/connections/secure-migration/complete")) {
+        return Response.json({ success: true });
+      }
+      if (url.includes("/api/connections/") && init?.method === "PUT") {
+        return Response.json({ success: false });
+      }
+      throw new Error("unexpected fetch");
+    }) as typeof fetch;
+
+    try {
+      const rows = [
+        {
+          id: 4,
+          connectionString: "postgresql://postgres@localhost:5432/mydb",
+          credentialRef: "old-keychain-ref",
+          password: null,
+        },
+      ];
+      const [out] = await migrateAndHydrateConnections(rows as any);
+      expect(deleteSpy).toHaveBeenCalledTimes(0);
+      expect(out.credentialError).toBe(true);
+    } finally {
+      modeSpy.mockRestore();
+      hydrateSpy.mockRestore();
+      deleteSpy.mockRestore();
+    }
+  });
 });

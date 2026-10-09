@@ -3054,10 +3054,21 @@ export function ConnectionManager({
     if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
       return conn;
     }
+    // Already flagged as unrestorable: fail fast with unlock guidance
+    // instead of attempting another doomed unlock round-trip.
+    if ((conn as any).credentialError) {
+      throw new Error("Could not unlock saved credentials.");
+    }
     const ready = (await hydrateConnection(conn as any)) as Connection;
     setConnections((prev) =>
       prev.map((item) => (item.id === ready.id ? { ...item, ...ready } : item)),
     );
+    // A stale bundle yields a flagged row, not usable secrets: route callers
+    // to their unlock-failure handling (re-enter password) instead of
+    // attempting a passwordless connect that fails confusingly.
+    if ((ready as any).credentialError) {
+      throw new Error("Could not unlock saved credentials.");
+    }
     return ready;
   }, [workspaceMode]);
 
