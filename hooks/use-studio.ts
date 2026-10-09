@@ -3405,7 +3405,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
 
       // In fast mode the count runs independently; legacy mode still waits for it.
-      const countSql = `SELECT COUNT(*) as count FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
+      const countSql = `SELECT COUNT(*) as "count" FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
       const fetchCount = async () => {
         const countRes = await runQuery(currentConnectionString, countSql, [], undefined, queryExecutionContext);
         addHistoryEntry({
@@ -6652,7 +6652,7 @@ END $$;`.trim();
       return true;
     }) || pickFallbackTable(tables);
 
-    if (!target) return "SELECT 1 AS value;";
+    if (!target) return 'SELECT 1 AS "value";';
 
     const tableRef = quoteTableRef(target.schema, target.table);
     const numericColumn = target.columns.find((column) => isLikelyNumericType(column.type));
@@ -6671,7 +6671,7 @@ END $$;`.trim();
     }
 
     if (widgetType === "metric" || widgetType === "progress") {
-      return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
 // fallow-ignore-next-line code-duplication
@@ -6680,14 +6680,14 @@ END $$;`.trim();
         const label = quoteIdentifier(labelColumn.name);
         const value = quoteIdentifier(numericColumn.name);
         if (isMssql) {
-          return `SELECT TOP 8 ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
+          return `SELECT TOP 8 ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
         }
         if (isOracle) {
-          return `SELECT ${label} AS label, SUM(NVL(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY;`;
+          return `SELECT ${label} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY "value" DESC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY;`;
         }
-        return `SELECT ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 8;`;
+        return `SELECT ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 8;`;
       }
-      return `SELECT 'Rows' AS label, COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT 'Rows' AS "label", COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
     if (widgetType === "map") {
@@ -6698,22 +6698,22 @@ END $$;`.trim();
         const lat = latColumn ? quoteIdentifier(latColumn.name) : "NULL";
         const lon = lonColumn ? quoteIdentifier(lonColumn.name) : "NULL";
         if (isMssql) {
-          return `SELECT TOP 100 ${label} AS label, ${lat} AS lat, ${lon} AS lon FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL;`;
+          return `SELECT TOP 100 ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL;`;
         }
         if (isOracle) {
-          return `SELECT ${label} AS label, ${lat} AS lat, ${lon} AS lon FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;`;
+          return `SELECT ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;`;
         }
-        return `SELECT ${label} AS label, ${lat} AS lat, ${lon} AS lon FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL LIMIT 100;`;
+        return `SELECT ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL LIMIT 100;`;
       }
       return isMysql
-        ? "SELECT 'Default' AS label, CAST(0.0 AS DOUBLE) AS lat, CAST(0.0 AS DOUBLE) AS lon;"
+        ? 'SELECT \'Default\' AS "label", CAST(0.0 AS DOUBLE) AS "lat", CAST(0.0 AS DOUBLE) AS "lon";'
         : isClickhouse
-          ? "SELECT 'Default' AS label, CAST(0.0 AS Float64) AS lat, CAST(0.0 AS Float64) AS lon;"
+          ? 'SELECT \'Default\' AS "label", CAST(0.0 AS Float64) AS "lat", CAST(0.0 AS Float64) AS "lon";'
           : isMssql
-            ? "SELECT 'Default' AS label, CAST(0.0 AS FLOAT) AS lat, CAST(0.0 AS FLOAT) AS lon;"
+            ? 'SELECT \'Default\' AS "label", CAST(0.0 AS FLOAT) AS "lat", CAST(0.0 AS FLOAT) AS "lon";'
             : isOracle
-              ? "SELECT 'Default' AS label, CAST(0.0 AS BINARY_DOUBLE) AS lat, CAST(0.0 AS BINARY_DOUBLE) AS lon FROM dual;"
-              : "SELECT 'Default' AS label, 0.0::double precision AS lat, 0.0::double precision AS lon;";
+              ? 'SELECT \'Default\' AS "label", CAST(0.0 AS BINARY_DOUBLE) AS "lat", CAST(0.0 AS BINARY_DOUBLE) AS "lon" FROM dual;'
+              : 'SELECT \'Default\' AS "label", 0.0::double precision AS "lat", 0.0::double precision AS "lon";';
     }
 
     if (widgetType === "bar-chart" || widgetType === "area-chart" || widgetType === "sparkline") {
@@ -6727,41 +6727,41 @@ END $$;`.trim();
         if (numericColumn) {
           const value = quoteIdentifier(numericColumn.name);
           if (isMssql) {
-            return `SELECT TOP 30 ${dateExpr} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
+            return `SELECT TOP 30 ${dateExpr} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
           }
           if (isOracle) {
-            return `SELECT ${dateExpr} AS label, SUM(NVL(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
+            return `SELECT ${dateExpr} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
           }
-          return `SELECT DATE(${date}) AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
+          return `SELECT DATE(${date}) AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
         }
         if (isMssql) {
-          return `SELECT TOP 30 ${dateExpr} AS label, COUNT(*) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
+          return `SELECT TOP 30 ${dateExpr} AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
         }
         if (isOracle) {
-          return `SELECT ${dateExpr} AS label, COUNT(*) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
+          return `SELECT ${dateExpr} AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
         }
-        return `SELECT DATE(${date}) AS label, COUNT(*) AS value FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
+        return `SELECT DATE(${date}) AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
       }
 // fallow-ignore-next-line code-duplication
       if (labelColumn && numericColumn) {
         const label = quoteIdentifier(labelColumn.name);
         const value = quoteIdentifier(numericColumn.name);
         if (isMssql) {
-          return `SELECT TOP 12 ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
+          return `SELECT TOP 12 ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
         }
         if (isOracle) {
-          return `SELECT ${label} AS label, SUM(NVL(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY;`;
+          return `SELECT ${label} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY "value" DESC OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY;`;
         }
-        return `SELECT ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 12;`;
+        return `SELECT ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 12;`;
       }
-      return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
     if (widgetType === "text") {
-      return `SELECT COUNT(*) AS total_rows FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "total_rows" FROM ${tableRef};`;
     }
 
-    return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+    return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
   }, [isLikelyNumericType, pickFallbackTable, quoteIdentifier, quoteTableRef, isMysql, isClickhouse, isMssql]);
 
   const validateWidgetQueryShape = useCallback((

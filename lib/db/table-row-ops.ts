@@ -124,10 +124,16 @@ export async function deleteTableRows(
     const { executeOracleQuery, getTableStructure } = await import("./oracle-client");
     try {
       const structure = await getTableStructure(connectionString, schema, table);
-      const pkCol =
-        structure.find((c) => c.is_primary_key)?.column_name ??
-        Object.keys(pkValues[0] ?? {})[0];
-      if (!pkCol) {
+      // Use every primary-key column: a single-column condition would delete
+      // unselected rows on composite keys like (DEPARTMENT_ID, EMPLOYEE_ID).
+      const pkCols = structure
+        .filter((c) => c.is_primary_key)
+        .map((c) => c.column_name);
+      if (pkCols.length === 0) {
+        const fallback = Object.keys(pkValues[0] ?? {})[0];
+        if (fallback) pkCols.push(fallback);
+      }
+      if (pkCols.length === 0) {
         return {
           success: false,
           error:
@@ -136,10 +142,17 @@ export async function deleteTableRows(
       }
       const prefix = schema ? `"${schema}".` : "";
       for (const row of pkValues) {
-        const val = row[pkCol];
-        if (val === undefined) continue;
-        const sql = `DELETE FROM ${prefix}"${table}" WHERE "${pkCol}" = ?`;
-        await executeOracleQuery(connectionString, sql, [val]);
+        const whereClauses: string[] = [];
+        const values: any[] = [];
+        for (const col of pkCols) {
+          const val = row[col];
+          if (val === undefined) break;
+          whereClauses.push(`"${col}" = ?`);
+          values.push(val);
+        }
+        if (whereClauses.length !== pkCols.length) continue;
+        const sql = `DELETE FROM ${prefix}"${table}" WHERE ${whereClauses.join(" AND ")}`;
+        await executeOracleQuery(connectionString, sql, values);
       }
       return { success: true };
     } catch (error: any) {

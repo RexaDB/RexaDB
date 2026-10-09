@@ -109,7 +109,8 @@ export async function getTableStructure(
   const config = connectionStringToBridgeConfig(connectionString);
   const cols = await oracleGetTableStructure(config, schema, table);
 
-  // Enrich with PK / FK flags via dictionary queries.
+  // Enrich with PK / FK flags via dictionary queries. Keys use the exact
+  // dictionary case: quoted Oracle columns can distinguish `id` from `ID`.
   let pkCols = new Set<string>();
   let fkCols = new Set<string>();
   try {
@@ -123,11 +124,11 @@ export async function getTableStructure(
         AND ac.table_name = '${table.replace(/'/g, "''")}'
     `;
     const pkResult = await oracleExecuteQuery(config, pkSql);
-    pkCols = new Set((pkResult.rows || []).map((r) => String(r[0]).toUpperCase()));
+    pkCols = new Set((pkResult.rows || []).map((r) => String(r[0])));
   } catch {}
   try {
     const fks = await oracleGetForeignKeys(config, schema, table);
-    fkCols = new Set(fks.map((f) => f.fkColumn.toUpperCase()));
+    fkCols = new Set(fks.map((f) => f.fkColumn));
   } catch {}
 
   return cols.map((col) => ({
@@ -135,8 +136,8 @@ export async function getTableStructure(
     data_type: col.type,
     is_nullable: col.nullable ? "YES" : "NO",
     column_default: col.default || null,
-    is_primary_key: pkCols.has(col.name.toUpperCase()),
-    is_foreign_key: fkCols.has(col.name.toUpperCase()),
+    is_primary_key: pkCols.has(col.name),
+    is_foreign_key: fkCols.has(col.name),
     character_maximum_length: col.size || null,
   }));
 }
@@ -168,7 +169,7 @@ export async function getAllTablesWithColumns(connectionString: string) {
       try {
         const fks = await oracleGetForeignKeys(config, schema, table.name);
         for (const fk of fks) {
-          fkByColumn.set(String(fk.fkColumn).toUpperCase(), {
+          fkByColumn.set(String(fk.fkColumn), {
             pkSchema: fk.pkSchema,
             pkTable: fk.pkTable,
             pkColumn: fk.pkColumn,
@@ -176,7 +177,7 @@ export async function getAllTablesWithColumns(connectionString: string) {
         }
       } catch {}
       for (const col of cols) {
-        const fk = fkByColumn.get(String(col.column_name).toUpperCase());
+        const fk = fkByColumn.get(String(col.column_name));
         allRows.push({
           table_schema: schema,
           table_name: table.name,

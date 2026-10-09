@@ -603,7 +603,7 @@ export async function createSnapshotStream(
 
     try {
       logMem(`before COUNT(*) for ${ref}`);
-      const countRes = await runEngineQuery(connStr, `SELECT COUNT(*) as cnt FROM ${tableRef}`);
+      const countRes = await runEngineQuery(connStr, `SELECT COUNT(*) as "cnt" FROM ${tableRef}`);
       const totalTableRows = Number(countRes.rows[0]?.cnt || 0);
       const actualMax = Math.min(totalTableRows, MAX_SNAPSHOT_ROWS_PER_TABLE);
       truncated = totalTableRows > MAX_SNAPSHOT_ROWS_PER_TABLE;

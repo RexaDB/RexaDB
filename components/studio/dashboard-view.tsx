@@ -1713,7 +1713,7 @@ function TableWidget({
           fetchTableForeignKeys(connectionString, schema, tableName!),
           runQuery(
             connectionString,
-            `SELECT COUNT(*) as cnt FROM ${quoteTableRef(schema, tableName!, dbType)}${p.filterQuery ? ` WHERE ${p.filterQuery}` : ""};`,
+            `SELECT COUNT(*) as "cnt" FROM ${quoteTableRef(schema, tableName!, dbType)}${p.filterQuery ? ` WHERE ${p.filterQuery}` : ""};`,
           ),
         ]);
         if (!rowsRes.success) {

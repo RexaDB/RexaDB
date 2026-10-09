@@ -236,10 +236,30 @@ fn is_select_like(sql: &str) -> bool {
         || upper.starts_with("EXPLAIN")
 }
 
+fn is_plsql_block(sql: &str) -> bool {
+    let upper = strip_leading_comments(sql).to_ascii_uppercase();
+    upper.starts_with("BEGIN")
+        || upper.starts_with("DECLARE")
+        || (upper.starts_with("CREATE OR REPLACE")
+            && (upper.contains("PROCEDURE")
+                || upper.contains("FUNCTION")
+                || upper.contains("TRIGGER")
+                || upper.contains("PACKAGE")
+                || upper.contains("TYPE")))
+        || upper.starts_with("CREATE PROCEDURE")
+        || upper.starts_with("CREATE FUNCTION")
+        || upper.starts_with("CREATE TRIGGER")
+        || upper.starts_with("CREATE PACKAGE")
+        || upper.starts_with("CREATE TYPE")
+}
+
 fn strip_trailing_delimiter(sql: &str) -> String {
-    // Oracle rejects the trailing `;` client delimiter on plain SQL through
-    // the driver, so drop it (plus surrounding whitespace). PL/SQL blocks
-    // keep their internal semicolons; only the final delimiter is removed.
+    // A trailing `;` is only a client delimiter on ordinary SQL — Oracle
+    // rejects it through the driver. PL/SQL blocks and routine definitions
+    // require their final semicolon, so leave them intact.
+    if is_plsql_block(sql) {
+        return sql.trim_end().to_string();
+    }
     let mut out = sql.trim_end().to_string();
     while out.ends_with(';') {
         out.pop();
