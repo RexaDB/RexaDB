@@ -111,4 +111,45 @@ describe("oracle-connection", () => {
       }),
     ).toThrow(/service name/i);
   });
+
+  it("rejects descriptor-breaking service names, SIDs, hosts and ports", () => {
+    const base = {
+      host: "localhost",
+      port: "1521",
+      username: "u",
+      password: "p",
+      sslMode: "disable",
+    } as const;
+    // A `)` in the SID would break out of CONNECT_DATA and rewrite the descriptor.
+    expect(() =>
+      buildOracleNetConnectString({
+        ...base,
+        connectMode: "sid",
+        target: "ORCL))(CONNECT_DATA=(SID=EVIL",
+      }),
+    ).toThrow(/invalid oracle sid/i);
+    expect(() =>
+      buildOracleNetConnectString({
+        ...base,
+        connectMode: "service",
+        target: "SVC/SQL*Plus",
+      }),
+    ).toThrow(/invalid oracle service name/i);
+    expect(() =>
+      buildOracleNetConnectString({
+        ...base,
+        host: "db.example.com)(INJECT",
+        connectMode: "service",
+        target: "SVC",
+      }),
+    ).toThrow(/invalid oracle host/i);
+    expect(() =>
+      buildOracleNetConnectString({
+        ...base,
+        port: "1521; evil",
+        connectMode: "service",
+        target: "SVC",
+      }),
+    ).toThrow(/invalid oracle port/i);
+  });
 });

@@ -121,9 +121,32 @@ export function buildOracleConnectionString(
  * Build the Oracle Net connect string passed to the Rust thin driver.
  * Service Name → Easy Connect. SID → connect descriptor.
  */
+const DESCRIPTOR_TARGET_RE = /^[A-Za-z0-9_.\-#$]+$/;
+const DESCRIPTOR_HOST_RE = /^[A-Za-z0-9_.\-:$[\]]+$/;
+const DESCRIPTOR_PORT_RE = /^\d+$/;
+
+function assertDescriptorValue(value: string, label: string, re: RegExp): string {
+  // The TNS descriptor is string-interpolated, so reject anything outside
+  // the characters Oracle naming allows. A `)` or `(` in the service
+  // name / SID would otherwise break out of CONNECT_DATA and rewrite the
+  // descriptor (e.g. redirect HOST) — fail closed instead.
+  if (!re.test(value)) {
+    throw new Error(`Invalid Oracle ${label}: ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 export function buildOracleNetConnectString(parts: OracleConnectionParts): string {
-  const host = parts.host.trim() || "localhost";
-  const port = parts.port.trim() || "1521";
+  const host = assertDescriptorValue(
+    parts.host.trim() || "localhost",
+    "host",
+    DESCRIPTOR_HOST_RE,
+  );
+  const port = assertDescriptorValue(
+    parts.port.trim() || "1521",
+    "port",
+    DESCRIPTOR_PORT_RE,
+  );
   const target = parts.target.trim();
   const sslEnabled =
     parts.sslMode &&
@@ -134,6 +157,7 @@ export function buildOracleNetConnectString(parts: OracleConnectionParts): strin
     if (!target) {
       throw new Error("Oracle SID is required when connect mode is SID.");
     }
+    assertDescriptorValue(target, "SID", DESCRIPTOR_TARGET_RE);
     return (
       `(DESCRIPTION=(ADDRESS=(PROTOCOL=${protocol})(HOST=${host})(PORT=${port}))` +
       `(CONNECT_DATA=(SID=${target})))`
@@ -143,6 +167,7 @@ export function buildOracleNetConnectString(parts: OracleConnectionParts): strin
   if (!target) {
     throw new Error("Oracle service name is required when connect mode is Service Name.");
   }
+  assertDescriptorValue(target, "service name", DESCRIPTOR_TARGET_RE);
   if (sslEnabled) {
     return `${protocol}://${host}:${port}/${target}`;
   }
