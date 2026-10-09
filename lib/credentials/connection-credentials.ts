@@ -240,7 +240,11 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
           password,
         )
       : hydrated.connectionString;
-  return { ...hydrated, connectionString } as T;
+  // Unlock succeeded, so previously flagged errors (cancelled vault prompt,
+  // temporarily locked keychain) are resolved: never carry a stale
+  // credentialError forward onto usable credentials.
+  const { credentialError: _resolved, ...restored } = hydrated as Record<string, unknown>;
+  return { ...restored, connectionString } as T;
 }
 
 export async function deleteConnectionCredential(reference: string): Promise<void> {

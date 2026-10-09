@@ -3054,11 +3054,10 @@ export function ConnectionManager({
     if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
       return conn;
     }
-    // Already flagged as unrestorable: fail fast with unlock guidance
-    // instead of attempting another doomed unlock round-trip.
-    if ((conn as any).credentialError) {
-      throw new Error("Could not unlock saved credentials.");
-    }
+    // Always retry hydration: a credentialError flag may be left over from
+    // a transient failure (cancelled vault prompt, temporarily locked
+    // keychain) that has since been resolved elsewhere, e.g. in Settings.
+    // Reject only if credentials remain unavailable.
     const ready = (await hydrateConnection(conn as any)) as Connection;
     setConnections((prev) =>
       prev.map((item) => (item.id === ready.id ? { ...item, ...ready } : item)),

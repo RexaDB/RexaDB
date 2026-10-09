@@ -320,6 +320,33 @@ describe("hydrateConnection stale-bundle guard", () => {
     }
   });
 
+  it("clears a transient credentialError once unlock succeeds", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "postgresql://postgres:s3cret@localhost:5432/mydb",
+        password: "s3cret",
+        authToken: null,
+      }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => Response.json({ success: true })) as unknown as typeof fetch;
+    try {
+      const out = await hydrateConnection({
+        id: 12,
+        connectionString: "postgresql://postgres@localhost:5432/mydb",
+        password: null,
+        credentialRef: "vault:recovered-ref",
+        credentialSecret: "v1.recovered",
+        credentialError: true,
+      } as any);
+      expect(out.connectionString).toContain("s3cret");
+      expect((out as any).credentialError).toBeUndefined();
+    } finally {
+      decryptSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps the row driver settings instead of replaying the bundle ones", async () => {
     const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
       JSON.stringify({
