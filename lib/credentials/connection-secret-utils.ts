@@ -108,3 +108,43 @@ export function redactedTargetForComparison(value: string): string {
   }
   return stripConnectionSecrets(normalized);
 }
+
+const INCIDENTAL_QUERY_KEY_LIST = ["jarPaths", "driverClass"] as const;
+
+/**
+ * Row-wins merge of incidental client-side query parameters (driver
+ * settings) onto a stored bundle URL. When a user edits e.g. `jarPaths`
+ * while leaving the password blank, the saved row carries the new settings
+ * but the stored bundle still holds the old URL — replaying the bundle
+ * verbatim would revert the edit on reload. Returns the bundle URL
+ * unchanged when the incidental settings already match (or when either
+ * side is not URL-parseable).
+ */
+export function applyRowDriverSettings(bundleUrl: string, rowUrl: string): string {
+  const bundlePrefix = /^jdbc:/i.test(bundleUrl) ? bundleUrl.slice(0, 5) : "";
+  let bundle: URL;
+  let row: URL;
+  try {
+    bundle = new URL(bundlePrefix ? bundleUrl.slice(5) : bundleUrl);
+    row = new URL(/^jdbc:/i.test(rowUrl) ? rowUrl.slice(5) : rowUrl);
+  } catch {
+    return bundleUrl;
+  }
+  let changed = false;
+  for (const key of INCIDENTAL_QUERY_KEY_LIST) {
+    const lower = key.toLowerCase();
+    const rowEntry = [...row.searchParams.entries()].find(([k]) => k.toLowerCase() === lower);
+    const bundleEntries = [...bundle.searchParams.entries()].filter(([k]) => k.toLowerCase() === lower);
+    const same = rowEntry
+      ? bundleEntries.length === 1 &&
+        bundleEntries[0][0] === rowEntry[0] &&
+        bundleEntries[0][1] === rowEntry[1]
+      : bundleEntries.length === 0;
+    if (same) continue;
+    for (const [k] of bundleEntries) bundle.searchParams.delete(k);
+    if (rowEntry) bundle.searchParams.append(rowEntry[0], rowEntry[1]);
+    changed = true;
+  }
+  if (!changed) return bundleUrl;
+  return `${bundlePrefix}${bundle.toString()}`;
+}

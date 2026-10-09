@@ -1,6 +1,7 @@
 import { isDesktopRuntime } from "@/lib/desktop";
 import { API_BASE } from "@/lib/api-base";
 import {
+  applyRowDriverSettings,
   hasConnectionSecret,
   redactedTargetForComparison,
   restorePostgresPassword,
@@ -39,6 +40,28 @@ async function readStoredBundle(payload: CredentialPayload): Promise<Record<stri
   }
 }
 
+/**
+ * Re-encrypt (vault) or overwrite (keychain) the stored bundle under the
+ * SAME reference with a new connection string while keeping the stored
+ * secrets. Returns the new vault envelope, or null for keychain refs.
+ */
+async function refreshStoredBundle(
+  ref: string,
+  connectionString: string,
+  stored: Record<string, unknown>,
+): Promise<string | null> {
+  const bundle = JSON.stringify({
+    connectionString,
+    password: typeof stored.password === "string" ? stored.password : null,
+    authToken: typeof stored.authToken === "string" ? stored.authToken : null,
+  });
+  if (ref.startsWith("vault:")) {
+    return await encryptVaultSecret(ref, bundle);
+  }
+  await invoke("connection_credential_set", { reference: ref, value: bundle });
+  return null;
+}
+
 export async function protectConnectionPayload<T extends CredentialPayload>(payload: T): Promise<T> {
   if (!hasConnectionSecret(payload)) {
     // Explicit null clears a stored reference (caller opted to drop credentials).
@@ -64,20 +87,50 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
     if (typeof payload.credentialRef === "string" && typeof payload.connectionString === "string") {
       const stored = await readStoredBundle(payload);
       const storedTarget = typeof stored?.connectionString === "string" ? stored.connectionString : null;
-      if (storedTarget !== null) {
+      if (stored && storedTarget !== null) {
+        let targetChanged = false;
+        let incidentalOnly = false;
         try {
-          if (redactedTargetForComparison(storedTarget) !== redactedTargetForComparison(payload.connectionString)) {
-            return {
-              ...payload,
-              credentialRef: null,
-              credentialSecret: null,
-              password: null,
-              authToken: null,
-              credentialStorageMode: getCredentialStorageMode(),
-            } as T;
-          }
+          targetChanged =
+            redactedTargetForComparison(storedTarget) !== redactedTargetForComparison(payload.connectionString);
+          incidentalOnly =
+            !targetChanged &&
+            stripConnectionSecrets(storedTarget) !== stripConnectionSecrets(payload.connectionString);
         } catch {
           // Fall through and keep the reference on comparison failure.
+        }
+        if (targetChanged) {
+          return {
+            ...payload,
+            credentialRef: null,
+            credentialSecret: null,
+            password: null,
+            authToken: null,
+            credentialStorageMode: getCredentialStorageMode(),
+          } as T;
+        }
+        if (incidentalOnly) {
+          // Only client-side driver settings (jarPaths/driverClass) changed:
+          // refresh the stored bundle in place so reloads and the sidecar
+          // cache use the new settings while keeping the stored secrets.
+          // The reference is unchanged, so no rotation or orphan cleanup
+          // is needed.
+          try {
+            const credentialSecret = await refreshStoredBundle(
+              payload.credentialRef,
+              payload.connectionString,
+              stored,
+            );
+            return {
+              ...payload,
+              credentialSecret: payload.credentialRef.startsWith("vault:")
+                ? credentialSecret
+                : payload.credentialSecret,
+              credentialStorageMode: payload.credentialStorageMode || getCredentialStorageMode(),
+            } as T;
+          } catch {
+            // Fall through and keep the reference on refresh failure.
+          }
         }
       }
     }
@@ -123,10 +176,6 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
   // Only forward plain string secrets to the sidecar cache; never forward
   // objects that would make node-postgres see a non-string password.
   const cacheSecret: Record<string, string | null> = {};
-  for (const field of ["connectionString", "password", "authToken"] as const) {
-    const value = secret[field];
-    if (value === null || typeof value === "string") cacheSecret[field] = value;
-  }
   // Defense in depth: if the row's saved target no longer matches the
   // bundle's target (e.g. a save made before stale-reference detection
   // paired a new URL with an old reference), never replay the old URL and
@@ -147,6 +196,18 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
     if (stale) {
       return { ...connection, password: null, authToken: null, credentialError: true } as T;
     }
+    // Same remote target, but the row may carry newer client-side driver
+    // settings (jarPaths/driverClass edited while the password was left
+    // blank, or a bundle refresh that failed to persist). The row wins for
+    // those settings so reloads don't revert the edit.
+    const merged = applyRowDriverSettings(String(secret.connectionString), connection.connectionString);
+    if (merged !== secret.connectionString) {
+      secret = { ...secret, connectionString: merged };
+    }
+  }
+  for (const field of ["connectionString", "password", "authToken"] as const) {
+    const value = secret[field];
+    if (value === null || typeof value === "string") cacheSecret[field] = value;
   }
   try {
     await fetch(new URL("/api/connections/credential-cache", API_BASE), {

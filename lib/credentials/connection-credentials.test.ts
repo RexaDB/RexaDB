@@ -2,6 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { hydrateConnection, protectConnectionPayload } from "./connection-credentials";
 import * as localVault from "./local-vault";
 import {
+  applyRowDriverSettings,
   hasConnectionSecret,
   redactedTargetForComparison,
   restorePostgresPassword,
@@ -84,6 +85,61 @@ describe("protectConnectionPayload reference retention (issue #21)", () => {
       decryptSpy.mockRestore();
     }
   });
+
+  it("refreshes the bundle in place when only driver settings change", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X",
+        password: null,
+        authToken: null,
+      }),
+    );
+    let encryptedArgs!: [string, string];
+    const encryptSpy = spyOn(localVault, "encryptVaultSecret").mockImplementation(async (ref, plaintext) => {
+      encryptedArgs = [ref, plaintext];
+      return "v1.refreshed-envelope";
+    });
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/new.jar",
+        password: "",
+        credentialRef: "vault:driver-ref",
+        credentialSecret: "v1.old-envelope",
+      });
+      expect(out.credentialRef).toBe("vault:driver-ref");
+      expect(out.credentialSecret).toBe("v1.refreshed-envelope");
+      expect(encryptedArgs[0]).toBe("vault:driver-ref");
+      const refreshed = JSON.parse(encryptedArgs[1]);
+      expect(refreshed.connectionString).toContain("jarPaths=");
+    } finally {
+      decryptSpy.mockRestore();
+      encryptSpy.mockRestore();
+    }
+  });
+
+  it("does not rewrite the bundle when nothing changed", async () => {
+    const bundle = JSON.stringify({
+      connectionString: "postgresql://postgres:s3cret@localhost:5432/mydb",
+      password: "s3cret",
+      authToken: null,
+    });
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(bundle);
+    const encryptSpy = spyOn(localVault, "encryptVaultSecret").mockResolvedValue("v1.unexpected");
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "postgresql://postgres@localhost:5432/mydb",
+        password: "",
+        credentialRef: "vault:same-ref",
+        credentialSecret: "v1.same",
+      });
+      expect(out.credentialRef).toBe("vault:same-ref");
+      expect(out.credentialSecret).toBe("v1.same");
+      expect(encryptSpy).toHaveBeenCalledTimes(0);
+    } finally {
+      decryptSpy.mockRestore();
+      encryptSpy.mockRestore();
+    }
+  });
 });
 
 describe("connection credential redaction", () => {
@@ -135,6 +191,24 @@ describe("connection credential redaction", () => {
       redactedTargetForComparison("postgresql://postgres@old-host:5432/app"),
     ).not.toBe(redactedTargetForComparison("postgresql://postgres@new-host:5432/app"));
   });
+
+  it("merges row driver settings onto the bundle URL without touching the target", () => {
+    expect(
+      applyRowDriverSettings(
+        "jdbc:postgresql://db.example/app?driverClass=org.X",
+        "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/new.jar",
+      ),
+    ).toBe("jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=%2Fnew.jar");
+    expect(
+      applyRowDriverSettings(
+        "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/old.jar",
+        "jdbc:postgresql://db.example/app?driverClass=org.X",
+      ),
+    ).toBe("jdbc:postgresql://db.example/app?driverClass=org.X");
+    const unchanged = "jdbc:postgresql://db.example/app?driverClass=org.X";
+    expect(applyRowDriverSettings(unchanged, unchanged)).toBe(unchanged);
+    expect(applyRowDriverSettings("not-a-url", "also-not-a-url")).toBe("not-a-url");
+  });
 });
 
 describe("hydrateConnection stale-bundle guard", () => {
@@ -183,6 +257,40 @@ describe("hydrateConnection stale-bundle guard", () => {
       } as any);
       expect(out.connectionString).toContain("localhost");
       expect((out as any).credentialError).toBeUndefined();
+    } finally {
+      decryptSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps the row driver settings instead of replaying the bundle ones", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/old.jar&password=s3cret",
+        password: null,
+        authToken: null,
+      }),
+    );
+    const originalFetch = globalThis.fetch;
+    let cachedBody!: string;
+    globalThis.fetch = (async (_input: unknown, init?: { body?: unknown }) => {
+      cachedBody = String(init?.body ?? null);
+      return Response.json({ success: true });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await hydrateConnection({
+        id: 11,
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/new.jar",
+        password: null,
+        credentialRef: "vault:driver-ref",
+        credentialSecret: "v1.driver",
+      } as any);
+      expect(out.connectionString).toContain("jarPaths=");
+      expect(out.connectionString).toContain("new.jar");
+      expect(out.connectionString).not.toContain("old.jar");
+      expect(out.connectionString).toContain("password=s3cret");
+      expect((out as any).credentialError).toBeUndefined();
+      expect(cachedBody).toContain("new.jar");
     } finally {
       decryptSpy.mockRestore();
       globalThis.fetch = originalFetch;
