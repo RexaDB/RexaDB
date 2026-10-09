@@ -57,17 +57,36 @@ function resolveApiUrl(input: RequestInfo | URL): string {
 async function request<T = any>(
   input: RequestInfo | URL,
   init?: RequestInit,
+  opts: { timeoutMs?: number } = {},
 ): Promise<ApiResult<T>> {
   const apiUrl = resolveApiUrl(input);
 
   let response: Response;
+  // Optional bound so a hung local service can't stall the caller forever.
+  // Only used by callers that pass timeoutMs (e.g. the connections loader);
+  // every other caller keeps the previous unbounded behavior.
+  const timeoutMs = opts.timeoutMs;
+  const controller =
+    timeoutMs && timeoutMs > 0 && !init?.signal
+      ? new AbortController()
+      : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
   try {
-    response = await fetch(apiUrl, init);
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Request failed",
-    };
+    try {
+      response = await fetch(
+        apiUrl,
+        controller ? { ...init, signal: controller.signal } : init,
+      );
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : "Request failed",
+      };
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const body = await response.json().catch(() => null);
@@ -108,10 +127,68 @@ function callAction<T = any>(action: string, args: unknown[] = []) {
   });
 }
 
+export type ConnectionsLoadResult = {
+  ok: boolean;
+  data: any[];
+  error?: string;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch connections and distinguish transport failure from "zero rows".
+ * Retries on network/sidecar errors (cold-start race, sidecar respawn on a
+ * new port) instead of resolving to [] on the first failed attempt — the
+ * historical cause of "No connections found" until the next manual refresh.
+ */
+export async function getConnectionsResult(
+  opts: { retries?: number; retryDelayMs?: number; timeoutMs?: number } = {},
+): Promise<ConnectionsLoadResult> {
+  const retries = opts.retries ?? 5;
+  const retryDelayMs = opts.retryDelayMs ?? 700;
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  // Ensure the dynamic Tauri sidecar port has been discovered at least once.
+  try {
+    const mod = await import("@/lib/api-base");
+    await mod.initApiBase().catch(() => undefined);
+  } catch {
+    // ignore — request() still tries the default base URL.
+  }
+  let lastError = "Request failed.";
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const res = await request<any[]>(buildUrl("/api/connections"), undefined, {
+      timeoutMs,
+    });
+    if (res.success && Array.isArray(res.data)) {
+      try {
+        return { ok: true, data: await migrateAndHydrateConnections(res.data) };
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : "Request failed.";
+        return { ok: false, data: [], error: lastError };
+      }
+    }
+    lastError =
+      typeof res.error === "string" && res.error
+        ? res.error
+        : "Could not reach the local sidecar.";
+    if (attempt < retries) {
+      try {
+        const mod = await import("@/lib/api-base");
+        await mod.refreshApiBase().catch(() => undefined);
+      } catch {
+        // ignore
+      }
+      await sleep(retryDelayMs * (attempt + 1));
+    }
+  }
+  return { ok: false, data: [], error: lastError };
+}
+
 export async function getConnections(): Promise<any[]> {
-  const res = await request<any[]>(buildUrl("/api/connections"));
-  if (!res.success || !Array.isArray(res.data)) return [];
-  return migrateAndHydrateConnections(res.data);
+  const res = await getConnectionsResult();
+  return res.data;
 }
 
 export function upsertUserProfile(payload: {

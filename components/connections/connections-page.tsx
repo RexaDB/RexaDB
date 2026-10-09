@@ -14,7 +14,7 @@ import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
-import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
+import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
 import { supabase } from "@/lib/supabase/client";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
 import { ONBOARDING_COMPLETE_KEY } from "@/lib/onboarding";
@@ -147,15 +147,50 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     void hydrate();
   }, []);
 
+  const [connsError, setConnsError] = useState<string | null>(null);
   const loadConns = useCallback(async () => {
     try {
-      const rows = await getConnections();
-      setConnections(rows || []);
-    } catch {}
+      const res = await getConnectionsResult();
+      if (res.ok) {
+        setConnections(res.data || []);
+        setConnsError(null);
+      } else {
+        setConnsError(res.error || "Could not reach the local sidecar.");
+      }
+    } catch {
+      setConnsError("Could not reach the local sidecar.");
+    }
   }, []);
   useEffect(() => {
-    void loadConns();
+    // Same cold-start race as ConnectionManager: wait for the sidecar
+    // before the first fetch so the sidebar list isn't stuck empty.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { waitForSidecarReady } = await import("@/lib/api-base");
+        await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+      } catch {}
+      if (!cancelled) await loadConns();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loadConns]);
+  useEffect(() => {
+    // Recovery for a failed initial load: retry when the window regains
+    // focus or the network comes back, so the sidebar doesn't stay empty
+    // while the main list (which has its own Retry) already recovered.
+    if (!connsError) return;
+    const retry = () => {
+      void loadConns();
+    };
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [connsError, loadConns]);
 
   const activeTabId = nav.stack[nav.index] ?? CONNECTIONS_TAB.id;
   const activeTab = useMemo(
@@ -178,9 +213,9 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     let active = true;
     (async () => {
       try {
-        const rows = await getConnections();
-        if (active) {
-          setSelectedConnection(rows?.find((c) => c.id === selectedConnectionId) || null);
+        const res = await getConnectionsResult({ retries: 0 });
+        if (active && res.ok) {
+          setSelectedConnection(res.data?.find((c) => c.id === selectedConnectionId) || null);
         }
       } catch {}
     })();

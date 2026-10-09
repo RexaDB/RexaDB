@@ -125,7 +125,7 @@ import {
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
-import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
+import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
 import {
   deleteConnectionCredential,
   hydrateConnection,
@@ -518,8 +518,30 @@ export function ConnectionManager({
     error: string;
   };
 
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  // Set once the sidecar answers; the initial connections load waits for
+  // this AND workspace auth (see below) so a slow production cold start
+  // can't resolve to [] before either is known.
+  const [sidecarReady, setSidecarReady] = useState(false);
+  // Monotonic id for loadConnections() runs; stale runs (e.g. a local-mode
+  // load overtaken by a workspace-mode change) must not overwrite newer rows.
+  const loadGenRef = useRef(0);
+
   useEffect(() => {
-    void loadConnections();
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { waitForSidecarReady } = await import("@/lib/api-base");
+        await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+      } catch {
+        // Best-effort only — the gated load below still runs and
+        // loadConnections() itself retries.
+      }
+      if (!cancelled) setSidecarReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const providerCards: Array<{
@@ -1591,12 +1613,19 @@ export function ConnectionManager({
       }
     }
     try {
-      const local = (await getConnections()) ?? [];
+      const result = await getConnectionsResult();
+      if (!result.ok) {
+        throw new Error(result.error || "Could not reach the local sidecar.");
+      }
+      const local = result.data ?? [];
       return local.filter(
         (c: any) => !c.connectionString?.startsWith("workspace:"),
       );
-    } catch {
-      return [];
+    } catch (err) {
+      // Distinguish transport failure (throw → loadConnections shows a Retry
+      // state) from a genuine empty list (return []). Swallowing here caused
+      // cold-start "No connections found" until the next manual refresh.
+      throw err instanceof Error ? err : new Error("Failed to load connections.");
     }
   }, [workspaceMode]);
 
@@ -2018,13 +2047,20 @@ export function ConnectionManager({
       : "";
 
   const loadConnections = async () => {
+    // Guard against stale overwrites: if another load starts (e.g. the
+    // mode flips from local to workspace while a fetch is in flight), only
+    // the latest run may publish its rows.
+    const generation = loadGenRef.current + 1;
+    loadGenRef.current = generation;
     setConnectionsLoading(true);
     try {
       const [conns, groups] = await Promise.all([
         fetchConnections(),
         fetchConnectionGroups(),
       ]);
+      if (generation !== loadGenRef.current) return;
       setConnections(conns);
+      setConnectionsError(null);
       if (conns.some((conn: any) => conn.credentialError)) {
         toast.error(
           "Some saved credentials could not be unlocked. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
@@ -2036,10 +2072,18 @@ export function ConnectionManager({
         );
       }
       setConnectionGroups(groups);
+    } catch (err) {
+      if (generation !== loadGenRef.current) return;
+      // Keep previously loaded rows (if any) instead of wiping to [] — a
+      // transient sidecar failure must not erase the visible list.
+      const message =
+        err instanceof Error ? err.message : "Failed to load connections.";
+      setConnectionsError(message);
     } finally {
       // Always clear the loading gate, even on an unexpected failure —
       // otherwise the whole page hangs on the loading state forever.
-      setConnectionsLoading(false);
+      // A superseded run must not clear a newer run's spinner early.
+      if (generation === loadGenRef.current) setConnectionsLoading(false);
     }
   };
 
@@ -2226,7 +2270,7 @@ export function ConnectionManager({
   }, []);
 
   useEffect(() => {
-    if (workspaceAuthLoaded) {
+    if (workspaceAuthLoaded && sidecarReady) {
       void loadConnections();
       if (workspaceMode) {
         studioApi
@@ -2245,7 +2289,26 @@ export function ConnectionManager({
         setWorkspacePermissions([]);
       }
     }
-  }, [workspaceMode, workspaceAuthLoaded]);
+  }, [workspaceMode, workspaceAuthLoaded, sidecarReady]);
+
+  useEffect(() => {
+    // If the initial load failed (sidecar was still starting), a later
+    // focus/online event means the sidecar is likely up now — retry
+    // instead of leaving the empty state stuck. Re-subscribes when the
+    // mode/auth/ready inputs change so the retry always loads for the
+    // current mode instead of a stale closure's mode.
+    if (!connectionsError) return;
+    const retryIfUnloaded = () => {
+      void loadConnections();
+    };
+    window.addEventListener("focus", retryIfUnloaded);
+    window.addEventListener("online", retryIfUnloaded);
+    return () => {
+      window.removeEventListener("focus", retryIfUnloaded);
+      window.removeEventListener("online", retryIfUnloaded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionsError, workspaceMode, workspaceAuthLoaded, sidecarReady]);
 
   useEffect(() => {
     if (
@@ -5703,13 +5766,27 @@ export function ConnectionManager({
                         <Database className="w-6 h-6 text-muted-foreground" />
                       </div>
                       <h3 className="text-sm font-medium text-foreground mb-1">
-                        No connections found
+                        {connectionsError && !searchQuery
+                          ? "Could not load connections"
+                          : "No connections found"}
                       </h3>
                       <p className="text-xs text-muted-foreground max-w-xs mb-6">
                         {searchQuery
                           ? "Try a different search term."
-                          : "Add a database connection to get started."}
+                          : connectionsError
+                            ? `${connectionsError} The local sidecar may still be starting — retry in a moment.`
+                            : "Add a database connection to get started."}
                       </p>
+                      {connectionsError && !searchQuery && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mb-3"
+                          onClick={() => void loadConnections()}
+                        >
+                          Retry
+                        </Button>
+                      )}
                       {!searchQuery && can("connections.create") && (
                         <Button
                           size="sm"
