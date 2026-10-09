@@ -117,6 +117,63 @@ describe("protectConnectionPayload reference retention (issue #21)", () => {
     }
   });
 
+  it("keeps a URL-only password when refreshing driver settings", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/old.jar&password=s3cret",
+        password: null,
+        authToken: null,
+      }),
+    );
+    let encryptedArgs!: [string, string];
+    const encryptSpy = spyOn(localVault, "encryptVaultSecret").mockImplementation(async (ref, plaintext) => {
+      encryptedArgs = [ref, plaintext];
+      return "v1.refreshed-envelope";
+    });
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/new.jar",
+        password: "",
+        credentialRef: "vault:driver-ref",
+        credentialSecret: "v1.old-envelope",
+      });
+      expect(out.credentialRef).toBe("vault:driver-ref");
+      expect(out.credentialSecret).toBe("v1.refreshed-envelope");
+      const refreshed = JSON.parse(encryptedArgs[1]);
+      expect(refreshed.connectionString).toContain("password=s3cret");
+      expect(refreshed.connectionString).toContain("new.jar");
+      expect(refreshed.connectionString).not.toContain("old.jar");
+    } finally {
+      decryptSpy.mockRestore();
+      encryptSpy.mockRestore();
+    }
+  });
+
+  it("does not rewrite the bundle when only the presented secret is redacted", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X&password=s3cret",
+        password: null,
+        authToken: null,
+      }),
+    );
+    const encryptSpy = spyOn(localVault, "encryptVaultSecret").mockResolvedValue("v1.unexpected");
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "jdbc:postgresql://db.example/app?driverClass=org.X",
+        password: "",
+        credentialRef: "vault:same-ref",
+        credentialSecret: "v1.same",
+      });
+      expect(out.credentialRef).toBe("vault:same-ref");
+      expect(out.credentialSecret).toBe("v1.same");
+      expect(encryptSpy).toHaveBeenCalledTimes(0);
+    } finally {
+      decryptSpy.mockRestore();
+      encryptSpy.mockRestore();
+    }
+  });
+
   it("does not rewrite the bundle when nothing changed", async () => {
     const bundle = JSON.stringify({
       connectionString: "postgresql://postgres:s3cret@localhost:5432/mydb",

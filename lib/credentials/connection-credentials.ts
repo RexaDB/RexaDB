@@ -111,23 +111,31 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
         }
         if (incidentalOnly) {
           // Only client-side driver settings (jarPaths/driverClass) changed:
-          // refresh the stored bundle in place so reloads and the sidecar
-          // cache use the new settings while keeping the stored secrets.
-          // The reference is unchanged, so no rotation or orphan cleanup
-          // is needed.
+          // merge the row's settings onto the stored URL rather than
+          // replacing it. The password may live only inside the stored URL
+          // (stored.password null, e.g. JDBC `?password=`), and replacing
+          // it with the passwordless row URL would erase auth so the next
+          // open cannot authenticate. Same reference, so no rotation or
+          // orphan cleanup is needed.
           try {
-            const credentialSecret = await refreshStoredBundle(
-              payload.credentialRef,
+            const mergedConnectionString = applyRowDriverSettings(
+              storedTarget,
               payload.connectionString,
-              stored,
             );
-            return {
-              ...payload,
-              credentialSecret: payload.credentialRef.startsWith("vault:")
-                ? credentialSecret
-                : payload.credentialSecret,
-              credentialStorageMode: payload.credentialStorageMode || getCredentialStorageMode(),
-            } as T;
+            if (mergedConnectionString !== storedTarget) {
+              const credentialSecret = await refreshStoredBundle(
+                payload.credentialRef,
+                mergedConnectionString,
+                stored,
+              );
+              return {
+                ...payload,
+                credentialSecret: payload.credentialRef.startsWith("vault:")
+                  ? credentialSecret
+                  : payload.credentialSecret,
+                credentialStorageMode: payload.credentialStorageMode || getCredentialStorageMode(),
+              } as T;
+            }
           } catch {
             // Fall through and keep the reference on refresh failure.
           }
