@@ -23,6 +23,21 @@ async function invoke<T>(command: string, args: Record<string, unknown>): Promis
   return invoke<T>(command, args);
 }
 
+async function readStoredBundle(payload: CredentialPayload): Promise<Record<string, unknown> | null> {
+  const ref = payload.credentialRef;
+  if (typeof ref !== "string" || !ref) return null;
+  try {
+    const raw = ref.startsWith("vault:")
+      ? await decryptVaultSecret(ref, payload.credentialSecret || "")
+      : await invoke<string>("connection_credential_get", { reference: ref });
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export async function protectConnectionPayload<T extends CredentialPayload>(payload: T): Promise<T> {
   if (!hasConnectionSecret(payload)) {
     // Explicit null clears a stored reference (caller opted to drop credentials).
@@ -38,6 +53,32 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
         authToken: null,
         credentialStorageMode: getCredentialStorageMode(),
       } as T;
+    }
+    // If the caller is saving a new target alongside the old reference, the
+    // stored bundle still holds the previous connectionString. Keeping the
+    // reference would let hydrate replay the old URL (and old password) over
+    // the new target on reload. Compare redacted targets and drop the stale
+    // reference so the new passwordless target actually sticks; the caller
+    // deletes the orphaned keychain entry after a successful save.
+    if (typeof payload.credentialRef === "string" && typeof payload.connectionString === "string") {
+      const stored = await readStoredBundle(payload);
+      const storedTarget = typeof stored?.connectionString === "string" ? stored.connectionString : null;
+      if (storedTarget !== null) {
+        try {
+          if (stripConnectionSecrets(storedTarget) !== stripConnectionSecrets(payload.connectionString)) {
+            return {
+              ...payload,
+              credentialRef: null,
+              credentialSecret: null,
+              password: null,
+              authToken: null,
+              credentialStorageMode: getCredentialStorageMode(),
+            } as T;
+          }
+        } catch {
+          // Fall through and keep the reference on comparison failure.
+        }
+      }
     }
     return {
       ...payload,

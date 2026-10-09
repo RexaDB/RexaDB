@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { markEntitlementRefreshPending } from "@/lib/billing/entitlement-resolver";
 import { supabase } from "@/lib/supabase/client";
-import { isDesktopRuntime } from "@/lib/desktop";
+import { isDesktopRuntime, isWindowsDesktopRuntime } from "@/lib/desktop";
 
 const DEBUG = true;
 function debug(...args: unknown[]) {
@@ -14,10 +14,15 @@ function debug(...args: unknown[]) {
 /** Map common Windows install-lock failures to actionable copy. */
 function formatUpdaterError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/permission denied|os error 13|could not rename temporary file/i.test(message)) {
-    return `${message} Quit every RexaDB window (and check Task Manager for leftover processes), then retry the update.`;
+  if (!/permission denied|os error 13|could not rename temporary file/i.test(message)) {
+    return message;
   }
-  return message;
+  // Only Windows uses Task Manager wording; other platforms keep the raw error.
+  const onWindows =
+    isWindowsDesktopRuntime() ||
+    (typeof navigator !== "undefined" && /Win/i.test((navigator as any).platform || (navigator as any).userAgent || ""));
+  if (!onWindows) return message;
+  return `${message} Quit every RexaDB window (and check Task Manager for leftover processes), then retry the update.`;
 }
 
 // The Tauri updater endpoint can hang indefinitely on a stalled connection

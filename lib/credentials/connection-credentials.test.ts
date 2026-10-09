@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { protectConnectionPayload } from "./connection-credentials";
+import * as localVault from "./local-vault";
 import {
   hasConnectionSecret,
   restorePostgresPassword,
@@ -38,6 +39,49 @@ describe("protectConnectionPayload reference retention (issue #21)", () => {
     expect(out.credentialRef).toBeNull();
     expect(out.credentialSecret).toBeNull();
     expect(out.password).toBeNull();
+  });
+
+  it("keeps credentialRef when the redacted target is unchanged", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "postgresql://postgres:s3cret@localhost:5432/postgres?sslmode=disable",
+        password: null,
+        authToken: null,
+      }),
+    );
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "postgresql://postgres@localhost:5432/postgres?sslmode=disable",
+        password: "",
+        credentialRef: "vault:keep-me",
+        credentialSecret: "v1.keep",
+      });
+      expect(out.credentialRef).toBe("vault:keep-me");
+    } finally {
+      decryptSpy.mockRestore();
+    }
+  });
+
+  it("drops a stale credentialRef when the saved target changes", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "postgresql://postgres:s3cret@old-host:5432/old-db?sslmode=require",
+        password: "s3cret",
+        authToken: null,
+      }),
+    );
+    try {
+      const out = await protectConnectionPayload({
+        connectionString: "postgresql://postgres@new-host:5432/new-db?sslmode=require",
+        password: "",
+        credentialRef: "vault:stale-ref",
+        credentialSecret: "v1.stale",
+      });
+      expect(out.credentialRef).toBeNull();
+      expect(out.connectionString).toContain("new-host");
+    } finally {
+      decryptSpy.mockRestore();
+    }
   });
 });
 

@@ -3049,6 +3049,7 @@ export function ConnectionManager({
     setConnectionScreen(isDuplicate ? "new-form" : "edit-form");
   };
 
+  const formRequestRef = useRef(0);
   const unlockConnectionSecrets = useCallback(async (conn: Connection): Promise<Connection> => {
     if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
       return conn;
@@ -3061,15 +3062,18 @@ export function ConnectionManager({
   }, [workspaceMode]);
 
   const handleEdit = (conn: Connection) => {
+    const requestId = ++formRequestRef.current;
     void (async () => {
       let ready = conn;
       try {
         ready = await unlockConnectionSecrets(conn);
       } catch {
+        if (requestId !== formRequestRef.current) return;
         toast.error(
           "Could not unlock saved credentials for editing. Re-enter the password to restore this connection.",
         );
       }
+      if (requestId !== formRequestRef.current) return;
       populateFormFromConnection(ready, false);
       if (
         workspaceMode &&
@@ -3085,6 +3089,7 @@ export function ConnectionManager({
           for (const a of res.data || []) {
             if (a.roleId != null) access[a.roleId] = a.accessType;
           }
+          if (requestId !== formRequestRef.current) return;
           setFormAccess(access);
         } catch {
           /* no access data */
@@ -3093,15 +3098,18 @@ export function ConnectionManager({
     })();
   };
   const handleDuplicate = (conn: Connection) => {
+    const requestId = ++formRequestRef.current;
     void (async () => {
       let ready = conn;
       try {
         ready = await unlockConnectionSecrets(conn);
       } catch {
+        if (requestId !== formRequestRef.current) return;
         toast.error(
           "Could not unlock saved credentials to duplicate. Re-enter the password on the copy.",
         );
       }
+      if (requestId !== formRequestRef.current) return;
       populateFormFromConnection(ready, true);
     })();
   };
@@ -3293,7 +3301,18 @@ export function ConnectionManager({
                 parsed.searchParams.set("jarPaths", match.jarPaths.join(","));
                 const healed = parsed.toString();
                 ready = { ...ready, connectionString: healed };
-                await updateConnection(ready.id, { connectionString: healed }).catch(() => {});
+                // Pass the existing reference so protectConnectionPayload can
+                // rotate (not orphan) the keychain entry, and mirror the
+                // repair in state so the next open does not rewrite again.
+                await updateConnection(ready.id, {
+                  connectionString: healed,
+                  credentialRef: (ready as any).credentialRef,
+                }).catch(() => {});
+                setConnections((prev) =>
+                  prev.map((item) =>
+                    item.id === ready.id ? { ...item, connectionString: healed } : item,
+                  ),
+                );
               }
             }
           }

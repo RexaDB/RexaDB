@@ -1537,15 +1537,10 @@ export async function completeConnectionSecretMigration() {
     }
   }
 
-  // Live rows are already redacted; VACUUM only reclaims pages for forensics.
-  // A successful WAL checkpoint is enough to clear the retry toast when the
-  // database is still briefly locked (common on Windows while the sidecar is busy).
-  try {
-    await checkpointConnectionDatabase(db, sql);
-    return { success: true };
-  } catch {
-    throw lastError instanceof Error ? lastError : new Error(String(lastError || "SQLite cleanup could not finish."));
-  }
+  // VACUUM rebuilds the file so freed pages holding legacy secrets are
+  // actually erased. A checkpoint alone does not, so never report success
+  // without it — keep cleanup pending and let the caller retry.
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "SQLite cleanup could not finish."));
 }
 
 async function ensureCredentialVaultTable() {
