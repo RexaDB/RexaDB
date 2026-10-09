@@ -1770,7 +1770,18 @@ export function ConnectionManager({
     if (result.success && result.warning) {
       toast.error("Credentials were removed from the live database, but SQLite cleanup did not finish. Retry after closing other database tools.");
     }
-    return result;
+    // Surface the effective credentials so callers that mirror the update
+    // into local state (e.g. the JDBC jarPaths heal after a rotation) don't
+    // keep pointing at a deleted reference.
+    const effective = protectedPayload as Partial<{
+      credentialRef: string | null;
+      credentialSecret: string | null;
+    }>;
+    return {
+      ...result,
+      ...(effective.credentialRef !== undefined ? { credentialRef: effective.credentialRef } : {}),
+      ...(effective.credentialSecret !== undefined ? { credentialSecret: effective.credentialSecret } : {}),
+    };
   };
 
   const removeConnection = async (id: number) => {
@@ -3319,17 +3330,32 @@ export function ConnectionManager({
                 ready = { ...ready, connectionString: healed };
                 // Pass the existing reference plus the unlocked secrets so
                 // protectConnectionPayload rotates (not orphans) the bundle
-                // with the healed URL, and mirror the repair in state so the
-                // next open does not rewrite again.
-                await updateConnection(ready.id, {
+                // with the healed URL. Mirror the healed URL *and* the
+                // effective reference into state: after a rotation the old
+                // keychain entry is deleted, so keeping it would break the
+                // next unlock until a full reload.
+                const healResult: {
+                  success?: boolean;
+                  credentialRef?: string | null;
+                  credentialSecret?: string | null;
+                } | null = await updateConnection(ready.id, {
                   connectionString: healed,
                   credentialRef: (ready as any).credentialRef,
                   password: (ready as any).password ?? undefined,
                   authToken: (ready as any).authToken ?? undefined,
-                }).catch(() => {});
+                }).catch(() => null);
+                const healedPatch: Record<string, unknown> = { connectionString: healed };
+                if (healResult?.success === true) {
+                  if (healResult.credentialRef !== undefined) {
+                    healedPatch.credentialRef = healResult.credentialRef;
+                  }
+                  if (healResult.credentialSecret !== undefined) {
+                    healedPatch.credentialSecret = healResult.credentialSecret;
+                  }
+                }
                 setConnections((prev) =>
                   prev.map((item) =>
-                    item.id === ready.id ? { ...item, connectionString: healed } : item,
+                    item.id === ready.id ? { ...item, ...healedPatch } : item,
                   ),
                 );
               }
