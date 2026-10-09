@@ -519,45 +519,30 @@ export function ConnectionManager({
   };
 
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  // Set once the sidecar answers; the initial connections load waits for
+  // this AND workspace auth (see below) so a slow production cold start
+  // can't resolve to [] before either is known.
+  const [sidecarReady, setSidecarReady] = useState(false);
+  // Monotonic id for loadConnections() runs; stale runs (e.g. a local-mode
+  // load overtaken by a workspace-mode change) must not overwrite newer rows.
+  const loadGenRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    // Gate the very first load on sidecar readiness: on a production
-    // cold start the sidecar can still be spawning (and the dynamic Tauri
-    // port undiscovered) when this component mounts. A single immediate
-    // fetch would fail, resolve to [], and leave "No connections found"
-    // on screen until the next manual refresh.
     void (async () => {
       try {
         const { waitForSidecarReady } = await import("@/lib/api-base");
         await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
       } catch {
-        // Best-effort only — loadConnections() itself retries.
+        // Best-effort only — the gated load below still runs and
+        // loadConnections() itself retries.
       }
-      if (!cancelled) await loadConnections();
+      if (!cancelled) setSidecarReady(true);
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    // If the initial load failed (sidecar was still starting), a later
-    // focus/online event means the sidecar is likely up now — retry
-    // instead of leaving the empty state stuck.
-    if (!connectionsError) return;
-    const retryIfUnloaded = () => {
-      void loadConnections();
-    };
-    window.addEventListener("focus", retryIfUnloaded);
-    window.addEventListener("online", retryIfUnloaded);
-    return () => {
-      window.removeEventListener("focus", retryIfUnloaded);
-      window.removeEventListener("online", retryIfUnloaded);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionsError]);
 
   const providerCards: Array<{
     id: ConnectionProvider;
@@ -2062,12 +2047,18 @@ export function ConnectionManager({
       : "";
 
   const loadConnections = async () => {
+    // Guard against stale overwrites: if another load starts (e.g. the
+    // mode flips from local to workspace while a fetch is in flight), only
+    // the latest run may publish its rows.
+    const generation = loadGenRef.current + 1;
+    loadGenRef.current = generation;
     setConnectionsLoading(true);
     try {
       const [conns, groups] = await Promise.all([
         fetchConnections(),
         fetchConnectionGroups(),
       ]);
+      if (generation !== loadGenRef.current) return;
       setConnections(conns);
       setConnectionsError(null);
       if (conns.some((conn: any) => conn.credentialError)) {
@@ -2082,6 +2073,7 @@ export function ConnectionManager({
       }
       setConnectionGroups(groups);
     } catch (err) {
+      if (generation !== loadGenRef.current) return;
       // Keep previously loaded rows (if any) instead of wiping to [] — a
       // transient sidecar failure must not erase the visible list.
       const message =
@@ -2090,7 +2082,8 @@ export function ConnectionManager({
     } finally {
       // Always clear the loading gate, even on an unexpected failure —
       // otherwise the whole page hangs on the loading state forever.
-      setConnectionsLoading(false);
+      // A superseded run must not clear a newer run's spinner early.
+      if (generation === loadGenRef.current) setConnectionsLoading(false);
     }
   };
 
@@ -2277,7 +2270,7 @@ export function ConnectionManager({
   }, []);
 
   useEffect(() => {
-    if (workspaceAuthLoaded) {
+    if (workspaceAuthLoaded && sidecarReady) {
       void loadConnections();
       if (workspaceMode) {
         studioApi
@@ -2296,7 +2289,26 @@ export function ConnectionManager({
         setWorkspacePermissions([]);
       }
     }
-  }, [workspaceMode, workspaceAuthLoaded]);
+  }, [workspaceMode, workspaceAuthLoaded, sidecarReady]);
+
+  useEffect(() => {
+    // If the initial load failed (sidecar was still starting), a later
+    // focus/online event means the sidecar is likely up now — retry
+    // instead of leaving the empty state stuck. Re-subscribes when the
+    // mode/auth/ready inputs change so the retry always loads for the
+    // current mode instead of a stale closure's mode.
+    if (!connectionsError) return;
+    const retryIfUnloaded = () => {
+      void loadConnections();
+    };
+    window.addEventListener("focus", retryIfUnloaded);
+    window.addEventListener("online", retryIfUnloaded);
+    return () => {
+      window.removeEventListener("focus", retryIfUnloaded);
+      window.removeEventListener("online", retryIfUnloaded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionsError, workspaceMode, workspaceAuthLoaded, sidecarReady]);
 
   useEffect(() => {
     if (

@@ -39,12 +39,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function probeSidecarHttp(): Promise<boolean> {
+async function probeSidecarHttp(timeoutMs: number): Promise<boolean> {
+  if (timeoutMs <= 0) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -52,9 +60,13 @@ async function probeSidecarHttp(): Promise<boolean> {
  * Best-effort check: is the sidecar reachable right now?
  * In Tauri this prefers the Rust `is_sidecar_ready` flag (which also
  * re-syncs the dynamic port); in a plain browser it probes /health.
- * Never throws.
+ * The HTTP probe is bounded by `timeoutMs` so a local service that
+ * accepts without replying can't hang the caller. Never throws.
  */
-export async function isSidecarReady(): Promise<boolean> {
+export async function isSidecarReady(
+  opts: { timeoutMs?: number } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 5000;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     try {
@@ -69,7 +81,7 @@ export async function isSidecarReady(): Promise<boolean> {
   } catch {
     // Not running inside Tauri — fall through to HTTP probe.
   }
-  return probeSidecarHttp();
+  return probeSidecarHttp(timeoutMs);
 }
 
 /**
@@ -87,14 +99,20 @@ export async function waitForSidecarReady(
   await initApiBase().catch(() => undefined);
   let attempts = 0;
   for (;;) {
-    if (await isSidecarReady()) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    // Bound each probe by the remaining budget so the overall wait never
+    // exceeds timeoutMs, even if a local service accepts without replying.
+    if (await isSidecarReady({ timeoutMs: Math.min(remaining, 5000) })) {
+      return true;
+    }
     if (Date.now() >= deadline) return false;
     attempts += 1;
     // The sidecar may have respawned on a new port while we poll.
     if (attempts % 3 === 0) {
       await refreshApiBase().catch(() => undefined);
     }
-    await sleep(pollMs);
+    await sleep(Math.max(0, Math.min(pollMs, deadline - Date.now())));
   }
 }
 

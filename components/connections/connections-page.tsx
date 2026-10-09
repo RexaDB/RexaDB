@@ -147,11 +147,19 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     void hydrate();
   }, []);
 
+  const [connsError, setConnsError] = useState<string | null>(null);
   const loadConns = useCallback(async () => {
     try {
       const res = await getConnectionsResult();
-      if (res.ok) setConnections(res.data || []);
-    } catch {}
+      if (res.ok) {
+        setConnections(res.data || []);
+        setConnsError(null);
+      } else {
+        setConnsError(res.error || "Could not reach the local sidecar.");
+      }
+    } catch {
+      setConnsError("Could not reach the local sidecar.");
+    }
   }, []);
   useEffect(() => {
     // Same cold-start race as ConnectionManager: wait for the sidecar
@@ -168,6 +176,21 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       cancelled = true;
     };
   }, [loadConns]);
+  useEffect(() => {
+    // Recovery for a failed initial load: retry when the window regains
+    // focus or the network comes back, so the sidebar doesn't stay empty
+    // while the main list (which has its own Retry) already recovered.
+    if (!connsError) return;
+    const retry = () => {
+      void loadConns();
+    };
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [connsError, loadConns]);
 
   const activeTabId = nav.stack[nav.index] ?? CONNECTIONS_TAB.id;
   const activeTab = useMemo(
