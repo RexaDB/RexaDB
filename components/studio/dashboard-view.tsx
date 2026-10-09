@@ -772,6 +772,9 @@ function selectWithLimit(tableRef: string, limit: number, dbType: string) {
   if (dbType === "mssql") {
     return `SELECT TOP ${limit} * FROM ${tableRef}`;
   }
+  if (dbType === "oracle") {
+    return `SELECT * FROM ${tableRef} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT ${limit} ROWS ONLY`;
+  }
   return `SELECT * FROM ${tableRef} LIMIT ${limit}`;
 }
 
@@ -783,6 +786,9 @@ function selectWithOrderLimit(
 ) {
   if (dbType === "mssql") {
     return `SELECT TOP ${limit} * FROM ${tableRef} ORDER BY ${orderBy}`;
+  }
+  if (dbType === "oracle") {
+    return `SELECT * FROM ${tableRef} ORDER BY ${orderBy} OFFSET 0 ROWS FETCH NEXT ${limit} ROWS ONLY`;
   }
   return `SELECT * FROM ${tableRef} ORDER BY ${orderBy} LIMIT ${limit}`;
 }
@@ -1675,6 +1681,8 @@ function TableWidget({
             const q = quoteCol(colName);
             if (dbType === "mssql")
               return `CAST(${q} AS NVARCHAR(MAX)) LIKE '%${searchVal}%'`;
+            if (dbType === "oracle")
+              return `TO_CHAR(${q}) LIKE '%${searchVal}%'`;
             return `CAST(${q} AS TEXT) LIKE '%${searchVal}%'`;
           })
           .join(" OR ");
@@ -1686,7 +1694,11 @@ function TableWidget({
       }
       let limitClause = ` LIMIT ${p.pageSize}`;
       let offsetClause = ` OFFSET ${p.page * p.pageSize}`;
-      if (dbType === "mssql") {
+      if (dbType === "mssql" || dbType === "oracle") {
+        if (!order) {
+          order =
+            dbType === "oracle" ? " ORDER BY 1" : " ORDER BY (SELECT 1)";
+        }
         limitClause = ` OFFSET ${p.page * p.pageSize} ROWS FETCH NEXT ${p.pageSize} ROWS ONLY`;
         offsetClause = "";
       }
@@ -1701,7 +1713,7 @@ function TableWidget({
           fetchTableForeignKeys(connectionString, schema, tableName!),
           runQuery(
             connectionString,
-            `SELECT COUNT(*) as cnt FROM ${quoteTableRef(schema, tableName!, dbType)}${p.filterQuery ? ` WHERE ${p.filterQuery}` : ""};`,
+            `SELECT COUNT(*) as "cnt" FROM ${quoteTableRef(schema, tableName!, dbType)}${p.filterQuery ? ` WHERE ${p.filterQuery}` : ""};`,
           ),
         ]);
         if (!rowsRes.success) {

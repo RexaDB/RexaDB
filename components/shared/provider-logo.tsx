@@ -29,6 +29,7 @@ const LOGO_MAP: Record<string, string> = {
   yugabytedb: "/providers/yogabyte.png",
   federated: "/providers/federated.svg",
   jdbc: "/providers/jdbc.svg",
+  oracle: "/providers/Oracle.svg",
 };
 
 export function getProviderLogoUrl(type?: string | null): string {

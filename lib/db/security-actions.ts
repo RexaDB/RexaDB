@@ -144,10 +144,12 @@ export async function toggleExtension(connectionString: string, name: string, in
 
 export async function fetchTriggers(connectionString: string, schema?: string) {
   const dbType = detectConnectionDbType(connectionString);
-  if (dbType === "mssql") {
+  if (dbType === "mssql" || dbType === "oracle") {
     try {
       const { getDbTriggers } = await import("./db-engine");
-      const rows = await getDbTriggers(connectionString, schema || "dbo");
+      const fallback =
+        dbType === "oracle" ? schema || "" : schema || "dbo";
+      const rows = await getDbTriggers(connectionString, fallback);
       // Normalize to both the legacy pg trigger shape
       // ({ schema, name, table_name, timing, event, definition })
       // and the TriggersList shape ({ table, activation, events, ... })
@@ -179,7 +181,7 @@ export async function fetchTriggers(connectionString: string, schema?: string) {
       });
       return { success: true, data };
     } catch (error: any) {
-      console.error("Failed to fetch MSSQL triggers:", error);
+      console.error(`Failed to fetch ${dbType} triggers:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -247,6 +249,17 @@ export async function deleteEnum(connectionString: string, schema: string, name:
 }
 
 export async function fetchIndexes(connectionString: string, schema?: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "oracle") {
+    try {
+      const { getDbIndexes } = await import("./db-engine");
+      const data = await getDbIndexes(connectionString, schema);
+      return { success: true, data };
+    } catch (error: any) {
+      console.error("Failed to fetch Oracle indexes:", error);
+      return { success: false, error: error.message };
+    }
+  }
   return withPgClientRead(connectionString, "indexes", async (executeQuery) => {
     const sql = `
       SELECT 
@@ -756,4 +769,67 @@ async function createTrigger(
 
     await executeQuery(connectionString, sql);
   });
+}
+
+export async function fetchPackages(connectionString: string, schema: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType !== "oracle") return { success: true, data: [] as any[] };
+  try {
+    const { getDbPackages } = await import("./db-engine");
+    const data = await getDbPackages(connectionString, schema);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchSequences(connectionString: string, schema: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType !== "oracle") return { success: true, data: [] as any[] };
+  try {
+    const { getDbSequences } = await import("./db-engine");
+    const data = await getDbSequences(connectionString, schema);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchSynonyms(connectionString: string, schema: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType !== "oracle") return { success: true, data: [] as any[] };
+  try {
+    const { getDbSynonyms } = await import("./db-engine");
+    const data = await getDbSynonyms(connectionString, schema);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchDbLinks(connectionString: string) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType !== "oracle") return { success: true, data: [] as any[] };
+  try {
+    const { getDbLinks } = await import("./db-engine");
+    const data = await getDbLinks(connectionString);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function fetchMaterializedViews(
+  connectionString: string,
+  schema: string,
+) {
+  const dbType = detectConnectionDbType(connectionString);
+  if (dbType !== "oracle") return { success: true, data: [] as any[] };
+  try {
+    const { getDbMaterializedViews } = await import("./db-engine");
+    const data = await getDbMaterializedViews(connectionString, schema);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
 }

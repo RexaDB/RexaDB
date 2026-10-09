@@ -29,7 +29,8 @@ export type JdbcDriverTemplate = {
 };
 
 export const DEFAULT_TEMPLATES: JdbcDriverTemplate[] = [
-  { name: "Oracle", driverClass: "oracle.jdbc.OracleDriver", urlTemplate: "jdbc:oracle:thin:@${host}:${port}:${database}", defaultPort: 1521, jarUrl: "https://repo1.maven.org/maven2/com/oracle/database/jdbc/ojdbc11/23.7.0.25.01/ojdbc11-23.7.0.25.01.jar", logo: "/providers/jdbc/Oracle.svg", category: "relational" },
+  // Service Name form (@//host:port/service). SID form is @host:port:sid — mutually exclusive.
+  { name: "Oracle", driverClass: "oracle.jdbc.OracleDriver", urlTemplate: "jdbc:oracle:thin:@//${host}:${port}/${database}", defaultPort: 1521, jarUrl: "https://repo1.maven.org/maven2/com/oracle/database/jdbc/ojdbc11/23.7.0.25.01/ojdbc11-23.7.0.25.01.jar", logo: "/providers/jdbc/Oracle.svg", category: "relational" },
   { name: "Snowflake", driverClass: "net.snowflake.client.jdbc.SnowflakeDriver", urlTemplate: "jdbc:snowflake://${host}.snowflakecomputing.com/?db=${database}&warehouse=${warehouse}&schema=${schema}", defaultPort: 443, jarUrl: "https://repo1.maven.org/maven2/net/snowflake/snowflake-jdbc/3.22.0/snowflake-jdbc-3.22.0.jar", logo: "/providers/jdbc/Snowflake.svg", category: "cloud" },
   { name: "IBM DB2", driverClass: "com.ibm.db2.jcc.DB2Driver", urlTemplate: "jdbc:db2://${host}:${port}/${database}", defaultPort: 50000, jarUrl: "https://repo1.maven.org/maven2/com/ibm/db2/jcc/db2jcc/db2jcc-db2jcc4/4.31.10/db2jcc-db2jcc4-4.31.10.jar", logo: "/providers/jdbc/IBM_DB2.svg", category: "relational" },
   { name: "SAP HANA", driverClass: "com.sap.db.jdbc.Driver", urlTemplate: "jdbc:sap://${host}:${port}/?databaseName=${database}", defaultPort: 39013, jarUrl: "https://repo1.maven.org/maven2/com/sap/cloud/db/jdbc/ngdbc/2.22.11/ngdbc-2.22.11.jar", logo: "/providers/jdbc/SAP_HANA.svg", category: "relational" },

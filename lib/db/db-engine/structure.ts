@@ -8,6 +8,7 @@ export async function getDbTableStructure(connectionString: string, schema: stri
   if (dbType === "mssql") return (await import("../mssql-client")).getTableStructure(connectionString, schema, table);
   if (dbType === "duckdb") return (await import("../duckdb-client")).getDuckdbTableStructure(connectionString, schema, table);
   if (dbType === "jdbc") return (await import("../jdbc-client")).getJdbcTableStructure(connectionString, schema, table);
+  if (dbType === "oracle") return (await import("../oracle-client")).getTableStructure(connectionString, schema, table);
   if (dbType === "spacetimedb") return (await import("../spacetimedb-client")).getSpacetimeDbTableStructure(connectionString, schema, table);
   if (dbType === "trino") {
     const info = getTrinoConnectionInfo(connectionString);
@@ -120,6 +121,9 @@ export async function getDbAllTablesWithColumns(connectionString: string): Promi
       }
     }
     return allRows;
+  }
+  if (dbType === "oracle") {
+    return (await import("../oracle-client")).getAllTablesWithColumns(connectionString);
   }
   return (await import("../sql-engine")).getSqlEngineAllTablesWithColumns(connectionString);
 }

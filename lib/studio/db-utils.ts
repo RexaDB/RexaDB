@@ -166,7 +166,7 @@ export function updateConnectionStringDatabase(connectionString: string, newData
   }
 }
 
-export function getDefaultNewTableColumns(dbType: "postgres" | "mongodb" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "redis" | "trino" | "duckdb" | "federated" | "spacetimedb" | "jdbc" | "supabase-mgmt") {
+export function getDefaultNewTableColumns(dbType: "postgres" | "mongodb" | "sqlite" | "mysql" | "clickhouse" | "mssql" | "redis" | "trino" | "duckdb" | "federated" | "spacetimedb" | "jdbc" | "oracle" | "supabase-mgmt") {
   if (dbType === "redis" || dbType === "jdbc") {
     return [];
   }

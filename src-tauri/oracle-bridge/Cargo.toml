@@ -1,0 +1,16 @@
+[package]
+name = "rexadb-oracle-bridge"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Native Oracle thin-driver bridge for RexaDB (JSON over stdio)"
+license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "rexadb-oracle-bridge"
+path = "src/main.rs"
+
+[dependencies]
+oracledb = "26.0.0-beta.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

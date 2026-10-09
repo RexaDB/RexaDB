@@ -22,7 +22,23 @@ import {
   } from "@/lib/api/actions-client";
 import { Connection } from "@/lib/db/schema";
 import { getDatabaseFromConnectionString, updateConnectionStringDatabase, getDefaultNewTableColumns } from "@/lib/studio/db-helpers";
-import { detectConnectionDbType, getMongoDatabaseFromConnectionString } from "@/lib/db/connection-type";
+import {
+  detectConnectionDbType,
+  getMongoDatabaseFromConnectionString,
+  supportsIndexCatalog,
+  supportsOracleExtraCatalog,
+  supportsRoutineCatalog,
+  supportsRoutineWrite,
+  supportsTriggerWrite,
+} from "@/lib/db/connection-type";
+import { parseOracleConnectionString } from "@/lib/db/oracle-connection";
+import {
+  fetchPackages as apiFetchPackages,
+  fetchSequences as apiFetchSequences,
+  fetchSynonyms as apiFetchSynonyms,
+  fetchDbLinks as apiFetchDbLinks,
+  fetchMaterializedViews as apiFetchMaterializedViews,
+} from "@/lib/api/actions-client";
 import { usesDatabaseNamespaces } from "@/lib/db/namespace-display";
 import { fetchNamespaceList } from "@/lib/db/namespace-list";
 import type { RedisCreateKeyInput, RedisKeyInfo } from "@/types/redis";
@@ -290,6 +306,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const isMysql = dbType === "mysql";
   const isClickhouse = dbType === "clickhouse";
   const isMssql = dbType === "mssql";
+  const isOracle = dbType === "oracle";
   const createSupport = useMemo(() => {
     const isPostgres = dbType === "postgres" || dbType === "supabase-mgmt";
     const isMongo = dbType === "mongodb";
@@ -308,6 +325,11 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const fallbackSchemaForDb = useMemo(() => {
     if (dbType === "postgres" || dbType === "supabase-mgmt") return "public";
     if (dbType === "mssql") return "dbo";
+    if (dbType === "oracle") {
+      const user = parseOracleConnectionString(connection.connectionString)
+        .username.toUpperCase();
+      return user || "REXADB";
+    }
     if (dbType === "mysql") return getDatabaseFromConnectionString(connection.connectionString);
     if (dbType === "clickhouse") return getDatabaseFromConnectionString(connection.connectionString);
     if (dbType === "redis") return getDatabaseFromConnectionString(connection.connectionString);
@@ -345,7 +367,12 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     return Array.from(new Set(cleaned));
   }, []);
   const buildPlaceholders = useCallback((count: number) => {
-    if (dbType === "mysql" || dbType === "clickhouse" || dbType === "mssql") {
+    if (
+      dbType === "mysql" ||
+      dbType === "clickhouse" ||
+      dbType === "mssql" ||
+      dbType === "oracle"
+    ) {
       return Array.from({ length: count }, () => "?").join(", ");
     }
     return Array.from({ length: count }, (_, i) => `$${i + 1}`).join(", ");
@@ -366,6 +393,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         ? "SELECT * FROM system.tables LIMIT 10;"
         : dbType === "mssql"
           ? "SELECT TOP 10 * FROM information_schema.tables;"
+        : dbType === "oracle"
+          ? "SELECT * FROM all_tables ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;"
         : "SELECT * FROM information_schema.tables LIMIT 10;",
   );
   const queryRef = useRef(query);
@@ -582,6 +611,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           ? "SELECT * FROM system.tables LIMIT 10;"
           : dbType === "mssql"
             ? "SELECT TOP 10 * FROM information_schema.tables;"
+          : dbType === "oracle"
+            ? "SELECT * FROM all_tables ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY;"
           : "SELECT * FROM information_schema.tables LIMIT 10;";
       return [{ id: GLOBAL_SQL_CONTEXT_ID, type: "sql", name: "Query 1", query: defaultQuery }];
     }
@@ -966,7 +997,17 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
 
 
-  const [databaseView, setDatabaseView] = useState<"schema" | "tables" | "functions" | "extensions" | "triggers" | "enums" | "indexes" | "rls-policies" | "sessions" | "locks" | "explain-plan" | "backup-restore" | "catalog">("schema");
+  const [databaseView, setDatabaseView] = useState<"schema" | "tables" | "functions" | "extensions" | "triggers" | "enums" | "indexes" | "packages" | "sequences" | "synonyms" | "db-links" | "materialized-views" | "rls-policies" | "sessions" | "locks" | "explain-plan" | "backup-restore" | "catalog">("schema");
+  const [packages, setPackages] = useState<any[]>([]);
+  const [sequences, setSequences] = useState<any[]>([]);
+  const [synonyms, setSynonyms] = useState<any[]>([]);
+  const [dbLinks, setDbLinks] = useState<any[]>([]);
+  const [materializedViews, setMaterializedViews] = useState<any[]>([]);
+  const [fetchingPackages, setFetchingPackages] = useState(false);
+  const [fetchingSequences, setFetchingSequences] = useState(false);
+  const [fetchingSynonyms, setFetchingSynonyms] = useState(false);
+  const [fetchingDbLinks, setFetchingDbLinks] = useState(false);
+  const [fetchingMaterializedViews, setFetchingMaterializedViews] = useState(false);
 
   const [functions, setFunctions] = useState<any[]>([]);
   const [fetchingFunctions, setFetchingFunctions] = useState(false);
@@ -1348,6 +1389,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   const { handleDeleteFunction, handleUpdateFunctionDefinition } = useFunctionManagement({
     currentConnectionString,
+    dbType,
     executionMode,
     confirm,
     addHistoryEntry,
@@ -2312,20 +2354,22 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   useEffect(() => {
     if (databaseExplorer) return;
-    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
+    const isRoutineDb = supportsRoutineCatalog(dbType);
     if (!schemaExplorer || !isRoutineDb || !selectedSchema) {
       return;
     }
     void loadFunctions();
     void loadTriggers();
-    if (dbType === "postgres" || dbType === "supabase-mgmt") {
+    if (supportsIndexCatalog(dbType)) {
       void loadIndexes();
+    }
+    if (dbType === "postgres" || dbType === "supabase-mgmt") {
       void loadEnums();
     }
   }, [schemaExplorer, databaseExplorer, selectedSchema, dbType]);
 
   const loadAllSchemaData = useCallback(async () => {
-    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
+    const isRoutineDb = supportsRoutineCatalog(dbType);
     if (!isRoutineDb || schemas.length === 0) return;
     setFetchingAllSchema(true);
     try {
@@ -2360,7 +2404,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       );
       setFunctions(funcResults.flat());
 
-      if (dbType === "mssql") {
+      if (dbType === "mssql" || dbType === "oracle") {
         const trigResults = await Promise.all(
           schemaList.map(async (schema) => {
             const res = await fetchTriggers(currentConnectionString, schema);
@@ -2368,6 +2412,15 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           }),
         );
         setTriggers(trigResults.flat());
+        if (dbType === "oracle" && supportsIndexCatalog(dbType)) {
+          const indexResults = await Promise.all(
+            schemaList.map(async (schema) => {
+              const res = await fetchIndexes(currentConnectionString, schema);
+              return res.success && res.data ? res.data : [];
+            }),
+          );
+          setIndexes(indexResults.flat());
+        }
         return;
       }
       const [triggersRes, indexesRes, enumsRes] = await Promise.all([
@@ -2385,14 +2438,71 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   useEffect(() => {
     if (!databaseExplorer) return;
-    const isRoutineDb = dbType === "postgres" || dbType === "supabase-mgmt" || dbType === "mssql";
-    if (!isRoutineDb) return;
+    if (!supportsRoutineCatalog(dbType)) return;
     void loadAllSchemaData();
   }, [databaseExplorer, dbType, loadAllSchemaData]);
 
+  const loadPackages = useCallback(async () => {
+    if (!selectedSchema || !supportsOracleExtraCatalog(dbType)) return;
+    setFetchingPackages(true);
+    try {
+      const res = await apiFetchPackages(currentConnectionString, selectedSchema);
+      if (res.success && res.data) setPackages(res.data as any[]);
+    } finally {
+      setFetchingPackages(false);
+    }
+  }, [currentConnectionString, selectedSchema, dbType]);
+
+  const loadSequences = useCallback(async () => {
+    if (!selectedSchema || !supportsOracleExtraCatalog(dbType)) return;
+    setFetchingSequences(true);
+    try {
+      const res = await apiFetchSequences(currentConnectionString, selectedSchema);
+      if (res.success && res.data) setSequences(res.data as any[]);
+    } finally {
+      setFetchingSequences(false);
+    }
+  }, [currentConnectionString, selectedSchema, dbType]);
+
+  const loadSynonyms = useCallback(async () => {
+    if (!selectedSchema || !supportsOracleExtraCatalog(dbType)) return;
+    setFetchingSynonyms(true);
+    try {
+      const res = await apiFetchSynonyms(currentConnectionString, selectedSchema);
+      if (res.success && res.data) setSynonyms(res.data as any[]);
+    } finally {
+      setFetchingSynonyms(false);
+    }
+  }, [currentConnectionString, selectedSchema, dbType]);
+
+  const loadDbLinks = useCallback(async () => {
+    if (!supportsOracleExtraCatalog(dbType)) return;
+    setFetchingDbLinks(true);
+    try {
+      const res = await apiFetchDbLinks(currentConnectionString);
+      if (res.success && res.data) setDbLinks(res.data as any[]);
+    } finally {
+      setFetchingDbLinks(false);
+    }
+  }, [currentConnectionString, dbType]);
+
+  const loadMaterializedViews = useCallback(async () => {
+    if (!selectedSchema || !supportsOracleExtraCatalog(dbType)) return;
+    setFetchingMaterializedViews(true);
+    try {
+      const res = await apiFetchMaterializedViews(
+        currentConnectionString,
+        selectedSchema,
+      );
+      if (res.success && res.data) setMaterializedViews(res.data as any[]);
+    } finally {
+      setFetchingMaterializedViews(false);
+    }
+  }, [currentConnectionString, selectedSchema, dbType]);
+
   useEffect(() => {
     const isPgLike = dbType === "postgres" || dbType === "supabase-mgmt";
-    const isRoutineDb = isPgLike || dbType === "mssql";
+    const isRoutineDb = supportsRoutineCatalog(dbType);
     if (!isRoutineDb) {
       setFunctions([]);
       setRlsPolicies([]);
@@ -2417,6 +2527,30 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
       return;
     }
+    if (databaseView === "indexes" && supportsIndexCatalog(dbType)) {
+      void loadIndexes();
+      return;
+    }
+    if (databaseView === "packages") {
+      void loadPackages();
+      return;
+    }
+    if (databaseView === "sequences") {
+      void loadSequences();
+      return;
+    }
+    if (databaseView === "synonyms") {
+      void loadSynonyms();
+      return;
+    }
+    if (databaseView === "db-links") {
+      void loadDbLinks();
+      return;
+    }
+    if (databaseView === "materialized-views") {
+      void loadMaterializedViews();
+      return;
+    }
     if (!isPgLike) return;
     if (databaseView === "extensions") {
       void loadExtensions();
@@ -2424,10 +2558,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     if (databaseView === "enums") {
       void loadEnums();
-      return;
-    }
-    if (databaseView === "indexes") {
-      void loadIndexes();
       return;
     }
     if (databaseView === "rls-policies" && selectedSchema) {
@@ -2444,8 +2574,13 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     loadTriggers,
     loadEnums,
     loadIndexes,
+    loadPackages,
+    loadSequences,
+    loadSynonyms,
+    loadDbLinks,
     loadRlsPolicies,
     loadPostgresRoles,
+    currentConnectionString,
   ]);
 
 
@@ -3270,7 +3405,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
 
       // In fast mode the count runs independently; legacy mode still waits for it.
-      const countSql = `SELECT COUNT(*) as count FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
+      const countSql = `SELECT COUNT(*) as "count" FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
       const fetchCount = async () => {
         const countRes = await runQuery(currentConnectionString, countSql, [], undefined, queryExecutionContext);
         addHistoryEntry({
@@ -3328,23 +3463,26 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
       let sql = `SELECT ${columnsClause} FROM ${quoteTableRef(schema, tableName)}`;
       if (filter) sql += ` WHERE ${filter}`;
-      if (dbType === "mssql") {
+      if (dbType === "mssql" || dbType === "oracle") {
         if (sort) {
           sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
         } else {
-          sql += " ORDER BY (SELECT 1)";
+          // OFFSET/FETCH requires ORDER BY. Oracle accepts positional 1;
+          // SQL Server uses a constant subquery.
+          sql += dbType === "oracle" ? " ORDER BY 1" : " ORDER BY (SELECT 1)";
         }
-        sql += ` OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`;
+        sql += ` OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
       } else if (dbType === "trino") {
         if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        sql += ` LIMIT ${limit};`;
+        sql += ` LIMIT ${limit}`;
       } else if (dbType === "spacetimedb") {
         if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        sql += ` LIMIT ${limit};`;
+        sql += ` LIMIT ${limit}`;
       } else {
         if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        sql += ` LIMIT ${limit} OFFSET ${offset};`;
+        sql += ` LIMIT ${limit} OFFSET ${offset}`;
       }
+      sql += ";";
       // Dispatch the row request first so an expensive count cannot hold up its start.
       const rowRequest = runQuery(currentConnectionString, sql, [], undefined, queryExecutionContext);
       if (fastMode) {
@@ -4354,9 +4492,12 @@ END $$;`.trim();
     setFKSelectionLoading(true);
     setFKSelectionSearch("");
     try {
-      const query = isMssql
-        ? `SELECT TOP 100 * FROM ${quoteTableRef(fk.foreign_table_schema, fk.foreign_table_name)}`
-        : `SELECT * FROM ${quoteTableRef(fk.foreign_table_schema, fk.foreign_table_name)} LIMIT 100`;
+      const query =
+        isMssql
+          ? `SELECT TOP 100 * FROM ${quoteTableRef(fk.foreign_table_schema, fk.foreign_table_name)}`
+          : dbType === "oracle"
+            ? `SELECT * FROM ${quoteTableRef(fk.foreign_table_schema, fk.foreign_table_name)} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY`
+            : `SELECT * FROM ${quoteTableRef(fk.foreign_table_schema, fk.foreign_table_name)} LIMIT 100`;
       const startTime = Date.now();
       const res = await runQuery(currentConnectionString, query);
 
@@ -5470,6 +5611,10 @@ END $$;`.trim();
     orientation: string,
     functionName: string
   ) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger create is read-only for Oracle connections.");
+      return;
+    }
     const sql = `CREATE TRIGGER "${name}" ${timing} ${events.join(' OR ')} ON "${schema}"."${table}" FOR EACH ${orientation} EXECUTE FUNCTION ${functionName}();`;
     await runCreateAction({
       reviewAction: { type: 'create_trigger', description: `Create trigger "${name}" on ${schema}.${table}`, sql, metadata: { schema, table, name, events, timing, orientation, functionName } },
@@ -5487,6 +5632,10 @@ END $$;`.trim();
   };
 
   const handleDeleteTrigger = useCallback(async (schema: string, name: string) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger delete is read-only for Oracle connections.");
+      return;
+    }
     // Note: To drop a trigger, we need the table name. triggers-list has it, but this handler currently only gets schema/name.
     // However, in PostgreSQL, triggers are often dropped using: DROP TRIGGER [IF EXISTS] name ON table_name [CASCADE | RESTRICT]
     // Since we don't have the table name here easily without changing the signature, let's look at how loadTriggers gets them.
@@ -5523,7 +5672,7 @@ END $$;`.trim();
     } finally {
       setIsDeletingTrigger(false);
     }
-  }, [currentConnectionString, executionMode, confirm, loadTriggers, runQuery, triggers, addHistoryEntry]);
+  }, [currentConnectionString, executionMode, confirm, loadTriggers, runQuery, triggers, addHistoryEntry, dbType]);
 
   const runDeleteWithConfirm = useCallback(async (opts: {
     reviewAction: { type: string; description: string; sql: string; metadata?: any };
@@ -6031,6 +6180,10 @@ END $$;`.trim();
     orientation: string,
     functionName: string
   ) => {
+    if (!supportsTriggerWrite(dbType)) {
+      toast.error("Trigger edit is read-only for Oracle connections.");
+      return;
+    }
     // Postgres has no ALTER TRIGGER — an edit is DROP + CREATE.
     // To avoid losing the trigger if CREATE fails, we use a transaction and temporary name
     const tempName = `__temp_trigger_${Date.now()}`;
@@ -6071,7 +6224,7 @@ END $$;`.trim();
     } finally {
       setIsCreatingTrigger(false);
     }
-  }, [addReviewAction, currentConnectionString, loadTriggers, runQuery, switchAwayFromTab, logQueryResult]);
+  }, [addReviewAction, currentConnectionString, loadTriggers, runQuery, switchAwayFromTab, logQueryResult, dbType]);
 
   const openCreateSchemaTab = useCallback(() => {
     openSimpleTab('create-schema', 'create-schema', 'New Schema', {
@@ -6499,7 +6652,7 @@ END $$;`.trim();
       return true;
     }) || pickFallbackTable(tables);
 
-    if (!target) return "SELECT 1 AS value;";
+    if (!target) return 'SELECT 1 AS "value";';
 
     const tableRef = quoteTableRef(target.schema, target.table);
     const numericColumn = target.columns.find((column) => isLikelyNumericType(column.type));
@@ -6510,13 +6663,15 @@ END $$;`.trim();
     });
 
     if (widgetType === "table") {
-      return isMssql
-        ? `SELECT TOP 100 * FROM ${tableRef};`
-        : `SELECT * FROM ${tableRef} LIMIT 100;`;
+      if (isMssql) return `SELECT TOP 100 * FROM ${tableRef};`;
+      if (isOracle) {
+        return `SELECT * FROM ${tableRef} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;`;
+      }
+      return `SELECT * FROM ${tableRef} LIMIT 100;`;
     }
 
     if (widgetType === "metric" || widgetType === "progress") {
-      return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
 // fallow-ignore-next-line code-duplication
@@ -6524,11 +6679,15 @@ END $$;`.trim();
       if (labelColumn && numericColumn) {
         const label = quoteIdentifier(labelColumn.name);
         const value = quoteIdentifier(numericColumn.name);
-        return isMssql
-          ? `SELECT TOP 8 ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`
-          : `SELECT ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 8;`;
+        if (isMssql) {
+          return `SELECT TOP 8 ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
+        }
+        if (isOracle) {
+          return `SELECT ${label} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY "value" DESC OFFSET 0 ROWS FETCH NEXT 8 ROWS ONLY;`;
+        }
+        return `SELECT ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 8;`;
       }
-      return `SELECT 'Rows' AS label, COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT 'Rows' AS "label", COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
     if (widgetType === "map") {
@@ -6538,49 +6697,71 @@ END $$;`.trim();
         const label = labelColumn ? quoteIdentifier(labelColumn.name) : "'Point'";
         const lat = latColumn ? quoteIdentifier(latColumn.name) : "NULL";
         const lon = lonColumn ? quoteIdentifier(lonColumn.name) : "NULL";
-        return isMssql
-          ? `SELECT TOP 100 ${label} AS label, ${lat} AS lat, ${lon} AS lon FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL;`
-          : `SELECT ${label} AS label, ${lat} AS lat, ${lon} AS lon FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL LIMIT 100;`;
+        if (isMssql) {
+          return `SELECT TOP 100 ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL;`;
+        }
+        if (isOracle) {
+          return `SELECT ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY;`;
+        }
+        return `SELECT ${label} AS "label", ${lat} AS "lat", ${lon} AS "lon" FROM ${tableRef} WHERE ${lat} IS NOT NULL AND ${lon} IS NOT NULL LIMIT 100;`;
       }
       return isMysql
-        ? "SELECT 'Default' AS label, CAST(0.0 AS DOUBLE) AS lat, CAST(0.0 AS DOUBLE) AS lon;"
+        ? 'SELECT \'Default\' AS "label", CAST(0.0 AS DOUBLE) AS "lat", CAST(0.0 AS DOUBLE) AS "lon";'
         : isClickhouse
-          ? "SELECT 'Default' AS label, CAST(0.0 AS Float64) AS lat, CAST(0.0 AS Float64) AS lon;"
+          ? 'SELECT \'Default\' AS "label", CAST(0.0 AS Float64) AS "lat", CAST(0.0 AS Float64) AS "lon";'
           : isMssql
-            ? "SELECT 'Default' AS label, CAST(0.0 AS FLOAT) AS lat, CAST(0.0 AS FLOAT) AS lon;"
-            : "SELECT 'Default' AS label, 0.0::double precision AS lat, 0.0::double precision AS lon;";
+            ? 'SELECT \'Default\' AS "label", CAST(0.0 AS FLOAT) AS "lat", CAST(0.0 AS FLOAT) AS "lon";'
+            : isOracle
+              ? 'SELECT \'Default\' AS "label", CAST(0.0 AS BINARY_DOUBLE) AS "lat", CAST(0.0 AS BINARY_DOUBLE) AS "lon" FROM dual;'
+              : 'SELECT \'Default\' AS "label", 0.0::double precision AS "lat", 0.0::double precision AS "lon";';
     }
 
     if (widgetType === "bar-chart" || widgetType === "area-chart" || widgetType === "sparkline") {
       if (dateColumn) {
         const date = quoteIdentifier(dateColumn.name);
-        const dateExpr = isMssql ? `CAST(${date} AS date)` : `DATE(${date})`;
+        const dateExpr = isMssql
+          ? `CAST(${date} AS date)`
+          : isOracle
+            ? `TRUNC(${date})`
+            : `DATE(${date})`;
         if (numericColumn) {
           const value = quoteIdentifier(numericColumn.name);
-          return isMssql
-            ? `SELECT TOP 30 ${dateExpr} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`
-            : `SELECT DATE(${date}) AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
+          if (isMssql) {
+            return `SELECT TOP 30 ${dateExpr} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
+          }
+          if (isOracle) {
+            return `SELECT ${dateExpr} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
+          }
+          return `SELECT DATE(${date}) AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
         }
-        return isMssql
-          ? `SELECT TOP 30 ${dateExpr} AS label, COUNT(*) AS value FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`
-          : `SELECT DATE(${date}) AS label, COUNT(*) AS value FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
+        if (isMssql) {
+          return `SELECT TOP 30 ${dateExpr} AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr};`;
+        }
+        if (isOracle) {
+          return `SELECT ${dateExpr} AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY ${dateExpr} ORDER BY ${dateExpr} OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY;`;
+        }
+        return `SELECT DATE(${date}) AS "label", COUNT(*) AS "value" FROM ${tableRef} GROUP BY DATE(${date}) ORDER BY DATE(${date}) LIMIT 30;`;
       }
 // fallow-ignore-next-line code-duplication
       if (labelColumn && numericColumn) {
         const label = quoteIdentifier(labelColumn.name);
         const value = quoteIdentifier(numericColumn.name);
-        return isMssql
-          ? `SELECT TOP 12 ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`
-          : `SELECT ${label} AS label, SUM(COALESCE(${value}, 0)) AS value FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 12;`;
+        if (isMssql) {
+          return `SELECT TOP 12 ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC;`;
+        }
+        if (isOracle) {
+          return `SELECT ${label} AS "label", SUM(NVL(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY "value" DESC OFFSET 0 ROWS FETCH NEXT 12 ROWS ONLY;`;
+        }
+        return `SELECT ${label} AS "label", SUM(COALESCE(${value}, 0)) AS "value" FROM ${tableRef} GROUP BY ${label} ORDER BY value DESC LIMIT 12;`;
       }
-      return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
     }
 
     if (widgetType === "text") {
-      return `SELECT COUNT(*) AS total_rows FROM ${tableRef};`;
+      return `SELECT COUNT(*) AS "total_rows" FROM ${tableRef};`;
     }
 
-    return `SELECT COUNT(*) AS value FROM ${tableRef};`;
+    return `SELECT COUNT(*) AS "value" FROM ${tableRef};`;
   }, [isLikelyNumericType, pickFallbackTable, quoteIdentifier, quoteTableRef, isMysql, isClickhouse, isMssql]);
 
   const validateWidgetQueryShape = useCallback((
@@ -8101,7 +8282,11 @@ END $$;`.trim();
       : dbType === "redis"
         ? "PING"
         : table && schema
-          ? `SELECT * FROM ${quoteTableRef(schema, table)} LIMIT 100`
+          ? dbType === "mssql"
+            ? `SELECT TOP 100 * FROM ${quoteTableRef(schema, table)}`
+            : dbType === "oracle"
+              ? `SELECT * FROM ${quoteTableRef(schema, table)} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY`
+              : `SELECT * FROM ${quoteTableRef(schema, table)} LIMIT 100`
           : "");
     const newTab = {
       id: tabId,
@@ -8257,9 +8442,12 @@ END $$;`.trim();
         rows = res.data.rows ?? [];
       } else {
         const ref = quoteTableRef(targetSchema, tableName);
-        const sql = dbType === "mssql"
-          ? `SELECT * FROM ${ref} ORDER BY (SELECT 1) OFFSET 0 ROWS FETCH NEXT ${pageSize} ROWS ONLY;`
-          : `SELECT * FROM ${ref} LIMIT ${pageSize};`;
+        const sql =
+          dbType === "mssql"
+            ? `SELECT * FROM ${ref} ORDER BY (SELECT 1) OFFSET 0 ROWS FETCH NEXT ${pageSize} ROWS ONLY;`
+            : dbType === "oracle"
+              ? `SELECT * FROM ${ref} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT ${pageSize} ROWS ONLY;`
+              : `SELECT * FROM ${ref} LIMIT ${pageSize};`;
         const res = await runQuery(currentConnectionString, sql);
         if (!res.success || !res.data) {
           toast.error(res.error || "Export failed.");
@@ -8469,7 +8657,8 @@ END $$;`.trim();
   }, [selectedTable, selectedRows, results, getRowId, executionMode, selectedSchema, currentConnectionString, refreshTableData, filterQuery, sortConfig, dbType, applyOptimisticRowDeletes, quoteIdentifier, quoteTableRef]);
 
   const buildInsertSql = (columnsSql: string, count: number) => {
-    const returnClause = (isMysql || isClickhouse) ? "" : (isMssql ? " OUTPUT INSERTED.*" : " RETURNING *");
+    // Oracle supports RETURNING ... INTO, not Postgres-style RETURNING *.
+    const returnClause = (isMysql || isClickhouse || isOracle) ? "" : (isMssql ? " OUTPUT INSERTED.*" : " RETURNING *");
     return `INSERT INTO ${quoteTableRef(selectedSchema!, selectedTable!)} (${columnsSql}) VALUES (${buildPlaceholders(count)})${returnClause};`;
   };
 
@@ -8737,56 +8926,88 @@ END $$;`.trim();
     router.replace(`${pathname}?${nextSearch}`);
   }, [searchParams, pathname, router]);
 
-  const openDatabaseTab = useCallback((type: 'schema' | 'tables' | 'functions' | 'extensions' | 'triggers' | 'enums' | 'indexes' | 'rls-policies' | 'sessions' | 'locks' | 'explain-plan' | 'backup-restore' | 'catalog') => {
-    if (dbType !== "postgres" && dbType !== "supabase-mgmt" && ["functions", "extensions", "triggers", "enums", "indexes", "rls-policies", "sessions", "locks"].includes(type)) {
+  const openDatabaseTab = useCallback((type: 'schema' | 'tables' | 'functions' | 'extensions' | 'triggers' | 'enums' | 'indexes' | 'packages' | 'sequences' | 'synonyms' | 'db-links' | 'materialized-views' | 'rls-policies' | 'sessions' | 'locks' | 'explain-plan' | 'backup-restore' | 'catalog') => {
+    const pgOnly = ["extensions", "enums", "rls-policies", "sessions", "locks"];
+    const routineOk = supportsRoutineCatalog(dbType);
+    const indexOk = supportsIndexCatalog(dbType);
+    const oracleOk = supportsOracleExtraCatalog(dbType);
+    const isPgLike = dbType === "postgres" || dbType === "supabase-mgmt";
+
+    if (pgOnly.includes(type) && !isPgLike) {
       toast.error("That database view is supported only for PostgreSQL connections.");
       return;
     }
+    if ((type === "functions" || type === "triggers") && !routineOk) {
+      toast.error("Functions and triggers are not supported for this database type.");
+      return;
+    }
+    if (type === "indexes" && !indexOk) {
+      toast.error("Indexes are not supported for this database type.");
+      return;
+    }
+    if (
+      ["packages", "sequences", "synonyms", "db-links", "materialized-views"].includes(type) &&
+      !oracleOk
+    ) {
+      toast.error("That catalog view is supported only for Oracle connections.");
+      return;
+    }
+
     const tabId = `database-${type}`;
-    const nameMap = {
-      'schema': 'Schema Diagram',
-      'tables': dbType === "mongodb" ? 'Collections List' : 'Tables List',
-      'functions': 'Functions',
-      'extensions': 'Extensions',
-      'triggers': 'Triggers',
-      'enums': 'Enumerated Types',
-      'indexes': 'Indexes',
-      'rls-policies': 'RLS Policies',
-      'sessions': 'Sessions',
-      'locks': 'Locks',
-      'explain-plan': 'Explain Plan',
-      'backup-restore': 'Backup & Restore',
-      'catalog': 'Data Catalog',
-    } as const;
-    const typeMap = {
-      'schema': 'database-schema' as const,
-      'tables': 'database-tables' as const,
-      'functions': 'database-functions' as const,
-      'extensions': 'database-extensions' as const,
-      'triggers': 'database-triggers' as const,
-      'enums': 'database-enums' as const,
-      'indexes': 'database-indexes' as const,
-      'rls-policies': 'database-rls-policies' as const,
-      'sessions': 'database-sessions' as const,
-      'locks': 'database-locks' as const,
-      'explain-plan': 'database-explain-plan' as const,
-      'backup-restore': 'database-backup-restore' as const,
-      'catalog': 'database-catalog' as const,
+    const nameMap: Record<string, string> = {
+      schema: "Schema Diagram",
+      tables: dbType === "mongodb" ? "Collections List" : "Tables List",
+      functions: "Functions",
+      extensions: "Extensions",
+      triggers: "Triggers",
+      enums: "Enumerated Types",
+      indexes: "Indexes",
+      packages: "Packages",
+      sequences: "Sequences",
+      synonyms: "Synonyms",
+      "db-links": "DB Links",
+      "materialized-views": "Materialized Views",
+      "rls-policies": "RLS Policies",
+      sessions: "Sessions",
+      locks: "Locks",
+      "explain-plan": "Explain Plan",
+      "backup-restore": "Backup & Restore",
+      catalog: "Data Catalog",
+    };
+    const typeMap: Record<string, string> = {
+      schema: "database-schema",
+      tables: "database-tables",
+      functions: "database-functions",
+      extensions: "database-extensions",
+      triggers: "database-triggers",
+      enums: "database-enums",
+      indexes: "database-indexes",
+      packages: "database-packages",
+      sequences: "database-sequences",
+      synonyms: "database-synonyms",
+      "db-links": "database-db-links",
+      "materialized-views": "database-materialized-views",
+      "rls-policies": "database-rls-policies",
+      sessions: "database-sessions",
+      locks: "database-locks",
+      "explain-plan": "database-explain-plan",
+      "backup-restore": "database-backup-restore",
+      catalog: "database-catalog",
     };
 
     const existingTab = openTabs.find(t => t.id === tabId);
     if (!existingTab) {
       const newTab = {
         id: tabId,
-        type: typeMap[type],
-        name: nameMap[type]
+        type: typeMap[type] as any,
+        name: nameMap[type],
       };
 
       addTabAndSwitch(newTab, tabId);
     } else {
       switchTab(tabId);
     }
-  }, [openTabs, activeTabId, switchTab, dbType]);
+  }, [openTabs, activeTabId, switchTab, dbType, addTabAndSwitch]);
 
   const viewTableSchema = useCallback((tableName: string) => {
     setSchemaHighlightedTable(tableName);
@@ -9492,6 +9713,21 @@ END $$;`.trim();
     indexes,
     fetchingIndexes,
     loadIndexes,
+    packages,
+    fetchingPackages,
+    loadPackages,
+    sequences,
+    fetchingSequences,
+    loadSequences,
+    synonyms,
+    fetchingSynonyms,
+    loadSynonyms,
+    dbLinks,
+    fetchingDbLinks,
+    loadDbLinks,
+    materializedViews,
+    fetchingMaterializedViews,
+    loadMaterializedViews,
     allSchemaTables,
     allSchemaViews,
     fetchingAllSchema,

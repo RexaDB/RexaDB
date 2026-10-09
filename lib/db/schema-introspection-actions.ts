@@ -71,13 +71,14 @@ export async function fetchRedisKeys(
 
 export async function fetchFunctions(connectionString: string, schema: string) {
   const dbType = detectConnectionDbType(connectionString);
-  if (dbType === "mssql") {
+  if (dbType === "mssql" || dbType === "oracle") {
     const { getDbFunctions } = await import("./db-engine");
     try {
-      const routines = await getDbFunctions(connectionString, schema || "dbo");
+      const fallback = dbType === "oracle" ? schema : schema || "dbo";
+      const routines = await getDbFunctions(connectionString, fallback);
       return { success: true, data: routines };
     } catch (error: any) {
-      console.error("Failed to fetch MSSQL routines:", error);
+      console.error(`Failed to fetch ${dbType} routines:`, error);
       return { success: false, error: error.message };
     }
   }

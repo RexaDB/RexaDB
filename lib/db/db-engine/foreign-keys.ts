@@ -21,6 +21,13 @@ export async function getDbTableForeignKeys(
       table,
     );
   }
+  if (dbType === "oracle") {
+    return (await import("../oracle-client")).getTableForeignKeys(
+      connectionString,
+      schema,
+      table,
+    );
+  }
   if (
     dbType === "clickhouse" ||
     dbType === "trino" ||

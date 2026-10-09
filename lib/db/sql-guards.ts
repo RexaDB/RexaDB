@@ -54,8 +54,45 @@ export function tableRef(dbType: string, schema: string, table: string): string 
   return `${quoteIdentifier(dbType, schema)}.${quoteIdentifier(dbType, table)}`;
 }
 
+/**
+ * Append dialect-aware ORDER BY + limit/offset to a SELECT.
+ * Oracle and SQL Server use OFFSET/FETCH (no LIMIT).
+ * `orderBySql` should be the expression only (e.g. `"ID" ASC`), or empty
+ * when the caller wants a stable dummy order for OFFSET/FETCH dialects.
+ */
+export function buildOrderLimitSql(opts: {
+  dbType: string;
+  limit: number;
+  offset?: number;
+  /** Already-quoted ORDER BY body, without the ORDER BY keyword. */
+  orderBySql?: string;
+}): string {
+  const dbType = String(opts.dbType || "").toLowerCase();
+  const limit = Math.max(0, Math.floor(Number(opts.limit) || 0));
+  const offset = Math.max(0, Math.floor(Number(opts.offset) || 0));
+  const orderBySql = String(opts.orderBySql || "").trim();
+
+  if (dbType === "mssql" || dbType === "oracle") {
+    const order =
+      orderBySql ||
+      (dbType === "oracle" ? "1" : "(SELECT 1)");
+    return ` ORDER BY ${order} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+  }
+
+  if (dbType === "trino" || dbType === "spacetimedb") {
+    const order = orderBySql ? ` ORDER BY ${orderBySql}` : "";
+    return `${order} LIMIT ${limit}`;
+  }
+
+  const order = orderBySql ? ` ORDER BY ${orderBySql}` : "";
+  return `${order} LIMIT ${limit} OFFSET ${offset}`;
+}
+
 export function buildSampleQuery(dbType: string, schema: string, table: string, limit: number): string {
   const ref = tableRef(dbType, schema, table);
   if (dbType === "mssql") return `SELECT TOP ${limit} * FROM ${ref};`;
+  if (dbType === "oracle") {
+    return `SELECT * FROM ${ref}${buildOrderLimitSql({ dbType, limit, offset: 0 })};`;
+  }
   return `SELECT * FROM ${ref} LIMIT ${limit};`;
 }

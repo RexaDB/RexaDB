@@ -12,10 +12,15 @@ import {
   fetchPostgresRoles,
   fetchTableSecurityInfo,
 } from "@/lib/api/actions-client";
-import { detectConnectionDbType } from "@/lib/db/connection-type";
+import {
+  detectConnectionDbType,
+  supportsIndexCatalog,
+  supportsRoutineCatalog,
+} from "@/lib/db/connection-type";
 import { usesDatabaseNamespaces } from "@/lib/db/namespace-display";
 import { fetchNamespaceList } from "@/lib/db/namespace-list";
 import { getDatabaseFromConnectionString } from "@/lib/studio/db-helpers";
+import { parseOracleConnectionString } from "@/lib/db/oracle-connection";
 
 interface UseConnectionDataLoaderProps {
   setFetchingSchemas: (loading: boolean) => void;
@@ -53,6 +58,9 @@ export function useConnectionDataLoader({
     const connType = detectConnectionDbType(connString);
     const isPgLike = connType === "postgres" || connType === "supabase-mgmt";
     const isMssql = connType === "mssql";
+    const isOracle = connType === "oracle";
+    const routineCatalog = supportsRoutineCatalog(connType);
+    const indexCatalog = supportsIndexCatalog(connType);
     setFetchingSchemas(true);
     try {
       const res = await fetchNamespaceList(connString, { forceRefresh });
@@ -79,6 +87,12 @@ export function useConnectionDataLoader({
         if (isMssql && normalizedSchemas.includes("dbo")) {
           defaultSchema = "dbo";
         }
+        if (isOracle) {
+          const user = parseOracleConnectionString(connString).username.toUpperCase();
+          if (user && normalizedSchemas.includes(user)) {
+            defaultSchema = user;
+          }
+        }
         if (usesDatabaseNamespaces(connType)) {
           const dbName = getDatabaseFromConnectionString(connString);
           if (dbName && normalizedSchemas.includes(dbName)) {
@@ -90,9 +104,12 @@ export function useConnectionDataLoader({
         // Load other data
         fetchTables(connString, defaultSchema, { forceRefresh }).then(r => r.success && r.data && setTables(r.data));
         fetchViews(connString, defaultSchema).then(r => r.success && r.data && setViewTables(r.data));
-        if (isPgLike || isMssql) {
+        if (routineCatalog) {
           fetchFunctions(connString, defaultSchema).then(r => r.success && r.data && setFunctions(r.data));
           fetchTriggers(connString, defaultSchema).then(r => r.success && r.data && setTriggers(r.data));
+        }
+        if (indexCatalog) {
+          fetchIndexes(connString, defaultSchema).then(r => r.success && r.data && setIndexes(r.data));
         }
         if (isPgLike) {
           fetchTableSecurityInfo(connString, defaultSchema).then((r) => {
@@ -108,9 +125,8 @@ export function useConnectionDataLoader({
             }
           });
           fetchRlsPolicies(connString, defaultSchema || null, null).then(r => r.success && r.data && setRlsPolicies(r.data));
-          fetchIndexes(connString, defaultSchema).then(r => r.success && r.data && setIndexes(r.data));
         } else {
-          if (!isMssql) {
+          if (!routineCatalog) {
             setFunctions([]);
           }
           setTableSecurity({});

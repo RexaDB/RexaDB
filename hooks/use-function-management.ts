@@ -2,9 +2,11 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import { fetchFunctions, runQuery } from "@/lib/api/actions-client";
 import { generateActionId, executeSqlWithHistory } from "@/lib/studio/execute-with-review";
+import { supportsRoutineWrite } from "@/lib/db/connection-type";
 
 interface UseFunctionManagementProps {
   currentConnectionString: string;
+  dbType?: string | null;
   executionMode: 'direct' | 'review';
   confirm: (options: { title: string; description: string; variant: 'destructive' | 'default'; confirmText: string }) => Promise<boolean>;
   addHistoryEntry: (entry: any) => void;
@@ -15,6 +17,7 @@ interface UseFunctionManagementProps {
 
 export function useFunctionManagement({
   currentConnectionString,
+  dbType,
   executionMode,
   confirm,
   addHistoryEntry,
@@ -23,6 +26,10 @@ export function useFunctionManagement({
   loadFunctions,
 }: UseFunctionManagementProps) {
   const handleDeleteFunction = useCallback(async (schema: string, functionName: string, args: string = "") => {
+    if (!supportsRoutineWrite(dbType ?? null)) {
+      toast.error("Routine delete is read-only for Oracle connections.");
+      return;
+    }
     const signature = args.trim();
     const qualifiedName = `"${schema}"."${functionName}"`;
     const sql = signature
@@ -61,7 +68,7 @@ export function useFunctionManagement({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete function");
     }
-  }, [currentConnectionString, executionMode, confirm, loadFunctions, runQuery, addHistoryEntry, setPendingActions, setIsReviewSheetOpen]);
+  }, [currentConnectionString, dbType, executionMode, confirm, loadFunctions, runQuery, addHistoryEntry, setPendingActions, setIsReviewSheetOpen]);
 
   const handleUpdateFunctionDefinition = useCallback(async (
     schema: string,
@@ -69,6 +76,10 @@ export function useFunctionManagement({
     args: string,
     definition: string
   ) => {
+    if (!supportsRoutineWrite(dbType ?? null)) {
+      toast.error("Routine edit is read-only for Oracle connections.");
+      return false;
+    }
     const signature = args.trim();
     const normalizedSql = (definition || "").trim();
 
@@ -111,7 +122,7 @@ export function useFunctionManagement({
       toast.error(err instanceof Error ? err.message : "Failed to update function");
       return false;
     }
-  }, [currentConnectionString, executionMode, runQuery, addHistoryEntry, loadFunctions, setPendingActions, setIsReviewSheetOpen]);
+  }, [currentConnectionString, dbType, executionMode, runQuery, addHistoryEntry, loadFunctions, setPendingActions, setIsReviewSheetOpen]);
 
   return {
     handleDeleteFunction,

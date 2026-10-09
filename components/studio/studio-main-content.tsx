@@ -11,6 +11,7 @@ import { ExtensionsList } from "./database/extensions-list";
 import { TriggersList } from "./database/triggers-list";
 import { EnumsList } from "./database/enums-list";
 import { IndexesList } from "./database/indexes-list";
+import { OracleCatalogList } from "./database/oracle-catalog-list";
 import { RlsPoliciesList } from "./database/rls-policies-list";
 import { RlsPolicyEditorView } from "./database/rls-policy-editor-view";
 import { SessionsList } from "./database/sessions-list";
@@ -330,6 +331,16 @@ export function StudioMainContent({
     fetchingEnums,
     indexes,
     fetchingIndexes,
+    packages,
+    fetchingPackages,
+    sequences,
+    fetchingSequences,
+    synonyms,
+    fetchingSynonyms,
+    dbLinks,
+    fetchingDbLinks,
+    materializedViews,
+    fetchingMaterializedViews,
     rlsPolicies,
     postgresRoles,
     supabaseAuthUsers,
@@ -1186,6 +1197,11 @@ export function StudioMainContent({
     | "triggers"
     | "enums"
     | "indexes"
+    | "packages"
+    | "sequences"
+    | "synonyms"
+    | "db-links"
+    | "materialized-views"
     | "rls-policies"
     | "sessions"
     | "locks"
@@ -1206,6 +1222,11 @@ export function StudioMainContent({
       "triggers",
       "enums",
       "indexes",
+      "packages",
+      "sequences",
+      "synonyms",
+      "db-links",
+      "materialized-views",
       "rls-policies",
       "sessions",
       "locks",
@@ -1215,25 +1236,7 @@ export function StudioMainContent({
       "spacetimedb-logs",
       "spacetimedb-schema",
     ];
-    return validViews.includes(view)
-      ? (view as
-          | "schema"
-          | "tables"
-          | "catalog"
-          | "functions"
-          | "extensions"
-          | "triggers"
-          | "enums"
-          | "indexes"
-          | "rls-policies"
-          | "sessions"
-          | "locks"
-          | "explain-plan"
-          | "backup-restore"
-          | "spacetimedb-reducers"
-          | "spacetimedb-logs"
-          | "spacetimedb-schema")
-      : null;
+    return validViews.includes(view) ? (view as any) : null;
   };
 
   const renderPaneBody = (paneId: string) => {
@@ -1372,6 +1375,8 @@ export function StudioMainContent({
                       exportTableData={studio.exportTableData}
                       viewTables={studio.viewTables}
                       tableDescriptions={tableDescriptionMap}
+                      onRefreshTables={refreshTablesSidebar}
+                      isRefreshingTables={studio.fetchingTables}
                     />
                   )
                 ) : paneDatabaseView === "catalog" ? (
@@ -1458,8 +1463,14 @@ export function StudioMainContent({
                   <IndexesList
                     indexes={indexes || []}
                     fetchingIndexes={fetchingIndexes}
-                    onDeleteIndex={handleDeleteIndex}
-                    onOpenCreateIndexTab={studio.openCreateIndexTab}
+                    onDeleteIndex={
+                      studio.dbType === "oracle" ? undefined : handleDeleteIndex
+                    }
+                    onOpenCreateIndexTab={
+                      studio.dbType === "oracle"
+                        ? undefined
+                        : studio.openCreateIndexTab
+                    }
                     onOpenTable={(table, schema) => handleTableClick(table, schema)}
                     onViewDefinition={(index: any) => {
                       const tabId = `sql-index-${index.name}`;
@@ -1476,6 +1487,156 @@ export function StudioMainContent({
                     schemas={schemas}
                     selectedSchema={selectedSchema}
                     onSchemaChange={setSelectedSchema}
+                  />
+                ) : paneDatabaseView === "packages" ? (
+                  <OracleCatalogList
+                    title="Packages"
+                    description="PL/SQL packages (spec) in the selected schema"
+                    rows={packages || []}
+                    loading={fetchingPackages}
+                    schemas={schemas}
+                    selectedSchema={selectedSchema}
+                    onSchemaChange={setSelectedSchema}
+                    searchPlaceholder="Search packages"
+                    columns={[
+                      { key: "name", header: "Name", width: "1.2fr" },
+                      {
+                        key: "status",
+                        header: "Status",
+                        width: "0.6fr",
+                        render: (row) => (
+                          <span className="text-muted-foreground">
+                            {String(row.status || "")}
+                          </span>
+                        ),
+                      },
+                    ]}
+                    onViewDefinition={(row) => {
+                      const tabId = `sql-package-${row.name}`;
+                      const newTab = {
+                        id: tabId,
+                        type: "sql" as const,
+                        name: `Package: ${row.name}`,
+                        query: row.definition || `-- No source for ${row.name}`,
+                      };
+                      const nextTabs = [...openTabs, newTab];
+                      studio.setOpenTabs(nextTabs);
+                      studio.switchTab(tabId, nextTabs);
+                    }}
+                  />
+                ) : paneDatabaseView === "sequences" ? (
+                  <OracleCatalogList
+                    title="Sequences"
+                    description="Number generators used for identity and keys"
+                    rows={sequences || []}
+                    loading={fetchingSequences}
+                    schemas={schemas}
+                    selectedSchema={selectedSchema}
+                    onSchemaChange={setSelectedSchema}
+                    searchPlaceholder="Search sequences"
+                    columns={[
+                      { key: "name", header: "Name", width: "1fr" },
+                      { key: "last_number", header: "Last", width: "0.6fr" },
+                      { key: "increment_by", header: "Increment", width: "0.6fr" },
+                      {
+                        key: "cycle_flag",
+                        header: "Cycle",
+                        width: "0.5fr",
+                        render: (row) => (row.cycle_flag ? "Yes" : "No"),
+                      },
+                    ]}
+                  />
+                ) : paneDatabaseView === "synonyms" ? (
+                  <OracleCatalogList
+                    title="Synonyms"
+                    description="Aliases that point at other schema objects"
+                    rows={synonyms || []}
+                    loading={fetchingSynonyms}
+                    schemas={schemas}
+                    selectedSchema={selectedSchema}
+                    onSchemaChange={setSelectedSchema}
+                    searchPlaceholder="Search synonyms"
+                    columns={[
+                      { key: "name", header: "Name", width: "1fr" },
+                      {
+                        key: "target",
+                        header: "Target",
+                        width: "1.4fr",
+                        render: (row) =>
+                          `${row.table_owner || ""}.${row.table_name || ""}`,
+                      },
+                      {
+                        key: "db_link",
+                        header: "DB Link",
+                        width: "0.8fr",
+                        render: (row) => row.db_link || "—",
+                      },
+                    ]}
+                  />
+                ) : paneDatabaseView === "db-links" ? (
+                  <OracleCatalogList
+                    title="Database Links"
+                    description="Named connections to remote (or local loopback) Oracle databases"
+                    rows={(dbLinks || []).map((l: any) => ({
+                      ...l,
+                      name: l.name,
+                      schema: l.owner,
+                    }))}
+                    loading={fetchingDbLinks}
+                    showSchemaFilter={false}
+                    searchPlaceholder="Search DB links"
+                    columns={[
+                      { key: "name", header: "Name", width: "1fr" },
+                      { key: "username", header: "User", width: "0.8fr" },
+                      { key: "host", header: "Connect string", width: "1.4fr" },
+                    ]}
+                  />
+                ) : paneDatabaseView === "materialized-views" ? (
+                  <OracleCatalogList
+                    title="Materialized Views"
+                    description="Stored query results that can be refreshed on demand or on a schedule"
+                    rows={materializedViews || []}
+                    loading={fetchingMaterializedViews}
+                    schemas={schemas}
+                    selectedSchema={selectedSchema}
+                    onSchemaChange={setSelectedSchema}
+                    searchPlaceholder="Search materialized views"
+                    columns={[
+                      { key: "name", header: "Name", width: "1.1fr" },
+                      {
+                        key: "refresh_method",
+                        header: "Refresh",
+                        width: "0.7fr",
+                        render: (row) =>
+                          String(row.refresh_method || row.refresh_mode || "—"),
+                      },
+                      {
+                        key: "staleness",
+                        header: "Staleness",
+                        width: "0.7fr",
+                        render: (row) => String(row.staleness || "—"),
+                      },
+                      {
+                        key: "compile_state",
+                        header: "State",
+                        width: "0.6fr",
+                        render: (row) => String(row.compile_state || "—"),
+                      },
+                    ]}
+                    onViewDefinition={(row) => {
+                      const tabId = `sql-mview-${row.name}`;
+                      const newTab = {
+                        id: tabId,
+                        type: "sql" as const,
+                        name: `MView: ${row.name}`,
+                        query:
+                          row.query ||
+                          `-- No query text for ${row.name}`,
+                      };
+                      const nextTabs = [...openTabs, newTab];
+                      studio.setOpenTabs(nextTabs);
+                      studio.switchTab(tabId, nextTabs);
+                    }}
                   />
                 ) : paneDatabaseView === "rls-policies" ? (
                   <RlsPoliciesList
@@ -2089,6 +2250,16 @@ export function StudioMainContent({
           studio.setDatabaseView("enums");
         } else if (itemData.type === "database-indexes") {
           studio.setDatabaseView("indexes");
+        } else if (itemData.type === "database-packages") {
+          studio.setDatabaseView("packages");
+        } else if (itemData.type === "database-sequences") {
+          studio.setDatabaseView("sequences");
+        } else if (itemData.type === "database-synonyms") {
+          studio.setDatabaseView("synonyms");
+        } else if (itemData.type === "database-db-links") {
+          studio.setDatabaseView("db-links");
+        } else if (itemData.type === "database-materialized-views") {
+          studio.setDatabaseView("materialized-views");
         } else if (itemData.type === "database-rls-policies") {
           studio.setDatabaseView("rls-policies");
         } else if (itemData.type === "database-sessions") {

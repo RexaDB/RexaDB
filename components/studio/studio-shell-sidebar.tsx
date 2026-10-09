@@ -36,7 +36,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/shared/provider-logo";
 import { getTabIcon } from "@/lib/studio/tab-registry";
-import { isPostgresCatalogDbType } from "@/lib/db/connection-type";
+import {
+  isPostgresCatalogDbType,
+  supportsIndexCatalog,
+  supportsOracleExtraCatalog,
+  supportsRoutineCatalog,
+} from "@/lib/db/connection-type";
 import { getConnections } from "@/lib/api/actions-client";
 import type { Connection } from "@/lib/db/schema";
 import { useConfirm } from "@/hooks/use-confirm";
@@ -76,6 +81,8 @@ import {
   Eye,
   Tag,
   X,
+  ListFilter,
+  RefreshCw,
 } from "lucide-react";
 import { PaymentsPanel } from "./payments/payments-panel";
 import { StoragePanel } from "./storage/storage-panel";
@@ -97,6 +104,21 @@ import {
   copyItemName,
   getTableDerivedValues,
 } from "@/lib/studio/table-utils";
+import {
+  filterTablesByNameAndType,
+  mergeTablesAndViews,
+  type TableTypeFilter,
+} from "@/lib/studio/table-filter";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { TablesFilterMenu } from "./database/tables-filter-menu";
+import {
+  MaybeVirtualizedTables,
+  VirtualizedRows,
+} from "./database/virtualized-rows";
 
 type Section = "dashboard" | "notes" | "tables" | "sql" | "database" | "auth" | "workflows" | "payments" | "storage" | "edge-functions" | "import-export" | "themes" | "erd" | "extensions" | null;
 
@@ -426,7 +448,12 @@ export function StudioShellSidebar({
             <span className="font-medium">{title}</span>
           </button>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto px-0.5 pb-2 scrollbar-hide">
+          <div className={cn(
+            "min-h-0 flex-1 px-0.5 scrollbar-hide",
+            // The tables panel owns its scroll (virtualized list needs a
+            // bounded scroll container); other panels scroll here as before.
+            section === "tables" ? "overflow-hidden pb-0" : "overflow-y-auto pb-2",
+          )}>
             {section === "tables" && <TablesPanel studio={studio} />}
             {section === "sql" && <SqlPanel studio={studio} />}
             {section === "dashboard" && <DashboardPanel studio={studio} />}
@@ -826,6 +853,7 @@ function TagFoldersList({
   onRenameTag,
   onDeleteTag,
   renderTable,
+  resetKey,
 }: {
   tagsList: Array<{ name: string; color: string }>;
   tablesByTag: Map<string, string[]>;
@@ -836,6 +864,7 @@ function TagFoldersList({
   onRenameTag: (name: string) => void;
   onDeleteTag: (name: string) => void;
   renderTable: (table: string) => React.ReactNode;
+  resetKey?: string;
 }) {
   // No early return on empty tags: the Untagged group below always
   // renders, so tables never disappear from Tags view.
@@ -861,12 +890,18 @@ function TagFoldersList({
       </button>
     );
   };
-  const renderChildren = (tables: string[], emptyLabel: string) => (
+  const renderChildren = (tables: string[], emptyLabel: string, keyPrefix: string) => (
     <div className="relative ml-[15px] space-y-px border-l border-border/50 pl-1">
       {tables.length === 0 ? (
         <div className="px-2 py-1 text-[11px] text-muted-foreground/60">{emptyLabel}</div>
       ) : (
-        tables.map((t) => renderTable(t))
+        <MaybeVirtualizedTables
+          tables={tables}
+          keyPrefix={keyPrefix}
+          resetKey={resetKey}
+          maxHeightClass="max-h-72"
+          renderTable={renderTable}
+        />
       )}
     </div>
   );
@@ -906,7 +941,7 @@ function TagFoldersList({
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
-            {expanded && renderChildren(tables, "No tables")}
+            {expanded && renderChildren(tables, "No tables", `tag:${tag.name}`)}
           </div>
         );
       })}
@@ -918,14 +953,191 @@ function TagFoldersList({
           () => toggleTag("__untagged"),
         )}
         {isTagExpanded("__untagged") &&
-          renderChildren(untaggedTables, "Everything is tagged")}
+          renderChildren(untaggedTables, "Everything is tagged", "tag:__untagged")}
       </div>
     </div>
   );
 }
 
+/** Single table/view row for the flat (non-tag-folder) sidebar lists. Extracted so the two `filtered.map` call sites and the virtualized list share one implementation. */
+function SidebarFlatTableRow({
+  table,
+  selectedSchema,
+  studio,
+  viewTableSet,
+  itemNoun,
+  openEditorLabel,
+  isMongo,
+  canExportSql,
+  copyDefinitionLabel,
+  handleCopyItemName,
+  dropdownMenuClassName = "min-w-[160px]",
+}: {
+  table: string;
+  selectedSchema: string;
+  studio: any;
+  viewTableSet: Set<string>;
+  itemNoun: string;
+  openEditorLabel: string;
+  isMongo: boolean;
+  canExportSql: boolean;
+  copyDefinitionLabel: string;
+  handleCopyItemName: (name: string) => void;
+  dropdownMenuClassName?: string;
+}) {
+  const securityInfo = studio.tableSecurity?.[table];
+  const rlsEnabled = securityInfo?.rlsEnabled;
+  const showDataApi = Boolean(studio.dataApiInstalled);
+  const isView = viewTableSet.has(table);
+  const ItemIcon = isView ? Eye : Table2;
+
+  const renderMenuItems = (
+    Component: any,
+    Sub: any,
+    SubTrigger: any,
+    SubContent: any,
+    Separator: any,
+    isDropdown = false,
+  ) => {
+    const handleAction =
+      (fn?: (t: string, s: string) => void) =>
+      (e: React.MouseEvent) => {
+        if (isDropdown) e.stopPropagation();
+        fn?.(table, selectedSchema);
+      };
+
+    return (
+      <>
+        <Component
+          onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
+        >
+          Open {itemNoun}
+        </Component>
+        <Component
+          onClick={handleAction((t, s) =>
+            studio.openSqlEditor?.(t, s),
+          )}
+        >
+          {openEditorLabel}
+        </Component>
+        <Component
+          onClick={handleAction((t) => studio.viewTableSchema?.(t))}
+        >
+          View Schema
+        </Component>
+        <TableContextMenuItems
+          Component={Component}
+          Sub={Sub}
+          SubTrigger={SubTrigger}
+          SubContent={SubContent}
+          Separator={Separator}
+          itemNoun={itemNoun}
+          copyDefinitionLabel={copyDefinitionLabel}
+          duplicateLabel={`Duplicate ${itemNoun}`}
+          isMongo={isMongo}
+          canExportSql={canExportSql}
+          isDropdown={isDropdown}
+          table={table}
+          selectedSchema={selectedSchema}
+          tags={studio.tags ?? []}
+          tableTags={studio.tableTags ?? {}}
+          handleAction={handleAction}
+          onToggleTag={(s: string, t: string, tagName: string) =>
+            studio.toggleTableTag?.(s, t, tagName)
+          }
+          handleCopyName={(t: string) => void handleCopyItemName(t)}
+          handleCopyDefinition={(t: string, s: string) => studio.copyTableSchema?.(t, s)}
+          handleDuplicate={(t: string, s: string) => studio.duplicateTable?.(t, s)}
+          onExport={(format: "csv" | "json" | "sql", t?: string, s?: string) => studio.exportTableData?.(t, s, format)}
+          onEmpty={(t: string, s: string) => studio.emptyTable?.(t, s)}
+          onDelete={(t: string, s: string) => studio.deleteTable?.(t, s)}
+          beforeExport={<Separator />}
+        />
+      </>
+    );
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <div className="relative group">
+          <button
+            type="button"
+            onClick={() => studio.handleTableClick?.(table, selectedSchema)}
+            className={cn(
+              ROW,
+              studio.selectedTable === table && "bg-white/10 text-foreground",
+              "w-full",
+            )}
+          >
+            <ItemIcon className="size-4 shrink-0" />
+            <span className="truncate flex-1">{table}</span>
+            {(showDataApi || rlsEnabled === false) && (
+              <span className="flex items-center gap-1 shrink-0">
+                {showDataApi && (
+                  <span title="Accessible via Data API">
+                    <Globe className="w-3.5 h-3.5 text-primary/70" />
+                  </span>
+                )}
+                {rlsEnabled === false && (
+                  <span title="RLS disabled">
+                    <Unlock className="w-3.5 h-3.5 text-red-500/80" />
+                  </span>
+                )}
+              </span>
+            )}
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              asChild
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={cn(
+                  "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
+                  "opacity-0 group-hover:opacity-100",
+                )}
+              >
+                <MoreVertical className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className={dropdownMenuClassName}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {renderMenuItems(
+                DropdownMenuItem,
+                DropdownMenuSub,
+                DropdownMenuSubTrigger,
+                DropdownMenuSubContent,
+                DropdownMenuSeparator,
+                true,
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[160px]">
+        {renderMenuItems(
+          ContextMenuItem,
+          ContextMenuSub,
+          ContextMenuSubTrigger,
+          ContextMenuSubContent,
+          ContextMenuSeparator,
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 function TablesPanel({ studio }: { studio: any }) {
   const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<TableTypeFilter>("all");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [wildcardsEnabled, setWildcardsEnabled] = useState(true);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [schemaMenuOpen, setSchemaMenuOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     tables: true,
@@ -957,18 +1169,16 @@ function TablesPanel({ studio }: { studio: any }) {
   const tables: string[] = (studio.tables ?? []).map((t: any) =>
     typeof t === "string" ? t : (t?.name ?? String(t)),
   );
-  const filtered = tables.filter((t) =>
-    t.toLowerCase().includes(q.toLowerCase()),
-  );
 
   const schemaExplorer = Boolean(studio.schemaExplorer);
   const isPostgres = isPostgresCatalogDbType(studio.dbType);
-  const isRoutineDb = isPostgres || studio.dbType === "mssql";
+  const isRoutineDb = supportsRoutineCatalog(studio.dbType);
+  const indexCatalog = supportsIndexCatalog(studio.dbType);
   const qLower = q.toLowerCase();
 
   const functions: any[] = schemaExplorer && isRoutineDb ? (studio.functions ?? []) : [];
   const triggers: any[] = schemaExplorer && isRoutineDb ? (studio.triggers ?? []) : [];
-  const indexes: any[] = schemaExplorer && isPostgres ? (studio.indexes ?? []) : [];
+  const indexes: any[] = schemaExplorer && indexCatalog ? (studio.indexes ?? []) : [];
   const enums: any[] = schemaExplorer && isPostgres ? (studio.enums ?? []) : [];
 
   const filteredFunctions = qLower
@@ -999,7 +1209,28 @@ function TablesPanel({ studio }: { studio: any }) {
           ? "Redis Editor"
           : "Editor";
   const openEditorLabel = `Open in ${editorLabel}`;
-  const viewTableSet = new Set(studio.viewTables ?? []);
+  const viewTableSet = new Set<string>(studio.viewTables ?? []);
+  // Union base tables + views: Oracle/MSSQL/JDBC backends split them across
+  // getTables/getViews, so iterating `tables` alone hides every view.
+  const allTables = mergeTablesAndViews(tables, studio.viewTables);
+  const sidebarQ = q.trim();
+  const filtered = filterTablesByNameAndType(allTables, (t) => t, {
+    query: sidebarQ,
+    mode: "auto",
+    caseSensitive,
+    wildcardsEnabled,
+    typeFilter,
+    viewSet: viewTableSet,
+  });
+  const filtersActive =
+    typeFilter !== "all" || caseSensitive || !wildcardsEnabled;
+  const refreshingTables = Boolean(studio.fetchingTables);
+  const handleRefreshTables = () => {
+    if (refreshingTables) return;
+    studio.refreshTablesSidebar?.();
+  };
+  // Reset the virtual list scroll whenever the visible set changes identity.
+  const resetKey = `${selectedSchema}|${sidebarQ}|${typeFilter}|${caseSensitive}|${wildcardsEnabled}`;
 
   const handleCopyItemName = (name: string) => copyItemName(name, itemNoun);
 
@@ -1034,18 +1265,69 @@ function TablesPanel({ studio }: { studio: any }) {
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="relative my-1">
-        <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={schemaExplorer ? "Search..." : "Search tables..."}
-          className="h-8 pl-7 text-sm"
-        />
+    <div className="flex h-full min-h-0 flex-col gap-0.5">
+      <div className="relative my-1 flex shrink-0 items-center gap-1">
+        <div className="relative min-w-0 flex-1">
+          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={schemaExplorer ? "Search..." : "Search tables..."}
+            className="h-8 pl-7 pr-8 text-sm"
+          />
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Table filter options"
+                title="Filter options"
+                className={cn(
+                  "absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md transition-colors",
+                  filtersActive
+                    ? "text-primary hover:bg-white/10"
+                    : "text-muted-foreground hover:bg-white/10 hover:text-foreground",
+                )}
+              >
+                <ListFilter className="size-3.5" />
+                {filtersActive && (
+                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-auto p-0">
+              <TablesFilterMenu
+                typeFilter={typeFilter}
+                onTypeFilterChange={setTypeFilter}
+                caseSensitive={caseSensitive}
+                onCaseSensitiveChange={setCaseSensitive}
+                wildcardsEnabled={wildcardsEnabled}
+                onWildcardsEnabledChange={setWildcardsEnabled}
+                onRefresh={() => {
+                  handleRefreshTables();
+                  setFilterOpen(false);
+                }}
+                isRefreshing={refreshingTables}
+                tablesCount={allTables.filter((t) => !viewTableSet.has(t)).length}
+                viewsCount={allTables.filter((t) => viewTableSet.has(t)).length}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+        {!isMongo && (
+          <button
+            type="button"
+            onClick={handleRefreshTables}
+            disabled={refreshingTables}
+            aria-label="Refresh tables and views"
+            title="Refresh tables and views"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-white/[0.04] text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-3.5", refreshingTables && "animate-spin")} />
+          </button>
+        )}
       </div>
       {/* Schema picker + new-table action under the search bar. */}
-      <div className="mb-1 flex items-center gap-1">
+      <div className="mb-1 flex shrink-0 items-center gap-1">
         <DropdownMenu open={schemaMenuOpen} onOpenChange={setSchemaMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
@@ -1102,7 +1384,7 @@ function TablesPanel({ studio }: { studio: any }) {
         </button>
       </div>
       {/* A-Z / Tags view toggle + new-tag entry — under the schema picker. */}
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-1 flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
           <button
             type="button"
@@ -1240,189 +1522,66 @@ function TablesPanel({ studio }: { studio: any }) {
 
       {!schemaExplorer || !isPostgres ? (
         tagView ? (
-          <TagFoldersList
-            tagsList={tagsList}
-            tablesByTag={tablesByTag}
-            untaggedTables={untaggedTables}
-            isTagExpanded={isTagExpanded}
-            toggleTag={toggleTag}
-            onManageTags={() => setTagManagerOpen(true)}
-            onRenameTag={openRenameTagDialog}
-            onDeleteTag={(name) => studio.removeTag?.(name)}
-            renderTable={(table) => (
-              <SidebarTableRow
-                key={`${selectedSchema}.${table}`}
+          <div className="min-h-0 flex-1 overflow-y-auto pb-1">
+            <TagFoldersList
+              tagsList={tagsList}
+              tablesByTag={tablesByTag}
+              untaggedTables={untaggedTables}
+              isTagExpanded={isTagExpanded}
+              toggleTag={toggleTag}
+              onManageTags={() => setTagManagerOpen(true)}
+              onRenameTag={openRenameTagDialog}
+              onDeleteTag={(name) => studio.removeTag?.(name)}
+              resetKey={resetKey}
+              renderTable={(table) => (
+                <SidebarTableRow
+                  key={`${selectedSchema}.${table}`}
+                  table={table}
+                  selectedSchema={selectedSchema}
+                  studio={studio}
+                  viewTableSet={viewTableSet}
+                  itemNoun={itemNoun}
+                  openEditorLabel={openEditorLabel}
+                  copyDefinitionLabel={copyDefinitionLabel}
+                  canExportSql={canExportSql}
+                  isMongo={isMongo}
+                  tagsList={tagsList}
+                  tableTagsMap={tableTagsMap}
+                  tagsForTable={tagsForTable}
+                  handleCopyItemName={handleCopyItemName}
+                />
+              )}
+            />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="px-2 py-2 text-xs text-muted-foreground">
+            {q ? "No matches" : "No tables"}
+          </div>
+        ) : (
+          <VirtualizedRows
+            items={filtered}
+            keyFor={(table) => `${selectedSchema}.${table}`}
+            renderItem={(table) => (
+              <SidebarFlatTableRow
                 table={table}
                 selectedSchema={selectedSchema}
                 studio={studio}
                 viewTableSet={viewTableSet}
                 itemNoun={itemNoun}
                 openEditorLabel={openEditorLabel}
-                copyDefinitionLabel={copyDefinitionLabel}
-                canExportSql={canExportSql}
                 isMongo={isMongo}
-                tagsList={tagsList}
-                tableTagsMap={tableTagsMap}
-                tagsForTable={tagsForTable}
+                canExportSql={canExportSql}
+                copyDefinitionLabel={copyDefinitionLabel}
                 handleCopyItemName={handleCopyItemName}
               />
             )}
+            resetKey={resetKey}
+            className="min-h-0 flex-1"
           />
-        ) : filtered.length === 0 ? (
-          <div className="px-2 py-2 text-xs text-muted-foreground">
-            {q ? "No matches" : "No tables"}
-          </div>
-        ) : (
-          filtered.map((table) => {
-            const securityInfo = studio.tableSecurity?.[table];
-            const rlsEnabled = securityInfo?.rlsEnabled;
-            const showDataApi = Boolean(studio.dataApiInstalled);
-            const isView = viewTableSet.has(table);
-            const ItemIcon = isView ? Eye : Table2;
-
-            const renderMenuItems = (
-              Component: any,
-              Sub: any,
-              SubTrigger: any,
-              SubContent: any,
-              Separator: any,
-              isDropdown = false,
-            ) => {
-              const handleAction =
-                (fn?: (t: string, s: string) => void) =>
-                (e: React.MouseEvent) => {
-                  if (isDropdown) e.stopPropagation();
-                  fn?.(table, selectedSchema);
-                };
-
-              return (
-                <>
-                  <Component
-                    onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
-                  >
-                    Open {itemNoun}
-                  </Component>
-                  <Component
-                    onClick={handleAction((t, s) =>
-                      studio.openSqlEditor?.(t, s),
-                    )}
-                  >
-                    {openEditorLabel}
-                  </Component>
-                  <Component
-                    onClick={handleAction((t) => studio.viewTableSchema?.(t))}
-                  >
-                    View Schema
-                  </Component>
-                  <TableContextMenuItems
-                    Component={Component}
-                    Sub={Sub}
-                    SubTrigger={SubTrigger}
-                    SubContent={SubContent}
-                    Separator={Separator}
-                    itemNoun={itemNoun}
-                    copyDefinitionLabel={copyDefinitionLabel}
-                    duplicateLabel={`Duplicate ${itemNoun}`}
-                    isMongo={isMongo}
-                    canExportSql={canExportSql}
-                    isDropdown={isDropdown}
-                    table={table}
-                    selectedSchema={selectedSchema}
-                    tags={studio.tags ?? []}
-                    tableTags={studio.tableTags ?? {}}
-                    handleAction={handleAction}
-                    onToggleTag={(s, t, tagName) =>
-                      studio.toggleTableTag?.(s, t, tagName)
-                    }
-                    handleCopyName={(t) => void handleCopyItemName(t)}
-                    handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
-                    handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
-                    onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
-                    onEmpty={(t, s) => studio.emptyTable?.(t, s)}
-                    onDelete={(t, s) => studio.deleteTable?.(t, s)}
-                    beforeExport={<Separator />}
-                  />
-                </>
-              );
-            };
-
-            return (
-              <ContextMenu key={`${selectedSchema}.${table}`}>
-                <ContextMenuTrigger>
-                  <div className="relative group">
-                    <button
-                      type="button"
-                      onClick={() => studio.handleTableClick?.(table, selectedSchema)}
-                      className={cn(
-                        ROW,
-                        studio.selectedTable === table && "bg-white/10 text-foreground",
-                        "w-full",
-                      )}
-                    >
-                      <ItemIcon className="size-4 shrink-0" />
-                      <span className="truncate flex-1">{table}</span>
-                      {(showDataApi || rlsEnabled === false) && (
-                        <span className="flex items-center gap-1 shrink-0">
-                          {showDataApi && (
-                            <span title="Accessible via Data API">
-                              <Globe className="w-3.5 h-3.5 text-primary/70" />
-                            </span>
-                          )}
-                          {rlsEnabled === false && (
-                            <span title="RLS disabled">
-                              <Unlock className="w-3.5 h-3.5 text-red-500/80" />
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        asChild
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className={cn(
-                            "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
-                            "opacity-0 group-hover:opacity-100",
-                          )}
-                        >
-                          <MoreVertical className="size-3.5" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        className="min-w-[160px]"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {renderMenuItems(
-                          DropdownMenuItem,
-                          DropdownMenuSub,
-                          DropdownMenuSubTrigger,
-                          DropdownMenuSubContent,
-                          DropdownMenuSeparator,
-                          true,
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="min-w-[160px]">
-                  {renderMenuItems(
-                    ContextMenuItem,
-                    ContextMenuSub,
-                    ContextMenuSubTrigger,
-                    ContextMenuSubContent,
-                    ContextMenuSeparator,
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>
-            );
-          })
         )
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-2 pb-1">
           {/* Tables */}
           <div>
             <SchemaSectionHeader
@@ -1444,6 +1603,7 @@ function TablesPanel({ studio }: { studio: any }) {
                     onManageTags={() => setTagManagerOpen(true)}
                     onRenameTag={openRenameTagDialog}
                     onDeleteTag={(name) => studio.removeTag?.(name)}
+                    resetKey={resetKey}
                     renderTable={(table) => (
                       <SidebarTableRow
                         key={`${selectedSchema}.${table}`}
@@ -1468,153 +1628,27 @@ function TablesPanel({ studio }: { studio: any }) {
                     No tables found
                   </div>
                 ) : (
-                  filtered.map((table) => {
-                    const securityInfo = studio.tableSecurity?.[table];
-                    const rlsEnabled = securityInfo?.rlsEnabled;
-                    const showDataApi = Boolean(studio.dataApiInstalled);
-                    const isView = viewTableSet.has(table);
-                    const ItemIcon = isView ? Eye : Table2;
-
-                    const renderMenuItems = (
-                      Component: any,
-                      Sub: any,
-                      SubTrigger: any,
-                      SubContent: any,
-                      Separator: any,
-                      isDropdown = false,
-                    ) => {
-                      const handleAction =
-                        (fn?: (t: string, s: string) => void) =>
-                        (e: React.MouseEvent) => {
-                          if (isDropdown) e.stopPropagation();
-                          fn?.(table, selectedSchema);
-                        };
-
-                      return (
-                        <>
-                          <Component
-                            onClick={handleAction((t) => studio.handleTableClick?.(t, selectedSchema))}
-                          >
-                            Open {itemNoun}
-                          </Component>
-                          <Component
-                            onClick={handleAction((t, s) =>
-                              studio.openSqlEditor?.(t, s),
-                            )}
-                          >
-                            {openEditorLabel}
-                          </Component>
-                          <Component
-                            onClick={handleAction((t) => studio.viewTableSchema?.(t))}
-                          >
-                            View Schema
-                          </Component>
-                          <TableContextMenuItems
-                            Component={Component}
-                            Sub={Sub}
-                            SubTrigger={SubTrigger}
-                            SubContent={SubContent}
-                            Separator={Separator}
-                            itemNoun={itemNoun}
-                            copyDefinitionLabel={copyDefinitionLabel}
-                            duplicateLabel={`Duplicate ${itemNoun}`}
-                            isMongo={isMongo}
-                            canExportSql={canExportSql}
-                            isDropdown={isDropdown}
-                            table={table}
-                            selectedSchema={selectedSchema}
-                            tags={studio.tags ?? []}
-                            tableTags={studio.tableTags ?? {}}
-                            handleAction={handleAction}
-                            onToggleTag={(s, t, tagName) =>
-                              studio.toggleTableTag?.(s, t, tagName)
-                            }
-                            handleCopyName={(t) => void handleCopyItemName(t)}
-                            handleCopyDefinition={(t, s) => studio.copyTableSchema?.(t, s)}
-                            handleDuplicate={(t, s) => studio.duplicateTable?.(t, s)}
-                            onExport={(format, t, s) => studio.exportTableData?.(t, s, format)}
-                            onEmpty={(t, s) => studio.emptyTable?.(t, s)}
-                            onDelete={(t, s) => studio.deleteTable?.(t, s)}
-                            beforeExport={<Separator />}
-                          />
-                        </>
-                      );
-                    };
-
-                    return (
-                      <ContextMenu key={`${selectedSchema}.${table}`}>
-                        <ContextMenuTrigger>
-                          <div className="relative group">
-                            <button
-                              type="button"
-                              onClick={() => studio.handleTableClick?.(table, selectedSchema)}
-                              className={cn(
-                                ROW,
-                                studio.selectedTable === table && "bg-white/10 text-foreground",
-                                "w-full",
-                              )}
-                            >
-                              <ItemIcon className="size-4 shrink-0" />
-                              <span className="truncate flex-1">{table}</span>
-                              {(showDataApi || rlsEnabled === false) && (
-                                <span className="flex items-center gap-1 shrink-0">
-                                  {showDataApi && (
-                                    <span title="Accessible via Data API">
-                                      <Globe className="w-3.5 h-3.5 text-primary/70" />
-                                    </span>
-                                  )}
-                                  {rlsEnabled === false && (
-                                    <span title="RLS disabled">
-                                      <Unlock className="w-3.5 h-3.5 text-red-500/80" />
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                            </button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger
-                                asChild
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    "absolute right-1 top-1/2 -translate-y-1/2 size-6 shrink-0 flex items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-white/10 hover:text-foreground focus:opacity-100 focus-visible:outline-none",
-                                    "opacity-0 group-hover:opacity-100",
-                                  )}
-                                >
-                                  <MoreVertical className="size-3.5" />
-                                </button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent
-                                align="end"
-                                className="min-w-[160px] border border-border bg-popover shadow-2xl"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {renderMenuItems(
-                                  DropdownMenuItem,
-                                  DropdownMenuSub,
-                                  DropdownMenuSubTrigger,
-                                  DropdownMenuSubContent,
-                                  DropdownMenuSeparator,
-                                  true,
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent className="min-w-[160px]">
-                          {renderMenuItems(
-                            ContextMenuItem,
-                            ContextMenuSub,
-                            ContextMenuSubTrigger,
-                            ContextMenuSubContent,
-                            ContextMenuSeparator,
-                          )}
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    );
-                  })
+                  <MaybeVirtualizedTables
+                    tables={filtered}
+                    keyPrefix={selectedSchema}
+                    resetKey={resetKey}
+                    maxHeightClass="max-h-96"
+                    renderTable={(table) => (
+                      <SidebarFlatTableRow
+                        table={table}
+                        selectedSchema={selectedSchema}
+                        studio={studio}
+                        viewTableSet={viewTableSet}
+                        itemNoun={itemNoun}
+                        openEditorLabel={openEditorLabel}
+                        isMongo={isMongo}
+                        canExportSql={canExportSql}
+                        copyDefinitionLabel={copyDefinitionLabel}
+                        handleCopyItemName={handleCopyItemName}
+                        dropdownMenuClassName="min-w-[160px] border border-border bg-popover shadow-2xl"
+                      />
+                    )}
+                  />
                 )}
               </div>
             )}
@@ -1752,6 +1786,7 @@ function TablesPanel({ studio }: { studio: any }) {
                 )}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}
@@ -2039,7 +2074,9 @@ function DatabasePanel({ studio }: { studio: any }) {
   // enums / indexes stay Postgres-only. Hide unsupported views instead of
   // showing empty states.
   const pgCatalog = isPostgresCatalogDbType(dbType);
-  const routineCatalog = pgCatalog || dbType === "mssql";
+  const routineCatalog = supportsRoutineCatalog(dbType);
+  const indexCatalog = supportsIndexCatalog(dbType);
+  const oracleExtra = supportsOracleExtraCatalog(dbType);
   const items: Array<{ label: string; view: string; tabType: string; show?: boolean }> = [
     { label: "Schema Diagram", view: "schema", tabType: "database-schema" },
     { label: "Data Catalog", view: "catalog", tabType: "database-catalog" },
@@ -2049,9 +2086,19 @@ function DatabasePanel({ studio }: { studio: any }) {
       tabType: "database-tables",
     },
     { label: "Functions", view: "functions", tabType: "database-functions", show: routineCatalog },
+    { label: "Packages", view: "packages", tabType: "database-packages", show: oracleExtra },
     { label: "Triggers", view: "triggers", tabType: "database-triggers", show: routineCatalog },
     { label: "Enums", view: "enums", tabType: "database-enums", show: pgCatalog },
-    { label: "Indexes", view: "indexes", tabType: "database-indexes", show: pgCatalog },
+    { label: "Indexes", view: "indexes", tabType: "database-indexes", show: indexCatalog },
+    { label: "Sequences", view: "sequences", tabType: "database-sequences", show: oracleExtra },
+    { label: "Synonyms", view: "synonyms", tabType: "database-synonyms", show: oracleExtra },
+    {
+      label: "Materialized Views",
+      view: "materialized-views",
+      tabType: "database-materialized-views",
+      show: oracleExtra,
+    },
+    { label: "DB Links", view: "db-links", tabType: "database-db-links", show: oracleExtra },
   ];
   return (
     <div className="flex flex-col gap-0.5 pt-1">
@@ -2309,3 +2356,4 @@ function WorkflowsPanel({ studio }: { studio: any }) {
     </div>
   );
 }
+

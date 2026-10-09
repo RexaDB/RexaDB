@@ -59,6 +59,11 @@ import {
   killSession as _killSession,
   cancelSessionQuery as _cancelSessionQuery,
   fetchLocks as _fetchLocks,
+  fetchPackages as _fetchPackages,
+  fetchSequences as _fetchSequences,
+  fetchSynonyms as _fetchSynonyms,
+  fetchDbLinks as _fetchDbLinks,
+  fetchMaterializedViews as _fetchMaterializedViews,
 } from "./security-actions";
 import {
   runAllChecks as _runAllChecks,
@@ -171,6 +176,24 @@ async function deleteEnum(
 }
 export async function fetchIndexes(connectionString: string, schema?: string) {
   return _fetchIndexes(connectionString, schema);
+}
+export async function fetchPackages(connectionString: string, schema: string) {
+  return _fetchPackages(connectionString, schema);
+}
+export async function fetchSequences(connectionString: string, schema: string) {
+  return _fetchSequences(connectionString, schema);
+}
+export async function fetchSynonyms(connectionString: string, schema: string) {
+  return _fetchSynonyms(connectionString, schema);
+}
+export async function fetchDbLinks(connectionString: string) {
+  return _fetchDbLinks(connectionString);
+}
+export async function fetchMaterializedViews(
+  connectionString: string,
+  schema: string,
+) {
+  return _fetchMaterializedViews(connectionString, schema);
 }
 export async function fetchRlsPolicies(
   connectionString: string,
@@ -2674,6 +2697,11 @@ export async function testConnection(
       case "jdbc": {
         const { testJdbcConnection } = await import("./jdbc-client");
         await testJdbcConnection(connectionString);
+        return { success: true };
+      }
+      case "oracle": {
+        const { testOracleConnection } = await import("./oracle-client");
+        await testOracleConnection(connectionString);
         return { success: true };
       }
       case "supabase-mgmt": {

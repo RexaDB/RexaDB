@@ -136,6 +136,8 @@ jobs:
           bash resources/java-bridge/build.sh
           ls -lh resources/java-bridge/dist/bridge.jar 2>&1 | head -n 5
           ls -lh resources/java-bridge/dist/jre/bin/java 2>&1 | head -n 5 || ls -lh resources/java-bridge/dist/jre 2>&1 | head -n 20
+          bun run scripts/build-oracle-bridge.mjs
+          ls -lh resources/oracle-bridge/rexadb-oracle-bridge 2>&1 | head -n 5
 
       - name: Build AppImage (identical to local machine)
         run: |

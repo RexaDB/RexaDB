@@ -784,6 +784,11 @@ export async function searchAllTables(
         .map((c) => `CAST(${c} AS NVARCHAR(MAX)) LIKE '%${escapedSearch}%'`)
         .join(" OR ");
       limitClause = "";
+    } else if (dbType === "oracle") {
+      whereClause = quotedCols
+        .map((c) => `TO_CHAR(${c}) LIKE '%${escapedSearch}%'`)
+        .join(" OR ");
+      limitClause = "";
     } else if (dbType === "clickhouse") {
       whereClause = quotedCols
         .map((c) => `CAST(${c} AS String) LIKE '%${escapedSearch}%'`)
@@ -799,6 +804,8 @@ export async function searchAllTables(
     let sql: string;
     if (dbType === "mssql") {
       sql = `SELECT TOP ${MAX_RESULTS_PER_TABLE} * FROM ${quotedTable} WHERE ${whereClause}`;
+    } else if (dbType === "oracle") {
+      sql = `SELECT * FROM ${quotedTable} WHERE ${whereClause} ORDER BY 1 OFFSET 0 ROWS FETCH NEXT ${MAX_RESULTS_PER_TABLE} ROWS ONLY`;
     } else {
       sql = `SELECT * FROM ${quotedTable} WHERE ${whereClause} ${limitClause}`;
     }

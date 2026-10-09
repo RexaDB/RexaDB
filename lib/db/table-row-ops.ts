@@ -120,6 +120,47 @@ export async function deleteTableRows(
     }
   }
 
+  if (dbType === "oracle") {
+    const { executeOracleQuery, getTableStructure } = await import("./oracle-client");
+    try {
+      const structure = await getTableStructure(connectionString, schema, table);
+      // Use every primary-key column: a single-column condition would delete
+      // unselected rows on composite keys like (DEPARTMENT_ID, EMPLOYEE_ID).
+      const pkCols = structure
+        .filter((c) => c.is_primary_key)
+        .map((c) => c.column_name);
+      if (pkCols.length === 0) {
+        const fallback = Object.keys(pkValues[0] ?? {})[0];
+        if (fallback) pkCols.push(fallback);
+      }
+      if (pkCols.length === 0) {
+        return {
+          success: false,
+          error:
+            "No primary key found for this table. Deletion is only supported for tables with a primary key.",
+        };
+      }
+      const prefix = schema ? `"${schema}".` : "";
+      for (const row of pkValues) {
+        const whereClauses: string[] = [];
+        const values: any[] = [];
+        for (const col of pkCols) {
+          const val = row[col];
+          if (val === undefined) break;
+          whereClauses.push(`"${col}" = ?`);
+          values.push(val);
+        }
+        if (whereClauses.length !== pkCols.length) continue;
+        const sql = `DELETE FROM ${prefix}"${table}" WHERE ${whereClauses.join(" AND ")}`;
+        await executeOracleQuery(connectionString, sql, values);
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error("Failed to delete Oracle rows:", error);
+      return { success: false, error: error.message };
+    }
+  }
+
   const { deleteRows, getTablePrimaryKey } = await import("./pg-client");
 
   try {
@@ -235,6 +276,30 @@ export async function updateTableRows(
     }
   }
 
+  if (dbType === "oracle") {
+    const { executeOracleQuery } = await import("./oracle-client");
+    try {
+      const prefix = schema ? `"${schema}".` : "";
+      for (const u of updates) {
+        const setEntries = Object.entries(u.set);
+        const whereEntries = Object.entries(u.where);
+        if (setEntries.length === 0 || whereEntries.length === 0) continue;
+        const setClauses = setEntries.map(([k]) => `"${k}" = ?`).join(", ");
+        const whereClauses = whereEntries.map(([k]) => `"${k}" = ?`).join(" AND ");
+        const values = [
+          ...setEntries.map(([, v]) => v),
+          ...whereEntries.map(([, v]) => v),
+        ];
+        const sql = `UPDATE ${prefix}"${table}" SET ${setClauses} WHERE ${whereClauses}`;
+        await executeOracleQuery(connectionString, sql, values);
+      }
+      return { success: true };
+    } catch (error: any) {
+      console.error("Failed to update Oracle rows:", error);
+      return { success: false, error: error.message };
+    }
+  }
+
   const { updateRows } = await import("./pg-client");
 
   try {
@@ -304,6 +369,7 @@ export async function fetchTableStructure(
     dbType === "trino" ||
     dbType === "spacetimedb" ||
     dbType === "jdbc" ||
+    dbType === "oracle" ||
     dbType === "supabase-mgmt"
   ) {
     const { getDbTableStructure } = await import("./db-engine");
@@ -378,6 +444,7 @@ export async function fetchTableForeignKeys(
     dbType === "trino" ||
     dbType === "spacetimedb" ||
     dbType === "jdbc" ||
+    dbType === "oracle" ||
     dbType === "supabase-mgmt"
   ) {
     const { getDbTableForeignKeys } = await import("./db-engine");
