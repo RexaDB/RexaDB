@@ -247,7 +247,7 @@ cp src-tauri/binaries/rexadb-server-x86_64-unknown-linux-gnu \
 chmod +x "$APPDIR/usr/bin/rexadb-server"
 success "Sidecar bundled"
 
-# ── Step 4.5: Bundle JDBC bridge resources (bridge.jar + JRE) ─────────────
+# ── Step 4.5: Bundle JDBC + Oracle bridge resources ───────────────────────
 # Tauri resources config maps these to the app resource directory.
 # On Linux deb: /usr/lib/<product-name>/<resource>
 # With binary at $APPDIR/usr/bin/rexa-db, resources go to $APPDIR/usr/lib/RexaDB/
@@ -257,6 +257,12 @@ cp -a resources/java-bridge/dist/bridge.jar "$APPDIR/usr/lib/RexaDB/bridge.jar"
 cp -a resources/java-bridge/dist/jre    "$APPDIR/usr/lib/RexaDB/jre"
 chmod -R u+rwX "$APPDIR/usr/lib/RexaDB"
 success "JDBC bridge resources bundled ($(du -sh "$APPDIR/usr/lib/RexaDB" | cut -f1))"
+# Native Oracle thin-driver bridge (mirrors tauri.conf.json resources mapping).
+log "Bundling Oracle bridge resource..."
+mkdir -p "$APPDIR/usr/lib/RexaDB/oracle-bridge"
+cp -a resources/oracle-bridge/rexadb-oracle-bridge "$APPDIR/usr/lib/RexaDB/oracle-bridge/"
+chmod +x "$APPDIR/usr/lib/RexaDB/oracle-bridge/rexadb-oracle-bridge"
+success "Oracle bridge resource bundled"
 
 # ── Step 5: Create AppRun (linuxdeploy doesn't create one without
 #           --output appimage) with WebKit Wayland workaround ───────────────

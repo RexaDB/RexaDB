@@ -79,6 +79,13 @@ export function TriggersList({
   dbType = "postgres",
 }: TriggersListProps) {
   const isMssql = dbType === "mssql";
+  const isOracle = dbType === "oracle";
+  // Oracle trigger SQL differs from the Postgres shapes these controls
+  // emit, so Oracle stays read-only until Oracle-aware actions exist.
+  const readOnlyTriggers = isMssql || isOracle;
+  const readOnlyTitle = isOracle
+    ? "Triggers are read-only for Oracle connections"
+    : "Editing MSSQL triggers coming soon";
   // MSSQL rows carry table_name/timing/event; pg-explorer rows carry
   // table/activation/events — accept both.
   const normalizedTriggers = useMemo(
@@ -256,18 +263,18 @@ export function TriggersList({
               <DropdownMenuContent side="bottom" align="end" className="w-52">
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                  onClick={() => { if (!isMssql) onEditTrigger?.(t); }}
+                  disabled={readOnlyTriggers}
+                  title={readOnlyTriggers ? readOnlyTitle : undefined}
+                  onClick={() => { if (!readOnlyTriggers) onEditTrigger?.(t); }}
                 >
                   <Edit2 size={14} />
                   <p>Edit trigger</p>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                  onClick={() => { if (!isMssql) onDuplicateTrigger?.(t); }}
+                  disabled={readOnlyTriggers}
+                  title={readOnlyTriggers ? readOnlyTitle : undefined}
+                  onClick={() => { if (!readOnlyTriggers) onDuplicateTrigger?.(t); }}
                 >
                   <Copy size={14} />
                   <p>Duplicate trigger</p>
@@ -275,9 +282,9 @@ export function TriggersList({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL triggers coming soon" : undefined}
-                  onClick={() => { if (!isMssql) onDeleteTrigger?.(t); }}
+                  disabled={readOnlyTriggers}
+                  title={readOnlyTriggers ? readOnlyTitle : undefined}
+                  onClick={() => { if (!readOnlyTriggers) onDeleteTrigger?.(t); }}
                 >
                   <Trash2 size={14} />
                   <p>Delete trigger</p>
@@ -288,7 +295,7 @@ export function TriggersList({
         ),
       },
     ],
-    [isMssql, onDeleteTrigger, onDuplicateTrigger, onEditTrigger, onOpenTable],
+    [readOnlyTriggers, readOnlyTitle, onDeleteTrigger, onDuplicateTrigger, onEditTrigger, onOpenTable],
   );
 
   if (fetchingTriggers && triggers.length === 0) {
@@ -366,7 +373,7 @@ export function TriggersList({
           </DbToolbarFilters>
           <div className="flex items-center gap-2">
 
-            {isMssql ? (
+            {readOnlyTriggers ? (
               <>
               <TooltipProvider>
               <Tooltip>
@@ -389,7 +396,7 @@ export function TriggersList({
                     </Button>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Creating MSSQL triggers coming soon</TooltipContent>
+                <TooltipContent side="bottom">{readOnlyTitle}</TooltipContent>
               </Tooltip>
               </TooltipProvider>
               </>
@@ -425,14 +432,16 @@ export function TriggersList({
             <div className="flex-1 flex flex-col justify-start supabase-theme">
               <EmptyStatePresentational
                 icon={Zap}
-                title={isMssql ? `No triggers in ${selectedSchema}` : "Add your first trigger"}
+                title={readOnlyTriggers ? `No triggers in ${selectedSchema}` : "Add your first trigger"}
                 description={
-                  isMssql
-                    ? "SQL Server DML triggers on tables in this schema will appear here."
+                  readOnlyTriggers
+                    ? isOracle
+                      ? "Oracle triggers in this schema are browsable here; trigger writes are read-only for now."
+                      : "SQL Server DML triggers on tables in this schema will appear here."
                     : "Make your database reactive. Send updates in realtime, call edge functions, or validate data as it comes in."
                 }
               >
-                {!isMssql && onOpenCreateTriggerTab && (
+                {!readOnlyTriggers && onOpenCreateTriggerTab && (
                   <div className="flex items-center gap-2">
                     <TooltipProvider>
                       <Tooltip>
@@ -465,9 +474,9 @@ export function TriggersList({
                   onPageChange: setPage,
                   itemLabel: "triggers",
                 }}
-                isRowClickable={() => !isMssql}
+                isRowClickable={() => !readOnlyTriggers}
                 onRowClick={(t) => {
-                  if (!isMssql) onEditTrigger?.(t as Trigger);
+                  if (!readOnlyTriggers) onEditTrigger?.(t as Trigger);
                 }}
                 emptyState={
                   <div className="py-8 text-center">

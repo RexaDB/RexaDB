@@ -121,6 +121,13 @@ export function FunctionsList({
   onAskAI,
 }: FunctionsListProps) {
   const isMssql = dbType === "mssql";
+  const isOracle = dbType === "oracle";
+  // Oracle routine SQL differs from the Postgres shapes these controls
+  // emit, so Oracle stays read-only until Oracle-aware actions exist.
+  const readOnlyRoutines = isMssql || isOracle;
+  const readOnlyTitle = isOracle
+    ? "Routines are read-only for Oracle connections"
+    : "Editing MSSQL routines coming soon";
   const [search, setSearch] = useState("");
   const [selectedFunction, setSelectedFunction] =
     useState<DatabaseFunction | null>(null);
@@ -298,14 +305,14 @@ export function FunctionsList({
                   onClick={() => { openFunctionViewer(fn); }}
                 >
                   <Edit2 size={14} />
-                  <p>{isMssql ? "View definition" : "Edit function"}</p>
+                  <p>{readOnlyRoutines ? "View definition" : "Edit function"}</p>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                  disabled={readOnlyRoutines}
+                  title={readOnlyRoutines ? readOnlyTitle : undefined}
                   onClick={() => {
-                    if (isMssql) return;
+                    if (readOnlyRoutines) return;
                     const newFn = { ...fn, name: `${fn.name}_duplicate` };
                     openFunctionViewer(newFn);
                   }}
@@ -316,10 +323,10 @@ export function FunctionsList({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="space-x-2"
-                  disabled={isMssql}
-                  title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                  disabled={readOnlyRoutines}
+                  title={readOnlyRoutines ? readOnlyTitle : undefined}
                   onClick={() => {
-                    if (!isMssql)
+                    if (!readOnlyRoutines)
                       onDeleteFunction(fn.schema, fn.name, fn.arguments);
                   }}
                 >
@@ -332,7 +339,7 @@ export function FunctionsList({
         ),
       },
     ],
-    [isMssql, onDeleteFunction],
+    [readOnlyRoutines, onDeleteFunction],
   );
 
   const hasDefinitionChanges =
@@ -341,8 +348,8 @@ export function FunctionsList({
 
   const handleSaveDefinition = async () => {
     if (!selectedFunction || !hasDefinitionChanges) return;
-    // MSSQL routines are read-only in this view; never send their SQL.
-    if (isMssql) return;
+    // MSSQL/Oracle routines are read-only in this view; never send their SQL.
+    if (readOnlyRoutines) return;
     setIsSavingDefinition(true);
     try {
       const saved = await onSaveFunctionDefinition(
@@ -478,7 +485,7 @@ export function FunctionsList({
             <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
           </Tooltip>
           </TooltipProvider>
-          {isMssql ? (
+          {readOnlyRoutines ? (
             <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -489,7 +496,7 @@ export function FunctionsList({
                   </Button>
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Editing MSSQL routines coming soon</TooltipContent>
+              <TooltipContent side="bottom">{readOnlyTitle}</TooltipContent>
             </Tooltip>
             </TooltipProvider>
           ) : (
@@ -522,10 +529,12 @@ export function FunctionsList({
           <div className="flex-1 flex flex-col justify-start supabase-theme">
             <EmptyStatePresentational
               icon={Database}
-              title={isMssql ? `No procedures or functions in ${selectedSchema}` : "Add your first function"}
+              title={readOnlyRoutines ? `No procedures or functions in ${selectedSchema}` : "Add your first function"}
               description={
-                isMssql
-                  ? "SQL Server stored procedures and functions in this schema will appear here."
+                readOnlyRoutines
+                  ? isOracle
+                    ? "Oracle procedures, functions and package members in this schema are browsable here; routine writes are read-only for now."
+                    : "SQL Server stored procedures and functions in this schema will appear here."
                   : "PostgreSQL functions are a set of SQL and procedural commands such as declarations, assignments, loops, or flow-of-control."
               }
             >
@@ -541,7 +550,7 @@ export function FunctionsList({
                     <TooltipContent side="bottom">Create with RexaDB Assistant</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-                {!isMssql && (
+                {!readOnlyRoutines && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -661,7 +670,7 @@ export function FunctionsList({
                       appEditorTheme={appEditorTheme}
                       customEditorThemes={customEditorThemes}
                       vimMode={vimMode}
-                      readOnly={isMssql}
+                      readOnly={readOnlyRoutines}
                     />
                   ) : (
                     <SqlQueryInput
@@ -675,16 +684,16 @@ export function FunctionsList({
                       onRunSelected={handleSaveDefinition}
                       onSaveSnippet={() => {}}
                       onSelectionChange={() => {}}
-                      readOnly={isMssql}
+                      readOnly={readOnlyRoutines}
                     />
                   )}
                 </div>
               </div>
             </div>
             <SheetFooter>
-              {isMssql && (
+              {readOnlyRoutines && (
                 <span className="text-xs text-muted-foreground mr-auto">
-                  MSSQL routines are read-only in this view.
+                  {isOracle ? "Oracle routines are read-only in this view." : "MSSQL routines are read-only in this view."}
                 </span>
               )}
               <Button
@@ -694,13 +703,13 @@ export function FunctionsList({
                 disabled={isSavingDefinition}
               >
                 <X className="w-3.5 h-3.5 mr-1" />
-                {isMssql ? "Close" : "Cancel"}
+                {readOnlyRoutines ? "Close" : "Cancel"}
               </Button>
               <Button
                 size="sm"
                 onClick={handleSaveDefinition}
-                disabled={isMssql || !hasDefinitionChanges || isSavingDefinition}
-                title={isMssql ? "Editing MSSQL routines coming soon" : undefined}
+                disabled={readOnlyRoutines || !hasDefinitionChanges || isSavingDefinition}
+                title={readOnlyRoutines ? readOnlyTitle : undefined}
               >
                 <Save className="w-3.5 h-3.5 mr-1" />
                 {isSavingDefinition ? "Saving..." : "Save"}

@@ -68,6 +68,8 @@ function candidateBridgePaths(): string[] {
     const base = normalizePath(process.env.RESOURCEDIR);
     out.push(path.join(base, name));
     out.push(path.join(base, "bin", name));
+    // Tauri bundles the bridge as resources/oracle-bridge/<binary>.
+    out.push(path.join(base, "oracle-bridge", name));
   }
   try {
     const exeDir = path.dirname(process.execPath);

@@ -46,7 +46,7 @@
     "resources": {
       "../resources/java-bridge/dist/bridge.jar": "bridge.jar",
       "../resources/java-bridge/dist/jre/": "jre/",
-      "../resources/oracle-bridge/rexadb-oracle-bridge": "rexadb-oracle-bridge"
+      "../resources/oracle-bridge/": "oracle-bridge/"
     },
     "icon": [
       "icons/32x32.png",
