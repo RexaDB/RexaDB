@@ -260,6 +260,26 @@ jobs:
           echo "Verifying identity...\n\n"
           security find-identity -v -p codesigning "$KEYCHAIN_RUNNER"
 
+      - name: Sign Oracle bridge (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Tauri copies bundle resources as-is: an unsigned Mach-O binary in
+          # Contents/Resources fails Apple notarization ("binary is not
+          # signed", no secure timestamp, no hardened runtime). Sign it here
+          # with the same Developer ID identity so the bundle notarizes.
+          BIN="resources/oracle-bridge/rexadb-oracle-bridge"
+          if [ ! -f "$BIN" ]; then
+            echo "  ❌ MISSING: $BIN (run build-oracle-bridge first)"
+            exit 1
+          fi
+          IDENTITY=$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.signingIdentity")
+          echo "  Signing $BIN with: $IDENTITY"
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$BIN"
+          codesign --verify --verbose=2 "$BIN"
+          echo "  ✅ Oracle bridge signed"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

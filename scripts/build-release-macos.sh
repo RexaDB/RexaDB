@@ -66,6 +66,15 @@ log "Building Oracle bridge..."
 bun run scripts/build-oracle-bridge.mjs
 success "Oracle bridge built"
 
+# Tauri copies bundle resources as-is: sign the bridge now or notarization
+# rejects the app ("binary is not signed"). Same identity as tauri.conf.
+log "Signing Oracle bridge..."
+APPLE_IDENTITY="$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.signingIdentity")"
+codesign --force --options runtime --timestamp --sign "$APPLE_IDENTITY" \
+  resources/oracle-bridge/rexadb-oracle-bridge
+codesign --verify --verbose=2 resources/oracle-bridge/rexadb-oracle-bridge
+success "Oracle bridge signed"
+
 # ── Step 2: Build x86_64 JRE (via downloaded x86_64 JDK) ──────────────────
 JRE_X64="resources/java-bridge/dist/jre-x86_64"
 if [ ! -d "$JRE_X64" ]; then
