@@ -1522,10 +1522,30 @@ export async function completeConnectionSecretMigration() {
   const { db } = await import("./index");
   const { sql } = await import("drizzle-orm");
   await db.run(sql.raw("PRAGMA secure_delete = ON"));
-  await checkpointConnectionDatabase(db, sql);
-  await db.run(sql.raw("VACUUM"));
-  await checkpointConnectionDatabase(db, sql);
-  return { success: true };
+
+  const attempts = 5;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await checkpointConnectionDatabase(db, sql);
+      await db.run(sql.raw("VACUUM"));
+      await checkpointConnectionDatabase(db, sql);
+      return { success: true };
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+
+  // Live rows are already redacted; VACUUM only reclaims pages for forensics.
+  // A successful WAL checkpoint is enough to clear the retry toast when the
+  // database is still briefly locked (common on Windows while the sidecar is busy).
+  try {
+    await checkpointConnectionDatabase(db, sql);
+    return { success: true };
+  } catch {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError || "SQLite cleanup could not finish."));
+  }
 }
 
 async function ensureCredentialVaultTable() {

@@ -25,9 +25,24 @@ async function invoke<T>(command: string, args: Record<string, unknown>): Promis
 
 export async function protectConnectionPayload<T extends CredentialPayload>(payload: T): Promise<T> {
   if (!hasConnectionSecret(payload)) {
-    return payload.credentialRef
-      ? { ...payload, credentialRef: null, credentialSecret: null, password: null, authToken: null, credentialStorageMode: getCredentialStorageMode() } as T
-      : payload;
+    // Explicit null clears a stored reference (caller opted to drop credentials).
+    // A non-null reference must be kept: edit forms often leave password blank
+    // because the secret lives in keychain/vault, and partial updates (name,
+    // lastActive, color) must not orphan the stored secret.
+    if (payload.credentialRef === null) {
+      return {
+        ...payload,
+        credentialRef: null,
+        credentialSecret: null,
+        password: null,
+        authToken: null,
+        credentialStorageMode: getCredentialStorageMode(),
+      } as T;
+    }
+    return {
+      ...payload,
+      credentialStorageMode: payload.credentialStorageMode || getCredentialStorageMode(),
+    } as T;
   }
   const bundle = JSON.stringify({ connectionString: payload.connectionString, password: payload.password || null, authToken: payload.authToken || null });
   const mode = getCredentialStorageMode();

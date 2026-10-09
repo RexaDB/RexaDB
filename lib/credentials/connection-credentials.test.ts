@@ -1,9 +1,45 @@
 import { describe, expect, it } from "bun:test";
+import { protectConnectionPayload } from "./connection-credentials";
 import {
   hasConnectionSecret,
   restorePostgresPassword,
   stripConnectionSecrets,
 } from "./connection-secret-utils";
+
+describe("protectConnectionPayload reference retention (issue #21)", () => {
+  it("keeps an existing credentialRef when the payload has no inline secret", async () => {
+    const out = await protectConnectionPayload({
+      id: 1,
+      name: "local",
+      connectionString: "postgresql://postgres@localhost:5432/postgres?sslmode=disable",
+      password: "",
+      credentialRef: "kept-ref-123",
+      credentialSecret: null,
+    });
+    expect(out.credentialRef).toBe("kept-ref-123");
+    expect(out.connectionString).toContain("postgresql://postgres@localhost");
+  });
+
+  it("keeps credentialRef on partial updates such as lastActive-only payloads that include the ref", async () => {
+    const out = await protectConnectionPayload({
+      lastActive: Date.now(),
+      credentialRef: "partial-ref",
+    });
+    expect(out.credentialRef).toBe("partial-ref");
+  });
+
+  it("clears credentials only when credentialRef is explicitly null", async () => {
+    const out = await protectConnectionPayload({
+      connectionString: "postgresql://postgres@localhost:5432/postgres",
+      credentialRef: null,
+      credentialSecret: "v1.should-clear",
+      password: null,
+    });
+    expect(out.credentialRef).toBeNull();
+    expect(out.credentialSecret).toBeNull();
+    expect(out.password).toBeNull();
+  });
+});
 
 describe("connection credential redaction", () => {
   it("removes URL passwords without changing non-secret parameters", () => {

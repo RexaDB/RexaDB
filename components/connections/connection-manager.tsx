@@ -128,8 +128,10 @@ import { supabase } from "@/lib/supabase/client";
 import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
 import {
   deleteConnectionCredential,
+  hydrateConnection,
   protectConnectionPayload,
 } from "@/lib/credentials/connection-credentials";
+import { hasConnectionSecret } from "@/lib/credentials/connection-secret-utils";
 import {
   activateLocalUserProfile,
   loadStoredDisplayName,
@@ -3047,15 +3049,34 @@ export function ConnectionManager({
     setConnectionScreen(isDuplicate ? "new-form" : "edit-form");
   };
 
+  const unlockConnectionSecrets = useCallback(async (conn: Connection): Promise<Connection> => {
+    if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
+      return conn;
+    }
+    const ready = (await hydrateConnection(conn as any)) as Connection;
+    setConnections((prev) =>
+      prev.map((item) => (item.id === ready.id ? { ...item, ...ready } : item)),
+    );
+    return ready;
+  }, [workspaceMode]);
+
   const handleEdit = (conn: Connection) => {
-    populateFormFromConnection(conn, false);
-    if (
-      workspaceMode &&
-      can("connections.manage_access") &&
-      conn.connectionString.startsWith("workspace:")
-    ) {
-      const wsId = conn.connectionString.replace("workspace:", "");
-      (async () => {
+    void (async () => {
+      let ready = conn;
+      try {
+        ready = await unlockConnectionSecrets(conn);
+      } catch {
+        toast.error(
+          "Could not unlock saved credentials for editing. Re-enter the password to restore this connection.",
+        );
+      }
+      populateFormFromConnection(ready, false);
+      if (
+        workspaceMode &&
+        can("connections.manage_access") &&
+        ready.connectionString.startsWith("workspace:")
+      ) {
+        const wsId = ready.connectionString.replace("workspace:", "");
         try {
           const res = await studioApi.get<{ data: ConnectionAccess[] }>(
             `/connections/${wsId}/access`,
@@ -3068,11 +3089,22 @@ export function ConnectionManager({
         } catch {
           /* no access data */
         }
-      })();
-    }
+      }
+    })();
   };
-  const handleDuplicate = (conn: Connection) =>
-    populateFormFromConnection(conn, true);
+  const handleDuplicate = (conn: Connection) => {
+    void (async () => {
+      let ready = conn;
+      try {
+        ready = await unlockConnectionSecrets(conn);
+      } catch {
+        toast.error(
+          "Could not unlock saved credentials to duplicate. Re-enter the password on the copy.",
+        );
+      }
+      populateFormFromConnection(ready, true);
+    })();
+  };
   const openTransferForConnection = (conn: Connection) => {
     setTransferSourceConnectionId(String(conn.id));
     setConnectionScreen("transfer");
@@ -3227,14 +3259,31 @@ export function ConnectionManager({
     }
     if (openingConnectionId === conn.id) return;
     setOpeningConnectionId(conn.id);
+
+    let ready = conn;
+    try {
+      ready = await unlockConnectionSecrets(conn);
+    } catch (err) {
+      openConnectionFailureDialog({
+        connectionName: conn.name,
+        error:
+          err instanceof Error
+            ? err.message
+            : "Could not unlock saved credentials.",
+        message: `Unable to unlock credentials for "${conn.name}". Check Settings → Security (keychain/vault) and retry.`,
+      });
+      setOpeningConnectionId(null);
+      return;
+    }
+
     const provider = detectProvider(
-      conn.connectionString,
-      (conn as any).connectionType,
+      ready.connectionString,
+      (ready as any).connectionType,
     );
     if (provider !== "federated") {
       if (provider === "jdbc") {
         try {
-          const parsed = new URL(conn.connectionString);
+          const parsed = new URL(ready.connectionString);
           if (!parsed.searchParams.get("jarPaths")) {
             const driverClass = parsed.searchParams.get("driverClass") || "";
             if (driverClass) {
@@ -3243,8 +3292,8 @@ export function ConnectionManager({
               if (match && match.jarPaths.length > 0) {
                 parsed.searchParams.set("jarPaths", match.jarPaths.join(","));
                 const healed = parsed.toString();
-                conn.connectionString = healed;
-                await updateConnection(conn.id, { connectionString: healed }).catch(() => {});
+                ready = { ...ready, connectionString: healed };
+                await updateConnection(ready.id, { connectionString: healed }).catch(() => {});
               }
             }
           }
@@ -3252,23 +3301,23 @@ export function ConnectionManager({
       }
       try {
         const res = await testConnection({
-          connectionString: conn.connectionString,
-          connectionType: (conn as any).connectionType || provider,
+          connectionString: ready.connectionString,
+          connectionType: (ready as any).connectionType || provider,
         });
         if (!res.success) {
           openConnectionFailureDialog({
-            connectionName: conn.name,
+            connectionName: ready.name,
             error: res.error ?? "Connection failed.",
-            message: `Unable to connect to "${conn.name}".`,
+            message: `Unable to connect to "${ready.name}".`,
           });
           setOpeningConnectionId(null);
           return;
         }
       } catch (err) {
         openConnectionFailureDialog({
-          connectionName: conn.name,
+          connectionName: ready.name,
           error: err instanceof Error ? err.message : String(err),
-          message: `Unable to connect to "${conn.name}".`,
+          message: `Unable to connect to "${ready.name}".`,
         });
         setOpeningConnectionId(null);
         return;
@@ -3277,15 +3326,15 @@ export function ConnectionManager({
 
     // Update lastActive before opening
     const now = Date.now();
-    await updateConnection(conn.id, { lastActive: now });
+    await updateConnection(ready.id, { lastActive: now });
 
     console.log(
       "[openConnection] navigating to studio, conn.id:",
-      conn.id,
+      ready.id,
       "conn.type:",
-      conn.connectionType,
+      ready.connectionType,
     );
-    await openStudioTarget(conn.id);
+    await openStudioTarget(ready.id);
   };
 
   const handleOpenStudio = async (
