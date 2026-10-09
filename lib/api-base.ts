@@ -35,6 +35,69 @@ export function refreshApiBase(): Promise<void> {
   return initialization;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function probeSidecarHttp(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort check: is the sidecar reachable right now?
+ * In Tauri this prefers the Rust `is_sidecar_ready` flag (which also
+ * re-syncs the dynamic port); in a plain browser it probes /health.
+ * Never throws.
+ */
+export async function isSidecarReady(): Promise<boolean> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    try {
+      const ok = await invoke<boolean>("is_sidecar_ready");
+      if (ok) {
+        await initApiBase().catch(() => undefined);
+        return true;
+      }
+    } catch {
+      // Tauri import worked but the command failed — fall through to HTTP probe.
+    }
+  } catch {
+    // Not running inside Tauri — fall through to HTTP probe.
+  }
+  return probeSidecarHttp();
+}
+
+/**
+ * Wait until the sidecar answers (or timeout). Used to avoid a one-shot
+ * initial fetch racing a slow cold-start sidecar and caching an empty list
+ * for the whole session. Never throws; returns false on timeout.
+ */
+export async function waitForSidecarReady(
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const pollMs = opts.pollMs ?? 500;
+  const deadline = Date.now() + timeoutMs;
+  // Make sure we have at least attempted port discovery before probing.
+  await initApiBase().catch(() => undefined);
+  let attempts = 0;
+  for (;;) {
+    if (await isSidecarReady()) return true;
+    if (Date.now() >= deadline) return false;
+    attempts += 1;
+    // The sidecar may have respawned on a new port while we poll.
+    if (attempts % 3 === 0) {
+      await refreshApiBase().catch(() => undefined);
+    }
+    await sleep(pollMs);
+  }
+}
+
 // Wrapper that routes API calls through the Express sidecar instead of same-origin.
 // Use this instead of raw fetch("/api/...") so calls work in static export AND dev mode.
 export function apiFetch(url: string, init?: RequestInit): Promise<Response> {

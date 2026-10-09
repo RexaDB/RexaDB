@@ -14,7 +14,7 @@ import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
 import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
-import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
+import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
 import { supabase } from "@/lib/supabase/client";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
 import { ONBOARDING_COMPLETE_KEY } from "@/lib/onboarding";
@@ -149,12 +149,24 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
 
   const loadConns = useCallback(async () => {
     try {
-      const rows = await getConnections();
-      setConnections(rows || []);
+      const res = await getConnectionsResult();
+      if (res.ok) setConnections(res.data || []);
     } catch {}
   }, []);
   useEffect(() => {
-    void loadConns();
+    // Same cold-start race as ConnectionManager: wait for the sidecar
+    // before the first fetch so the sidebar list isn't stuck empty.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { waitForSidecarReady } = await import("@/lib/api-base");
+        await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+      } catch {}
+      if (!cancelled) await loadConns();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loadConns]);
 
   const activeTabId = nav.stack[nav.index] ?? CONNECTIONS_TAB.id;
@@ -178,9 +190,9 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     let active = true;
     (async () => {
       try {
-        const rows = await getConnections();
-        if (active) {
-          setSelectedConnection(rows?.find((c) => c.id === selectedConnectionId) || null);
+        const res = await getConnectionsResult({ retries: 0 });
+        if (active && res.ok) {
+          setSelectedConnection(res.data?.find((c) => c.id === selectedConnectionId) || null);
         }
       } catch {}
     })();

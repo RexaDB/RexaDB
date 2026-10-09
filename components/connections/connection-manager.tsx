@@ -125,7 +125,7 @@ import {
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase/client";
-import { getConnections, getStoredUserProfile } from "@/lib/api/actions-client";
+import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
 import {
   deleteConnectionCredential,
   hydrateConnection,
@@ -518,9 +518,46 @@ export function ConnectionManager({
     error: string;
   };
 
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+
   useEffect(() => {
-    void loadConnections();
+    let cancelled = false;
+    // Gate the very first load on sidecar readiness: on a production
+    // cold start the sidecar can still be spawning (and the dynamic Tauri
+    // port undiscovered) when this component mounts. A single immediate
+    // fetch would fail, resolve to [], and leave "No connections found"
+    // on screen until the next manual refresh.
+    void (async () => {
+      try {
+        const { waitForSidecarReady } = await import("@/lib/api-base");
+        await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+      } catch {
+        // Best-effort only — loadConnections() itself retries.
+      }
+      if (!cancelled) await loadConnections();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    // If the initial load failed (sidecar was still starting), a later
+    // focus/online event means the sidecar is likely up now — retry
+    // instead of leaving the empty state stuck.
+    if (!connectionsError) return;
+    const retryIfUnloaded = () => {
+      void loadConnections();
+    };
+    window.addEventListener("focus", retryIfUnloaded);
+    window.addEventListener("online", retryIfUnloaded);
+    return () => {
+      window.removeEventListener("focus", retryIfUnloaded);
+      window.removeEventListener("online", retryIfUnloaded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionsError]);
 
   const providerCards: Array<{
     id: ConnectionProvider;
@@ -1591,12 +1628,19 @@ export function ConnectionManager({
       }
     }
     try {
-      const local = (await getConnections()) ?? [];
+      const result = await getConnectionsResult();
+      if (!result.ok) {
+        throw new Error(result.error || "Could not reach the local sidecar.");
+      }
+      const local = result.data ?? [];
       return local.filter(
         (c: any) => !c.connectionString?.startsWith("workspace:"),
       );
-    } catch {
-      return [];
+    } catch (err) {
+      // Distinguish transport failure (throw → loadConnections shows a Retry
+      // state) from a genuine empty list (return []). Swallowing here caused
+      // cold-start "No connections found" until the next manual refresh.
+      throw err instanceof Error ? err : new Error("Failed to load connections.");
     }
   }, [workspaceMode]);
 
@@ -2025,6 +2069,7 @@ export function ConnectionManager({
         fetchConnectionGroups(),
       ]);
       setConnections(conns);
+      setConnectionsError(null);
       if (conns.some((conn: any) => conn.credentialError)) {
         toast.error(
           "Some saved credentials could not be unlocked. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
@@ -2036,6 +2081,12 @@ export function ConnectionManager({
         );
       }
       setConnectionGroups(groups);
+    } catch (err) {
+      // Keep previously loaded rows (if any) instead of wiping to [] — a
+      // transient sidecar failure must not erase the visible list.
+      const message =
+        err instanceof Error ? err.message : "Failed to load connections.";
+      setConnectionsError(message);
     } finally {
       // Always clear the loading gate, even on an unexpected failure —
       // otherwise the whole page hangs on the loading state forever.
@@ -5703,13 +5754,27 @@ export function ConnectionManager({
                         <Database className="w-6 h-6 text-muted-foreground" />
                       </div>
                       <h3 className="text-sm font-medium text-foreground mb-1">
-                        No connections found
+                        {connectionsError && !searchQuery
+                          ? "Could not load connections"
+                          : "No connections found"}
                       </h3>
                       <p className="text-xs text-muted-foreground max-w-xs mb-6">
                         {searchQuery
                           ? "Try a different search term."
-                          : "Add a database connection to get started."}
+                          : connectionsError
+                            ? `${connectionsError} The local sidecar may still be starting — retry in a moment.`
+                            : "Add a database connection to get started."}
                       </p>
+                      {connectionsError && !searchQuery && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mb-3"
+                          onClick={() => void loadConnections()}
+                        >
+                          Retry
+                        </Button>
+                      )}
                       {!searchQuery && can("connections.create") && (
                         <Button
                           size="sm"
