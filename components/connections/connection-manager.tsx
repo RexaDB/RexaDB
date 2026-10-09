@@ -2208,7 +2208,7 @@ export function ConnectionManager({
       const detail = (e as CustomEvent).detail;
       if (detail?.connected !== undefined) {
         setWorkspaceMode(!!detail.connected);
-        setConnectionScreen("list");
+        navigateConnectionScreen("list");
         if (typeof window !== "undefined") {
           if (detail.connected) {
             window.sessionStorage.setItem("workspace:active", "1");
@@ -2528,7 +2528,7 @@ export function ConnectionManager({
   };
 
   const handleOpenSettings = () => {
-    setConnectionScreen("settings");
+    navigateConnectionScreen("settings");
   };
 
   const handleAddSupabaseAccount = useCallback(() => {
@@ -2545,7 +2545,7 @@ export function ConnectionManager({
     });
     if (next.length === 0) {
       if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
-      else setConnectionScreen("supabase");
+      else navigateConnectionScreen("supabase");
     }
   }, [onOpenSupabaseAccounts]);
 
@@ -2574,7 +2574,7 @@ export function ConnectionManager({
       } else {
         await loadConnections();
         if (!isSupabaseMode) {
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
         }
         toast.success(`Connected to ${payload.name}`);
       }
@@ -2598,7 +2598,7 @@ export function ConnectionManager({
     });
     if (next.length === 0) {
       if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
-      else setConnectionScreen("spacetimedb-account");
+      else navigateConnectionScreen("spacetimedb-account");
     }
   }, [onOpenSpacetimedbAccounts]);
 
@@ -2627,7 +2627,7 @@ export function ConnectionManager({
       } else {
         await loadConnections();
         if (!isSpacetimeDbMode) {
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
         }
         toast.success(`Connected to ${payload.name}`);
       }
@@ -2657,7 +2657,7 @@ export function ConnectionManager({
     const installed = neonCliInstalled ?? (await checkNeonCli());
     if (!installed) {
       if (onOpenNeonAccounts) onOpenNeonAccounts();
-      else setConnectionScreen("neon-cli");
+      else navigateConnectionScreen("neon-cli");
       return;
     }
     setNeonReconnectProfile(null);
@@ -2668,7 +2668,7 @@ export function ConnectionManager({
     const installed = neonCliInstalled ?? (await checkNeonCli());
     if (!installed) {
       if (onOpenNeonAccounts) onOpenNeonAccounts();
-      else setConnectionScreen("neon-cli");
+      else navigateConnectionScreen("neon-cli");
       return;
     }
     setNeonReconnectProfile(profileName);
@@ -2685,7 +2685,7 @@ export function ConnectionManager({
     });
     if (next.length === 0) {
       if (onOpenNeonAccounts) onOpenNeonAccounts();
-      else setConnectionScreen("neon-cli");
+      else navigateConnectionScreen("neon-cli");
     }
   }, [onOpenNeonAccounts]);
 
@@ -2710,7 +2710,7 @@ export function ConnectionManager({
       } else {
         await loadConnections();
         if (!isNeonCliMode) {
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
         }
         toast.success(`Connected to ${payload.name}`);
       }
@@ -2734,7 +2734,7 @@ export function ConnectionManager({
     });
     if (next.length === 0) {
       if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
-      else setConnectionScreen("planetscale-account");
+      else navigateConnectionScreen("planetscale-account");
     }
   }, [onOpenPlanetscaleAccounts]);
 
@@ -2759,7 +2759,7 @@ export function ConnectionManager({
       } else {
         await loadConnections();
         if (!isPlanetscaleMode) {
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
         }
         toast.success(`Connected to ${payload.name}`);
       }
@@ -2932,7 +2932,7 @@ export function ConnectionManager({
         if (res.success) {
           await syncAccessRules(editingConnection.id);
           resetConnectionDraft();
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
           setEditingConnection(null);
           await loadConnections();
           queueCloudPush();
@@ -2956,7 +2956,7 @@ export function ConnectionManager({
         if (res.success) {
           await syncAccessRules((res as any).id);
           resetConnectionDraft();
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
           await loadConnections();
           queueCloudPush();
         } else {
@@ -3073,6 +3073,18 @@ export function ConnectionManager({
 
   const formRequestRef = useRef(0);
   const openRequestRef = useRef(0);
+  // Every screen navigation invalidates in-flight edit/duplicate unlocks:
+  // a stale populate must never overwrite the screen the user moved to.
+  // The form fill in populateFormFromConnection uses setConnectionScreen
+  // directly and is the only exempt caller (it runs after the staleness
+  // check for its own request).
+  const navigateConnectionScreen = useCallback(
+    (screen: ConnectionScreen) => {
+      formRequestRef.current++;
+      setConnectionScreen(screen);
+    },
+    [],
+  );
   // Synchronous ground truth for in-flight opens (state updates lag a
   // tick, so a state-only guard misses same-tick double clicks).
   const openTokensRef = useRef(new Map<number, symbol>());
@@ -3150,11 +3162,8 @@ export function ConnectionManager({
     })();
   };
   const openTransferForConnection = (conn: Connection) => {
-    // A competing form action: invalidate any in-flight edit/duplicate
-    // unlock so its late populate cannot yank the screen back to a form.
-    formRequestRef.current++;
     setTransferSourceConnectionId(String(conn.id));
-    setConnectionScreen("transfer");
+    navigateConnectionScreen("transfer");
   };
 
   const autoEditTriggeredRef = useRef(false);
@@ -3176,13 +3185,10 @@ export function ConnectionManager({
   useEffect(() => {
     if (newConnectionTrigger !== lastNewConnTriggerRef.current) {
       lastNewConnTriggerRef.current = newConnectionTrigger;
-      // Invalidate any in-flight edit/duplicate unlock so its late populate
-      // cannot overwrite this fresh draft.
-      formRequestRef.current++;
       resetConnectionDraft();
-      setConnectionScreen("new-select");
+      navigateConnectionScreen("new-select");
     }
-  }, [newConnectionTrigger, resetConnectionDraft]);
+  }, [newConnectionTrigger, resetConnectionDraft, navigateConnectionScreen]);
 
   const fetchConnectionCredentials = useCallback(
     async (
@@ -3903,7 +3909,7 @@ export function ConnectionManager({
           toast.error("You don't have permission to create connections.");
           return;
         }
-        setConnectionScreen("new-select");
+        navigateConnectionScreen("new-select");
         return;
       }
 
@@ -3957,7 +3963,7 @@ export function ConnectionManager({
       if (event.key === "Escape") {
         event.preventDefault();
         if (!isSupabaseMode) {
-          setConnectionScreen("list");
+          navigateConnectionScreen("list");
           resetConnectionDraft();
         }
         return;
@@ -4127,7 +4133,7 @@ export function ConnectionManager({
   ): void => {
     if (!card) return;
     setSelectedProvider(card.id);
-    setConnectionScreen("new-form");
+    navigateConnectionScreen("new-form");
   };
 
   const renderAuthMenuItem = (label: string) => (
@@ -4701,32 +4707,32 @@ export function ConnectionManager({
               connectionScreen === "supabase" ||
               connectionScreen === "neon-cli"
             }
-            onBack={() => setConnectionScreen("list")}
+            onBack={() => navigateConnectionScreen("list")}
             onCommandSearchClick={() => setCommandMenuOpen(true)}
             showAnalyticsToggle={!!onAnalyticsToggle}
             isAnalyticsEnabled={isAnalyticsEnabled}
             onAnalyticsToggle={onAnalyticsToggle}
             settingsActive={connectionScreen === "settings"}
             onSettingsClick={() =>
-              setConnectionScreen(
+              navigateConnectionScreen(
                 connectionScreen === "settings" ? "list" : "settings",
               )
             }
             supabaseActive={connectionScreen === "supabase"}
             onSupabaseClick={() =>
-              setConnectionScreen(
+              navigateConnectionScreen(
                 connectionScreen === "supabase" ? "list" : "supabase",
               )
             }
             spacetimedbActive={connectionScreen === "spacetimedb-account"}
             onSpacetimedbClick={() =>
-              setConnectionScreen(
+              navigateConnectionScreen(
                 connectionScreen === "spacetimedb-account" ? "list" : "spacetimedb-account",
               )
             }
             neonActive={connectionScreen === "neon-cli"}
             onNeonClick={() =>
-              setConnectionScreen(
+              navigateConnectionScreen(
                 connectionScreen === "neon-cli" ? "list" : "neon-cli",
               )
             }
@@ -5164,7 +5170,7 @@ export function ConnectionManager({
                       <button
                         onClick={() => {
                           if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
-                          else setConnectionScreen("supabase");
+                          else navigateConnectionScreen("supabase");
                         }}
                         title={
                           supabaseAccounts.length === 1
@@ -5181,7 +5187,7 @@ export function ConnectionManager({
                       <button
                         onClick={() => {
                           if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
-                          else setConnectionScreen("spacetimedb-account");
+                          else navigateConnectionScreen("spacetimedb-account");
                         }}
                         title={
                           spacetimedbAccounts.length === 1
@@ -5198,7 +5204,7 @@ export function ConnectionManager({
                       <button
                         onClick={() => {
                           if (onOpenNeonAccounts) onOpenNeonAccounts();
-                          else setConnectionScreen("neon-cli");
+                          else navigateConnectionScreen("neon-cli");
                         }}
                         title={
                           neonAccounts.length === 1
@@ -5217,7 +5223,7 @@ export function ConnectionManager({
                           onClick={() => {
                             if (onOpenPlanetscaleAccounts)
                               onOpenPlanetscaleAccounts();
-                            else setConnectionScreen("planetscale-account");
+                            else navigateConnectionScreen("planetscale-account");
                           }}
                           title={
                             planetscaleAccounts.length === 1
@@ -5234,7 +5240,7 @@ export function ConnectionManager({
                         </button>
                       )}
                     <button
-                      onClick={() => setConnectionScreen("settings")}
+                      onClick={() => navigateConnectionScreen("settings")}
                       title="Settings"
                       aria-label="Settings"
                       className="flex h-7 w-7 items-center justify-center rounded-full border border-studio-border bg-background/15 hover:bg-background/25 no-drag"
@@ -5366,7 +5372,7 @@ export function ConnectionManager({
                       <button
                         onClick={() => {
                           resetConnectionDraft();
-                          setConnectionScreen("new-select");
+                          navigateConnectionScreen("new-select");
                         }}
                         className="h-9 px-3 rounded-lg border border-border bg-background text-sm flex items-center gap-2 focus:outline-none"
                       >
@@ -5711,7 +5717,7 @@ export function ConnectionManager({
                           className="bg-transparent border-dashed border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50"
                           onClick={() => {
                             resetConnectionDraft();
-                            setConnectionScreen("new-select");
+                            navigateConnectionScreen("new-select");
                           }}
                         >
                           <Plus className="w-4 h-4 mr-2" /> Add Connection
@@ -5730,7 +5736,7 @@ export function ConnectionManager({
                     size="icon"
                     variant="ghost"
                     className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                    onClick={() => setConnectionScreen("list")}
+                    onClick={() => navigateConnectionScreen("list")}
                   >
                     <ArrowLeft className="w-4 h-4" />
                   </Button>
@@ -5828,7 +5834,7 @@ export function ConnectionManager({
           ) : connectionScreen === "compare" ? (
             <ConnectionSchemaCompareScreen
               connections={connections}
-              onBack={() => setConnectionScreen("list")}
+              onBack={() => navigateConnectionScreen("list")}
             />
           ) : connectionScreen === "transfer" ? (
             <TransferProjectScreen
@@ -5837,18 +5843,18 @@ export function ConnectionManager({
               initialSourceConnectionId={transferSourceConnectionId}
               onBack={() => {
                 setTransferSourceConnectionId(null);
-                setConnectionScreen("list");
+                navigateConnectionScreen("list");
               }}
               onComplete={() => {
                 setTransferSourceConnectionId(null);
-                setConnectionScreen("list");
+                navigateConnectionScreen("list");
               }}
             />
           ) : connectionScreen === "settings" ? (
             <Dialog
               open={true}
               onOpenChange={(open) => {
-                if (!open) setConnectionScreen("list");
+                if (!open) navigateConnectionScreen("list");
               }}
             >
               <DialogContent
@@ -5898,7 +5904,7 @@ export function ConnectionManager({
                   <div className="mb-4 flex items-center">
                     <Button
                       variant="ghost"
-                      onClick={() => setConnectionScreen("list")}
+                      onClick={() => navigateConnectionScreen("list")}
                       className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -5928,7 +5934,7 @@ export function ConnectionManager({
                   <div className="mb-4 flex items-center">
                     <Button
                       variant="ghost"
-                      onClick={() => setConnectionScreen("list")}
+                      onClick={() => navigateConnectionScreen("list")}
                       className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -5958,7 +5964,7 @@ export function ConnectionManager({
                   <div className="mb-4 flex items-center">
                     <Button
                       variant="ghost"
-                      onClick={() => setConnectionScreen("list")}
+                      onClick={() => navigateConnectionScreen("list")}
                       className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -5992,7 +5998,7 @@ export function ConnectionManager({
                   <div className="mb-4 flex items-center">
                     <Button
                       variant="ghost"
-                      onClick={() => setConnectionScreen("list")}
+                      onClick={() => navigateConnectionScreen("list")}
                       className="h-8 gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:text-foreground"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -6048,7 +6054,7 @@ export function ConnectionManager({
                             setPgSslMode(parsed.sslMode);
                           }
                         }
-                        setConnectionScreen("new-form");
+                        navigateConnectionScreen("new-form");
                       }
                     }}
                     ref={connectionStringInputRef}
@@ -6071,7 +6077,7 @@ export function ConnectionManager({
                       onClick={() => {
                         if (supabaseAccounts.length > 0) {
                           if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
-                          else setConnectionScreen("supabase");
+                          else navigateConnectionScreen("supabase");
                         } else {
                           handleAddSupabaseAccount();
                         }
@@ -6104,7 +6110,7 @@ export function ConnectionManager({
                       onClick={() => {
                         if (spacetimedbAccounts.length > 0) {
                           if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
-                          else setConnectionScreen("spacetimedb-account");
+                          else navigateConnectionScreen("spacetimedb-account");
                         } else {
                           handleAddSpacetimeDbAccount();
                         }
@@ -6137,7 +6143,7 @@ export function ConnectionManager({
                       onClick={() => {
                         if (neonAccounts.length > 0) {
                           if (onOpenNeonAccounts) onOpenNeonAccounts();
-                          else setConnectionScreen("neon-cli");
+                          else navigateConnectionScreen("neon-cli");
                         } else {
                           void handleAddNeonAccount();
                         }
@@ -6169,7 +6175,7 @@ export function ConnectionManager({
                         onClick={() => {
                           if (planetscaleAccounts.length > 0) {
                             if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
-                            else setConnectionScreen("planetscale-account");
+                            else navigateConnectionScreen("planetscale-account");
                           } else {
                             handleAddPlanetscaleAccount();
                           }
@@ -6206,7 +6212,7 @@ export function ConnectionManager({
                         type="button"
                         onClick={() => {
                           if (card.id === "jdbc") {
-                            setConnectionScreen("jdbc-picker");
+                            navigateConnectionScreen("jdbc-picker");
                           } else {
                             setSelectedProvider(card.id);
                             if (isFieldBasedProvider(card.id)) {
@@ -6216,7 +6222,7 @@ export function ConnectionManager({
                             } else {
                               setFieldValues(null);
                             }
-                            setConnectionScreen("new-form");
+                            navigateConnectionScreen("new-form");
                           }
                         }}
                         className="group flex flex-col items-center justify-center rounded-lg border border-studio-border/60 bg-studio-bg/60 p-3.5 hover:border-studio-border hover:bg-studio-row-hover/80"
@@ -6249,7 +6255,7 @@ export function ConnectionManager({
                       size="sm"
                       className="text-muted-foreground hover:text-foreground"
                       onClick={() => {
-                        setConnectionScreen("list");
+                        navigateConnectionScreen("list");
                         resetConnectionDraft();
                       }}
                     >
@@ -6262,7 +6268,7 @@ export function ConnectionManager({
           ) : connectionScreen === "jdbc-picker" ? (
             <JdbcDatabasePickerScreen
               onBack={() => {
-                setConnectionScreen("new-select");
+                navigateConnectionScreen("new-select");
                 resetConnectionDraft();
               }}
               onSelect={async (driver) => {
@@ -6274,7 +6280,7 @@ export function ConnectionManager({
                     .replace("${database}", "mydb"),
                 );
                 setJdbcDriverClass(driver.driverClass);
-                setConnectionScreen("new-form");
+                navigateConnectionScreen("new-form");
                 const installed = await loadInstalledDrivers();
                 const existing = installed.find((i) => i.name === driver.name);
                 if (existing) {
@@ -6296,7 +6302,7 @@ export function ConnectionManager({
                       size="icon"
                       className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
                       onClick={() => {
-                        setConnectionScreen(
+                        navigateConnectionScreen(
                           connectionScreen === "edit-form"
                             ? "list"
                             : "new-select",
@@ -7211,7 +7217,7 @@ export function ConnectionManager({
           });
           setActiveSupabaseAccountId(account.id);
           if (onOpenSupabaseAccounts) onOpenSupabaseAccounts();
-          else setConnectionScreen("supabase");
+          else navigateConnectionScreen("supabase");
           void registerActiveSupabaseProjects(
             token,
             connectionsRef.current.map((c) => c.connectionString),
@@ -7257,7 +7263,7 @@ export function ConnectionManager({
           });
           setActiveSpacetimeDbAccountId(account.id);
           if (onOpenSpacetimedbAccounts) onOpenSpacetimedbAccounts();
-          else setConnectionScreen("spacetimedb-account");
+          else navigateConnectionScreen("spacetimedb-account");
           void registerSpacetimeDbDatabases(
             token,
             account.host || "",
@@ -7311,7 +7317,7 @@ export function ConnectionManager({
           setNeonReconnectProfile(null);
           setNeonReloadSignal((n) => n + 1);
           if (onOpenNeonAccounts) onOpenNeonAccounts();
-          else setConnectionScreen("neon-cli");
+          else navigateConnectionScreen("neon-cli");
         }}
       />
 
@@ -7325,7 +7331,7 @@ export function ConnectionManager({
           });
           setActivePlanetscaleAccountId(account.id);
           if (onOpenPlanetscaleAccounts) onOpenPlanetscaleAccounts();
-          else setConnectionScreen("planetscale-account");
+          else navigateConnectionScreen("planetscale-account");
         }}
       />
     </div>
@@ -7405,7 +7411,7 @@ export function ConnectionManager({
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
-              setConnectionScreen("compare");
+              navigateConnectionScreen("compare");
               setManageMenuOpen(false);
             }}
             className="gap-2 focus:bg-muted/50"
@@ -7414,7 +7420,7 @@ export function ConnectionManager({
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
-              setConnectionScreen("transfer");
+              navigateConnectionScreen("transfer");
               setManageMenuOpen(false);
             }}
             className="gap-2 focus:bg-muted/50"
@@ -7424,7 +7430,7 @@ export function ConnectionManager({
           <DropdownMenuSeparator className="bg-border/60" />
           <DropdownMenuItem
             onClick={() => {
-              setConnectionScreen("cloud-sync");
+              navigateConnectionScreen("cloud-sync");
               setManageMenuOpen(false);
             }}
             className="gap-2 focus:bg-muted/50"
@@ -7467,7 +7473,7 @@ export function ConnectionManager({
         }
         onClick={() => {
           resetConnectionDraft();
-          setConnectionScreen("new-select");
+          navigateConnectionScreen("new-select");
         }}
       >
         <Plus className="w-4 h-4" />
