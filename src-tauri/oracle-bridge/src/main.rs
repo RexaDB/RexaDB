@@ -236,21 +236,78 @@ fn is_select_like(sql: &str) -> bool {
         || upper.starts_with("EXPLAIN")
 }
 
+fn is_ident_boundary(c: char) -> bool {
+    !(c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '#')
+}
+
+/// True when `text` starts with `keyword` followed by a word boundary.
+fn starts_with_keyword(text: &str, keyword: &str) -> bool {
+    match text.get(..keyword.len()) {
+        Some(prefix) if prefix == keyword => text
+            .chars()
+            .nth(keyword.len())
+            .map(is_ident_boundary)
+            .unwrap_or(true),
+        _ => false,
+    }
+}
+
+/// Strip `keyword` (with word boundary) from the front of `text`.
+fn strip_keyword<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
+    if starts_with_keyword(text, keyword) {
+        Some(text[keyword.len()..].trim_start())
+    } else {
+        None
+    }
+}
+
+fn first_word(text: &str) -> &str {
+    let end = text
+        .find(is_ident_boundary)
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
 fn is_plsql_block(sql: &str) -> bool {
     let upper = strip_leading_comments(sql).to_ascii_uppercase();
-    upper.starts_with("BEGIN")
-        || upper.starts_with("DECLARE")
-        || (upper.starts_with("CREATE OR REPLACE")
-            && (upper.contains("PROCEDURE")
-                || upper.contains("FUNCTION")
-                || upper.contains("TRIGGER")
-                || upper.contains("PACKAGE")
-                || upper.contains("TYPE")))
-        || upper.starts_with("CREATE PROCEDURE")
-        || upper.starts_with("CREATE FUNCTION")
-        || upper.starts_with("CREATE TRIGGER")
-        || upper.starts_with("CREATE PACKAGE")
-        || upper.starts_with("CREATE TYPE")
+    let trimmed = upper.trim_start();
+    if starts_with_keyword(trimmed, "BEGIN") || starts_with_keyword(trimmed, "DECLARE") {
+        return true;
+    }
+    // Only CREATE PROCEDURE/FUNCTION/TRIGGER/PACKAGE/TYPE (with optional
+    // OR REPLACE / EDITIONABLE / FORCE modifiers) is PL/SQL. The object
+    // kind must come immediately after CREATE — e.g. CREATE OR REPLACE
+    // VIEW ... AS SELECT object_type ... is ordinary SQL even though the
+    // statement text contains "TYPE".
+    let Some(mut rest) = strip_keyword(trimmed, "CREATE") else {
+        return false;
+    };
+    loop {
+        let mut progressed = false;
+        for modifier in [
+            "OR REPLACE",
+            "EDITIONABLE",
+            "NONEDITIONABLE",
+            "FORCE",
+            "GLOBAL TEMPORARY",
+            "PRIVATE TEMPORARY",
+            "MATERIALIZED",
+            "UNIQUE",
+            "BITMAP",
+        ] {
+            if let Some(after) = strip_keyword(rest, modifier) {
+                rest = after;
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    matches!(
+        first_word(rest),
+        "PROCEDURE" | "FUNCTION" | "TRIGGER" | "PACKAGE" | "TYPE"
+    )
 }
 
 fn strip_trailing_delimiter(sql: &str) -> String {
@@ -577,5 +634,56 @@ fn main() {
             Ok(req) => handle_request(req),
             Err(e) => respond(false, 0, None, error_data(format!("invalid json: {e}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plsql_blocks_keep_their_semicolon() {
+        for sql in [
+            "BEGIN NULL; END;",
+            "  DECLARE x NUMBER; BEGIN x := 1; END;",
+            "CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;",
+            "CREATE PROCEDURE p AS BEGIN NULL; END;",
+            "CREATE OR REPLACE EDITIONABLE FUNCTION f RETURN NUMBER AS BEGIN RETURN 1; END;",
+            "CREATE OR REPLACE TRIGGER t BEFORE INSERT ON emp FOR EACH ROW BEGIN NULL; END;",
+            "CREATE OR REPLACE PACKAGE pkg AS PROCEDURE p; END pkg;",
+            "CREATE OR REPLACE TYPE t AS OBJECT (x NUMBER);",
+        ] {
+            assert!(is_plsql_block(sql), "expected PL/SQL: {sql}");
+            assert!(
+                strip_trailing_delimiter(sql).ends_with(';'),
+                "semicolon must be preserved: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_sql_is_not_plsql() {
+        for sql in [
+            "SELECT object_type FROM all_objects;",
+            "CREATE OR REPLACE VIEW v AS SELECT object_type FROM all_objects;",
+            "CREATE OR REPLACE FORCE VIEW v AS SELECT 1 FROM dual;",
+            "CREATE TABLE t (object_type VARCHAR2(30));",
+            "CREATE INDEX i ON t (object_type);",
+            "CREATE OR REPLACE SYNONYM s FOR rexadb.employees;",
+            "-- comment mentioning TYPE\nSELECT 1 FROM dual;",
+            "/* PACKAGE */ SELECT 1 FROM dual;",
+        ] {
+            assert!(!is_plsql_block(sql), "expected ordinary SQL: {sql}");
+            assert!(
+                !strip_trailing_delimiter(sql).ends_with(';'),
+                "delimiter must be stripped: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn commented_selects_take_the_cursor_path() {
+        assert!(is_select_like("-- report\nSELECT 1 FROM dual"));
+        assert!(is_select_like("/* nightly */ WITH x AS (SELECT 1 FROM dual) SELECT * FROM x"));
     }
 }
