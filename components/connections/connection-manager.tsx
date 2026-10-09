@@ -1200,9 +1200,20 @@ export function ConnectionManager({
   const [transferSourceConnectionId, setTransferSourceConnectionId] = useState<string | null>(
     null,
   );
-  const [openingConnectionId, setOpeningConnectionId] = useState<number | null>(
-    null,
+  const [openingConnectionIds, setOpeningConnectionIds] = useState<Set<number>>(
+    () => new Set(),
   );
+  const markOpening = useCallback((id: number) => {
+    setOpeningConnectionIds((prev) => new Set(prev).add(id));
+  }, []);
+  const unmarkOpening = useCallback((id: number) => {
+    setOpeningConnectionIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(
     null,
   );
@@ -3245,7 +3256,7 @@ export function ConnectionManager({
     const openStudioTarget = async (id: number) => {
       if (opts?.forceNewWindow || openConnectionsInNewWindow) {
         await openConnectionInNewWindow(id);
-        setOpeningConnectionId(null);
+        unmarkOpening(id);
         return;
       }
       router.push(`/studio?id=${id}`);
@@ -3293,8 +3304,8 @@ export function ConnectionManager({
       }
       return;
     }
-    if (openingConnectionId === conn.id) return;
-    setOpeningConnectionId(conn.id);
+    if (openingConnectionIds.has(conn.id)) return;
+    markOpening(conn.id);
     // Superseded same-page opens must not navigate or pop dialogs: the
     // newest request owns all UI effects. Separate-window opens stay fully
     // independent so Ctrl/Cmd-clicking several connections opens each one.
@@ -3315,7 +3326,7 @@ export function ConnectionManager({
             : "Could not unlock saved credentials.",
         message: `Unable to unlock credentials for "${conn.name}". Check Settings → Security (keychain/vault) and retry.`,
       });
-      setOpeningConnectionId(null);
+      unmarkOpening(conn.id);
       return;
     }
     if (isSuperseded()) return;
@@ -3384,7 +3395,7 @@ export function ConnectionManager({
             error: res.error ?? "Connection failed.",
             message: `Unable to connect to "${ready.name}".`,
           });
-          setOpeningConnectionId(null);
+          unmarkOpening(ready.id);
           return;
         }
       } catch (err) {
@@ -3394,7 +3405,7 @@ export function ConnectionManager({
           error: err instanceof Error ? err.message : String(err),
           message: `Unable to connect to "${ready.name}".`,
         });
-        setOpeningConnectionId(null);
+        unmarkOpening(ready.id);
         return;
       }
     }
@@ -5400,7 +5411,7 @@ export function ConnectionManager({
                                   }}
                                   className={cn(
                                     "group relative rounded-lg border border-studio-border/60 bg-card hover:bg-studio-row-hover hover:border-studio-border p-4 cursor-pointer",
-                                    openingConnectionId === conn.id &&
+                                    openingConnectionIds.has(conn.id) &&
                                       "opacity-50 pointer-events-none",
                                     draggingConnectionId === conn.id &&
                                       "opacity-60",
@@ -5617,7 +5628,7 @@ export function ConnectionManager({
                                       </span>
                                     </div>
                                   </button>
-                                  {openingConnectionId === conn.id && (
+                                  {openingConnectionIds.has(conn.id) && (
                                     <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-lg backdrop-blur-sm z-10">
                                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-muted-foreground/80 rounded-lg" />
