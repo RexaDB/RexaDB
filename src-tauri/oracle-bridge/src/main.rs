@@ -252,13 +252,25 @@ fn starts_with_keyword(text: &str, keyword: &str) -> bool {
     }
 }
 
-/// Strip `keyword` (with word boundary) from the front of `text`.
+/// Strip `keyword` (with word boundary) from the front of `text`,
+/// skipping trailing whitespace and SQL comments so keywords separated
+/// by comments (e.g. `OR REPLACE /* note */ PROCEDURE`) still match.
 fn strip_keyword<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
     if starts_with_keyword(text, keyword) {
-        Some(text[keyword.len()..].trim_start())
+        Some(strip_leading_comments(text[keyword.len()..].trim_start()))
     } else {
         None
     }
+}
+
+/// Strip a sequence of keywords separated by whitespace and/or SQL
+/// comments (e.g. `OR /* note */ REPLACE`).
+fn strip_keyword_seq<'a>(mut text: &'a str, keywords: &[&str]) -> Option<&'a str> {
+    for kw in keywords {
+        text = strip_leading_comments(text.trim_start());
+        text = strip_keyword(text, kw)?;
+    }
+    Some(strip_leading_comments(text.trim_start()))
 }
 
 fn first_word(text: &str) -> &str {
@@ -283,19 +295,21 @@ fn is_plsql_block(sql: &str) -> bool {
         return false;
     };
     loop {
+        // Comments may sit between any opening keywords.
+        rest = strip_leading_comments(rest);
         let mut progressed = false;
         for modifier in [
-            "OR REPLACE",
-            "EDITIONABLE",
-            "NONEDITIONABLE",
-            "FORCE",
-            "GLOBAL TEMPORARY",
-            "PRIVATE TEMPORARY",
-            "MATERIALIZED",
-            "UNIQUE",
-            "BITMAP",
+            &["OR", "REPLACE"][..],
+            &["EDITIONABLE"][..],
+            &["NONEDITIONABLE"][..],
+            &["FORCE"][..],
+            &["GLOBAL", "TEMPORARY"][..],
+            &["PRIVATE", "TEMPORARY"][..],
+            &["MATERIALIZED"][..],
+            &["UNIQUE"][..],
+            &["BITMAP"][..],
         ] {
-            if let Some(after) = strip_keyword(rest, modifier) {
+            if let Some(after) = strip_keyword_seq(rest, modifier) {
                 rest = after;
                 progressed = true;
             }
@@ -648,6 +662,8 @@ mod tests {
             "  DECLARE x NUMBER; BEGIN x := 1; END;",
             "CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;",
             "CREATE PROCEDURE p AS BEGIN NULL; END;",
+            "CREATE OR REPLACE /* note */ PROCEDURE p AS BEGIN NULL; END;",
+            "CREATE /* c */ OR /* d */ REPLACE -- trailing note\nPROCEDURE p AS BEGIN NULL; END;",
             "CREATE OR REPLACE EDITIONABLE FUNCTION f RETURN NUMBER AS BEGIN RETURN 1; END;",
             "CREATE OR REPLACE TRIGGER t BEFORE INSERT ON emp FOR EACH ROW BEGIN NULL; END;",
             "CREATE OR REPLACE PACKAGE pkg AS PROCEDURE p; END pkg;",
