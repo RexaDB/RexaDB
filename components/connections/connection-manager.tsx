@@ -3073,6 +3073,9 @@ export function ConnectionManager({
 
   const formRequestRef = useRef(0);
   const openRequestRef = useRef(0);
+  // Synchronous ground truth for in-flight opens (state updates lag a
+  // tick, so a state-only guard misses same-tick double clicks).
+  const openTokensRef = useRef(new Map<number, symbol>());
   const unlockConnectionSecrets = useCallback(async (conn: Connection): Promise<Connection> => {
     if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
       return conn;
@@ -3256,6 +3259,7 @@ export function ConnectionManager({
     const openStudioTarget = async (id: number) => {
       if (opts?.forceNewWindow || openConnectionsInNewWindow) {
         await openConnectionInNewWindow(id);
+        openTokensRef.current.delete(id);
         unmarkOpening(id);
         return;
       }
@@ -3304,8 +3308,19 @@ export function ConnectionManager({
       }
       return;
     }
-    if (openingConnectionIds.has(conn.id)) return;
+    if (openTokensRef.current.has(conn.id)) return;
+    const openToken = Symbol("open");
+    openTokensRef.current.set(conn.id, openToken);
     markOpening(conn.id);
+    // Release this request's busy flag on every exit. The token check keeps
+    // a superseding same-connection request's entry intact while letting a
+    // superseded request clear its own, so no card stays disabled forever.
+    const releaseOpening = () => {
+      if (openTokensRef.current.get(conn.id) === openToken) {
+        openTokensRef.current.delete(conn.id);
+        unmarkOpening(conn.id);
+      }
+    };
     // Superseded same-page opens must not navigate or pop dialogs: the
     // newest request owns all UI effects. Separate-window opens stay fully
     // independent so Ctrl/Cmd-clicking several connections opens each one.
@@ -3317,7 +3332,10 @@ export function ConnectionManager({
     try {
       ready = await unlockConnectionSecrets(conn);
     } catch (err) {
-      if (isSuperseded()) return;
+      if (isSuperseded()) {
+        releaseOpening();
+        return;
+      }
       openConnectionFailureDialog({
         connectionName: conn.name,
         error:
@@ -3326,10 +3344,13 @@ export function ConnectionManager({
             : "Could not unlock saved credentials.",
         message: `Unable to unlock credentials for "${conn.name}". Check Settings → Security (keychain/vault) and retry.`,
       });
-      unmarkOpening(conn.id);
+      releaseOpening();
       return;
     }
-    if (isSuperseded()) return;
+    if (isSuperseded()) {
+      releaseOpening();
+      return;
+    }
 
     const provider = detectProvider(
       ready.connectionString,
@@ -3388,24 +3409,30 @@ export function ConnectionManager({
           connectionString: ready.connectionString,
           connectionType: (ready as any).connectionType || provider,
         });
-        if (isSuperseded()) return;
+        if (isSuperseded()) {
+          releaseOpening();
+          return;
+        }
         if (!res.success) {
           openConnectionFailureDialog({
             connectionName: ready.name,
             error: res.error ?? "Connection failed.",
             message: `Unable to connect to "${ready.name}".`,
           });
-          unmarkOpening(ready.id);
+          releaseOpening();
           return;
         }
       } catch (err) {
-        if (isSuperseded()) return;
+        if (isSuperseded()) {
+          releaseOpening();
+          return;
+        }
         openConnectionFailureDialog({
           connectionName: ready.name,
           error: err instanceof Error ? err.message : String(err),
           message: `Unable to connect to "${ready.name}".`,
         });
-        unmarkOpening(ready.id);
+        releaseOpening();
         return;
       }
     }
@@ -3413,7 +3440,10 @@ export function ConnectionManager({
     // Update lastActive before opening
     const now = Date.now();
     await updateConnection(ready.id, { lastActive: now });
-    if (isSuperseded()) return;
+    if (isSuperseded()) {
+      releaseOpening();
+      return;
+    }
 
     console.log(
       "[openConnection] navigating to studio, conn.id:",
@@ -3421,6 +3451,7 @@ export function ConnectionManager({
       "conn.type:",
       ready.connectionType,
     );
+    releaseOpening();
     await openStudioTarget(ready.id);
   };
 
