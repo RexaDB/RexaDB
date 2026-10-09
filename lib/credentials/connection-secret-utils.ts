@@ -87,11 +87,26 @@ export function restorePostgresPassword(connectionString: string, username: stri
 // row without rotating the remote identity.
 const INCIDENTAL_QUERY_KEYS = /^(jarPaths|driverClass)$/i;
 
+// Well-known default ports per scheme, for comparison normalization.
+const DEFAULT_SCHEME_PORTS: Record<string, string> = {
+  postgresql: "5432",
+  postgres: "5432",
+  mysql: "3306",
+  mariadb: "3306",
+  mongodb: "27017",
+  redis: "6379",
+  rediss: "6379",
+  sqlserver: "1433",
+  mssql: "1433",
+};
+
 /**
  * Redacted connection target for stale-bundle comparison: strips incidental
  * client-side query parameters, then all secrets. Two strings that differ
  * only by password (or by jarPaths/driverClass) compare equal; a changed
- * host/database/user does not.
+ * host/database/user does not. Semantically identical representations
+ * (parameter order, trailing slash, explicit default port) are normalized
+ * so cosmetic edits don't force needless credential re-entry.
  */
 export function redactedTargetForComparison(value: string): string {
   const jdbcPrefix = /^jdbc:/i.test(value) ? value.slice(0, 5) : "";
@@ -102,6 +117,11 @@ export function redactedTargetForComparison(value: string): string {
     for (const key of [...url.searchParams.keys()]) {
       if (INCIDENTAL_QUERY_KEYS.test(key)) url.searchParams.delete(key);
     }
+    url.searchParams.sort();
+    const scheme = url.protocol.replace(/:$/, "").toLowerCase();
+    const defaultPort = DEFAULT_SCHEME_PORTS[scheme];
+    if (defaultPort && url.port === defaultPort) url.port = "";
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
     normalized = `${jdbcPrefix}${url.toString()}`;
   } catch {
     normalized = value.replace(/([?&])(?:jarPaths|driverClass)=[^;&?#]*/gi, "$1");

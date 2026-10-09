@@ -249,6 +249,19 @@ describe("connection credential redaction", () => {
     ).not.toBe(redactedTargetForComparison("postgresql://postgres@new-host:5432/app"));
   });
 
+  it("treats cosmetic URL differences as the same target", () => {
+    const base = "postgresql://postgres@db.example:5432/app?sslmode=require&connect_timeout=10";
+    expect(redactedTargetForComparison(base)).toBe(
+      redactedTargetForComparison("postgresql://postgres@db.example/app?connect_timeout=10&sslmode=require"),
+    );
+    expect(redactedTargetForComparison(base)).toBe(
+      redactedTargetForComparison("postgresql://postgres@db.example:5432/app/?sslmode=require&connect_timeout=10"),
+    );
+    expect(redactedTargetForComparison(base)).not.toBe(
+      redactedTargetForComparison("postgresql://postgres@db.example:5433/app?sslmode=require&connect_timeout=10"),
+    );
+  });
+
   it("merges row driver settings onto the bundle URL without touching the target", () => {
     expect(
       applyRowDriverSettings(

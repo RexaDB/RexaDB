@@ -3061,6 +3061,7 @@ export function ConnectionManager({
   };
 
   const formRequestRef = useRef(0);
+  const openRequestRef = useRef(0);
   const unlockConnectionSecrets = useCallback(async (conn: Connection): Promise<Connection> => {
     if (workspaceMode || !(conn as any).credentialRef || hasConnectionSecret(conn)) {
       return conn;
@@ -3294,11 +3295,16 @@ export function ConnectionManager({
     }
     if (openingConnectionId === conn.id) return;
     setOpeningConnectionId(conn.id);
+    // Superseded opens must not navigate or pop dialogs: the newest request
+    // owns all UI effects. Stale completions return silently without
+    // touching openingConnectionId, which the owner manages.
+    const requestId = ++openRequestRef.current;
 
     let ready = conn;
     try {
       ready = await unlockConnectionSecrets(conn);
     } catch (err) {
+      if (requestId !== openRequestRef.current) return;
       openConnectionFailureDialog({
         connectionName: conn.name,
         error:
@@ -3310,6 +3316,7 @@ export function ConnectionManager({
       setOpeningConnectionId(null);
       return;
     }
+    if (requestId !== openRequestRef.current) return;
 
     const provider = detectProvider(
       ready.connectionString,
@@ -3368,6 +3375,7 @@ export function ConnectionManager({
           connectionString: ready.connectionString,
           connectionType: (ready as any).connectionType || provider,
         });
+        if (requestId !== openRequestRef.current) return;
         if (!res.success) {
           openConnectionFailureDialog({
             connectionName: ready.name,
@@ -3378,6 +3386,7 @@ export function ConnectionManager({
           return;
         }
       } catch (err) {
+        if (requestId !== openRequestRef.current) return;
         openConnectionFailureDialog({
           connectionName: ready.name,
           error: err instanceof Error ? err.message : String(err),
@@ -3391,6 +3400,7 @@ export function ConnectionManager({
     // Update lastActive before opening
     const now = Date.now();
     await updateConnection(ready.id, { lastActive: now });
+    if (requestId !== openRequestRef.current) return;
 
     console.log(
       "[openConnection] navigating to studio, conn.id:",
