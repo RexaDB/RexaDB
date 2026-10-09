@@ -3256,11 +3256,22 @@ export function ConnectionManager({
     conn: Connection,
     opts?: { forceNewWindow?: boolean },
   ) => {
-    const openStudioTarget = async (id: number) => {
-      if (opts?.forceNewWindow || openConnectionsInNewWindow) {
-        await openConnectionInNewWindow(id);
+    const releaseOpenToken = (id: number, token: symbol) => {
+      if (openTokensRef.current.get(id) === token) {
         openTokensRef.current.delete(id);
         unmarkOpening(id);
+      }
+    };
+    const openStudioTarget = async (id: number, token?: symbol) => {
+      if (opts?.forceNewWindow || openConnectionsInNewWindow) {
+        try {
+          await openConnectionInNewWindow(id);
+        } finally {
+          // Hold the busy flag until the window finishes opening (even on
+          // failure), and clear it only through the token check so an older
+          // open can never wipe a newer request's guard and busy state.
+          if (token !== undefined) releaseOpenToken(id, token);
+        }
         return;
       }
       router.push(`/studio?id=${id}`);
@@ -3316,10 +3327,7 @@ export function ConnectionManager({
     // a superseding same-connection request's entry intact while letting a
     // superseded request clear its own, so no card stays disabled forever.
     const releaseOpening = () => {
-      if (openTokensRef.current.get(conn.id) === openToken) {
-        openTokensRef.current.delete(conn.id);
-        unmarkOpening(conn.id);
-      }
+      releaseOpenToken(conn.id, openToken);
     };
     // Superseded same-page opens must not navigate or pop dialogs: the
     // newest request owns all UI effects. Separate-window opens stay fully
@@ -3451,8 +3459,11 @@ export function ConnectionManager({
       "conn.type:",
       ready.connectionType,
     );
-    releaseOpening();
-    await openStudioTarget(ready.id);
+    // Same-page navigation is synchronous, so releasing first is atomic.
+    // New-window opens keep the token until the window finishes opening;
+    // openStudioTarget releases it through the token check.
+    if (!(opts?.forceNewWindow || openConnectionsInNewWindow)) releaseOpening();
+    await openStudioTarget(ready.id, openToken);
   };
 
   const handleOpenStudio = async (
