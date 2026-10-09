@@ -105,8 +105,10 @@ const DEFAULT_SCHEME_PORTS: Record<string, string> = {
  * client-side query parameters, then all secrets. Two strings that differ
  * only by password (or by jarPaths/driverClass) compare equal; a changed
  * host/database/user does not. Semantically identical representations
- * (parameter order, trailing slash, explicit default port) are normalized
- * so cosmetic edits don't force needless credential re-entry.
+ * (parameter order, explicit default port) are normalized so cosmetic edits
+ * don't force needless credential re-entry. Path characters are preserved
+ * verbatim: PostgreSQL treats a trailing slash as part of the database
+ * name, so `app/` and `app` are different targets.
  */
 export function redactedTargetForComparison(value: string): string {
   const jdbcPrefix = /^jdbc:/i.test(value) ? value.slice(0, 5) : "";
@@ -121,7 +123,6 @@ export function redactedTargetForComparison(value: string): string {
     const scheme = url.protocol.replace(/:$/, "").toLowerCase();
     const defaultPort = DEFAULT_SCHEME_PORTS[scheme];
     if (defaultPort && url.port === defaultPort) url.port = "";
-    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
     normalized = `${jdbcPrefix}${url.toString()}`;
   } catch {
     normalized = value.replace(/([?&])(?:jarPaths|driverClass)=[^;&?#]*/gi, "$1");

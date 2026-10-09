@@ -254,12 +254,15 @@ describe("connection credential redaction", () => {
     expect(redactedTargetForComparison(base)).toBe(
       redactedTargetForComparison("postgresql://postgres@db.example/app?connect_timeout=10&sslmode=require"),
     );
-    expect(redactedTargetForComparison(base)).toBe(
-      redactedTargetForComparison("postgresql://postgres@db.example:5432/app/?sslmode=require&connect_timeout=10"),
-    );
     expect(redactedTargetForComparison(base)).not.toBe(
       redactedTargetForComparison("postgresql://postgres@db.example:5433/app?sslmode=require&connect_timeout=10"),
     );
+  });
+
+  it("treats a trailing path slash as a different database", () => {
+    expect(
+      redactedTargetForComparison("postgresql://postgres@db.example/app"),
+    ).not.toBe(redactedTargetForComparison("postgresql://postgres@db.example/app/"));
   });
 
   it("merges row driver settings onto the bundle URL without touching the target", () => {

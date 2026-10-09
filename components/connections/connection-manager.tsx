@@ -3295,16 +3295,18 @@ export function ConnectionManager({
     }
     if (openingConnectionId === conn.id) return;
     setOpeningConnectionId(conn.id);
-    // Superseded opens must not navigate or pop dialogs: the newest request
-    // owns all UI effects. Stale completions return silently without
-    // touching openingConnectionId, which the owner manages.
-    const requestId = ++openRequestRef.current;
+    // Superseded same-page opens must not navigate or pop dialogs: the
+    // newest request owns all UI effects. Separate-window opens stay fully
+    // independent so Ctrl/Cmd-clicking several connections opens each one.
+    const sharesPage = !(opts?.forceNewWindow || openConnectionsInNewWindow);
+    const requestId = sharesPage ? ++openRequestRef.current : 0;
+    const isSuperseded = () => sharesPage && requestId !== openRequestRef.current;
 
     let ready = conn;
     try {
       ready = await unlockConnectionSecrets(conn);
     } catch (err) {
-      if (requestId !== openRequestRef.current) return;
+      if (isSuperseded()) return;
       openConnectionFailureDialog({
         connectionName: conn.name,
         error:
@@ -3316,7 +3318,7 @@ export function ConnectionManager({
       setOpeningConnectionId(null);
       return;
     }
-    if (requestId !== openRequestRef.current) return;
+    if (isSuperseded()) return;
 
     const provider = detectProvider(
       ready.connectionString,
@@ -3375,7 +3377,7 @@ export function ConnectionManager({
           connectionString: ready.connectionString,
           connectionType: (ready as any).connectionType || provider,
         });
-        if (requestId !== openRequestRef.current) return;
+        if (isSuperseded()) return;
         if (!res.success) {
           openConnectionFailureDialog({
             connectionName: ready.name,
@@ -3386,7 +3388,7 @@ export function ConnectionManager({
           return;
         }
       } catch (err) {
-        if (requestId !== openRequestRef.current) return;
+        if (isSuperseded()) return;
         openConnectionFailureDialog({
           connectionName: ready.name,
           error: err instanceof Error ? err.message : String(err),
@@ -3400,7 +3402,7 @@ export function ConnectionManager({
     // Update lastActive before opening
     const now = Date.now();
     await updateConnection(ready.id, { lastActive: now });
-    if (requestId !== openRequestRef.current) return;
+    if (isSuperseded()) return;
 
     console.log(
       "[openConnection] navigating to studio, conn.id:",
