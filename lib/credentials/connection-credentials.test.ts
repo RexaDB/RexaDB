@@ -1,8 +1,9 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import { protectConnectionPayload } from "./connection-credentials";
+import { hydrateConnection, protectConnectionPayload } from "./connection-credentials";
 import * as localVault from "./local-vault";
 import {
   hasConnectionSecret,
+  redactedTargetForComparison,
   restorePostgresPassword,
   stripConnectionSecrets,
 } from "./connection-secret-utils";
@@ -121,5 +122,70 @@ describe("connection credential redaction", () => {
   it("restores explicit PostgreSQL credentials into a safe in-memory URL", () => {
     expect(restorePostgresPassword("postgresql://db.example/app", "app-user", "p@ss"))
       .toBe("postgresql://app-user:p%40ss@db.example/app");
+  });
+
+  it("compares redacted targets ignoring passwords and incidental params", () => {
+    expect(
+      redactedTargetForComparison("postgresql://postgres:s3cret@db.example/app?sslmode=require"),
+    ).toBe(redactedTargetForComparison("postgresql://postgres@db.example/app?sslmode=require"));
+    expect(
+      redactedTargetForComparison("jdbc:postgresql://db.example/app?driverClass=org.X&jarPaths=/a.jar"),
+    ).toBe(redactedTargetForComparison("jdbc:postgresql://db.example/app?driverClass=org.X"));
+    expect(
+      redactedTargetForComparison("postgresql://postgres@old-host:5432/app"),
+    ).not.toBe(redactedTargetForComparison("postgresql://postgres@new-host:5432/app"));
+  });
+});
+
+describe("hydrateConnection stale-bundle guard", () => {
+  it("keeps the row target and flags credentialError instead of replaying the old URL", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "postgresql://postgres:s3cret@old-host:5432/old-db",
+        password: "s3cret",
+        authToken: null,
+      }),
+    );
+    try {
+      const out = await hydrateConnection({
+        id: 9,
+        connectionString: "postgresql://postgres@new-host:5432/new-db",
+        password: null,
+        credentialRef: "vault:stale-ref",
+        credentialSecret: "v1.stale",
+      } as any);
+      expect(out.connectionString).toContain("new-host");
+      expect(out.connectionString).not.toContain("old-host");
+      expect(out.password).toBeNull();
+      expect((out as any).credentialError).toBe(true);
+    } finally {
+      decryptSpy.mockRestore();
+    }
+  });
+
+  it("hydrates normally when the bundle target matches the row", async () => {
+    const decryptSpy = spyOn(localVault, "decryptVaultSecret").mockResolvedValue(
+      JSON.stringify({
+        connectionString: "postgresql://postgres:s3cret@localhost:5432/mydb",
+        password: "s3cret",
+        authToken: null,
+      }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => Response.json({ success: true })) as unknown as typeof fetch;
+    try {
+      const out = await hydrateConnection({
+        id: 10,
+        connectionString: "postgresql://postgres@localhost:5432/mydb",
+        password: null,
+        credentialRef: "vault:good-ref",
+        credentialSecret: "v1.good",
+      } as any);
+      expect(out.connectionString).toContain("localhost");
+      expect((out as any).credentialError).toBeUndefined();
+    } finally {
+      decryptSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
   });
 });

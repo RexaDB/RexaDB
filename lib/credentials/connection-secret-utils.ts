@@ -79,3 +79,32 @@ export function restorePostgresPassword(connectionString: string, username: stri
     return connectionString;
   }
 }
+
+// Query parameters that describe the local client setup rather than the
+// remote target (driver resolution, etc.). They must not count as a target
+// change when deciding whether a stored credential bundle still belongs to
+// a saved connection string — e.g. the JDBC jarPaths self-heal rewrites the
+// row without rotating the remote identity.
+const INCIDENTAL_QUERY_KEYS = /^(jarPaths|driverClass)$/i;
+
+/**
+ * Redacted connection target for stale-bundle comparison: strips incidental
+ * client-side query parameters, then all secrets. Two strings that differ
+ * only by password (or by jarPaths/driverClass) compare equal; a changed
+ * host/database/user does not.
+ */
+export function redactedTargetForComparison(value: string): string {
+  const jdbcPrefix = /^jdbc:/i.test(value) ? value.slice(0, 5) : "";
+  const parseable = jdbcPrefix ? value.slice(5) : value;
+  let normalized = value;
+  try {
+    const url = new URL(parseable);
+    for (const key of [...url.searchParams.keys()]) {
+      if (INCIDENTAL_QUERY_KEYS.test(key)) url.searchParams.delete(key);
+    }
+    normalized = `${jdbcPrefix}${url.toString()}`;
+  } catch {
+    normalized = value.replace(/([?&])(?:jarPaths|driverClass)=[^;&?#]*/gi, "$1");
+  }
+  return stripConnectionSecrets(normalized);
+}

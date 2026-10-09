@@ -3114,6 +3114,9 @@ export function ConnectionManager({
     })();
   };
   const openTransferForConnection = (conn: Connection) => {
+    // A competing form action: invalidate any in-flight edit/duplicate
+    // unlock so its late populate cannot yank the screen back to a form.
+    formRequestRef.current++;
     setTransferSourceConnectionId(String(conn.id));
     setConnectionScreen("transfer");
   };
@@ -3137,6 +3140,9 @@ export function ConnectionManager({
   useEffect(() => {
     if (newConnectionTrigger !== lastNewConnTriggerRef.current) {
       lastNewConnTriggerRef.current = newConnectionTrigger;
+      // Invalidate any in-flight edit/duplicate unlock so its late populate
+      // cannot overwrite this fresh draft.
+      formRequestRef.current++;
       resetConnectionDraft();
       setConnectionScreen("new-select");
     }
@@ -3301,12 +3307,15 @@ export function ConnectionManager({
                 parsed.searchParams.set("jarPaths", match.jarPaths.join(","));
                 const healed = parsed.toString();
                 ready = { ...ready, connectionString: healed };
-                // Pass the existing reference so protectConnectionPayload can
-                // rotate (not orphan) the keychain entry, and mirror the
-                // repair in state so the next open does not rewrite again.
+                // Pass the existing reference plus the unlocked secrets so
+                // protectConnectionPayload rotates (not orphans) the bundle
+                // with the healed URL, and mirror the repair in state so the
+                // next open does not rewrite again.
                 await updateConnection(ready.id, {
                   connectionString: healed,
                   credentialRef: (ready as any).credentialRef,
+                  password: (ready as any).password ?? undefined,
+                  authToken: (ready as any).authToken ?? undefined,
                 }).catch(() => {});
                 setConnections((prev) =>
                   prev.map((item) =>

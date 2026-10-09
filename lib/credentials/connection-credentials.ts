@@ -2,6 +2,7 @@ import { isDesktopRuntime } from "@/lib/desktop";
 import { API_BASE } from "@/lib/api-base";
 import {
   hasConnectionSecret,
+  redactedTargetForComparison,
   restorePostgresPassword,
   stripConnectionSecrets,
 } from "./connection-secret-utils";
@@ -65,7 +66,7 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
       const storedTarget = typeof stored?.connectionString === "string" ? stored.connectionString : null;
       if (storedTarget !== null) {
         try {
-          if (stripConnectionSecrets(storedTarget) !== stripConnectionSecrets(payload.connectionString)) {
+          if (redactedTargetForComparison(storedTarget) !== redactedTargetForComparison(payload.connectionString)) {
             return {
               ...payload,
               credentialRef: null,
@@ -125,6 +126,27 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
   for (const field of ["connectionString", "password", "authToken"] as const) {
     const value = secret[field];
     if (value === null || typeof value === "string") cacheSecret[field] = value;
+  }
+  // Defense in depth: if the row's saved target no longer matches the
+  // bundle's target (e.g. a save made before stale-reference detection
+  // paired a new URL with an old reference), never replay the old URL and
+  // password over the new target — that would connect to the wrong
+  // database. The row wins; flag for credential re-entry instead.
+  if (
+    typeof connection.connectionString === "string" &&
+    typeof secret.connectionString === "string"
+  ) {
+    let stale = false;
+    try {
+      stale =
+        redactedTargetForComparison(String(secret.connectionString)) !==
+        redactedTargetForComparison(connection.connectionString);
+    } catch {
+      stale = false;
+    }
+    if (stale) {
+      return { ...connection, password: null, authToken: null, credentialError: true } as T;
+    }
   }
   try {
     await fetch(new URL("/api/connections/credential-cache", API_BASE), {
