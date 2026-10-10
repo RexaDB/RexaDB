@@ -1,3 +1,4 @@
+// components
 import { ToolbarSelectionActions } from "./toolbar/toolbar-selection-actions";
 import { ToolbarFilterSort } from "./toolbar/toolbar-filter-sort";
 import { ToolbarGlobalActions } from "./toolbar/toolbar-global-actions";
@@ -8,7 +9,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { LayoutTable01Icon } from "@hugeicons/core-free-icons";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,8 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+
+// types
 import type { ConnectionDbType } from "@/lib/db/connection-type";
 import type {
   SupabaseAuthUserOption,
@@ -77,13 +79,14 @@ interface DataTableToolbarProps {
 export function DataTableToolbar(props: DataTableToolbarProps) {
   const { selectedRows } = props;
 
-  const SearchInputWithScope = (
-    <div className="relative w-[280px] group/search-scope">
+  const searchInputWithScope = (
+    <div className="relative min-w-0 max-w-full flex-[1_0_16rem]">
       <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
       <Input
         value={props.globalSearchQuery}
         onChange={(e) => props.setGlobalSearchQuery(e.target.value)}
         placeholder="Search all values..."
+        aria-label="Search table values"
         className="h-7 pl-7 pr-8 text-xs bg-background border-border"
       />
       <DropdownMenu>
@@ -92,7 +95,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
             variant="ghost"
             size="icon-sm"
             aria-label="Search scope"
-            className="absolute right-1 top-1/2 -translate-y-1/2 border-0 bg-transparent shadow-none hover:bg-transparent active:bg-transparent opacity-0 group-hover/search-scope:opacity-100 focus:opacity-100"
+            className="absolute right-1 top-1/2 -translate-y-1/2 border-0 bg-transparent shadow-none hover:bg-transparent active:bg-transparent text-muted-foreground hover:text-foreground"
           >
             <ChevronDown className="h-3.5 w-3.5" />
           </Button>
@@ -148,7 +151,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
     />
   );
 
-  const ColumnsDropdown = (
+  const columnsDropdown = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="font-normal dark:border-white/15 dark:bg-white/[0.02]">
@@ -183,64 +186,74 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   );
 
   const toolbarItems = [
-    { id: "filter", label: "Filter and sort", content: <><ToolbarFilterSort
-      filterQuery={props.filterQuery} setFilterQuery={props.setFilterQuery}
-      sortConfig={props.sortConfig} setSortConfig={props.setSortConfig}
-      refreshTableData={props.refreshTableData} selectedTable={props.selectedTable}
-      selectedSchema={props.selectedSchema} results={props.results} dbType={props.dbType}
-      globalSearchQuery={props.globalSearchQuery} setGlobalSearchQuery={props.setGlobalSearchQuery}
-      setGlobalSearchScope={props.setGlobalSearchScope}
-    /></> },
-    { id: "views", label: "Saved views", content: <SavedTableViews
-      connectionString={props.connectionString} table={props.selectedTable}
-      schema={props.selectedSchema} filter={props.filterQuery} sort={props.sortConfig}
-      onApply={(filter, sort) => {
-        props.setFilterQuery(filter); props.setSortConfig(sort);
-        if (props.selectedTable) props.refreshTableData(props.selectedTable, props.selectedSchema, filter, sort);
-      }}
-    /> },
-    { id: "columns", label: "Columns", content: ColumnsDropdown },
+    {
+      id: "filter",
+      label: "Filter and sort",
+      content: (
+        <div className={selectedRows.size > 0 ? "hidden" : "contents"}>
+          <ToolbarFilterSort
+            filterQuery={props.filterQuery}
+            setFilterQuery={props.setFilterQuery}
+            sortConfig={props.sortConfig}
+            setSortConfig={props.setSortConfig}
+            refreshTableData={props.refreshTableData}
+            selectedTable={props.selectedTable}
+            selectedSchema={props.selectedSchema}
+            results={props.results}
+            dbType={props.dbType}
+            globalSearchQuery={props.globalSearchQuery}
+            setGlobalSearchQuery={props.setGlobalSearchQuery}
+            setGlobalSearchScope={props.setGlobalSearchScope}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "views",
+      label: "Saved views",
+      content: (
+        <SavedTableViews
+          connectionString={props.connectionString}
+          table={props.selectedTable}
+          schema={props.selectedSchema}
+          filter={props.filterQuery}
+          sort={props.sortConfig}
+          onApply={(filter, sort) => {
+            props.setFilterQuery(filter);
+            props.setSortConfig(sort);
+            if (props.selectedTable) {
+              props.refreshTableData(props.selectedTable, props.selectedSchema, filter, sort);
+            }
+          }}
+        />
+      ),
+    },
+    { id: "columns", label: "Columns", content: columnsDropdown },
     { id: "actions", label: "Table actions", content: toolbarGlobalActions },
   ];
 
   return (
-    <div className="relative border-b border-border bg-studio-bg h-12 shrink-0 overflow-hidden">
-      {/* Default State */}
-      <div
-        className={cn(
-          "flex items-center px-4 h-full w-full transition-all duration-300 ease-in-out absolute inset-0 gap-2",
-          selectedRows.size > 0
-            ? "-translate-y-full opacity-0 pointer-events-none"
-            : "translate-y-0 opacity-100",
-        )}
-      >
-        {SearchInputWithScope}
-        <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
-      </div>
+    <div className="shrink-0 border-b border-border bg-studio-bg">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-4 py-2.5">
+        {searchInputWithScope}
 
-      {/* Selection State */}
-      <div
-        className={cn(
-          "flex items-center px-4 h-full w-full transition-all duration-300 ease-in-out absolute inset-0 gap-2",
-          selectedRows.size > 0
-            ? "translate-y-0 opacity-100"
-            : "translate-y-full opacity-0 pointer-events-none",
-        )}
-      >
-        <ToolbarSelectionActions
-          selectedRows={props.selectedRows}
-          setSelectedRows={props.setSelectedRows}
-          exportData={props.exportData}
-          copyData={props.copyData}
-          handleDeleteRows={props.handleDeleteRows}
-          isDeleting={props.isDeleting}
-          deleteDisabled={props.isPermissionPreview}
+        <ToolbarLayout
+          items={toolbarItems}
+          connectionString={props.connectionString}
+          leadingContent={
+            <div className={selectedRows.size > 0 ? "flex min-w-0 max-w-full flex-wrap items-center gap-2" : "hidden"}>
+              <ToolbarSelectionActions
+                selectedRows={props.selectedRows}
+                setSelectedRows={props.setSelectedRows}
+                exportData={props.exportData}
+                copyData={props.copyData}
+                handleDeleteRows={props.handleDeleteRows}
+                isDeleting={props.isDeleting}
+                deleteDisabled={props.isPermissionPreview}
+              />
+            </div>
+          }
         />
-
-        <div className="flex flex-1 items-center gap-2">
-          {SearchInputWithScope}
-          <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
-        </div>
       </div>
     </div>
   );
