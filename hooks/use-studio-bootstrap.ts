@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+
+// services
 import { getStudioBootstrap } from "@/lib/api/actions-client";
+
+// types
 import type { Connection } from "@/lib/db/schema";
 import type { StudioInitialUiState } from "@/lib/studio/types";
 
 const emptyUiState: StudioInitialUiState = { openTabs: [], activeTabId: null, schemas: [], selectedSchema: null, tables: [] };
 
 export function useStudioBootstrap(connectionId: number | null, requestedSchema: string | null) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<Connection | null>(null);
   const [initialUiState, setInitialUiState] = useState<StudioInitialUiState>(emptyUiState);
   const prevConnectionIdRef = useRef<number | null>(null);
@@ -16,6 +21,7 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
     if (!connectionId) {
       prevConnectionIdRef.current = null;
       setConnection(null);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -26,12 +32,13 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
       setLoading(true);
     }
 
+    setError(null);
+
     void (async () => {
       try {
-        console.log("[useStudioBootstrap] calling getStudioBootstrap for connectionId:", connectionId);
         const bootstrapResult = await getStudioBootstrap(connectionId, requestedSchema || undefined);
         if (!mounted) return;
-        console.log("[useStudioBootstrap] bootstrapResult success:", bootstrapResult?.success, "hasConnection:", !!bootstrapResult?.data?.connection);
+        setError(bootstrapResult.success ? null : bootstrapResult.error || "Could not open this connection.");
         const bootstrap = bootstrapResult?.success ? bootstrapResult.data : null;
         const openTabs = Array.isArray(bootstrap?.tabs)
           ? bootstrap.tabs.map((tab) => ({
@@ -51,8 +58,11 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
           tables: bootstrap?.tables || [],
         });
         setConnection(bootstrap?.connection ?? null);
-      } catch {
-        if (mounted) setConnection(null);
+      } catch (failure) {
+        if (mounted) {
+          setConnection(null);
+          setError(failure instanceof Error ? failure.message : "Could not open this connection.");
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -63,5 +73,5 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
     };
   }, [connectionId, requestedSchema]);
 
-  return { loading, connection, initialUiState };
+  return { loading, error, connection, initialUiState };
 }

@@ -484,6 +484,14 @@ export async function getStudioBootstrap(
   );
   if (!result.success || !result.data?.connection) return result;
   const [connection] = await migrateAndHydrateConnections([result.data.connection]);
+  if (connection.credentialError) {
+    return {
+      ...result,
+      success: false,
+      error: "Could not unlock saved credentials. Return to Connections and unlock or re-enter this connection’s credentials before opening Studio.",
+      data: { ...result.data, connection: null },
+    };
+  }
   return { ...result, data: { ...result.data, connection: connection as Connection } };
 }
 

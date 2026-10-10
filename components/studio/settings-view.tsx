@@ -305,6 +305,8 @@ interface StudioSettingsModel {
   setAppZoom: (value: number) => void;
   executionMode: "direct" | "review";
   setExecutionMode: (value: "direct" | "review") => void;
+  infiniteTableScrolling: boolean;
+  setInfiniteTableScrolling: (value: boolean) => void;
   rowSpacing: "compact" | "standard" | "relaxed";
   setRowSpacing: (value: "compact" | "standard" | "relaxed") => void;
   alternatingRowColors: boolean;
@@ -764,6 +766,8 @@ export function SettingsView({
     setAppZoom,
     executionMode,
     setExecutionMode,
+    infiniteTableScrolling,
+    setInfiniteTableScrolling,
     rowSpacing,
     setRowSpacing,
     alternatingRowColors,
@@ -1588,6 +1592,14 @@ export function SettingsView({
                 <div data-setting-id="zoom">
                   <ZoomSetting value={appZoom} onChange={setAppZoom} />
                 </div>
+
+                <ToggleSetting
+                  settingId="infinite-table-scrolling"
+                  title="Infinite scrolling"
+                  description="Load more table rows as you scroll. Tables without a primary key use pagination. Turn off to use page-by-page navigation for all tables."
+                  value={infiniteTableScrolling}
+                  onChange={setInfiniteTableScrolling}
+                />
 
                 {/* Row Spacing */}
                 <SelectSetting

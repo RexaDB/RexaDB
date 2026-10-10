@@ -70,10 +70,8 @@ export function restorePostgresPassword(connectionString: string, username: stri
   if (!/^postgres(?:ql)?:\/\//i.test(normalized)) return connectionString;
   try {
     const url = new URL(normalized);
-    if (!url.username && username) url.username = username;
-    // URL setters percent-encode automatically, so raw values such as
-    // `12345` or `p@ss` survive the round-trip.
-    if (!url.password) url.password = password;
+    if (!url.username && username) url.username = encodeURIComponent(username);
+    if (!url.password) url.password = encodeURIComponent(password);
     return url.toString();
   } catch {
     return connectionString;

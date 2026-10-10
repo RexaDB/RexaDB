@@ -23,7 +23,7 @@ function readHidden(key: string): string[] {
   } catch { return []; }
 }
 
-export function ToolbarLayout({ items, connectionString }: { items: Item[]; connectionString?: string }) {
+export function ToolbarLayout({ items, connectionString, leadingContent }: { items: Item[]; connectionString?: string; leadingContent?: React.ReactNode }) {
   const key = React.useMemo(() => storageKey(connectionString), [connectionString]);
   const [hidden, setHidden] = React.useState<string[]>([]);
   React.useEffect(() => {
@@ -44,8 +44,10 @@ export function ToolbarLayout({ items, connectionString }: { items: Item[]; conn
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          className="flex w-0 min-w-8 flex-1 self-stretch items-center justify-end gap-2"
+          className="flex min-w-0 max-w-full grow flex-wrap items-center gap-2"
         >
+          {leadingContent}
+
           {items.filter((item) => !hidden.includes(item.id)).map((item) => <React.Fragment key={item.id}>{item.content}</React.Fragment>)}
         </div>
       </ContextMenuTrigger>
