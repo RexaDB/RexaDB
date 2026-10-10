@@ -1,6 +1,7 @@
 import userColumnMigrations from "./user-column-migrations.json";
 
 let coreTablesEnsured = false;
+let coreTablesEnsuring: Promise<void> | undefined;
 
 type ColumnDef = { name: string; type: string; constraints?: string };
 
@@ -15,7 +16,16 @@ ${colDefs}
   `));
 }
 
-export async function ensureCoreTables() {
+export function ensureCoreTables(): Promise<void> {
+  if (!coreTablesEnsuring) {
+    coreTablesEnsuring = migrateCoreTables().finally(() => {
+      coreTablesEnsuring = undefined;
+    });
+  }
+  return coreTablesEnsuring;
+}
+
+async function migrateCoreTables() {
   const { db } = await import("./index");
   const { sql } = await import("drizzle-orm");
 
@@ -33,6 +43,25 @@ export async function ensureCoreTables() {
       await db.run(sql.raw(migration.statement));
     }
   }
+
+  const connectionColumnMigrations = [
+    { column: "sort_order", statement: "ALTER TABLE connections ADD COLUMN sort_order INTEGER" },
+    { column: "connection_type", statement: "ALTER TABLE connections ADD COLUMN connection_type TEXT" },
+    { column: "environment", statement: "ALTER TABLE connections ADD COLUMN environment TEXT" },
+    { column: "color", statement: "ALTER TABLE connections ADD COLUMN color TEXT" },
+    { column: "group", statement: "ALTER TABLE connections ADD COLUMN \"group\" TEXT" },
+    { column: "is_favorite", statement: "ALTER TABLE connections ADD COLUMN is_favorite INTEGER DEFAULT 0" },
+    { column: "last_active", statement: "ALTER TABLE connections ADD COLUMN last_active INTEGER" },
+    { column: "host", statement: "ALTER TABLE connections ADD COLUMN host TEXT" },
+    { column: "port", statement: "ALTER TABLE connections ADD COLUMN port TEXT" },
+    { column: "database", statement: "ALTER TABLE connections ADD COLUMN database TEXT" },
+    { column: "username", statement: "ALTER TABLE connections ADD COLUMN username TEXT" },
+    { column: "password", statement: "ALTER TABLE connections ADD COLUMN password TEXT" },
+    { column: "ssl_mode", statement: "ALTER TABLE connections ADD COLUMN ssl_mode TEXT" },
+    { column: "auth_token", statement: "ALTER TABLE connections ADD COLUMN auth_token TEXT" },
+    { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
+    { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
+  ];
 
   const coreMigrationPromises = () => [
     ensureColumns("connection_settings", [
@@ -181,24 +210,7 @@ export async function ensureCoreTables() {
 
   if (coreTablesEnsured) {
     await Promise.all([
-      ensureColumns("connections", [
-        { column: "sort_order", statement: "ALTER TABLE connections ADD COLUMN sort_order INTEGER" },
-        { column: "connection_type", statement: "ALTER TABLE connections ADD COLUMN connection_type TEXT" },
-        { column: "environment", statement: "ALTER TABLE connections ADD COLUMN environment TEXT" },
-        { column: "color", statement: "ALTER TABLE connections ADD COLUMN color TEXT" },
-        { column: "group", statement: "ALTER TABLE connections ADD COLUMN \"group\" TEXT" },
-        { column: "is_favorite", statement: "ALTER TABLE connections ADD COLUMN is_favorite INTEGER DEFAULT 0" },
-        { column: "last_active", statement: "ALTER TABLE connections ADD COLUMN last_active INTEGER" },
-        { column: "host", statement: "ALTER TABLE connections ADD COLUMN host TEXT" },
-        { column: "port", statement: "ALTER TABLE connections ADD COLUMN port TEXT" },
-        { column: "database", statement: "ALTER TABLE connections ADD COLUMN database TEXT" },
-        { column: "username", statement: "ALTER TABLE connections ADD COLUMN username TEXT" },
-        { column: "password", statement: "ALTER TABLE connections ADD COLUMN password TEXT" },
-        { column: "ssl_mode", statement: "ALTER TABLE connections ADD COLUMN ssl_mode TEXT" },
-        { column: "auth_token", statement: "ALTER TABLE connections ADD COLUMN auth_token TEXT" },
-        { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
-        { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
-      ]).then(() => db.run(sql`UPDATE connections SET sort_order = created_at WHERE sort_order IS NULL`)),
+      ensureColumns("connections", connectionColumnMigrations).then(() => db.run(sql`UPDATE connections SET sort_order = created_at WHERE sort_order IS NULL`)),
       ...coreMigrationPromises(),
     ]);
     return;
@@ -221,10 +233,7 @@ export async function ensureCoreTables() {
     { name: "credential_ref", type: "TEXT" },
     { name: "credential_secret", type: "TEXT" },
   ]);
-  await ensureColumns("connections", [
-    { column: "credential_ref", statement: "ALTER TABLE connections ADD COLUMN credential_ref TEXT" },
-    { column: "credential_secret", statement: "ALTER TABLE connections ADD COLUMN credential_secret TEXT" },
-  ]);
+  await ensureColumns("connections", connectionColumnMigrations);
   await createTableIfNotExists("folders", [
     { name: "id", type: "TEXT", constraints: "PRIMARY KEY NOT NULL" },
     { name: "connection_id", type: "INTEGER", constraints: "REFERENCES connections(id) ON DELETE CASCADE" },

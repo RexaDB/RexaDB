@@ -397,3 +397,13 @@ describe("hydrateConnection stale-bundle guard", () => {
     }
   });
 });
+
+
+describe("browser keychain access", () => {
+  it("explains how to open a desktop connection in the browser", async () => {
+    await expect(hydrateConnection({
+      connectionString: "postgresql://postgres@localhost:5432/postgres",
+      credentialRef: "desktop-reference",
+    })).rejects.toThrow("duplicate the connection and re-enter its password for browser use");
+  });
+});

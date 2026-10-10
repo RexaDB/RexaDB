@@ -129,8 +129,10 @@ import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-cl
 import {
   deleteConnectionCredential,
   hydrateConnection,
+  isDesktopKeychainConnectionUnavailable,
   protectConnectionPayload,
 } from "@/lib/credentials/connection-credentials";
+import { setCredentialStorageMode } from "@/lib/credentials/local-vault";
 import { hasConnectionSecret } from "@/lib/credentials/connection-secret-utils";
 import {
   activateLocalUserProfile,
@@ -516,6 +518,8 @@ export function ConnectionManager({
     connectionName: string;
     message: string;
     error: string;
+    kind: "connection" | "credentials";
+    recoveryConnection: Connection | null;
   };
 
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -1170,6 +1174,8 @@ export function ConnectionManager({
       connectionName: "",
       message: "",
       error: "",
+      kind: "connection",
+      recoveryConnection: null,
     });
   const [showPassword, setShowPassword] = useState(false);
   const [pgHost, setPgHost] = useState("localhost");
@@ -2061,7 +2067,7 @@ export function ConnectionManager({
       if (generation !== loadGenRef.current) return;
       setConnections(conns);
       setConnectionsError(null);
-      if (conns.some((conn: any) => conn.credentialError)) {
+      if (conns.some((conn: any) => conn.credentialError && !isDesktopKeychainConnectionUnavailable(conn))) {
         toast.error(
           "Some saved credentials could not be unlocked. Connections without an unlocked keychain entry may fail to connect; restore keychain access and retry.",
         );
@@ -3308,6 +3314,8 @@ export function ConnectionManager({
       connectionName: string;
       message?: string;
       error: string;
+      kind?: "connection" | "credentials";
+      recoveryConnection?: Connection;
     }) => {
       setConnectionFailureDialog({
         open: true,
@@ -3316,10 +3324,25 @@ export function ConnectionManager({
         message:
           params.message ?? `Unable to connect to "${params.connectionName}".`,
         error: params.error,
+        kind: params.kind ?? "connection",
+        recoveryConnection: params.recoveryConnection ?? null,
       });
     },
     [],
   );
+
+  const handleCredentialRecovery = () => {
+    const connection = connectionFailureDialog.recoveryConnection;
+    if (!connection) return;
+    setConnectionFailureDialog((prev) => ({ ...prev, open: false }));
+    if (isDesktopKeychainConnectionUnavailable(connection)) {
+      setCredentialStorageMode("vault");
+      formRequestRef.current++;
+      populateFormFromConnection(connection, true);
+    } else {
+      handleEdit(connection);
+    }
+  };
 
   const openConnection = async (
     conn: Connection,
@@ -3414,12 +3437,15 @@ export function ConnectionManager({
         return;
       }
       openConnectionFailureDialog({
+        title: isDesktopKeychainConnectionUnavailable(conn) ? "Desktop credentials" : "Credentials locked",
+        kind: "credentials",
+        recoveryConnection: conn,
         connectionName: conn.name,
         error:
           err instanceof Error
             ? err.message
             : "Could not unlock saved credentials.",
-        message: `Unable to unlock credentials for "${conn.name}". Check Settings → Security (keychain/vault) and retry.`,
+        message: `Unable to unlock credentials for "${conn.name}".`,
       });
       releaseOpening();
       return;
@@ -4918,38 +4944,45 @@ export function ConnectionManager({
             </DialogHeader>
 
             <div className="space-y-5">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Check the connection details and make sure:
-                </p>
-                <ul className="space-y-1 text-sm text-foreground/85">
-                  <li className="ml-4 list-disc">
-                    The database server is running and reachable.
-                  </li>
-                  <li className="ml-4 list-disc">
-                    The host, port, database, username, and password are
-                    correct.
-                  </li>
-                  <li className="ml-4 list-disc">
-                    Your network, VPN, SSH tunnel, or firewall is not blocking
-                    the connection.
-                  </li>
-                </ul>
-              </div>
+              {connectionFailureDialog.kind === "connection" && (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    Check the connection details and make sure:
+                  </p>
+                  <ul className="space-y-1 text-sm text-foreground/85">
+                    <li className="ml-4 list-disc">
+                      The database server is running and reachable.
+                    </li>
+                    <li className="ml-4 list-disc">
+                      The host, port, database, username, and password are
+                      correct.
+                    </li>
+                    <li className="ml-4 list-disc">
+                      Your network, VPN, SSH tunnel, or firewall is not blocking
+                      the connection.
+                    </li>
+                  </ul>
+                </div>
+              )}
 
               <div className="rounded-lg border border-destructive/25 bg-destructive/8 px-4 py-3">
                 <p className="mb-1 text-xs font-mediumtracking-[0.14em] text-destructive/80">
                   Error details
                 </p>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-destructive">
-                  {connectionFailureDialog.error}
-                </pre>
+                {connectionFailureDialog.kind === "credentials" ? (
+                  <p className="text-sm leading-6 text-foreground">{connectionFailureDialog.error}</p>
+                ) : (
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-destructive">
+                    {connectionFailureDialog.error}
+                  </pre>
+                )}
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="gap-2">
               <Button
-                className="w-full"
+                variant={connectionFailureDialog.recoveryConnection ? "outline" : "default"}
+                className="w-full sm:w-auto"
                 onClick={() =>
                   setConnectionFailureDialog((prev) => ({
                     ...prev,
@@ -4957,8 +4990,19 @@ export function ConnectionManager({
                   }))
                 }
               >
-                Got it
+                {connectionFailureDialog.recoveryConnection ? "Close" : "Got it"}
               </Button>
+
+              {connectionFailureDialog.recoveryConnection && (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={handleCredentialRecovery}
+                >
+                  {isDesktopKeychainConnectionUnavailable(connectionFailureDialog.recoveryConnection)
+                    ? "Create browser copy"
+                    : "Edit credentials"}
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
