@@ -280,14 +280,40 @@ jobs:
           codesign --verify --verbose=2 "$BIN"
           echo "  ✅ Oracle bridge signed"
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Tauri build (with retry)
+        # bundle_dmg.sh / hdiutil flake transiently on macOS runners (e.g. v1.3.23
+        # Intel job failed only at DMG packaging after sign+notarize succeeded).
+        # Retry the whole build on failure — Rust/Next caches make retries cheap —
+        # instead of failing the release on runner flakiness.
+        # NOTE: shell must stay bash — Windows runners default to PowerShell.
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        with:
-          args: --bundles ${{ matrix.bundles }}
+        run: |
+          set -uo pipefail
+          MAX_ATTEMPTS=3
+          attempt=1
+          while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
+            echo "════ Tauri build attempt ${attempt}/${MAX_ATTEMPTS} ════"
+            if bun run tauri build --bundles ${{ matrix.bundles }}; then
+              echo "✅ Tauri build succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "❌ Tauri build failed on attempt ${attempt}"
+            # Drop stale partial bundle outputs (e.g. half-created dmg dir) so
+            # the next attempt starts fresh. target/ (Rust cache) is kept.
+            rm -rf src-tauri/target/release/bundle
+            attempt=$((attempt + 1))
+            if [ "$attempt" -le "$MAX_ATTEMPTS" ]; then
+              echo "Retrying in 30s..."
+              sleep 30
+            fi
+          done
+          echo "❌ Tauri build failed after ${MAX_ATTEMPTS} attempts"
+          exit 1
 
       - name: Verify bundle artifacts (Windows)
         if: runner.os == 'Windows'
