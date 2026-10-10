@@ -37,3 +37,8 @@ test("SETTINGS_SEARCH_INDEX has unique ids", () => {
   const ids = SETTINGS_SEARCH_INDEX.map((e) => e.id);
   assert.equal(new Set(ids).size, ids.length);
 });
+
+
+test("table scrolling is discoverable through pagination settings search", () => {
+  assert.ok(filterSettingsSearch("pagination").some((entry) => entry.id === "infinite-table-scrolling"));
+});

@@ -59,6 +59,8 @@ export function useAppSettings(planCode = "free") {
     setAppZoom: settings.setAppZoom,
     executionMode: settings.executionMode,
     setExecutionMode: settings.setExecutionMode,
+    infiniteTableScrolling: settings.infiniteTableScrolling,
+    setInfiniteTableScrolling: settings.setInfiniteTableScrolling,
     rowSpacing: settings.rowSpacing,
     setRowSpacing: settings.setRowSpacing,
     alternatingRowColors: settings.alternatingRowColors,

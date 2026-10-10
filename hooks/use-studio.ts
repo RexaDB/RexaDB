@@ -77,6 +77,7 @@ import { useNotePersistence } from "./use-note-persistence";
 import { useFunctionManagement } from "./use-function-management";
 import { useAgentChatMessages } from "./use-agent-chat-messages";
 import { useStudioDataPersistence } from "./use-studio-data-persistence";
+import { hasMoreTableRows, mergeTableBatch, supportsInfiniteTableScrolling } from "@/lib/studio/table-batches";
 import { useGlobalStudioSettings } from "./use-global-studio-settings";
 import { FastTableCountCache } from "@/lib/studio/fast-table-count";
 import { waitForTableCount } from "@/lib/studio/fast-table-loading";
@@ -145,6 +146,8 @@ type TableTabSnapshot = {
   totalCount?: number | null;
   countUnavailable?: boolean;
   fastTableLoading?: boolean;
+  infiniteScrolling?: boolean;
+  hasMoreRows?: boolean;
   permissionContext?: TablePermissionContext;
 };
 
@@ -1186,6 +1189,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const studioSettings = useGlobalStudioSettings(true);
   const {
     executionMode,
+    infiniteTableScrolling,
     tuiMode,
     tuiTheme,
     agentProvider,
@@ -1780,7 +1784,11 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const [isEditColumnSheetOpen, setIsEditColumnSheetOpen] = useState(false);
   const [columnToEdit, setColumnToEdit] = useState<string | null>(null);
   const [isEditingColumn, setIsEditingColumn] = useState(false);
-  const [pageSize, setPageSize] = useState(100);
+  const activeTableStructure = activeTableTabId ? tabDataCache[activeTableTabId]?.tableStructure ?? [] : [];
+  const infiniteScrolling = infiniteTableScrolling && supportsInfiniteTableScrolling(dbType, activeTableStructure);
+  const [tableBatchStates, setTableBatchStates] = useState<Record<string, { loading: boolean; error: string | null }>>({});
+  const tableBatchRequestsRef = useRef<Record<string, number>>({});
+  const [pageSize, setPageSize] = useState<number>(100);
   const [page, setPage] = useState(0);
   const [tablePermissionContext, setTablePermissionContextState] = useState<TablePermissionContext>(null);
   const buildTableTabCacheSnapshot = useCallback(() => ({
@@ -1795,7 +1803,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     countUnavailable,
     fastTableLoading: fastTableLoading && dbType !== "mongodb",
     permissionContext: tablePermissionContext,
-  }), [results, tableStructure, foreignKeys, filterQuery, sortConfig, page, pageSize, totalCount, countUnavailable, fastTableLoading, dbType, tablePermissionContext]);
+    infiniteScrolling,
+  }), [infiniteScrolling, results, tableStructure, foreignKeys, filterQuery, sortConfig, page, pageSize, totalCount, countUnavailable, fastTableLoading, dbType, tablePermissionContext]);
 
   const snapshotTableTabState = useCallback((tabId: string | null) => {
     if (!tabId) return;
@@ -1821,6 +1830,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         && current.totalCount === nextEntry.totalCount
         && current.countUnavailable === nextEntry.countUnavailable
         && current.fastTableLoading === nextEntry.fastTableLoading
+        && current.infiniteScrolling === nextEntry.infiniteScrolling
         && areTablePermissionContextsEqual(current.permissionContext ?? null, nextEntry.permissionContext ?? null);
       if (unchanged) return prev;
       return {
@@ -3250,6 +3260,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
 
   const updateTabStructureCache = useCallback((tabId: string, requestId: number, updates: Record<string, unknown>) => {
     if (tabRefreshRequestIdsRef.current[tabId] !== requestId) return;
+    tableTabSnapshotRef.current[tabId] = { ...tableTabSnapshotRef.current[tabId], ...updates };
     setTabDataCache(prev => ({
       ...prev,
       [tabId]: {
@@ -3269,6 +3280,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     targetTabId?: string,
     debugReason?: string,
     permissionContextOverride?: TablePermissionContext,
+    appendOffset?: number,
   ) => {
     if (!tableName || !schema) return;
     const tabId = resolveActiveTableTabId(schema, tableName, targetTabId) || `table-${schema}-${tableName}`;
@@ -3281,15 +3293,22 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
     const fastMode = fastTableLoading && dbType !== "mongodb";
     const countKey = JSON.stringify([dbType, currentConnectionString, schema, tableName, filter || "", queryExecutionContext]);
-    const fastRequestKey = JSON.stringify([tabId, countKey, sort, pSize ?? pageSize, pPage ?? page]);
+    const fastRequestKey = JSON.stringify([tabId, countKey, sort, pSize ?? pageSize, pPage ?? page, appendOffset]);
     const existingFastRequest = fastRequestsRef.current.get(fastRequestKey);
     if (fastMode && debugReason === "selected-table-effect" && existingFastRequest) return existingFastRequest;
+    const append = appendOffset !== undefined;
+    const previousSnapshot = getTableTabSnapshot(tabId);
+    const previousResults = previousSnapshot?.results;
+    if (append && (!infiniteScrolling || !previousResults?.rows?.length || tableBatchRequestsRef.current[tabId])) return;
     const requestId = ++tableRefreshRequestIdRef.current;
     let finishFastRequest: (() => void) | undefined;
     const fastRequest = fastMode ? new Promise<void>((resolve) => { finishFastRequest = resolve; }) : null;
     if (fastRequest) fastRequestsRef.current.set(fastRequestKey, fastRequest);
     const tabRequestId = (tabRefreshRequestIdsRef.current[tabId] || 0) + 1;
     tabRefreshRequestIdsRef.current[tabId] = tabRequestId;
+    if (append) tableBatchRequestsRef.current[tabId] = tabRequestId;
+    else delete tableBatchRequestsRef.current[tabId];
+    setTableBatchStates((prev) => ({ ...prev, [tabId]: { loading: append, error: null } }));
 
     const isCurrentTarget = () =>
       activeTabIdRef.current === tabId
@@ -3317,8 +3336,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       logStudioDebug("refresh-table-start", debugPayload);
     }
     
-    // Always mark this specific tab as loading
-    setTableLoadingById((prev) => (prev[tabId] ? prev : { ...prev, [tabId]: true }));
+    if (!append) setTableLoadingById((prev) => (prev[tabId] ? prev : { ...prev, [tabId]: true }));
 
     if (shouldUpdateVisibleState) {
       setError(null);
@@ -3337,33 +3355,46 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
 
     const limit = pSize !== undefined ? pSize : pageSize;
-    const offset = (pPage !== undefined ? pPage : page) * limit;
+    let batchInfiniteScrolling = infiniteScrolling;
+    let offset = appendOffset ?? (batchInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
+    const prefixPaging = dbType === "trino" || dbType === "spacetimedb";
+    let nextTotalCount: number | null = append ? previousSnapshot?.totalCount ?? null : null;
+    const acceptBatch = (data: any) => {
+      const batch = prefixPaging && append ? { ...data, rows: data.rows.slice(offset) } : data;
+      const merged = append ? mergeTableBatch(previousResults, batch) : batch;
+      updateTabStructureCache(tabId, tabRequestId, {
+        results: merged,
+        fastTableLoading: fastMode,
+        filterQuery: filter || "",
+        sortConfig: sort || null,
+        page: pPage !== undefined ? pPage : page,
+        pageSize: limit,
+        totalCount: nextTotalCount,
+        permissionContext: effectivePermissionContext,
+        infiniteScrolling: batchInfiniteScrolling,
+        hasMoreRows: hasMoreTableRows(batch.rows.length, limit, merged.rows.length, nextTotalCount),
+      });
+      if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
+        setResults(merged);
+        setTotalCount(nextTotalCount);
+        setExecutionTime(data.executionTime);
+        if (!append) {
+          setSelectedRows(new Set());
+          setSelectedCell(null);
+        }
+      }
+    };
     let refreshSucceeded = false;
     let refreshError: string | null = null;
 
     try {
       if (dbType === "mongodb") {
-        const countCommand = JSON.stringify({
-          operation: "count",
-          database: schema,
-          collection: tableName,
-          filter: {},
-        });
-        const countRes = await runQuery(currentConnectionString, countCommand);
-        if (countRes.success && countRes.data?.rows?.[0]?.count !== undefined) {
-          const nextTotalCount = Number(countRes.data.rows[0].count) || 0;
-          
-          updateTabStructureCache(tabId, tabRequestId, {
-        totalCount: nextTotalCount,
-        filterQuery: filter || "",
-        sortConfig: sort || null,
-        page: pPage !== undefined ? pPage : page,
-        pageSize: limit,
-        permissionContext: effectivePermissionContext,
-      });
-
-          if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
-            setTotalCount(nextTotalCount);
+        if (!append) {
+          const countRes = await runQuery(currentConnectionString, JSON.stringify({
+            operation: "count", database: schema, collection: tableName, filter: {},
+          }));
+          if (countRes.success && countRes.data?.rows?.[0]?.count !== undefined) {
+            nextTotalCount = Number(countRes.data.rows[0].count);
           }
         }
 
@@ -3374,29 +3405,15 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           filter: {},
           limit,
           skip: offset,
-          sort: sort ? { [sort.column]: sort.direction === "ASC" ? 1 : -1 } : undefined,
+          sort: sort ? { [sort.column]: sort.direction === "ASC" ? 1 : -1, ...(infiniteScrolling && sort.column !== "_id" ? { _id: 1 } : {}) } : infiniteScrolling ? { _id: 1 } : undefined,
         });
         const res = await runQuery(currentConnectionString, queryCommand);
         if (res.success && res.data) {
           refreshSucceeded = true;
-          updateTabStructureCache(tabId, tabRequestId, {
-            results: res.data,
-            filterQuery: filter || "",
-            sortConfig: sort || null,
-            page: pPage !== undefined ? pPage : page,
-            pageSize: limit,
-            permissionContext: effectivePermissionContext,
-          });
-
-          if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
-            setResults(res.data);
-            setExecutionTime(res.data.executionTime);
-            setSelectedRows(new Set());
-            setSelectedCell(null);
-          }
+          acceptBatch(res.data);
         } else {
           refreshError = res.error || "An unknown error occurred while fetching collection data.";
-          if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
+          if (!append && requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
             setError(res.error || "An unknown error occurred while fetching collection data.");
             setResults(null);
           }
@@ -3404,7 +3421,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         return;
       }
 
-      // In fast mode the count runs independently; legacy mode still waits for it.
       const countSql = `SELECT COUNT(*) as "count" FROM ${quoteTableRef(schema, tableName)}${filter ? ` WHERE ${filter}` : ""}`;
       const fetchCount = async () => {
         const countRes = await runQuery(currentConnectionString, countSql, [], undefined, queryExecutionContext);
@@ -3422,21 +3438,31 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       };
       const updateCount = (count: number | null) => {
         if (tabRefreshRequestIdsRef.current[tabId] !== tabRequestId || fastTableLoadingRef.current !== fastTableLoading) return;
-        updateTabStructureCache(tabId, tabRequestId, { totalCount: count, countUnavailable: fastMode && count === null });
+        nextTotalCount = count;
+        const snapshot = getTableTabSnapshot(tabId);
+        updateTabStructureCache(tabId, tabRequestId, {
+          totalCount: count,
+          countUnavailable: fastMode && count === null,
+          ...(infiniteScrolling && count !== null && snapshot?.results ? {
+            hasMoreRows: snapshot.hasMoreRows && snapshot.results.rows.length < count,
+          } : {}),
+        });
         if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
           if (count !== null) setTotalCount(count);
           setCountUnavailable(fastMode && count === null);
         }
       };
-      if (fastMode) {
+      if (fastMode && !append) {
         const shouldInvalidate = !["selected-table-effect", "column-toggle", "column-visibility-load", "switch-tab-stale-guard"].includes(debugReason || "");
         if (shouldInvalidate) fastCountCacheRef.current.clear();
         const cachedCount = fastCountCacheRef.current.get(countKey);
+        nextTotalCount = cachedCount;
         updateTabStructureCache(tabId, tabRequestId, {
           totalCount: cachedCount,
           countUnavailable: false,
           results: null,
           fastTableLoading: true,
+          infiniteScrolling,
           filterQuery: filter || "",
           sortConfig: sort || null,
           page: pPage !== undefined ? pPage : page,
@@ -3448,9 +3474,20 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           setCountUnavailable(false);
         }
       }
-      if (!fastMode) await waitForTableCount(false, fetchCount(), updateCount);
+      if (!fastMode && !append) await waitForTableCount(false, fetchCount(), updateCount);
 
-      const currentStructure = tableStructureRef.current;
+      let currentStructure = previousSnapshot?.tableStructure ?? [];
+      if (infiniteScrolling && currentStructure.length === 0) {
+        const structureRes = await fetchTableStructure(currentConnectionString, schema, tableName);
+        if (structureRes.success && structureRes.data) {
+          currentStructure = structureRes.data;
+          updateTabStructureCache(tabId, tabRequestId, { tableStructure: currentStructure });
+        }
+      }
+      batchInfiniteScrolling = infiniteScrolling && supportsInfiniteTableScrolling(dbType, currentStructure);
+      if (append && !batchInfiniteScrolling) return;
+      offset = appendOffset ?? (batchInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
+      const queryLimit = prefixPaging && batchInfiniteScrolling ? offset + limit : limit;
       const currentHidden = hiddenColumnNamesRef.current;
       let columnsClause = "*";
       if (currentStructure.length > 0 && currentHidden.length > 0) {
@@ -3463,27 +3500,23 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
       let sql = `SELECT ${columnsClause} FROM ${quoteTableRef(schema, tableName)}`;
       if (filter) sql += ` WHERE ${filter}`;
-      if (dbType === "mssql" || dbType === "oracle") {
-        if (sort) {
-          sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        } else {
-          // OFFSET/FETCH requires ORDER BY. Oracle accepts positional 1;
-          // SQL Server uses a constant subquery.
-          sql += dbType === "oracle" ? " ORDER BY 1" : " ORDER BY (SELECT 1)";
+      const orderColumns = sort ? [`${quoteIdentifier(sort.column)} ${sort.direction}`] : [];
+      if (batchInfiniteScrolling) {
+        for (const column of currentStructure.filter((column: any) => column.is_primary_key && column.column_name !== sort?.column)) {
+          orderColumns.push(`${quoteIdentifier(column.column_name)} ASC`);
         }
+      }
+      if (orderColumns.length) sql += ` ORDER BY ${orderColumns.join(", ")}`;
+      if (dbType === "mssql" || dbType === "oracle") {
+        if (!orderColumns.length) sql += dbType === "oracle" ? " ORDER BY 1" : " ORDER BY (SELECT 1)";
         sql += ` OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
-      } else if (dbType === "trino") {
-        if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        sql += ` LIMIT ${limit}`;
-      } else if (dbType === "spacetimedb") {
-        if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
-        sql += ` LIMIT ${limit}`;
+      } else if (prefixPaging) {
+        sql += ` LIMIT ${queryLimit}`;
       } else {
-        if (sort) sql += ` ORDER BY ${quoteIdentifier(sort.column)} ${sort.direction}`;
         sql += ` LIMIT ${limit} OFFSET ${offset}`;
       }
       sql += ";";
-      // Dispatch the row request first so an expensive count cannot hold up its start.
+      // an expensive count must not delay the row request.
       const rowRequest = runQuery(currentConnectionString, sql, [], undefined, queryExecutionContext);
       if (fastMode) {
         void waitForTableCount(true, fastCountCacheRef.current.load(countKey, fetchCount), updateCount);
@@ -3529,32 +3562,17 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           }
         }
 
-        updateTabStructureCache(tabId, tabRequestId, {
-          results: normalizedData,
-          fastTableLoading: fastMode,
-          filterQuery: filter || "",
-          sortConfig: sort || null,
-          page: pPage !== undefined ? pPage : page,
-          pageSize: limit,
-          permissionContext: effectivePermissionContext,
-        });
-
-        if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
-          setResults(normalizedData);
-          setExecutionTime(normalizedData.executionTime);
-          setSelectedRows(new Set());
-          setSelectedCell(null);
-        }
+        acceptBatch(normalizedData);
       } else {
         refreshError = res.error || "An unknown error occurred while fetching table data.";
-        if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
+        if (!append && requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
           setError(res.error || "An unknown error occurred while fetching table data.");
           setResults(null);
         }
       }
     } catch (err) {
       refreshError = err instanceof Error ? err.message : "A fatal error occurred.";
-      if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
+      if (!append && requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
         setError(err instanceof Error ? err.message : "A fatal error occurred.");
         setResults(null);
       }
@@ -3562,6 +3580,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       if (fastRequest && fastRequestsRef.current.get(fastRequestKey) === fastRequest) fastRequestsRef.current.delete(fastRequestKey);
       // Clear loading state if this is still the latest request for this specific tab
       if (tabRefreshRequestIdsRef.current[tabId] === tabRequestId) {
+        delete tableBatchRequestsRef.current[tabId];
+        setTableBatchStates((prev) => ({ ...prev, [tabId]: { loading: false, error: append ? refreshError : null } }));
         setTableLoadingById((prev) => (prev[tabId] ? { ...prev, [tabId]: false } : prev));
       }
 
@@ -3583,7 +3603,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
       finishFastRequest?.();
     }
-  }, [pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery, fastTableLoading]);
+  }, [infiniteScrolling, getTableTabSnapshot, clearTableData, updateTabStructureCache, pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery, fastTableLoading]);
 
   const toggleColumn = useCallback((columnName: string) => {
     setHiddenColumnNames(prev => {
@@ -4576,6 +4596,26 @@ END $$;`.trim();
 
   const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false);
 
+  useEffect(() => {
+    setPage(0);
+  }, [infiniteTableScrolling]);
+
+  const activeBatchState = activeTableTabId ? tableBatchStates[activeTableTabId] : undefined;
+  const hasMoreRows = activeTableTabId ? Boolean(tabDataCache[activeTableTabId]?.hasMoreRows) : false;
+  const loadingMore = activeBatchState?.loading ?? false;
+  const loadMoreError = activeBatchState?.error ?? null;
+
+  const loadMoreTableRows = useCallback(() => {
+    if (!infiniteScrolling || !activeTableTabId || !selectedTable || tableLoading || loadingMore || !hasMoreRows) return;
+    const snapshot = getTableTabSnapshot(activeTableTabId);
+    if (!snapshot || snapshot.filterQuery !== filterQuery || JSON.stringify(snapshot.sortConfig) !== JSON.stringify(sortConfig)
+      || snapshot.pageSize !== pageSize || !snapshot.infiniteScrolling
+      || !areTablePermissionContextsEqual(snapshot.permissionContext ?? null, tablePermissionContext)) return;
+    void refreshTableData(selectedTable, selectedSchema, filterQuery, sortConfig, pageSize, page, activeTableTabId,
+      "infinite-scroll", tablePermissionContext, snapshot.results.rows.length);
+  }, [infiniteScrolling, activeTableTabId, selectedTable, selectedSchema, tableLoading, loadingMore, hasMoreRows,
+    getTableTabSnapshot, filterQuery, sortConfig, pageSize, page, tablePermissionContext, refreshTableData]);
+
   // fallow-ignore-next-line code-duplication
   const handlePageChange = useCallback((newPage: number) => {
     setPage(newPage);
@@ -4618,6 +4658,7 @@ END $$;`.trim();
         JSON.stringify(cached.sortConfig) === JSON.stringify(sortConfig) &&
         cached.page === page &&
         cached.pageSize === pageSize &&
+        Boolean(cached.infiniteScrolling) === infiniteScrolling &&
         areTablePermissionContextsEqual(cached.permissionContext ?? null, tablePermissionContext);
 
       if (filtersMatch) {
@@ -4745,7 +4786,7 @@ END $$;`.trim();
     } else {
       clearTableData();
     }
-  }, [selectedTable, selectedSchema, filterQuery, sortConfig, pageSize, page, viewMode, tabDataCache, activeTabId, openTabs, refreshTableData, resolveActiveTableTabId, getTabBaseId, splitView.enabled, tablePermissionContext, fastTableLoading, dbType]);
+  }, [selectedTable, selectedSchema, filterQuery, sortConfig, pageSize, page, viewMode, tabDataCache, activeTabId, openTabs, refreshTableData, resolveActiveTableTabId, getTabBaseId, splitView.enabled, tablePermissionContext, fastTableLoading, dbType, infiniteScrolling]);
 
 // fallow-ignore-next-line code-duplication
   const columnVisibilityLoadedRef = useRef<Record<string, boolean>>({});
@@ -4962,7 +5003,7 @@ END $$;`.trim();
       ));
       
       // STALE TAB GUARD: If the tab is stuck loading or has no data, force a refresh on activation
-      if (!cached?.results || (cached.fastTableLoading ?? false) !== (fastTableLoading && dbType !== "mongodb") || tableLoadingById[tabId]) {
+      if (!cached?.results || (cached.fastTableLoading ?? false) !== (fastTableLoading && dbType !== "mongodb") || Boolean(cached.infiniteScrolling) !== infiniteScrolling || tableLoadingById[tabId]) {
         logStudioDebug("switch-tab-stale-guard", {
           tabId,
           targetPaneId,
@@ -4986,7 +5027,8 @@ END $$;`.trim();
         setSortConfig((prev) => (JSON.stringify(prev) === JSON.stringify(nextSort) ? prev : nextSort));
         setPage((prev) => (prev === nextPage ? prev : nextPage));
         setPageSize((prev) => (prev === nextPageSize ? prev : nextPageSize));
-        const validResults = (cached.fastTableLoading ?? false) === (fastTableLoading && dbType !== "mongodb") ? cached.results : null;
+        const validResults = (cached.fastTableLoading ?? false) === (fastTableLoading && dbType !== "mongodb")
+          && Boolean(cached.infiniteScrolling) === infiniteScrolling ? cached.results : null;
         setResults((prev: unknown) => (prev === validResults ? prev : validResults));
         setTotalCount(validResults ? (cached.totalCount ?? null) : null);
         setCountUnavailable(validResults ? !!cached.countUnavailable : false);
@@ -5064,7 +5106,7 @@ END $$;`.trim();
         }
       });
     }
-  }, [activeTabId, openTabs, pathname, router, searchParams, dbType, logTabPerf, createSupport, setOpenTabs, setViewMode, splitView, cloneTabIntoPane, getCurrentPaneId, getPaneIdForTab, refreshTableData, snapshotTableTabState, getTableTabSnapshot]);
+  }, [activeTabId, openTabs, pathname, router, searchParams, dbType, logTabPerf, createSupport, setOpenTabs, setViewMode, splitView, cloneTabIntoPane, getCurrentPaneId, getPaneIdForTab, refreshTableData, snapshotTableTabState, getTableTabSnapshot, infiniteScrolling]);
 
   /** Close all tabs whose base ID matches `baseId` and switch away if the active tab was closed. */
   const closeTabsByBaseId = useCallback((baseId: string) => {
@@ -9700,6 +9742,11 @@ END $$;`.trim();
     countUnavailable,
     handlePageChange,
     handlePageSizeChange,
+    infiniteScrolling,
+    loadingMore,
+    hasMoreRows,
+    loadMoreError,
+    loadMoreTableRows,
     schemaData,
     functions,
     fetchingFunctions,
