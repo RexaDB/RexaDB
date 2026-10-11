@@ -3299,7 +3299,8 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     const append = appendOffset !== undefined;
     const previousSnapshot = getTableTabSnapshot(tabId);
     const previousResults = previousSnapshot?.results;
-    if (append && (!infiniteScrolling || !previousResults?.rows?.length || tableBatchRequestsRef.current[tabId])) return;
+    let targetInfiniteScrolling = infiniteTableScrolling && supportsInfiniteTableScrolling(dbType, previousSnapshot?.tableStructure ?? []);
+    if (append && (!targetInfiniteScrolling || !previousResults?.rows?.length || tableBatchRequestsRef.current[tabId])) return;
     const requestId = ++tableRefreshRequestIdRef.current;
     let finishFastRequest: (() => void) | undefined;
     const fastRequest = fastMode ? new Promise<void>((resolve) => { finishFastRequest = resolve; }) : null;
@@ -3355,8 +3356,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
 
     const limit = pSize !== undefined ? pSize : pageSize;
-    let batchInfiniteScrolling = infiniteScrolling;
-    let offset = appendOffset ?? (batchInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
+    let offset = appendOffset ?? (targetInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
     const prefixPaging = dbType === "trino" || dbType === "spacetimedb";
     let nextTotalCount: number | null = append ? previousSnapshot?.totalCount ?? null : null;
     const acceptBatch = (data: any) => {
@@ -3371,7 +3371,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         pageSize: limit,
         totalCount: nextTotalCount,
         permissionContext: effectivePermissionContext,
-        infiniteScrolling: batchInfiniteScrolling,
+        infiniteScrolling: targetInfiniteScrolling,
         hasMoreRows: hasMoreTableRows(batch.rows.length, limit, merged.rows.length, nextTotalCount),
       });
       if (requestId === tableRefreshRequestIdRef.current && isCurrentTarget()) {
@@ -3405,7 +3405,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           filter: {},
           limit,
           skip: offset,
-          sort: sort ? { [sort.column]: sort.direction === "ASC" ? 1 : -1, ...(infiniteScrolling && sort.column !== "_id" ? { _id: 1 } : {}) } : infiniteScrolling ? { _id: 1 } : undefined,
+          sort: sort ? { [sort.column]: sort.direction === "ASC" ? 1 : -1, ...(targetInfiniteScrolling && sort.column !== "_id" ? { _id: 1 } : {}) } : targetInfiniteScrolling ? { _id: 1 } : undefined,
         });
         const res = await runQuery(currentConnectionString, queryCommand);
         if (res.success && res.data) {
@@ -3443,7 +3443,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         updateTabStructureCache(tabId, tabRequestId, {
           totalCount: count,
           countUnavailable: fastMode && count === null,
-          ...(infiniteScrolling && count !== null && snapshot?.results ? {
+          ...(targetInfiniteScrolling && count !== null && snapshot?.results ? {
             hasMoreRows: snapshot.hasMoreRows && snapshot.results.rows.length < count,
           } : {}),
         });
@@ -3462,7 +3462,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           countUnavailable: false,
           results: null,
           fastTableLoading: true,
-          infiniteScrolling,
+          infiniteScrolling: targetInfiniteScrolling,
           filterQuery: filter || "",
           sortConfig: sort || null,
           page: pPage !== undefined ? pPage : page,
@@ -3477,17 +3477,17 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       if (!fastMode && !append) await waitForTableCount(false, fetchCount(), updateCount);
 
       let currentStructure = previousSnapshot?.tableStructure ?? [];
-      if (infiniteScrolling && currentStructure.length === 0) {
+      if (infiniteTableScrolling && currentStructure.length === 0) {
         const structureRes = await fetchTableStructure(currentConnectionString, schema, tableName);
         if (structureRes.success && structureRes.data) {
           currentStructure = structureRes.data;
           updateTabStructureCache(tabId, tabRequestId, { tableStructure: currentStructure });
         }
       }
-      batchInfiniteScrolling = infiniteScrolling && supportsInfiniteTableScrolling(dbType, currentStructure);
-      if (append && !batchInfiniteScrolling) return;
-      offset = appendOffset ?? (batchInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
-      const queryLimit = prefixPaging && batchInfiniteScrolling ? offset + limit : limit;
+      targetInfiniteScrolling = infiniteTableScrolling && supportsInfiniteTableScrolling(dbType, currentStructure);
+      if (append && !targetInfiniteScrolling) return;
+      offset = appendOffset ?? (targetInfiniteScrolling ? 0 : (pPage !== undefined ? pPage : page) * limit);
+      const queryLimit = prefixPaging && targetInfiniteScrolling ? offset + limit : limit;
       const currentHidden = hiddenColumnNamesRef.current;
       let columnsClause = "*";
       if (currentStructure.length > 0 && currentHidden.length > 0) {
@@ -3501,7 +3501,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       let sql = `SELECT ${columnsClause} FROM ${quoteTableRef(schema, tableName)}`;
       if (filter) sql += ` WHERE ${filter}`;
       const orderColumns = sort ? [`${quoteIdentifier(sort.column)} ${sort.direction}`] : [];
-      if (batchInfiniteScrolling) {
+      if (targetInfiniteScrolling) {
         for (const column of currentStructure.filter((column: any) => column.is_primary_key && column.column_name !== sort?.column)) {
           orderColumns.push(`${quoteIdentifier(column.column_name)} ASC`);
         }
@@ -3603,7 +3603,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       }
       finishFastRequest?.();
     }
-  }, [infiniteScrolling, getTableTabSnapshot, clearTableData, updateTabStructureCache, pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery, fastTableLoading]);
+  }, [infiniteTableScrolling, getTableTabSnapshot, clearTableData, updateTabStructureCache, pageSize, page, currentConnectionString, addHistoryEntry, dbType, quoteTableRef, quoteIdentifier, resolveActiveTableTabId, splitView.enabled, tablePermissionContext, runQuery, fastTableLoading]);
 
   const toggleColumn = useCallback((columnName: string) => {
     setHiddenColumnNames(prev => {
@@ -4997,13 +4997,14 @@ END $$;`.trim();
       setSelectedTable(tab.name);
 
       const cached = hydratedCache ?? getTableTabSnapshot(tabId);
+      const targetInfiniteScrolling = infiniteTableScrolling && supportsInfiniteTableScrolling(dbType, cached?.tableStructure ?? []);
       const nextPermissionContext = cached?.permissionContext ?? null;
       setTablePermissionContextState((prev) => (
         areTablePermissionContextsEqual(prev, nextPermissionContext) ? prev : nextPermissionContext
       ));
       
       // STALE TAB GUARD: If the tab is stuck loading or has no data, force a refresh on activation
-      if (!cached?.results || (cached.fastTableLoading ?? false) !== (fastTableLoading && dbType !== "mongodb") || Boolean(cached.infiniteScrolling) !== infiniteScrolling || tableLoadingById[tabId]) {
+      if (!cached?.results || (cached.fastTableLoading ?? false) !== (fastTableLoading && dbType !== "mongodb") || Boolean(cached.infiniteScrolling) !== targetInfiniteScrolling || tableLoadingById[tabId]) {
         logStudioDebug("switch-tab-stale-guard", {
           tabId,
           targetPaneId,
@@ -5028,7 +5029,7 @@ END $$;`.trim();
         setPage((prev) => (prev === nextPage ? prev : nextPage));
         setPageSize((prev) => (prev === nextPageSize ? prev : nextPageSize));
         const validResults = (cached.fastTableLoading ?? false) === (fastTableLoading && dbType !== "mongodb")
-          && Boolean(cached.infiniteScrolling) === infiniteScrolling ? cached.results : null;
+          && Boolean(cached.infiniteScrolling) === targetInfiniteScrolling ? cached.results : null;
         setResults((prev: unknown) => (prev === validResults ? prev : validResults));
         setTotalCount(validResults ? (cached.totalCount ?? null) : null);
         setCountUnavailable(validResults ? !!cached.countUnavailable : false);
@@ -5106,7 +5107,7 @@ END $$;`.trim();
         }
       });
     }
-  }, [activeTabId, openTabs, pathname, router, searchParams, dbType, logTabPerf, createSupport, setOpenTabs, setViewMode, splitView, cloneTabIntoPane, getCurrentPaneId, getPaneIdForTab, refreshTableData, snapshotTableTabState, getTableTabSnapshot, infiniteScrolling]);
+  }, [activeTabId, openTabs, pathname, router, searchParams, dbType, logTabPerf, createSupport, setOpenTabs, setViewMode, splitView, cloneTabIntoPane, getCurrentPaneId, getPaneIdForTab, refreshTableData, snapshotTableTabState, getTableTabSnapshot, infiniteTableScrolling, fastTableLoading, tableLoadingById]);
 
   /** Close all tabs whose base ID matches `baseId` and switch away if the active tab was closed. */
   const closeTabsByBaseId = useCallback((baseId: string) => {

@@ -23,7 +23,14 @@ function loadCallback(name: string, bindings: Record<string, unknown>) {
   return new Function(...Object.keys(bindings), `${compiled}\nreturn callback;`)(...Object.values(bindings));
 }
 
-function createLoader({ infinite = true, dbType = "postgres", page = 0, countKnown = true, fast = false } = {}) {
+function createLoader({ infinite = true, dbType = "postgres", page = 0, countKnown = true, fast = false, outgoingInfinite = infinite }: {
+  infinite?: boolean;
+  dbType?: string;
+  page?: number;
+  countKnown?: boolean;
+  fast?: boolean;
+  outgoingInfinite?: boolean;
+} = {}) {
   const tabId = "table-public-accounts";
   const rows = Array.from({ length: 235 }, (_, id) => ({ id }));
   const queries: string[] = [];
@@ -36,7 +43,8 @@ function createLoader({ infinite = true, dbType = "postgres", page = 0, countKno
   const snapshotRef = { current: {} as Record<string, any> };
   const requestIds = { current: {} as Record<string, number> };
   const bindings: Record<string, any> = {
-    infiniteScrolling: infinite,
+    infiniteScrolling: outgoingInfinite,
+    infiniteTableScrolling: infinite,
     fastTableLoading: fast,
     fastTableLoadingRef: { current: fast },
     fastRequestsRef: { current: new Map() },
@@ -317,4 +325,87 @@ test("a target without a primary key falls back to pagination and rejects append
   await loader.load(100);
   assert.equal(loader.queries.length, queryCount);
   assert.equal(loader.visible.rows.length, 100);
+});
+
+
+for (const outgoingType of ["sql", "settings", "table"]) {
+  test(`returning from ${outgoingType} retains all cached infinite batches`, () => {
+    const tabId = "table-public-accounts";
+    const cached = {
+      results: { rows: Array.from({ length: 300 }, (_, id) => ({ id })) },
+      tableStructure: [{ column_name: "id", is_primary_key: true }],
+      foreignKeys: [],
+      infiniteScrolling: true,
+      fastTableLoading: false,
+      totalCount: 500,
+      page: 0,
+      pageSize: 100,
+    };
+    let visible: unknown = null;
+    let refreshCount = 0;
+    const noop = () => {};
+    const bindings = {
+      activeTabId: "outgoing",
+      openTabs: [
+        { id: "outgoing", type: outgoingType },
+        { id: tabId, type: "table", name: "accounts", schema: "public" },
+      ],
+      delayedUiRestoreBlockedRef: { current: false },
+      getCurrentPaneId: () => "1",
+      getTableTabSnapshot: () => cached,
+      splitView: { enabled: false },
+      createSupport: {},
+      tabSwitchPerfRef: { current: null },
+      logTabPerf: noop,
+      findPreservedInactiveTableTabId: () => null,
+      selectedSchemaRef: { current: "public" },
+      selectedTableRef: { current: "other" },
+      getPaneIdForTab: () => "1",
+      snapshotTableTabState: noop,
+      queryRef: { current: "" },
+      setOpenTabs: noop,
+      activePaneIdRef: { current: "1" },
+      logStudioDebug: noop,
+      setSplitView: noop,
+      setActiveTabId: noop,
+      activeTabIdRef: { current: "outgoing" },
+      setSelectedCell: noop,
+      getViewMode: () => "tables",
+      setViewMode: noop,
+      isDatabaseTabType: () => false,
+      setSelectedSchema: noop,
+      setSelectedTable: noop,
+      infiniteScrolling: false,
+      infiniteTableScrolling: true,
+      supportsInfiniteTableScrolling,
+      dbType: "postgres",
+      fastTableLoading: false,
+      tableLoadingById: {},
+      setTablePermissionContextState: noop,
+      refreshTableData: () => { refreshCount++; },
+      setFilterQuery: noop,
+      setSortConfig: noop,
+      setPage: noop,
+      setPageSize: noop,
+      setResults: (update: (previous: unknown) => unknown) => { visible = update(visible); },
+      setTotalCount: noop,
+      setCountUnavailable: noop,
+      setTableStructure: noop,
+      setForeignKeys: noop,
+      searchParams: new URLSearchParams({ tab: tabId, s: "public", t: "accounts" }),
+    };
+    loadCallback("switchTab", bindings)(tabId);
+    assert.equal(refreshCount, 0);
+    assert.equal(visible, cached.results);
+    assert.equal(cached.results.rows.length, 300);
+  });
+}
+
+test("refresh uses the destination scrolling mode when the outgoing tab uses pagination", async () => {
+  const loader = createLoader({ outgoingInfinite: false, page: 2 });
+  await loader.load();
+  assert.equal(loader.snapshot.infiniteScrolling, true);
+  assert.match(loader.queries.at(-1)!, /ORDER BY "id" ASC LIMIT 100 OFFSET 0/);
+  await loader.load(100);
+  assert.equal(loader.visible.rows.length, 200);
 });
