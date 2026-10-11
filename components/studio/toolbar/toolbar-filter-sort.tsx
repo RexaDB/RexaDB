@@ -190,14 +190,143 @@ export function splitTopLevelAnd(where: string): string[] {
   return parts.map((p) => p.trim()).filter(Boolean);
 }
 
-function unquoteIdentifier(raw: string): string {
+/** Split raw identifier text into name + quoting style (null = not a ref). */
+function splitIdentifierRef(
+  raw: string,
+): { name: string; quoted: "double" | "backtick" | "bracket" | null } | null {
   const t = raw.trim();
   if (t.length >= 2) {
-    if (t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1).replace(/""/g, '"');
-    if (t.startsWith("`") && t.endsWith("`")) return t.slice(1, -1).replace(/``/g, "`");
-    if (t.startsWith("[") && t.endsWith("]")) return t.slice(1, -1).replace(/]]/g, "]");
+    if (t.startsWith('"') && t.endsWith('"'))
+      return { name: t.slice(1, -1).replace(/""/g, '"'), quoted: "double" };
+    if (t.startsWith("`") && t.endsWith("`"))
+      return { name: t.slice(1, -1).replace(/``/g, "`"), quoted: "backtick" };
+    if (t.startsWith("[") && t.endsWith("]"))
+      return { name: t.slice(1, -1).replace(/]]/g, "]"), quoted: "bracket" };
   }
-  return t;
+  if (/^[A-Za-z_][\w$]*$/.test(t)) return { name: t, quoted: null };
+  return null;
+}
+
+/**
+ * Engine-aware column-reference equality. Quoted refs are exact (except
+ * MySQL/MSSQL, whose identifiers are case-insensitive); unquoted refs fold
+ * case everywhere except ClickHouse. Rejects quoting styles the engine
+ * doesn't accept (e.g. backticks on Postgres) — that SQL is invalid there.
+ */
+function sameColumnRef(
+  inputRefRaw: string,
+  canonical: string,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): boolean {
+  const parsed = splitIdentifierRef(inputRefRaw);
+  if (!parsed) return false;
+  if (!parsed.quoted) {
+    if (dbType === "clickhouse") return parsed.name === canonical;
+    return parsed.name.toLowerCase() === canonical.toLowerCase();
+  }
+  const valid =
+    parsed.quoted === "double"
+      ? dbType !== "mysql" && dbType !== "clickhouse" && dbType !== "mssql"
+      : parsed.quoted === "backtick"
+        ? dbType === "mysql" || dbType === "clickhouse"
+        : dbType === "mssql";
+  if (!valid) return false;
+  if (dbType === "mysql" || dbType === "mssql")
+    return parsed.name.toLowerCase() === canonical.toLowerCase();
+  return parsed.name === canonical;
+}
+
+/** Engine-aware column lookup by raw reference text. */
+function findColumn(
+  columns: string[],
+  refRaw: string,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): string | null {
+  const sorted = [...columns].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    if (sameColumnRef(refRaw, c, dbType)) return c;
+  }
+  return null;
+}
+
+/**
+ * Pull single-quoted literals out of a clause into indexed placeholders.
+ * Returns null on unterminated quotes. Literal contents are compared
+ * exactly (case/whitespace-sensitive); everything else is normalized.
+ */
+function extractStringLiterals(
+  s: string,
+): { text: string; literals: string[] } | null {
+  const literals: string[] = [];
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "'") {
+      let j = i + 1;
+      let lit = "";
+      let closed = false;
+      while (j < s.length) {
+        if (s[j] === "'") {
+          if (s[j + 1] === "'") {
+            lit += "'";
+            j += 2;
+            continue;
+          }
+          closed = true;
+          j++;
+          break;
+        }
+        lit += s[j];
+        j++;
+      }
+      if (!closed) return null;
+      literals.push(lit);
+      out += `__LIT_${literals.length - 1}__`;
+      i = j;
+    } else {
+      out += s[i];
+      i++;
+    }
+  }
+  return { text: out, literals };
+}
+
+/**
+ * Proof of round-trip: rebuild the candidate rule and require the output to
+ * match the input modulo identifier quoting/case, keyword case, whitespace,
+ * and `!=`/`<>` spelling. Anything else (functions, LIKE shapes, bare words,
+ * NULL comparisons, padded/empty/concatenated literals, cross-engine CASTs)
+ * fails here even if an earlier check missed it — and stays raw SQL.
+ */
+function verifyRuleRoundTrip(
+  inputSeg: string,
+  inputRefRaw: string,
+  rule: FilterRule,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): boolean {
+  const rebuilt = buildRuleClause(rule, dbType);
+  if (!rebuilt) return false;
+  if (!sameColumnRef(inputRefRaw, rule.column, dbType)) return false;
+  const a = extractStringLiterals(inputSeg);
+  const b = extractStringLiterals(rebuilt);
+  if (!a || !b) return false;
+  if (a.literals.length !== b.literals.length) return false;
+  for (let i = 0; i < a.literals.length; i++) {
+    if (a.literals[i] !== b.literals[i]) return false;
+  }
+  const norm = (t: string): string => {
+    let s = t;
+    // ClickHouse identifiers are case-sensitive — never fold case there
+    // (hand-typed lowercase keywords then stay raw, which is safe).
+    if (dbType !== "clickhouse") s = s.toUpperCase();
+    s = s.replace(/!=/g, "<>");
+    s = s.replace(/"/g, "").replace(/`/g, "").replace(/\[/g, "").replace(/\]/g, "");
+    const colKey =
+      dbType === "clickhouse" ? rule.column : rule.column.toUpperCase();
+    s = s.split(colKey).join("__COL__");
+    return s.replace(/\s+/g, " ").trim();
+  };
+  return norm(a.text) === norm(b.text);
 }
 
 function unquoteStringLiteral(raw: string): string {
@@ -274,6 +403,7 @@ function hasTopLevelJoiner(s: string): boolean {
 export function parseSegmentToRule(
   segment: string,
   columns: string[],
+  dbType: ToolbarFilterSortProps["dbType"] = "postgres",
 ): FilterRule | null {
   const seg = stripBalancedOuterParens(segment.trim());
   if (!seg) return null;
@@ -283,8 +413,7 @@ export function parseSegmentToRule(
     /^CAST\(\s*([\s\S]+?)\s+AS\s+(?:TEXT|CHAR|String|NVARCHAR\s*\(\s*MAX\s*\))\)\s+LIKE\s+'([\s\S]*)'$/i,
   );
   if (castMatch) {
-    const colName = unquoteIdentifier(castMatch[1]);
-    const col = columns.find((c) => c.toLowerCase() === colName.toLowerCase());
+    const col = findColumn(columns, castMatch[1], dbType);
     if (col) {
       const pattern = castMatch[2].replace(/''/g, "'");
       let operator: FilterOperator | null = null;
@@ -303,13 +432,18 @@ export function parseSegmentToRule(
         // — extracting it would rebuild as `%abc%` and widen the rows.
         return null;
       }
-      return {
+      const candidate: FilterRule = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         enabled: true,
         column: col,
         operator,
         value: inner,
       };
+      // Empty contains (`LIKE '%%'`) can't rebuild (empty values are
+      // dropped) and cross-engine CASTs rebuild differently — stay raw.
+      return verifyRuleRoundTrip(seg, castMatch[1], candidate, dbType)
+        ? candidate
+        : null;
     }
   }
 
@@ -318,7 +452,8 @@ export function parseSegmentToRule(
     (a, b) => b.length - a.length,
   );
   for (const c of sortedColumns) {
-    if (!seg.toLowerCase().startsWith(c.toLowerCase())) continue;
+    const refRaw = seg.slice(0, c.length);
+    if (!sameColumnRef(refRaw, c, dbType)) continue;
     const afterCol = seg.slice(c.length);
     // Column must be followed by whitespace or a quoted-identifier close —
     // unless the segment used a quoted identifier, handled below.
@@ -388,13 +523,18 @@ export function parseSegmentToRule(
           }
         }
       }
-      return {
+      const candidate: FilterRule = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${c}`,
         enabled: true,
         column: c,
         operator: filterOp,
         value: operatorNeedsValue(filterOp) ? unquoteStringLiteral(rawValue) : "",
       };
+      // Final proof: rebuild and require equivalence. Anything the checks
+      // above missed stays raw rather than changing rows on Apply.
+      return verifyRuleRoundTrip(seg, refRaw, candidate, dbType)
+        ? candidate
+        : null;
     }
     return null;
   }
@@ -402,10 +542,9 @@ export function parseSegmentToRule(
   // Quoted-identifier form: "col" = 'v' (what the builder emits).
   const quotedMatch = seg.match(/^("[^"]+"|`[^`]+`|\[[^\]]+\])\s*([\s\S]*)$/);
   if (quotedMatch) {
-    const colName = unquoteIdentifier(quotedMatch[1]);
-    const col = columns.find((c) => c.toLowerCase() === colName.toLowerCase());
+    const col = findColumn(columns, quotedMatch[1], dbType);
     if (col) {
-      return parseSegmentToRule(`${col} ${quotedMatch[2]}`, columns);
+      return parseSegmentToRule(`${col} ${quotedMatch[2]}`, columns, dbType);
     }
   }
   return null;
@@ -419,6 +558,7 @@ export function parseSegmentToRule(
 export function decomposeFilterQuery(
   filterQuery: string,
   columns: string[],
+  dbType: ToolbarFilterSortProps["dbType"] = "postgres",
 ): { rules: FilterRule[]; remainder: string } {
   const trimmed = stripLeadingWhereKeyword(filterQuery);
   if (!trimmed) return { rules: [makeRule("")], remainder: "" };
@@ -430,7 +570,7 @@ export function decomposeFilterQuery(
     // match. Keep any expression with a top-level OR together as raw SQL.
     if (hasTopLevelOr(text)) {
       const whole = text.trim();
-      const asRule = parseSegmentToRule(whole, columns);
+      const asRule = parseSegmentToRule(whole, columns, dbType);
       if (asRule) {
         rules.push(asRule);
         return;
@@ -447,7 +587,7 @@ export function decomposeFilterQuery(
       return;
     }
     for (const part of splitTopLevelAnd(text)) {
-      const rule = parseSegmentToRule(part, columns);
+      const rule = parseSegmentToRule(part, columns, dbType);
       if (rule) {
         rules.push(rule);
         continue;
@@ -765,7 +905,7 @@ export function ToolbarFilterSort({
 
       // Decompose into visual rules; anything unparseable (OR groups, raw
       // SQL) stays as the remainder so nothing is lost or re-wrapped.
-      const { rules, remainder } = decomposeFilterQuery(val, columns);
+      const { rules, remainder } = decomposeFilterQuery(val, columns, dbType);
       const realRules = rules.filter(
         (r) =>
           r.column && r.column !== "none" && r.operator && r.operator !== "none",
@@ -860,11 +1000,11 @@ export function ToolbarFilterSort({
   ]);
 
   const prepareDialog = React.useCallback(() => {
-    const { rules, remainder } = decomposeFilterQuery(filterQuery, columns);
+    const { rules, remainder } = decomposeFilterQuery(filterQuery, columns, dbType);
     setDraftRules(rules);
     setCustomWhere(remainder);
     setIsFilterMenuOpen(true);
-  }, [filterQuery, columns]);
+  }, [filterQuery, columns, dbType]);
 
   const handleApplyFilter = React.useCallback(() => {
     const visualClauses = draftRules

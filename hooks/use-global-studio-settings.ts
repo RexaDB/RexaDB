@@ -27,25 +27,10 @@ import {
   subscribeSettingsSyncApplied,
   subscribeSettingsSyncLocalChanged,
 } from "@/lib/studio/settings-sync-events";
-
-/** Order-insensitive deep equality for settings records. */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    try {
-      return JSON.stringify(value) ?? "";
-    } catch {
-      return "";
-    }
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${stableStringify(record[k])}`)
-    .join(",")}}`;
-}
+import {
+  confirmSettingsBaseline,
+  mergePreservingEdits,
+} from "@/lib/studio/settings-baseline";
 
 export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
 /** Fired when a studio-settings save fails its final retry (still local-only). */
@@ -446,15 +431,15 @@ export function useGlobalStudioSettings(persist = false) {
   ) => {
     const prev = appliedRef.current ?? {};
     // Dirty = differs from the last server-acknowledged state (falls back to
-    // the applied baseline before the first confirmed read).
+    // the applied baseline before the first confirmed read). Pure helper —
+    // see lib/studio/settings-baseline.ts (unit-tested).
     const baseline = confirmedRef.current ?? prev;
     const current = currentRef.current ?? {};
-    const merged: Record<string, unknown> = { ...incoming };
-    for (const key of Object.keys(current)) {
-      if (stableStringify(current[key]) !== stableStringify((baseline as Record<string, unknown>)[key])) {
-        merged[key] = current[key];
-      }
-    }
+    const merged = mergePreservingEdits(
+      current,
+      baseline as Record<string, unknown>,
+      incoming,
+    );
     applyFromRecord(merged);
     appliedRef.current = merged;
     // Recovery refetches (stale wakes after a failed save) apply without
@@ -465,10 +450,10 @@ export function useGlobalStudioSettings(persist = false) {
     // defaults look like unsaved edits — permanently rejecting later cloud
     // updates for them.
     if (opts?.confirmServerState !== false) {
-      confirmedRef.current = {
-        ...(confirmedRef.current ?? prev),
-        ...incoming,
-      };
+      confirmedRef.current = confirmSettingsBaseline(
+        (confirmedRef.current ?? prev) as Record<string, unknown>,
+        incoming,
+      );
     }
   }, []);
 

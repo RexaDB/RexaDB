@@ -218,7 +218,20 @@ describe("buildRuleClause engine CAST", () => {
   });
   test("mysql quick-filter contains round-trips through parse", () => {
     const clause = parseQuickFilter(`name ~ foo`, ["name"], "mysql")!;
-    const roundTripped = parseSegmentToRule(clause, ["name"]);
+    const roundTripped = parseSegmentToRule(clause, ["name"], "mysql");
     expect(roundTripped).toMatchObject({ column: "name", operator: "contains" });
+  });
+  test("cross-engine CAST stays raw instead of rebuilding wrong", () => {
+    const clause = parseQuickFilter(`name ~ foo`, ["name"], "mysql")!;
+    // Opened as postgres, the CHAR/backtick shape must not become TEXT.
+    expect(parseSegmentToRule(clause, ["name"], "postgres")).toBeNull();
+    // != is a spelling of <> — same rows, still parses.
+    expect(parseSegmentToRule(`status != 'x'`, COLUMNS)).toMatchObject({
+      operator: "ne",
+    });
+    // LIKE '%%' would drop the clause on Apply (empty value) — stays raw.
+    expect(
+      parseSegmentToRule(`CAST("status" AS TEXT) LIKE '%%'`, COLUMNS),
+    ).toBeNull();
   });
 });
