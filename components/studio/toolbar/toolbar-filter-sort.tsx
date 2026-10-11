@@ -55,7 +55,7 @@ type FilterOperator =
   | "none"
   | "";
 
-interface FilterRule {
+export interface FilterRule {
   id: string;
   enabled: boolean;
   column: string;
@@ -92,7 +92,7 @@ const SQL_TO_FILTER_OP: Record<string, FilterOperator> = {
   "IS NOT NULL": "is_not_null",
 };
 
-function makeRule(defaultColumn = ""): FilterRule {
+export function makeRule(defaultColumn = ""): FilterRule {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     enabled: true,
@@ -109,6 +109,261 @@ function operatorNeedsValue(operator: FilterOperator): boolean {
     operator !== "none" &&
     operator !== ""
   );
+}
+
+/**
+ * The agent sometimes echoes the WHERE keyword (or a full SELECT) despite
+ * instructions. Stored filters already mean WHERE, so strip it — this also
+ * heals previously stored `WHERE ...` filters on next open/apply.
+ */
+export function stripLeadingWhereKeyword(text: string): string {
+  const trimmed = String(text || "").trim();
+  if (/^select\b/i.test(trimmed)) {
+    const m = trimmed.match(/\bwhere\b\s+([\s\S]*)$/i);
+    if (m) return m[1].trim();
+    return trimmed;
+  }
+  return trimmed.replace(/^where\b\s*/i, "").trim();
+}
+
+/** Strip balanced outer paren pairs so re-applying never stacks `(...)`. */export function stripBalancedOuterParens(s: string): string {
+  let out = s.trim();
+  for (;;) {
+    if (out.length < 2 || !out.startsWith("(") || !out.endsWith(")")) return out;
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i] === "(") depth++;
+      else if (out[i] === ")") depth--;
+      if (depth === 0 && i < out.length - 1) {
+        balanced = false;
+        break;
+      }
+    }
+    if (!balanced || depth !== 0) return out;
+    out = out.slice(1, -1).trim();
+  }
+}
+
+/** Split on top-level AND only — OR segments stay intact for raw SQL. */
+export function splitTopLevelAnd(where: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inStr = false;
+  let current = "";
+  const upper = where.toUpperCase();
+  for (let i = 0; i < where.length; i++) {
+    const ch = where[i];
+    if (inStr) {
+      current += ch;
+      if (ch === "'") {
+        if (where[i + 1] === "'") {
+          current += where[i + 1];
+          i++;
+        } else {
+          inStr = false;
+        }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    if (ch === ")") depth = Math.max(0, depth - 1);
+    if (
+      depth === 0 &&
+      upper.startsWith("AND", i) &&
+      (i === 0 || /\s/.test(where[i - 1])) &&
+      (i + 3 >= where.length || /\s/.test(where[i + 3]))
+    ) {
+      parts.push(current);
+      current = "";
+      i += 2;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+function unquoteIdentifier(raw: string): string {
+  const t = raw.trim();
+  if (t.length >= 2) {
+    if (t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1).replace(/""/g, '"');
+    if (t.startsWith("`") && t.endsWith("`")) return t.slice(1, -1).replace(/``/g, "`");
+    if (t.startsWith("[") && t.endsWith("]")) return t.slice(1, -1).replace(/]]/g, "]");
+  }
+  return t;
+}
+
+function unquoteStringLiteral(raw: string): string {
+  const t = raw.trim();
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) {
+    return t.slice(1, -1).replace(/''/g, "'");
+  }
+  return t;
+}
+
+/** True when s contains AND/OR at paren depth 0 outside string literals. */
+function hasTopLevelJoiner(s: string): boolean {
+  let depth = 0;
+  let inStr = false;
+  const upper = s.toUpperCase();
+  const isBoundary = (idx: number) =>
+    idx < 0 || idx >= s.length || /\s/.test(s[idx]);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "'") {
+        if (s[i + 1] === "'") i++;
+        else inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      if (upper.startsWith("AND", i) && isBoundary(i - 1) && isBoundary(i + 3)) return true;
+      if (upper.startsWith("OR", i) && isBoundary(i - 1) && isBoundary(i + 2)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Parse one filter segment (`column op value`, quoted or not, CAST..LIKE
+ * included) back into a visual rule. Returns null when it isn't parseable.
+ */
+export function parseSegmentToRule(
+  segment: string,
+  columns: string[],
+): FilterRule | null {
+  const seg = stripBalancedOuterParens(segment.trim());
+  if (!seg) return null;
+
+  // CAST("col" AS TEXT) LIKE '%v%' shapes produced by contains/starts/ends.
+  const castMatch = seg.match(
+    /^CAST\(\s*([\s\S]+?)\s+AS\s+(?:TEXT|NVARCHAR\s*\(\s*MAX\s*\))\)\s+LIKE\s+'([\s\S]*)'$/i,
+  );
+  if (castMatch) {
+    const colName = unquoteIdentifier(castMatch[1]);
+    const col = columns.find((c) => c.toLowerCase() === colName.toLowerCase());
+    if (col) {
+      let pattern = castMatch[2].replace(/''/g, "'");
+      let operator: FilterOperator = "contains";
+      if (pattern.startsWith("%") && pattern.endsWith("%") && pattern.length >= 2) {
+        pattern = pattern.slice(1, -1);
+      } else if (pattern.endsWith("%")) {
+        operator = "starts_with";
+        pattern = pattern.slice(0, -1);
+      } else if (pattern.startsWith("%")) {
+        operator = "ends_with";
+        pattern = pattern.slice(1);
+      }
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        enabled: true,
+        column: col,
+        operator,
+        value: pattern,
+      };
+    }
+  }
+
+  const sortedColumns = [...columns].sort((a, b) => b.length - a.length);
+  const sortedSqlOps = Object.keys(SQL_TO_FILTER_OP).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const c of sortedColumns) {
+    if (!seg.toLowerCase().startsWith(c.toLowerCase())) continue;
+    const afterCol = seg.slice(c.length);
+    // Column must be followed by whitespace or a quoted-identifier close —
+    // unless the segment used a quoted identifier, handled below.
+    if (afterCol !== "" && !/^\s/.test(afterCol)) continue;
+    const rest = afterCol.trim();
+    for (const op of sortedSqlOps) {
+      if (!rest.toUpperCase().startsWith(op)) continue;
+      const afterOp = rest.slice(op.length);
+      const filterOp = SQL_TO_FILTER_OP[op.toUpperCase()];
+      if (!filterOp) continue;
+      // An operator with no value isn't a complete filter.
+      if (operatorNeedsValue(filterOp) && !afterOp.trim()) return null;
+      // A value with a top-level AND/OR belongs to a compound expression,
+      // not to this rule (splitting already handled AND; OR must survive).
+      if (hasTopLevelJoiner(afterOp)) return null;
+      return {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${c}`,
+        enabled: true,
+        column: c,
+        operator: filterOp,
+        value: operatorNeedsValue(filterOp) ? unquoteStringLiteral(afterOp.trim()) : "",
+      };
+    }
+    return null;
+  }
+
+  // Quoted-identifier form: "col" = 'v' (what the builder emits).
+  const quotedMatch = seg.match(/^("[^"]+"|`[^`]+`|\[[^\]]+\])\s*([\s\S]*)$/);
+  if (quotedMatch) {
+    const colName = unquoteIdentifier(quotedMatch[1]);
+    const col = columns.find((c) => c.toLowerCase() === colName.toLowerCase());
+    if (col) {
+      return parseSegmentToRule(`${col} ${quotedMatch[2]}`, columns);
+    }
+  }
+  return null;
+}
+
+/**
+ * Decompose a stored WHERE clause into visual rules + raw remainder, so
+ * reopening the dialog shows rows instead of one opaque blob — and
+ * re-applying is idempotent instead of stacking parens.
+ */
+export function decomposeFilterQuery(
+  filterQuery: string,
+  columns: string[],
+): { rules: FilterRule[]; remainder: string } {
+  const trimmed = stripLeadingWhereKeyword(filterQuery);
+  if (!trimmed) return { rules: [makeRule("")], remainder: "" };
+  const rules: FilterRule[] = [];
+  const leftovers: string[] = [];
+  const visit = (text: string, depth: number) => {
+    for (const part of splitTopLevelAnd(text)) {
+      const rule = parseSegmentToRule(part, columns);
+      if (rule) {
+        rules.push(rule);
+        continue;
+      }
+      // Fully-wrapped groups like ((a=1) AND (b=2)) — try the inside, but
+      // keep the original (parens intact: they matter for OR groups) when
+      // the inside doesn't fully decompose into rules.
+      if (depth < 3) {
+        const stripped = stripBalancedOuterParens(part);
+        if (stripped !== part.trim()) {
+          const rulesBefore = rules.length;
+          const leftoversBefore = leftovers.length;
+          visit(stripped, depth + 1);
+          if (rules.length > rulesBefore && leftovers.length === leftoversBefore) {
+            continue;
+          }
+          rules.length = rulesBefore;
+          leftovers.length = leftoversBefore;
+        }
+      }
+      leftovers.push(part.trim());
+    }
+  };
+  visit(trimmed, 0);
+  if (rules.length === 0) return { rules: [makeRule("")], remainder: leftovers.join(" AND ") };
+  return { rules, remainder: leftovers.join(" AND ") };
 }
 
 function quoteIdentifier(
@@ -217,7 +472,6 @@ export function ToolbarFilterSort({
     () => results?.fields?.map((f) => f.name) ?? [],
     [results?.fields],
   );
-  const firstColumn = columns[0] ?? "";
   const [isFilterMenuOpen, setIsFilterMenuOpen] = React.useState(false);
   const [draftRules, setDraftRules] = React.useState<FilterRule[]>([]);
   const [customWhere, setCustomWhere] = React.useState("");
@@ -397,50 +651,15 @@ export function ToolbarFilterSort({
         return;
       }
 
-      // Try to parse the input into rules (split by AND/OR)
-      const segments = val.split(/\s+(?:AND|OR)\s+/i);
-      const parsedRules: FilterRule[] = [];
-      const sortedColumns = [...columns].sort((a, b) => b.length - a.length);
-      const sortedSqlOps = Object.keys(SQL_TO_FILTER_OP).sort(
-        (a, b) => b.length - a.length,
+      // Decompose into visual rules; anything unparseable (OR groups, raw
+      // SQL) stays as the remainder so nothing is lost or re-wrapped.
+      const { rules, remainder } = decomposeFilterQuery(val, columns);
+      const realRules = rules.filter(
+        (r) =>
+          r.column && r.column !== "none" && r.operator && r.operator !== "none",
       );
 
-      for (const segment of segments) {
-        let col = "none";
-        let sqlOp = "none";
-        let filterVal = "";
-        const segmentTrimmed = segment.trim();
-
-        for (const c of sortedColumns) {
-          if (segmentTrimmed.toLowerCase().startsWith(c.toLowerCase())) {
-            const rest = segmentTrimmed.slice(c.length).trim();
-            for (const op of sortedSqlOps) {
-              if (rest.toUpperCase().startsWith(op)) {
-                col = c;
-                sqlOp = op;
-                filterVal = rest.slice(op.length).trim();
-                break;
-              }
-            }
-            break;
-          }
-        }
-
-        if (col !== "none" && sqlOp !== "none") {
-          const filterOp = SQL_TO_FILTER_OP[sqlOp.toUpperCase()];
-          if (filterOp) {
-            parsedRules.push({
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${parsedRules.length}`,
-              enabled: true,
-              column: col,
-              operator: filterOp,
-              value: filterVal,
-            });
-          }
-        }
-      }
-
-      if (parsedRules.length > 0) {
+      if (realRules.length > 0) {
         e.preventDefault();
         setDraftRules((prev) => {
           let updated = [...prev];
@@ -452,9 +671,9 @@ export function ToolbarFilterSort({
           ) {
             updated = [];
           }
-          return [...updated, ...parsedRules];
+          return [...updated, ...realRules];
         });
-        setCustomWhere("");
+        setCustomWhere(remainder);
         setShowSuggestions(false);
       } else {
         // If nothing was parsed but there is content, just apply the filter (keeps raw SQL in customWhere)
@@ -529,17 +748,20 @@ export function ToolbarFilterSort({
   ]);
 
   const prepareDialog = React.useCallback(() => {
-    setDraftRules([makeRule("")]);
-    setCustomWhere(filterQuery);
+    const { rules, remainder } = decomposeFilterQuery(filterQuery, columns);
+    setDraftRules(rules);
+    setCustomWhere(remainder);
     setIsFilterMenuOpen(true);
-  }, [filterQuery]);
+  }, [filterQuery, columns]);
 
   const handleApplyFilter = React.useCallback(() => {
     const visualClauses = draftRules
       .map((rule) => buildRuleClause(rule, dbType))
       .filter((clause): clause is string => !!clause);
     const clauses: string[] = [...visualClauses];
-    if (customWhere.trim()) clauses.push(`(${customWhere.trim()})`);
+    // Strip + re-wrap once so re-applying never stacks parens.
+    const remainder = stripBalancedOuterParens(customWhere.trim());
+    if (remainder) clauses.push(`(${remainder})`);
     const nextFilter = clauses.join(" AND ");
 
     setFilterQuery(nextFilter);
@@ -724,7 +946,7 @@ export function ToolbarFilterSort({
                 variant="outline"
                 className="h-8 px-3 text-xs border-border"
                 onClick={() =>
-                  setDraftRules((prev) => [...prev, makeRule(firstColumn)])
+                  setDraftRules((prev) => [...prev, makeRule("")])
                 }
               >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />

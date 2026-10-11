@@ -21,6 +21,9 @@ export type AiPermissionMode = "schema_only" | "schema_with_data";
 export type GlobalAiSettings = {
   permissionMode: AiPermissionMode;
   providers: Record<string, GlobalAiProviderConfig>;
+  /** Default provider + model used for one-shot agent actions (e.g. AI filter). */
+  defaultProvider: string;
+  defaultModel: string;
 };
 
 export type AgentChatHistoryMessage = {

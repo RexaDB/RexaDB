@@ -763,6 +763,7 @@ export function StudioMainContent({
     onToggleColumn: toggleColumn,
     onShowAllColumns: showAllColumns,
     connectionString: currentConnectionString,
+    connectionId: connection?.id ?? null,
   };
 
   const tableGridProps = {
@@ -1078,6 +1079,7 @@ export function StudioMainContent({
         permissionContext: cachedPermissionContext,
         setPermissionContext: noop,
         connectionString: currentConnectionString,
+        connectionId: connection?.id ?? null,
         postgresRoles,
         supabaseAuthUsers,
         loadingPermissionOptions: fetchingTablePermissionOptions,
