@@ -419,6 +419,13 @@ export function useGlobalStudioSettings(persist = false) {
   // and must survive incoming loads — this is what stops an in-flight
   // mount GET from swallowing a toggle made milliseconds after open.
   const appliedRef = useRef<Record<string, unknown> | null>(null);
+  // Last server-acknowledged record (load, fresh broadcast, or confirmed
+  // refetch). Dirty detection compares against THIS, not appliedRef: a
+  // recovery fetch preserves unsaved edits in state but must not mark them
+  // applied — otherwise a second failed retry sees no diff and restores stale
+  // server values, discarding the edit. Only a successful save (via its
+  // broadcast echo) or a confirmed-fresh read advances this baseline.
+  const confirmedRef = useRef<Record<string, unknown> | null>(null);
   // Fresh mirror of current state, refreshed after every render so
   // long-lived subscriptions always compare against live values.
   const currentRef = useRef<Record<string, unknown> | null>(null);
@@ -433,17 +440,28 @@ export function useGlobalStudioSettings(persist = false) {
   // can call it without capturing stale render state. applyFromRecord only
   // invokes stable setters, so holding its first instance is safe.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const applyRespectingUserEdits = useCallback((incoming: Record<string, unknown>) => {
+  const applyRespectingUserEdits = useCallback((
+    incoming: Record<string, unknown>,
+    opts?: { confirmServerState?: boolean },
+  ) => {
     const prev = appliedRef.current ?? {};
+    // Dirty = differs from the last server-acknowledged state (falls back to
+    // the applied baseline before the first confirmed read).
+    const baseline = confirmedRef.current ?? prev;
     const current = currentRef.current ?? {};
     const merged: Record<string, unknown> = { ...incoming };
     for (const key of Object.keys(current)) {
-      if (stableStringify(current[key]) !== stableStringify((prev as Record<string, unknown>)[key])) {
+      if (stableStringify(current[key]) !== stableStringify((baseline as Record<string, unknown>)[key])) {
         merged[key] = current[key];
       }
     }
     applyFromRecord(merged);
     appliedRef.current = merged;
+    // Recovery refetches (stale wakes after a failed save) apply without
+    // confirming, so unsaved edits stay marked until a save succeeds.
+    if (opts?.confirmServerState !== false) {
+      confirmedRef.current = { ...incoming };
+    }
   }, []);
 
   useEffect(() => {
@@ -502,7 +520,12 @@ export function useGlobalStudioSettings(persist = false) {
           return;
         }
         if (result.success && result.data) {
-          applyRespectingUserEdits(result.data as Record<string, any>);
+          // Recovery/refresh read: may be stale (e.g. wake after a failed
+          // save), so apply without confirming — unsaved edits stay dirty
+          // until a save succeeds.
+          applyRespectingUserEdits(result.data as Record<string, any>, {
+            confirmServerState: false,
+          });
         }
         setIsLoaded(true);
       })();

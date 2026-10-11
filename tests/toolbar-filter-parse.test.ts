@@ -137,6 +137,11 @@ describe("decomposeFilterQuery", () => {
     expect(
       parseSegmentToRule(`CAST("status" AS TEXT) LIKE 'act'`, COLUMNS),
     ).toBeNull();
+    // `= NULL` / `<> NULL` would rebuild as IS NULL / IS NOT NULL.
+    expect(parseSegmentToRule(`status = NULL`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`status <> NULL`, COLUMNS)).toBeNull();
+    // ...but the canonical forms still parse.
+    expect(parseSegmentToRule(`status IS NULL`, COLUMNS)?.operator).toBe("is_null");
     const { remainder } = decomposeFilterQuery(`time_created >= NOW()`, COLUMNS);
     expect(remainder).toBe(`time_created >= NOW()`);
   });

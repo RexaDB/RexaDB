@@ -344,6 +344,14 @@ export function parseSegmentToRule(
         rawValue.startsWith("'") &&
         rawValue.endsWith("'");
       const unquoted = wasQuoted ? unquoteStringLiteral(rawValue) : rawValue;
+      // `= NULL` / `<> NULL` never survive Apply: the builder rewrites them
+      // to `IS NULL` / `IS NOT NULL`, which changes semantics — leave raw.
+      if (
+        (filterOp === "eq" || filterOp === "ne") &&
+        /^null$/i.test(wasQuoted ? unquoted : rawValue)
+      ) {
+        return null;
+      }
       if (operatorNeedsValue(filterOp)) {
         if (wasQuoted) {
           // Quoted numerics/booleans/NULL would rebuild unquoted
