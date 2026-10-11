@@ -748,6 +748,9 @@ export type GlobalAiProviderConfig = {
 export type GlobalAiSettings = {
   permissionMode: "schema_only" | "schema_with_data";
   providers: Record<string, GlobalAiProviderConfig>;
+  /** Default provider + model used for one-shot agent actions (e.g. AI filter). */
+  defaultProvider: string;
+  defaultModel: string;
 };
 
 type StoredAiChat = {
@@ -770,6 +773,8 @@ export type StoredAiChatMessage = {
 
 const DEFAULT_GLOBAL_AI_SETTINGS: GlobalAiSettings = {
   permissionMode: "schema_with_data",
+  defaultProvider: "",
+  defaultModel: "",
   providers: {
     openai: { apiKey: "", models: [] },
     google: { apiKey: "", models: [] },
@@ -844,6 +849,14 @@ function normalizeGlobalAiSettings(input: unknown): GlobalAiSettings {
       source.permissionMode === "schema_only"
         ? "schema_only"
         : DEFAULT_GLOBAL_AI_SETTINGS.permissionMode,
+    defaultProvider:
+      typeof source.defaultProvider === "string"
+        ? source.defaultProvider.trim()
+        : "",
+    defaultModel:
+      typeof source.defaultModel === "string"
+        ? source.defaultModel.trim()
+        : "",
     providers: normalizedProviders,
   };
 }

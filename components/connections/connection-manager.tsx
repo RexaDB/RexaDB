@@ -446,36 +446,9 @@ export function ConnectionManager({
     handleInstall,
     handleRenewOtl,
   } = useAppUpdateContext();
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    const root = document.documentElement;
-    const storedMode = window.localStorage.getItem("rexa-db-tui-mode") === "1";
-    const storedTheme =
-      window.localStorage.getItem("rexa-db-tui-theme") || "auto";
-
-    if (!storedMode) {
-      root.classList.remove("tui-mode");
-      delete root.dataset.tuiTheme;
-      return;
-    }
-
-    root.classList.add("tui-mode");
-    const resolveTheme = () => {
-      if (storedTheme === "auto") {
-        return root.classList.contains("dark") ? "dark" : "light";
-      }
-      return storedTheme;
-    };
-    root.dataset.tuiTheme = resolveTheme();
-
-  // fallow-ignore-next-line code-duplication
-    if (storedTheme !== "auto") return;
-    const observer = new MutationObserver(() => {
-      root.dataset.tuiTheme = resolveTheme();
-    });
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
+  // Terminal-UI application lives centrally in useGlobalStudioSettings
+  // (consumed below), which applies the class reactively + mirrors
+  // localStorage — no mount-once copy here so toggles apply instantly.
 
   type ConnectionProvider =
     | "postgresql"

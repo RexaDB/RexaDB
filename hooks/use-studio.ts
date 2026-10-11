@@ -1190,8 +1190,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   const {
     executionMode,
     infiniteTableScrolling,
-    tuiMode,
-    tuiTheme,
     agentProvider,
     agentModel,
     agentApiKey,
@@ -1441,39 +1439,9 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     delayedUiRestoreBlockedRef.current = false;
   }, [connection.id]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const root = document.documentElement;
-    if (tuiMode) {
-      root.classList.add("tui-mode");
-    } else {
-      root.classList.remove("tui-mode");
-      delete root.dataset.tuiTheme;
-      return;
-    }
-    const resolveTheme = () => {
-      if (tuiTheme === "auto") {
-        return root.classList.contains("dark") ? "dark" : "light";
-      }
-      return tuiTheme;
-    };
-    root.dataset.tuiTheme = resolveTheme();
-  // fallow-ignore-next-line code-duplication
-    if (tuiTheme !== "auto") return;
-    const observer = new MutationObserver(() => {
-      root.dataset.tuiTheme = resolveTheme();
-    });
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, [tuiMode, tuiTheme]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    try {
-      window.localStorage.setItem("rexa-db-tui-mode", tuiMode ? "1" : "0");
-      window.localStorage.setItem("rexa-db-tui-theme", tuiTheme || "auto");
-    } catch {}
-  }, [tuiMode, tuiTheme]);
+  // Terminal-UI class + localStorage mirror are applied centrally by
+  // useGlobalStudioSettings (used here with persist=true), so toggles work
+  // from any screen — no local copy of that effect.
 
   // Track current connection id in a ref so addHistoryEntry can guard against stale state
   const currentConnectionIdRef = useRef<number>(connection.id);

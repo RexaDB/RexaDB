@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   getGlobalStudioSettings,
   saveGlobalStudioSettings,
@@ -24,9 +25,26 @@ import {
 import {
   emitSettingsSyncLocalChanged,
   subscribeSettingsSyncApplied,
+  subscribeSettingsSyncLocalChanged,
 } from "@/lib/studio/settings-sync-events";
+import {
+  confirmSettingsBaseline,
+  mergePreservingEdits,
+} from "@/lib/studio/settings-baseline";
 
 export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
+/** Fired when a studio-settings save fails its final retry (still local-only). */
+export const STUDIO_SETTINGS_SAVE_FAILED_EVENT =
+  "rexadb-studio-settings-save-failed";
+
+// Saves in flight across hook instances in this window. A load resolving
+// while a save is landing must defer to the save's broadcast (which carries
+// fresher state) instead of painting stale server data over fresh edits.
+let inFlightStudioSaves = 0;
+// Monotonic save ordering: only the newest completed save may broadcast.
+// Older overlapping responses are dropped so they can't undo newer edits.
+let studioSaveSeq = 0;
+let latestStudioSaveSeq = 0;
 
 interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   appZoom: number;
@@ -320,13 +338,147 @@ export function useGlobalStudioSettings(persist = false) {
     }
   };
 
+  // Current state as a plain record (same shape as the save payload).
+  const snapshotCurrent = (): Record<string, unknown> => ({
+    appZoom,
+    executionMode,
+    rowSpacing,
+    alternatingRowColors,
+    editorFontSize,
+    editorFontFamily,
+    sqlEditorEngine,
+    tuiMode,
+    tuiTheme,
+    commandMenuSections,
+    agentProvider,
+    agentModel,
+    agentApiKey,
+    glassmorphicHeaders,
+    gridAnimations,
+    sleekSelection,
+    colorizedPills,
+    relativeDates,
+    richJsonInspector,
+    dataBars,
+    skeletonLoaders,
+    fastTableLoading,
+    sleekLayout,
+    showTabIndicator,
+    iconThemeId,
+    customIconThemes,
+    restoreAppState,
+    openConnectionsInNewWindow,
+    schemaExplorer,
+    databaseExplorer,
+    tableExpansion,
+    hideWindowActions,
+    rlsPolicyTabEditor,
+    autoClosePane,
+    confirmSheetClose,
+    sidebarToggleBeforeConnection,
+    showPendingChangesBanner,
+    autoSaveQueries,
+    vimMode,
+    slashAiTrigger,
+    previewTabs,
+    resultTabsEnabled,
+    noiseBgEnabled,
+    noiseBgOpacity,
+    noiseBgSize,
+    noiseBgBlendMode,
+    noiseBgColor,
+    noiseBgTranslucent,
+    sqlFormatTabWidth,
+    sqlFormatUseTabs,
+    sqlFormatKeywordCase,
+    sqlFormatDataTypeCase,
+    sqlFormatFunctionCase,
+    sqlFormatIdentifierCase,
+    sqlFormatLogicalOperatorNewline,
+    sqlFormatExpressionWidth,
+    sqlFormatLinesBetweenQueries,
+    sqlFormatDenseOperators,
+    sqlFormatNewlineBeforeSemicolon,
+  });
+
+  // Baseline of the last applied record. Seeded with pristine mount-state
+  // inside the mount effect below (first-render closure = defaults, so even
+  // a frantic first-millisecond toggle can't poison it).
+  // A field whose current value differs from baseline was touched locally
+  // and must survive incoming loads — this is what stops an in-flight
+  // mount GET from swallowing a toggle made milliseconds after open.
+  const appliedRef = useRef<Record<string, unknown> | null>(null);
+  // Last server-acknowledged record (load, fresh broadcast, or confirmed
+  // refetch). Dirty detection compares against THIS, not appliedRef: a
+  // recovery fetch preserves unsaved edits in state but must not mark them
+  // applied — otherwise a second failed retry sees no diff and restores stale
+  // server values, discarding the edit. Only a successful save (via its
+  // broadcast echo) or a confirmed-fresh read advances this baseline.
+  const confirmedRef = useRef<Record<string, unknown> | null>(null);
+  // Fresh mirror of current state, refreshed after every render so
+  // long-lived subscriptions always compare against live values.
+  const currentRef = useRef<Record<string, unknown> | null>(null);
   useEffect(() => {
+    currentRef.current = snapshotCurrent();
+  });
+  // Freshness watermark: broadcasts bump it; a fetch that STARTED before
+  // the latest broadcast read stale server state and must not apply.
+  const freshSeqRef = useRef(0);
+
+  // Ref-safe body (refs + stable setters only) so long-lived subscriptions
+  // can call it without capturing stale render state. applyFromRecord only
+  // invokes stable setters, so holding its first instance is safe.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const applyRespectingUserEdits = useCallback((
+    incoming: Record<string, unknown>,
+    opts?: { confirmServerState?: boolean },
+  ) => {
+    const prev = appliedRef.current ?? {};
+    // Dirty = differs from the last server-acknowledged state (falls back to
+    // the applied baseline before the first confirmed read). Pure helper —
+    // see lib/studio/settings-baseline.ts (unit-tested).
+    const baseline = confirmedRef.current ?? prev;
+    const current = currentRef.current ?? {};
+    const merged = mergePreservingEdits(
+      current,
+      baseline as Record<string, unknown>,
+      incoming,
+    );
+    applyFromRecord(merged);
+    appliedRef.current = merged;
+    // Recovery refetches (stale wakes after a failed save) apply without
+    // confirming, so unsaved edits stay dirty until a save succeeds.
+    // Confirmed merges onto the previous baseline: incoming records can be
+    // sparse (empty/older settings omit fields that fall back to defaults),
+    // and replacing the baseline with a sparse record would make those
+    // defaults look like unsaved edits — permanently rejecting later cloud
+    // updates for them.
+    if (opts?.confirmServerState !== false) {
+      confirmedRef.current = confirmSettingsBaseline(
+        (confirmedRef.current ?? prev) as Record<string, unknown>,
+        incoming,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (appliedRef.current === null) appliedRef.current = snapshotCurrent();
+    // Seed the server-acknowledged baseline with mount defaults too: a sparse
+    // load must not make untouched defaults look dirty.
+    if (confirmedRef.current === null) confirmedRef.current = snapshotCurrent();
     let cancelled = false;
+    const mark = freshSeqRef.current;
     const load = async () => {
       const result = await getGlobalStudioSettings();
-      if (cancelled) return;
+      if (cancelled || freshSeqRef.current !== mark) return;
+      // A save is landing with fresher state via broadcast — stay unloaded
+      // and let that broadcast apply. Marking loaded here with defaults
+      // would let a persist=true consumer save defaults over user prefs.
+      if (inFlightStudioSaves > 0) {
+        return;
+      }
       if (result.success && result.data) {
-        applyFromRecord(result.data as Record<string, any>);
+        applyRespectingUserEdits(result.data as Record<string, any>);
       }
       setIsLoaded(true);
     };
@@ -334,24 +486,120 @@ export function useGlobalStudioSettings(persist = false) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Cross-instance sync: another hook instance in this window (e.g. the
+  // settings dialog) saved — apply its payload directly. No refetch, so a
+  // GET can never beat the POST and revert a fresh toggle (the flicker).
+  // Payload-less events (other sections) still fall back to a guarded refetch.
+  const loadSeqRef = useRef(0);
+  useEffect(() => {
+    return subscribeSettingsSyncLocalChanged((detail) => {
+      const incoming = detail?.studioSettings;
+      if (incoming && typeof incoming === "object") {
+        freshSeqRef.current += 1;
+        applyRespectingUserEdits({
+          ...incoming,
+          agentApiKey:
+            typeof (incoming as Record<string, unknown>).agentApiKey === "string"
+              ? (incoming as Record<string, unknown>).agentApiKey
+              : agentApiKeyRef.current,
+        });
+        setIsLoaded(true);
+        return;
+      }
+      const seq = ++loadSeqRef.current;
+      const mark = freshSeqRef.current;
+      void (async () => {
+        const result = await getGlobalStudioSettings();
+        if (seq !== loadSeqRef.current || freshSeqRef.current !== mark) return;
+        // Same as mount load: a pending save owns fresher state — wait for
+        // its broadcast instead of going live with defaults.
+        if (inFlightStudioSaves > 0) {
+          return;
+        }
+        if (result.success && result.data) {
+          // Recovery/refresh read: may be stale (e.g. wake after a failed
+          // save), so apply without confirming — unsaved edits stay dirty
+          // until a save succeeds.
+          applyRespectingUserEdits(result.data as Record<string, any>, {
+            confirmServerState: false,
+          });
+        }
+        setIsLoaded(true);
+      })();
+    });
+  }, [applyRespectingUserEdits]);
+
+  // Single source of truth for terminal-UI application: every consumer of
+  // this hook applies the class + persists the localStorage mirror, so
+  // toggles work from any screen (connections, studio, …), not just studio.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    if (!tuiMode) {
+      root.classList.remove("tui-mode");
+      delete root.dataset.tuiTheme;
+    } else {
+      root.classList.add("tui-mode");
+      const resolveTheme = () => {
+        if (tuiTheme === "auto") {
+          return root.classList.contains("dark") ? "dark" : "light";
+        }
+        return tuiTheme;
+      };
+      root.dataset.tuiTheme = resolveTheme();
+      if (tuiTheme === "auto") {
+        const observer = new MutationObserver(() => {
+          root.dataset.tuiTheme = resolveTheme();
+        });
+        observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+        try {
+          window.localStorage.setItem("rexa-db-tui-mode", "1");
+          window.localStorage.setItem("rexa-db-tui-theme", tuiTheme || "auto");
+        } catch {
+          /* storage may be unavailable */
+        }
+        return () => observer.disconnect();
+      }
+    }
+    try {
+      window.localStorage.setItem("rexa-db-tui-mode", tuiMode ? "1" : "0");
+      window.localStorage.setItem("rexa-db-tui-theme", tuiTheme || "auto");
+    } catch {
+      /* storage may be unavailable */
+    }
+    return;
+  }, [tuiMode, tuiTheme]);
 
   useEffect(() => {
     return subscribeSettingsSyncApplied((detail) => {
       const remote = detail.payload.studioSettings;
       if (!remote || typeof remote !== "object") return;
       // Preserve the device-local API key — cloud payload never includes it.
-      applyFromRecord({
+      // Respecting-apply keeps any just-made local edits over the pull.
+      applyRespectingUserEdits({
         ...remote,
         agentApiKey: agentApiKeyRef.current,
       });
       setIsLoaded(true);
     });
-  }, []);
+  }, [applyRespectingUserEdits]);
+
+  // Snapshot of the last saved payload — applying an identical record
+  // (our own broadcast echo, cloud echo) must not re-save, or saves and
+  // broadcasts ping-pong forever.
+  const lastSavedRef = useRef<string | null>(null);
+  // Bounded retry: a failed snapshot retries once after a short delay, then
+  // notifies instead of looping forever. The tick re-runs the save effect
+  // below (lastSavedRef was cleared, so the snapshot no longer matches).
+  const [saveRetryTick, setSaveRetryTick] = useState(0);
+  const saveRetriesRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!persist || !isLoaded) return;
-    void saveGlobalStudioSettings({
+    const payload = {
       appZoom,
       executionMode,
       infiniteTableScrolling,
@@ -413,12 +661,76 @@ export function useGlobalStudioSettings(persist = false) {
       sqlFormatLinesBetweenQueries,
       sqlFormatDenseOperators,
       sqlFormatNewlineBeforeSemicolon,
-    }).then(() => {
-      emitSettingsSyncLocalChanged("studioSettings");
-    });
+    };
+    let snapshot = "";
+    try {
+      snapshot = JSON.stringify(payload);
+    } catch {
+      snapshot = "";
+    }
+    if (snapshot && snapshot === lastSavedRef.current) return;
+    lastSavedRef.current = snapshot;
+    const seq = ++studioSaveSeq;
+    latestStudioSaveSeq = seq;
+    inFlightStudioSaves += 1;
+    void (async () => {
+      let failed = false;
+      let result: unknown = null;
+      try {
+        result = await saveGlobalStudioSettings(payload);
+        failed = !!result && (result as { success?: boolean }).success === false;
+      } catch {
+        failed = true;
+      } finally {
+        // Decrement BEFORE emitting so deferred loaders see a settled
+        // counter and actually refetch/apply instead of deferring again.
+        inFlightStudioSaves -= 1;
+      }
+      const settled = inFlightStudioSaves === 0;
+      if (failed) {
+        // Request-level failures resolve with { success: false } instead of
+        // rejecting — never broadcast those as if they saved. Clear the
+        // marker so the next edit retries. Wake deferred loaders once every
+        // save has settled — otherwise a still-pending older save makes
+        // receivers drop the wake and starve.
+        if (settled) {
+          lastSavedRef.current = null;
+          emitSettingsSyncLocalChanged("studioSettings");
+          const attempts = saveRetriesRef.current[snapshot] ?? 0;
+          if (attempts < 1) {
+            saveRetriesRef.current[snapshot] = attempts + 1;
+            window.setTimeout(() => setSaveRetryTick((t) => t + 1), 2000);
+          } else {
+            delete saveRetriesRef.current[snapshot];
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent(STUDIO_SETTINGS_SAVE_FAILED_EVENT, {
+                  detail: { at: Date.now() },
+                }),
+              );
+            }
+            toast.error(
+              "Couldn't save studio settings — your changes are kept locally and will retry on the next edit.",
+            );
+          }
+        }
+        return;
+      }
+      delete saveRetriesRef.current[snapshot];
+      // Drop stale values: only the newest save may broadcast its payload, or
+      // an older response would undo a newer edit. Still wake deferred
+      // loaders when the last pending save finishes so a newly mounted hook
+      // never stays unloaded with saving disabled.
+      if (seq !== latestStudioSaveSeq) {
+        if (settled) emitSettingsSyncLocalChanged("studioSettings");
+        return;
+      }
+      emitSettingsSyncLocalChanged("studioSettings", payload as Record<string, unknown>);
+    })();
   }, [
     persist,
     isLoaded,
+    saveRetryTick,
     appZoom,
     executionMode,
     infiniteTableScrolling,
