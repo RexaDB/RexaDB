@@ -55,7 +55,7 @@ type FilterOperator =
   | "none"
   | "";
 
-interface FilterRule {
+export interface FilterRule {
   id: string;
   enabled: boolean;
   column: string;
@@ -92,7 +92,7 @@ const SQL_TO_FILTER_OP: Record<string, FilterOperator> = {
   "IS NOT NULL": "is_not_null",
 };
 
-function makeRule(defaultColumn = ""): FilterRule {
+export function makeRule(defaultColumn = ""): FilterRule {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     enabled: true,
@@ -109,6 +109,511 @@ function operatorNeedsValue(operator: FilterOperator): boolean {
     operator !== "none" &&
     operator !== ""
   );
+}
+
+/**
+ * The agent sometimes echoes the WHERE keyword (or a full SELECT) despite
+ * instructions. Stored filters already mean WHERE, so strip it — this also
+ * heals previously stored `WHERE ...` filters on next open/apply.
+ */
+export function stripLeadingWhereKeyword(text: string): string {
+  const trimmed = String(text || "").trim();
+  if (/^select\b/i.test(trimmed)) {
+    const m = trimmed.match(/\bwhere\b\s+([\s\S]*)$/i);
+    if (m) return m[1].trim();
+    return trimmed;
+  }
+  return trimmed.replace(/^where\b\s*/i, "").trim();
+}
+
+/** Strip balanced outer paren pairs so re-applying never stacks `(...)`. */export function stripBalancedOuterParens(s: string): string {
+  let out = s.trim();
+  for (;;) {
+    if (out.length < 2 || !out.startsWith("(") || !out.endsWith(")")) return out;
+    let depth = 0;
+    let balanced = true;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i] === "(") depth++;
+      else if (out[i] === ")") depth--;
+      if (depth === 0 && i < out.length - 1) {
+        balanced = false;
+        break;
+      }
+    }
+    if (!balanced || depth !== 0) return out;
+    out = out.slice(1, -1).trim();
+  }
+}
+
+/** Split on top-level AND only — OR segments stay intact for raw SQL. */
+export function splitTopLevelAnd(where: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inStr = false;
+  let current = "";
+  const upper = where.toUpperCase();
+  for (let i = 0; i < where.length; i++) {
+    const ch = where[i];
+    if (inStr) {
+      current += ch;
+      if (ch === "'") {
+        if (where[i + 1] === "'") {
+          current += where[i + 1];
+          i++;
+        } else {
+          inStr = false;
+        }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    if (ch === ")") depth = Math.max(0, depth - 1);
+    if (
+      depth === 0 &&
+      upper.startsWith("AND", i) &&
+      (i === 0 || /\s/.test(where[i - 1])) &&
+      (i + 3 >= where.length || /\s/.test(where[i + 3]))
+    ) {
+      parts.push(current);
+      current = "";
+      i += 2;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+/** Split raw identifier text into name + quoting style (null = not a ref). */
+function splitIdentifierRef(
+  raw: string,
+): { name: string; quoted: "double" | "backtick" | "bracket" | null } | null {
+  const t = raw.trim();
+  if (t.length >= 2) {
+    if (t.startsWith('"') && t.endsWith('"'))
+      return { name: t.slice(1, -1).replace(/""/g, '"'), quoted: "double" };
+    if (t.startsWith("`") && t.endsWith("`"))
+      return { name: t.slice(1, -1).replace(/``/g, "`"), quoted: "backtick" };
+    if (t.startsWith("[") && t.endsWith("]"))
+      return { name: t.slice(1, -1).replace(/]]/g, "]"), quoted: "bracket" };
+  }
+  if (/^[A-Za-z_][\w$]*$/.test(t)) return { name: t, quoted: null };
+  return null;
+}
+
+/**
+ * Engine-aware column-reference equality. Quoted refs are exact (except
+ * MySQL/MSSQL, whose identifiers are case-insensitive); unquoted refs fold
+ * case everywhere except ClickHouse. Rejects quoting styles the engine
+ * doesn't accept (e.g. backticks on Postgres) — that SQL is invalid there.
+ */
+function sameColumnRef(
+  inputRefRaw: string,
+  canonical: string,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): boolean {
+  const parsed = splitIdentifierRef(inputRefRaw);
+  if (!parsed) return false;
+  if (!parsed.quoted) {
+    if (dbType === "clickhouse") return parsed.name === canonical;
+    return parsed.name.toLowerCase() === canonical.toLowerCase();
+  }
+  const valid =
+    parsed.quoted === "double"
+      ? dbType !== "mysql" && dbType !== "clickhouse" && dbType !== "mssql"
+      : parsed.quoted === "backtick"
+        ? dbType === "mysql" || dbType === "clickhouse"
+        : dbType === "mssql";
+  if (!valid) return false;
+  if (dbType === "mysql" || dbType === "mssql")
+    return parsed.name.toLowerCase() === canonical.toLowerCase();
+  return parsed.name === canonical;
+}
+
+/** Engine-aware column lookup by raw reference text. */
+function findColumn(
+  columns: string[],
+  refRaw: string,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): string | null {
+  const sorted = [...columns].sort((a, b) => b.length - a.length);
+  for (const c of sorted) {
+    if (sameColumnRef(refRaw, c, dbType)) return c;
+  }
+  return null;
+}
+
+/**
+ * Pull single-quoted literals out of a clause into indexed placeholders.
+ * Returns null on unterminated quotes. Literal contents are compared
+ * exactly (case/whitespace-sensitive); everything else is normalized.
+ */
+function extractStringLiterals(
+  s: string,
+): { text: string; literals: string[] } | null {
+  const literals: string[] = [];
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "'") {
+      let j = i + 1;
+      let lit = "";
+      let closed = false;
+      while (j < s.length) {
+        if (s[j] === "'") {
+          if (s[j + 1] === "'") {
+            lit += "'";
+            j += 2;
+            continue;
+          }
+          closed = true;
+          j++;
+          break;
+        }
+        lit += s[j];
+        j++;
+      }
+      if (!closed) return null;
+      literals.push(lit);
+      out += `__LIT_${literals.length - 1}__`;
+      i = j;
+    } else {
+      out += s[i];
+      i++;
+    }
+  }
+  return { text: out, literals };
+}
+
+/**
+ * Proof of round-trip: rebuild the candidate rule and require the output to
+ * match the input modulo identifier quoting/case, keyword case, whitespace,
+ * and `!=`/`<>` spelling. Anything else (functions, LIKE shapes, bare words,
+ * NULL comparisons, padded/empty/concatenated literals, cross-engine CASTs)
+ * fails here even if an earlier check missed it — and stays raw SQL.
+ */
+function verifyRuleRoundTrip(
+  inputSeg: string,
+  inputRefRaw: string,
+  rule: FilterRule,
+  dbType?: ToolbarFilterSortProps["dbType"],
+): boolean {
+  const rebuilt = buildRuleClause(rule, dbType);
+  if (!rebuilt) return false;
+  if (!sameColumnRef(inputRefRaw, rule.column, dbType)) return false;
+  const a = extractStringLiterals(inputSeg);
+  const b = extractStringLiterals(rebuilt);
+  if (!a || !b) return false;
+  if (a.literals.length !== b.literals.length) return false;
+  for (let i = 0; i < a.literals.length; i++) {
+    if (a.literals[i] !== b.literals[i]) return false;
+  }
+  const norm = (t: string): string => {
+    let s = t;
+    // ClickHouse identifiers are case-sensitive — never fold case there
+    // (hand-typed lowercase keywords then stay raw, which is safe).
+    if (dbType !== "clickhouse") s = s.toUpperCase();
+    s = s.replace(/!=/g, "<>");
+    s = s.replace(/"/g, "").replace(/`/g, "").replace(/\[/g, "").replace(/\]/g, "");
+    const colKey =
+      dbType === "clickhouse" ? rule.column : rule.column.toUpperCase();
+    s = s.split(colKey).join("__COL__");
+    return s.replace(/\s+/g, " ").trim();
+  };
+  return norm(a.text) === norm(b.text);
+}
+
+function unquoteStringLiteral(raw: string): string {
+  const t = raw.trim();
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) {
+    return t.slice(1, -1).replace(/''/g, "'");
+  }
+  return t;
+}
+
+/** True when s contains OR at paren depth 0 outside string literals. */
+export function hasTopLevelOr(s: string): boolean {
+  let depth = 0;
+  let inStr = false;
+  const upper = s.toUpperCase();
+  const isBoundary = (idx: number) =>
+    idx < 0 || idx >= s.length || /\s/.test(s[idx]);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "'") {
+        if (s[i + 1] === "'") i++;
+        else inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      if (upper.startsWith("OR", i) && isBoundary(i - 1) && isBoundary(i + 2)) return true;
+    }
+  }
+  return false;
+}
+
+/** True when s contains AND/OR at paren depth 0 outside string literals. */
+function hasTopLevelJoiner(s: string): boolean {
+  let depth = 0;
+  let inStr = false;
+  const upper = s.toUpperCase();
+  const isBoundary = (idx: number) =>
+    idx < 0 || idx >= s.length || /\s/.test(s[idx]);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "'") {
+        if (s[i + 1] === "'") i++;
+        else inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      if (upper.startsWith("AND", i) && isBoundary(i - 1) && isBoundary(i + 3)) return true;
+      if (upper.startsWith("OR", i) && isBoundary(i - 1) && isBoundary(i + 2)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Parse one filter segment (`column op value`, quoted or not, CAST..LIKE
+ * included) back into a visual rule. Returns null when it isn't parseable.
+ */
+export function parseSegmentToRule(
+  segment: string,
+  columns: string[],
+  dbType: ToolbarFilterSortProps["dbType"] = "postgres",
+): FilterRule | null {
+  const seg = stripBalancedOuterParens(segment.trim());
+  if (!seg) return null;
+
+  // CAST("col" AS TEXT) LIKE '%v%' shapes produced by contains/starts/ends.
+  const castMatch = seg.match(
+    /^CAST\(\s*([\s\S]+?)\s+AS\s+(?:TEXT|CHAR|String|NVARCHAR\s*\(\s*MAX\s*\))\)\s+LIKE\s+'([\s\S]*)'$/i,
+  );
+  if (castMatch) {
+    const col = findColumn(columns, castMatch[1], dbType);
+    if (col) {
+      const pattern = castMatch[2].replace(/''/g, "'");
+      let operator: FilterOperator | null = null;
+      let inner = pattern;
+      if (pattern.startsWith("%") && pattern.endsWith("%") && pattern.length >= 2) {
+        operator = "contains";
+        inner = pattern.slice(1, -1);
+      } else if (pattern.endsWith("%") && !pattern.startsWith("%")) {
+        operator = "starts_with";
+        inner = pattern.slice(0, -1);
+      } else if (pattern.startsWith("%") && !pattern.endsWith("%")) {
+        operator = "ends_with";
+        inner = pattern.slice(1);
+      } else {
+        // `LIKE 'abc'` without wildcards is an exact match, not a contains
+        // — extracting it would rebuild as `%abc%` and widen the rows.
+        return null;
+      }
+      const candidate: FilterRule = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        enabled: true,
+        column: col,
+        operator,
+        value: inner,
+      };
+      // Empty contains (`LIKE '%%'`) can't rebuild (empty values are
+      // dropped) and cross-engine CASTs rebuild differently — stay raw.
+      return verifyRuleRoundTrip(seg, castMatch[1], candidate, dbType)
+        ? candidate
+        : null;
+    }
+  }
+
+  const sortedColumns = [...columns].sort((a, b) => b.length - a.length);
+  const sortedSqlOps = Object.keys(SQL_TO_FILTER_OP).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const c of sortedColumns) {
+    const refRaw = seg.slice(0, c.length);
+    if (!sameColumnRef(refRaw, c, dbType)) continue;
+    const afterCol = seg.slice(c.length);
+    // Column must be followed by whitespace or a quoted-identifier close —
+    // unless the segment used a quoted identifier, handled below.
+    if (afterCol !== "" && !/^\s/.test(afterCol)) continue;
+    const rest = afterCol.trim();
+    for (const op of sortedSqlOps) {
+      if (!rest.toUpperCase().startsWith(op)) continue;
+      const afterOp = rest.slice(op.length);
+      const filterOp = SQL_TO_FILTER_OP[op.toUpperCase()];
+      if (!filterOp) continue;
+      // Bare LIKE / ILIKE / NOT LIKE never round-trip through the visual
+      // builder (which emits CAST(.. AS ..) LIKE '%v%'), so leave them raw.
+      const opUpper = op.toUpperCase();
+      if (opUpper === "LIKE" || opUpper === "ILIKE" || opUpper === "NOT LIKE") return null;
+      // An operator with no value isn't a complete filter, and trailing junk
+      // after a valueless operator (`IS NULL foo`) must not be silently
+      // dropped — leave it raw.
+      if (operatorNeedsValue(filterOp) && !afterOp.trim()) return null;
+      if (!operatorNeedsValue(filterOp) && afterOp.trim()) return null;
+      // A value with a top-level AND/OR belongs to a compound expression,
+      // not to this rule (splitting already handled AND; OR must survive).
+      if (hasTopLevelJoiner(afterOp)) return null;
+      const rawValue = afterOp.trim();
+      // Strict single-quoted literal: `'...'` with `''` escapes only. A
+      // starts-and-ends-with-quote check would accept `'a' 'b'` (SQL
+      // concatenation) and rebuild it as one literal — different rows.
+      const isStrictQuoted = /^'(?:[^']|'')*'$/.test(rawValue);
+      const wasQuoted =
+        rawValue.length >= 2 &&
+        rawValue.startsWith("'") &&
+        rawValue.endsWith("'");
+      if (wasQuoted && !isStrictQuoted) return null;
+      const unquoted = isStrictQuoted ? unquoteStringLiteral(rawValue) : rawValue;
+      // `= NULL` / `<> NULL` never survive Apply: the builder rewrites them
+      // to `IS NULL` / `IS NOT NULL`, which changes semantics — leave raw.
+      if (
+        (filterOp === "eq" || filterOp === "ne") &&
+        /^null$/i.test(wasQuoted ? unquoted : rawValue)
+      ) {
+        return null;
+      }
+      if (operatorNeedsValue(filterOp)) {
+        if (isStrictQuoted) {
+          // The builder trims values and drops empty ones: padded (`'  x  '`)
+          // or empty (`''`) strings would rebuild differently — or vanish, as
+          // empty values make buildRuleClause return null. Leave them raw.
+          if (unquoted !== unquoted.trim() || !unquoted.length) {
+            return null;
+          }
+          // Quoted numerics/booleans/NULL would rebuild unquoted
+          // (toSqlLiteral) and change type — leave them as raw SQL.
+          if (
+            /^null$/i.test(unquoted) ||
+            /^(true|false)$/i.test(unquoted) ||
+            /^-?\d+(\.\d+)?$/.test(unquoted)
+          ) {
+            return null;
+          }
+        } else {
+          // Unquoted values must rebuild byte-identical: numbers, booleans,
+          // and NULL. A bare word (`status = active`) is a column reference
+          // in SQL but would rebuild as the string `'active'` — leave it raw.
+          // Function calls (NOW()), lists, subqueries, or multi-word
+          // expressions are likewise left untouched.
+          if (!/^(NULL|TRUE|FALSE|-?\d+(\.\d+)?)$/i.test(rawValue)) {
+            return null;
+          }
+        }
+      }
+      const candidate: FilterRule = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${c}`,
+        enabled: true,
+        column: c,
+        operator: filterOp,
+        value: operatorNeedsValue(filterOp) ? unquoteStringLiteral(rawValue) : "",
+      };
+      // Final proof: rebuild and require equivalence. Anything the checks
+      // above missed stays raw rather than changing rows on Apply.
+      return verifyRuleRoundTrip(seg, refRaw, candidate, dbType)
+        ? candidate
+        : null;
+    }
+    return null;
+  }
+
+  // Quoted-identifier form: "col" = 'v' (what the builder emits).
+  const quotedMatch = seg.match(/^("[^"]+"|`[^`]+`|\[[^\]]+\])\s*([\s\S]*)$/);
+  if (quotedMatch) {
+    const col = findColumn(columns, quotedMatch[1], dbType);
+    if (col) {
+      return parseSegmentToRule(`${col} ${quotedMatch[2]}`, columns, dbType);
+    }
+  }
+  return null;
+}
+
+/**
+ * Decompose a stored WHERE clause into visual rules + raw remainder, so
+ * reopening the dialog shows rows instead of one opaque blob — and
+ * re-applying is idempotent instead of stacking parens.
+ */
+export function decomposeFilterQuery(
+  filterQuery: string,
+  columns: string[],
+  dbType: ToolbarFilterSortProps["dbType"] = "postgres",
+): { rules: FilterRule[]; remainder: string } {
+  const trimmed = stripLeadingWhereKeyword(filterQuery);
+  if (!trimmed) return { rules: [makeRule("")], remainder: "" };
+  const rules: FilterRule[] = [];
+  const leftovers: string[] = [];
+  const visit = (text: string, depth: number) => {
+    // AND binds tighter than OR — splitting a top-level `A OR B AND C` into
+    // separate AND terms and rejoining as `C AND (A OR B)` changes which rows
+    // match. Keep any expression with a top-level OR together as raw SQL.
+    if (hasTopLevelOr(text)) {
+      const whole = text.trim();
+      const asRule = parseSegmentToRule(whole, columns, dbType);
+      if (asRule) {
+        rules.push(asRule);
+        return;
+      }
+      // Peel one balanced paren layer only when the inside has no top-level
+      // OR (e.g. ((a=1 AND b=2))); otherwise keep the original verbatim so
+      // Apply never reorders OR/AND precedence.
+      const stripped = stripBalancedOuterParens(whole);
+      if (depth < 3 && stripped !== whole && !hasTopLevelOr(stripped)) {
+        visit(stripped, depth + 1);
+        return;
+      }
+      leftovers.push(whole);
+      return;
+    }
+    for (const part of splitTopLevelAnd(text)) {
+      const rule = parseSegmentToRule(part, columns, dbType);
+      if (rule) {
+        rules.push(rule);
+        continue;
+      }
+      // Fully-wrapped groups like ((a=1) AND (b=2)) — try the inside, but
+      // keep the original (parens intact: they matter for OR groups) when
+      // the inside doesn't fully decompose into rules.
+      if (depth < 3) {
+        const stripped = stripBalancedOuterParens(part);
+        if (stripped !== part.trim()) {
+          const rulesBefore = rules.length;
+          const leftoversBefore = leftovers.length;
+          visit(stripped, depth + 1);
+          if (rules.length > rulesBefore && leftovers.length === leftoversBefore) {
+            continue;
+          }
+          rules.length = rulesBefore;
+          leftovers.length = leftoversBefore;
+        }
+      }
+      leftovers.push(part.trim());
+    }
+  };
+  visit(trimmed, 0);
+  if (rules.length === 0) return { rules: [makeRule("")], remainder: leftovers.join(" AND ") };
+  return { rules, remainder: leftovers.join(" AND ") };
 }
 
 function quoteIdentifier(
@@ -130,6 +635,14 @@ function quoteString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/** Fuzzy-match CAST target per engine — must mirror the quick-filter builder. */
+function containsCastTarget(dbType: ToolbarFilterSortProps["dbType"]): string {
+  if (dbType === "mssql") return "NVARCHAR(MAX)";
+  if (dbType === "mysql") return "CHAR";
+  if (dbType === "clickhouse") return "String";
+  return "TEXT";
+}
+
 function toSqlLiteral(rawValue: string): string {
   const trimmed = rawValue.trim();
   if (!trimmed.length) return "''";
@@ -140,7 +653,7 @@ function toSqlLiteral(rawValue: string): string {
   return quoteString(trimmed);
 }
 
-function buildRuleClause(
+export function buildRuleClause(
   rule: FilterRule,
   dbType: ToolbarFilterSortProps["dbType"],
 ): string | null {
@@ -179,17 +692,11 @@ function buildRuleClause(
     case "lte":
       return `${column} <= ${literal}`;
     case "contains":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`;
     case "starts_with":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`;
     case "ends_with":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`;
     case "is_null":
       return `${column} IS NULL`;
     case "is_not_null":
@@ -217,7 +724,6 @@ export function ToolbarFilterSort({
     () => results?.fields?.map((f) => f.name) ?? [],
     [results?.fields],
   );
-  const firstColumn = columns[0] ?? "";
   const [isFilterMenuOpen, setIsFilterMenuOpen] = React.useState(false);
   const [draftRules, setDraftRules] = React.useState<FilterRule[]>([]);
   const [customWhere, setCustomWhere] = React.useState("");
@@ -397,50 +903,15 @@ export function ToolbarFilterSort({
         return;
       }
 
-      // Try to parse the input into rules (split by AND/OR)
-      const segments = val.split(/\s+(?:AND|OR)\s+/i);
-      const parsedRules: FilterRule[] = [];
-      const sortedColumns = [...columns].sort((a, b) => b.length - a.length);
-      const sortedSqlOps = Object.keys(SQL_TO_FILTER_OP).sort(
-        (a, b) => b.length - a.length,
+      // Decompose into visual rules; anything unparseable (OR groups, raw
+      // SQL) stays as the remainder so nothing is lost or re-wrapped.
+      const { rules, remainder } = decomposeFilterQuery(val, columns, dbType);
+      const realRules = rules.filter(
+        (r) =>
+          r.column && r.column !== "none" && r.operator && r.operator !== "none",
       );
 
-      for (const segment of segments) {
-        let col = "none";
-        let sqlOp = "none";
-        let filterVal = "";
-        const segmentTrimmed = segment.trim();
-
-        for (const c of sortedColumns) {
-          if (segmentTrimmed.toLowerCase().startsWith(c.toLowerCase())) {
-            const rest = segmentTrimmed.slice(c.length).trim();
-            for (const op of sortedSqlOps) {
-              if (rest.toUpperCase().startsWith(op)) {
-                col = c;
-                sqlOp = op;
-                filterVal = rest.slice(op.length).trim();
-                break;
-              }
-            }
-            break;
-          }
-        }
-
-        if (col !== "none" && sqlOp !== "none") {
-          const filterOp = SQL_TO_FILTER_OP[sqlOp.toUpperCase()];
-          if (filterOp) {
-            parsedRules.push({
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${parsedRules.length}`,
-              enabled: true,
-              column: col,
-              operator: filterOp,
-              value: filterVal,
-            });
-          }
-        }
-      }
-
-      if (parsedRules.length > 0) {
+      if (realRules.length > 0) {
         e.preventDefault();
         setDraftRules((prev) => {
           let updated = [...prev];
@@ -452,9 +923,9 @@ export function ToolbarFilterSort({
           ) {
             updated = [];
           }
-          return [...updated, ...parsedRules];
+          return [...updated, ...realRules];
         });
-        setCustomWhere("");
+        setCustomWhere(remainder);
         setShowSuggestions(false);
       } else {
         // If nothing was parsed but there is content, just apply the filter (keeps raw SQL in customWhere)
@@ -529,17 +1000,20 @@ export function ToolbarFilterSort({
   ]);
 
   const prepareDialog = React.useCallback(() => {
-    setDraftRules([makeRule("")]);
-    setCustomWhere(filterQuery);
+    const { rules, remainder } = decomposeFilterQuery(filterQuery, columns, dbType);
+    setDraftRules(rules);
+    setCustomWhere(remainder);
     setIsFilterMenuOpen(true);
-  }, [filterQuery]);
+  }, [filterQuery, columns, dbType]);
 
   const handleApplyFilter = React.useCallback(() => {
     const visualClauses = draftRules
       .map((rule) => buildRuleClause(rule, dbType))
       .filter((clause): clause is string => !!clause);
     const clauses: string[] = [...visualClauses];
-    if (customWhere.trim()) clauses.push(`(${customWhere.trim()})`);
+    // Strip + re-wrap once so re-applying never stacks parens.
+    const remainder = stripBalancedOuterParens(customWhere.trim());
+    if (remainder) clauses.push(`(${remainder})`);
     const nextFilter = clauses.join(" AND ");
 
     setFilterQuery(nextFilter);
@@ -724,7 +1198,7 @@ export function ToolbarFilterSort({
                 variant="outline"
                 className="h-8 px-3 text-xs border-border"
                 onClick={() =>
-                  setDraftRules((prev) => [...prev, makeRule(firstColumn)])
+                  setDraftRules((prev) => [...prev, makeRule("")])
                 }
               >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />

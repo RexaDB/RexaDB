@@ -58,12 +58,25 @@ export function getLastSettingsSyncStatus(): SettingsSyncStatusDetail {
   return lastSettingsSyncStatus;
 }
 
-export function emitSettingsSyncLocalChanged(section?: SettingsSyncSection) {
+export type SettingsSyncLocalChangedDetail = {
+  section: SettingsSyncSection | null;
+  at: number;
+  /** Full record for the section when the emitter has it (avoids refetch races). */
+  studioSettings?: Record<string, unknown>;
+};
+
+export function emitSettingsSyncLocalChanged(
+  section?: SettingsSyncSection,
+  studioSettings?: Record<string, unknown>,
+) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
-    new CustomEvent(SETTINGS_SYNC_LOCAL_CHANGED_EVENT, {
-      detail: { section: section ?? null, at: Date.now() },
-    }),
+    new CustomEvent<SettingsSyncLocalChangedDetail>(
+      SETTINGS_SYNC_LOCAL_CHANGED_EVENT,
+      {
+        detail: { section: section ?? null, at: Date.now(), studioSettings },
+      },
+    ),
   );
 }
 
@@ -95,9 +108,15 @@ export function subscribeSettingsSyncApplied(
   return () => window.removeEventListener(SETTINGS_SYNC_APPLIED_EVENT, listener);
 }
 
-export function subscribeSettingsSyncLocalChanged(handler: () => void) {
+export function subscribeSettingsSyncLocalChanged(
+  handler: (detail: SettingsSyncLocalChangedDetail) => void,
+) {
   if (typeof window === "undefined") return () => {};
-  const listener = () => handler();
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<SettingsSyncLocalChangedDetail>).detail;
+    if (!detail) return;
+    handler(detail);
+  };
   window.addEventListener(SETTINGS_SYNC_LOCAL_CHANGED_EVENT, listener);
   return () =>
     window.removeEventListener(SETTINGS_SYNC_LOCAL_CHANGED_EVENT, listener);

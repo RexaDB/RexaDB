@@ -116,6 +116,69 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
         </Select>
       </div>
 
+      {/* Default provider — used for one-shot agent actions (e.g. AI filter). */}
+      {(() => {
+        const usableProviders = Object.entries(settings.providers || {}).filter(
+          ([p, c]) => !!c && (p === "ollama" || String(c.apiKey ?? "").trim()) && Array.isArray(c.models) && c.models.length > 0,
+        );
+        const activeProvider = usableProviders.some(([p]) => p === settings.defaultProvider)
+          ? settings.defaultProvider
+          : "";
+        const activeModels = activeProvider
+          ? (settings.providers[activeProvider]?.models || [])
+          : [];
+        const activeModel = activeModels.includes(settings.defaultModel)
+          ? settings.defaultModel
+          : "";
+        return (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <Label className="text-xstracking-wider text-muted-foreground font-medium">
+              Default provider
+            </Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Used for one-shot agent actions like AI filter from search.
+            </p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <Select
+                value={activeProvider}
+                onValueChange={(provider) =>
+                  updateSettings({ ...settings, defaultProvider: provider, defaultModel: "" })
+                }
+              >
+                <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
+                  <SelectValue placeholder="Select default provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {usableProviders.map(([p]) => (
+                    <SelectItem key={p} value={p}>
+                      {labelFor(p)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={activeModel}
+                disabled={!activeProvider}
+                onValueChange={(model) =>
+                  updateSettings({ ...settings, defaultModel: model })
+                }
+              >
+                <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
+                  <SelectValue placeholder="Select default model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeModels.map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Web search (Exa) — key-only, no models. */}
       {(() => {
         const exaKey = settings.providers["exa"]?.apiKey || "";
