@@ -52,6 +52,10 @@ export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
 // while a save is landing must defer to the save's broadcast (which carries
 // fresher state) instead of painting stale server data over fresh edits.
 let inFlightStudioSaves = 0;
+// Monotonic save ordering: only the newest completed save may broadcast.
+// Older overlapping responses are dropped so they can't undo newer edits.
+let studioSaveSeq = 0;
+let latestStudioSaveSeq = 0;
 
 interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   appZoom: number;
@@ -445,9 +449,10 @@ export function useGlobalStudioSettings(persist = false) {
     const load = async () => {
       const result = await getGlobalStudioSettings();
       if (cancelled || freshSeqRef.current !== mark) return;
-      // A save is landing with fresher state via broadcast — don't paint stale.
+      // A save is landing with fresher state via broadcast — stay unloaded
+      // and let that broadcast apply. Marking loaded here with defaults
+      // would let a persist=true consumer save defaults over user prefs.
       if (inFlightStudioSaves > 0) {
-        setIsLoaded(true);
         return;
       }
       if (result.success && result.data) {
@@ -487,8 +492,9 @@ export function useGlobalStudioSettings(persist = false) {
       void (async () => {
         const result = await getGlobalStudioSettings();
         if (seq !== loadSeqRef.current || freshSeqRef.current !== mark) return;
+        // Same as mount load: a pending save owns fresher state — wait for
+        // its broadcast instead of going live with defaults.
         if (inFlightStudioSaves > 0) {
-          setIsLoaded(true);
           return;
         }
         if (result.success && result.data) {
@@ -631,19 +637,38 @@ export function useGlobalStudioSettings(persist = false) {
     }
     if (snapshot && snapshot === lastSavedRef.current) return;
     lastSavedRef.current = snapshot;
+    const seq = ++studioSaveSeq;
+    latestStudioSaveSeq = seq;
     inFlightStudioSaves += 1;
-    void saveGlobalStudioSettings(payload).then(
-      () => {
-        emitSettingsSyncLocalChanged("studioSettings", payload as Record<string, unknown>);
-      },
-      () => {
-        // Save failed — keep local state, but let instances that deferred
-        // their initial load to this save refetch instead of staying blank.
-        emitSettingsSyncLocalChanged("studioSettings");
-      },
-    ).finally(() => {
-      inFlightStudioSaves -= 1;
-    });
+    void (async () => {
+      let failed = false;
+      let result: unknown = null;
+      try {
+        result = await saveGlobalStudioSettings(payload);
+        failed = !!result && (result as { success?: boolean }).success === false;
+      } catch {
+        failed = true;
+      } finally {
+        // Decrement BEFORE emitting so deferred loaders see a settled
+        // counter and actually refetch/apply instead of deferring again.
+        inFlightStudioSaves -= 1;
+      }
+      if (failed) {
+        // Request-level failures resolve with { success: false } instead of
+        // rejecting — never broadcast those as if they saved. Clear the
+        // marker so the next edit retries, and emit payload-less so deferred
+        // loaders refetch instead of staying blank.
+        if (seq === latestStudioSaveSeq) {
+          lastSavedRef.current = null;
+          emitSettingsSyncLocalChanged("studioSettings");
+        }
+        return;
+      }
+      // Drop stale responses: only the newest save may broadcast, or an
+      // older response would undo a newer edit.
+      if (seq !== latestStudioSaveSeq) return;
+      emitSettingsSyncLocalChanged("studioSettings", payload as Record<string, unknown>);
+    })();
   }, [
     persist,
     isLoaded,

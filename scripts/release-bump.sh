@@ -204,8 +204,31 @@ fs.writeFileSync(lockFile, lock);
 console.log('  updated ' + lockFile);
 "
 
-# Sanity check: no stale references to the old version remain in version files.
-if grep -rn "$CURRENT_VERSION" package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml 2>/dev/null | grep -i version; then
+# Sanity check: every version file must now read exactly NEW_VERSION, and the
+# old version must be gone as a parsed field (substring grep would false-match
+# 1.3.23 inside 1.3.230, so compare exact fields instead).
+node -e "
+const fs = require('fs');
+const oldV = '$CURRENT_VERSION';
+const newV = '$NEW_VERSION';
+const failures = [];
+const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+if (pkg.version !== newV) failures.push('package.json version=' + pkg.version);
+const tauri = JSON.parse(fs.readFileSync('./src-tauri/tauri.conf.json', 'utf8'));
+if (tauri.version !== newV) failures.push('tauri.conf.json version=' + tauri.version);
+const toml = fs.readFileSync('./src-tauri/Cargo.toml', 'utf8');
+const tomlMatch = toml.match(/^\s*version\s*=\s*\"([^\"]+)\"/m);
+if (!tomlMatch || tomlMatch[1] !== newV) failures.push('Cargo.toml version=' + (tomlMatch ? tomlMatch[1] : '<none>'));
+const lock = fs.readFileSync('./src-tauri/Cargo.lock', 'utf8');
+const lockMatch = lock.match(/name\s*=\s*\"rexa-db\"\s*\nversion\s*=\s*\"([^\"]+)\"/);
+if (!lockMatch || lockMatch[1] !== newV) failures.push('Cargo.lock rexa-db version=' + (lockMatch ? lockMatch[1] : '<none>'));
+for (const v of [pkg.version, tauri.version, tomlMatch && tomlMatch[1], lockMatch && lockMatch[1]]) {
+  if (v === oldV) failures.push('stale version ' + oldV + ' still present');
+}
+if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
+console.log('  versions verified: ' + newV);
+"
+if [[ $? -ne 0 ]]; then
   fail "Stale version $CURRENT_VERSION still present after bump."
   exit 1
 fi

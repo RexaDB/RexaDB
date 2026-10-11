@@ -22,6 +22,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/lib/api-base";
 import { getGlobalAiSettings } from "@/lib/api/actions-client";
@@ -99,14 +101,38 @@ function quoteQuickIdentifier(name: string, dbType?: ConnectionDbType): string {
   return `"${raw.replace(/"/g, '""')}"`;
 }
 
-function toQuickLiteral(rawValue: string): string {
-  const trimmed = rawValue.trim().replace(/^'([\s\S]*)'$/, "$1").replace(/^"([\s\S]*)"$/, "$1");
+export function toQuickLiteral(rawValue: string, dbType?: ConnectionDbType): string {
+  const trimmed = rawValue.trim();
   if (!trimmed.length) return "''";
+  // Explicitly quoted text stays a string — never reinterpret 'null',
+  // 'true', or '123' as NULL/boolean/number.
+  const singleQuoted = trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'");
+  const doubleQuoted = trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"');
+  if (singleQuoted || doubleQuoted) {
+    const inner = trimmed.slice(1, -1);
+    return `'${inner.replace(/'/g, "''")}'`;
+  }
   if (/^null$/i.test(trimmed)) return "NULL";
-  if (/^true$/i.test(trimmed)) return "TRUE";
-  if (/^false$/i.test(trimmed)) return "FALSE";
+  if (/^true$/i.test(trimmed)) return dbType === "mssql" ? "1" : "TRUE";
+  if (/^false$/i.test(trimmed)) return dbType === "mssql" ? "0" : "FALSE";
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
   return `'${trimmed.replace(/'/g, "''")}'`;
+}
+
+/** Join a new filter clause without letting OR rows bypass it. */
+export function joinFilterClause(existing: string, clause: string): string {
+  const base = existing.trim();
+  if (!base) return clause;
+  return `(${base}) AND (${clause})`;
+}
+
+/** Fuzzy-match CAST target per engine (~ operator + AI dialect rules). */
+function quickContainsCast(column: string, pattern: string, dbType?: ConnectionDbType): string {
+  const like = `LIKE '%${pattern}%'`;
+  if (dbType === "mssql") return `CAST(${column} AS NVARCHAR(MAX)) ${like}`;
+  if (dbType === "mysql") return `CAST(${column} AS CHAR) ${like}`;
+  if (dbType === "clickhouse") return `CAST(${column} AS String) ${like}`;
+  return `CAST(${column} AS TEXT) ${like}`;
 }
 
 /** Longest known column that prefixes the text (case-insensitive). */
@@ -130,7 +156,7 @@ function matchColumnPrefix(
  * Parse `column op value` / `column IS [NOT] NULL` into a SQL WHERE clause.
  * Returns null when the text isn't a complete filter.
  */
-function parseQuickFilter(
+export function parseQuickFilter(
   text: string,
   columns: string[],
   dbType?: ConnectionDbType,
@@ -158,12 +184,10 @@ function parseQuickFilter(
       .replace(/^'([\s\S]*)'$/, "$1")
       .replace(/^"([\s\S]*)"$/, "$1")
       .replace(/'/g, "''");
-    return dbType === "mssql"
-      ? `CAST(${column} AS NVARCHAR(MAX)) LIKE '%${pattern}%'`
-      : `CAST(${column} AS TEXT) LIKE '%${pattern}%'`;
+    return quickContainsCast(column, pattern, dbType);
   }
   const sqlOp = op === "!=" ? "<>" : op;
-  return `${column} ${sqlOp} ${toQuickLiteral(rawValue)}`;
+  return `${column} ${sqlOp} ${toQuickLiteral(rawValue, dbType)}`;
 }
 
 // ─── AI filter: natural language → WHERE clause via the default agent ───
@@ -453,6 +477,9 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
     <UnifiedSearchBar
       globalSearchQuery={props.globalSearchQuery}
       setGlobalSearchQuery={props.setGlobalSearchQuery}
+      globalSearchScope={props.globalSearchScope}
+      setGlobalSearchScope={props.setGlobalSearchScope}
+      supportsWholeTableSearch={props.supportsWholeTableSearch}
       selectedTable={props.selectedTable}
       selectedSchema={props.selectedSchema}
       tableColumns={tableColumns}
@@ -474,6 +501,9 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
     <UnifiedSearchBar
       globalSearchQuery={props.globalSearchQuery}
       setGlobalSearchQuery={props.setGlobalSearchQuery}
+      globalSearchScope={props.globalSearchScope}
+      setGlobalSearchScope={props.setGlobalSearchScope}
+      supportsWholeTableSearch={props.supportsWholeTableSearch}
       selectedTable={props.selectedTable}
       selectedSchema={props.selectedSchema}
       tableColumns={tableColumns}
@@ -536,6 +566,9 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
 function UnifiedSearchBar({
   globalSearchQuery,
   setGlobalSearchQuery,
+  globalSearchScope,
+  setGlobalSearchScope,
+  supportsWholeTableSearch,
   selectedTable,
   selectedSchema,
   tableColumns,
@@ -552,6 +585,9 @@ function UnifiedSearchBar({
 }: {
   globalSearchQuery: string;
   setGlobalSearchQuery: (query: string) => void;
+  globalSearchScope: "page" | "table";
+  setGlobalSearchScope: (scope: "page" | "table") => void;
+  supportsWholeTableSearch?: boolean;
   selectedTable: string | null;
   selectedSchema: string;
   tableColumns: Array<{ name: string; type: string }>;
@@ -573,6 +609,17 @@ function UnifiedSearchBar({
 }) {
   const columns = tableColumns.map((c) => c.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Live mirrors so async AI responses merge against current state instead
+  // of the stale closure captured when the request started.
+  const filterQueryRef = useRef(filterQuery);
+  const searchQueryRef = useRef(globalSearchQuery);
+  useEffect(() => {
+    filterQueryRef.current = filterQuery;
+  }, [filterQuery]);
+  useEffect(() => {
+    searchQueryRef.current = globalSearchQuery;
+  }, [globalSearchQuery]);
+  const aiSeqRef = useRef(0);
   const measureRef = useRef<HTMLSpanElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   // Filter assist never pops on its own — only via Cmd/Ctrl+F or the hint.
@@ -651,7 +698,7 @@ function UnifiedSearchBar({
   const createFilterFromSearch = (): boolean => {
     const clause = parseQuickFilter(globalSearchQuery, columns, dbType);
     if (!clause || !selectedTable) return false;
-    const next = filterQuery.trim() ? `${filterQuery} AND (${clause})` : clause;
+    const next = joinFilterClause(filterQuery, clause);
     setFilterQuery(next);
     refreshTableData(selectedTable, selectedSchema, next, sortConfig);
     setGlobalSearchQuery("");
@@ -664,6 +711,7 @@ function UnifiedSearchBar({
   const createAiFilter = async () => {
     const text = globalSearchQuery.trim();
     if (!text || aiBusy || !selectedTable) return;
+    const seq = ++aiSeqRef.current;
     setAiBusy(true);
     setAssistOpen(false);
     try {
@@ -676,10 +724,15 @@ function UnifiedSearchBar({
         connectionId,
         connectionString,
       });
-      const next = filterQuery.trim() ? `${filterQuery} AND (${clause})` : clause;
+      if (seq !== aiSeqRef.current) return;
+      // Merge against the LIVE filter — a quick filter added while the AI
+      // request was in flight must survive. Only clear the search box when
+      // the user hasn't typed something new meanwhile.
+      const liveFilter = filterQueryRef.current;
+      const next = joinFilterClause(liveFilter, clause);
       setFilterQuery(next);
       refreshTableData(selectedTable, selectedSchema, next, sortConfig);
-      setGlobalSearchQuery("");
+      if (searchQueryRef.current.trim() === text) setGlobalSearchQuery("");
       toast.success(`AI filter added: ${clause}`);
       inputRef.current?.blur();
     } catch (e) {
@@ -825,7 +878,44 @@ function UnifiedSearchBar({
               </button>
             </div>
           )}
-          <div className="flex min-w-0 shrink-0 items-center">{children}</div>
+          <div className="flex min-w-0 shrink-0 items-center gap-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Search scope"
+                  title={globalSearchScope === "table" ? "Searching whole table" : "Searching this page"}
+                  className="h-7 shrink-0 px-1.5 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  {globalSearchScope === "table" ? "table" : "page"}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuLabel className="text-xs tracking-wider text-muted-foreground/70">
+                  Search Scope
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={globalSearchScope}
+                  onValueChange={(value) => {
+                    if (value === "page" || value === "table") {
+                      setGlobalSearchScope(value);
+                    }
+                  }}
+                >
+                  <DropdownMenuRadioItem value="page" className="text-xs">
+                    This page
+                  </DropdownMenuRadioItem>
+                  {supportsWholeTableSearch !== false && (
+                    <DropdownMenuRadioItem value="table" className="text-xs">
+                      Whole table
+                    </DropdownMenuRadioItem>
+                  )}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {children}
+          </div>
         </div>
       </PopoverAnchor>
       <PopoverContent

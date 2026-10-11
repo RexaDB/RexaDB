@@ -208,6 +208,35 @@ function unquoteStringLiteral(raw: string): string {
   return t;
 }
 
+/** True when s contains OR at paren depth 0 outside string literals. */
+export function hasTopLevelOr(s: string): boolean {
+  let depth = 0;
+  let inStr = false;
+  const upper = s.toUpperCase();
+  const isBoundary = (idx: number) =>
+    idx < 0 || idx >= s.length || /\s/.test(s[idx]);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "'") {
+        if (s[i + 1] === "'") i++;
+        else inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inStr = true;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      if (upper.startsWith("OR", i) && isBoundary(i - 1) && isBoundary(i + 2)) return true;
+    }
+  }
+  return false;
+}
+
 /** True when s contains AND/OR at paren depth 0 outside string literals. */
 function hasTopLevelJoiner(s: string): boolean {
   let depth = 0;
@@ -251,7 +280,7 @@ export function parseSegmentToRule(
 
   // CAST("col" AS TEXT) LIKE '%v%' shapes produced by contains/starts/ends.
   const castMatch = seg.match(
-    /^CAST\(\s*([\s\S]+?)\s+AS\s+(?:TEXT|NVARCHAR\s*\(\s*MAX\s*\))\)\s+LIKE\s+'([\s\S]*)'$/i,
+    /^CAST\(\s*([\s\S]+?)\s+AS\s+(?:TEXT|CHAR|String|NVARCHAR\s*\(\s*MAX\s*\))\)\s+LIKE\s+'([\s\S]*)'$/i,
   );
   if (castMatch) {
     const colName = unquoteIdentifier(castMatch[1]);
@@ -294,17 +323,47 @@ export function parseSegmentToRule(
       const afterOp = rest.slice(op.length);
       const filterOp = SQL_TO_FILTER_OP[op.toUpperCase()];
       if (!filterOp) continue;
+      // Bare LIKE / ILIKE / NOT LIKE never round-trip through the visual
+      // builder (which emits CAST(.. AS ..) LIKE '%v%'), so leave them raw.
+      const opUpper = op.toUpperCase();
+      if (opUpper === "LIKE" || opUpper === "ILIKE" || opUpper === "NOT LIKE") return null;
       // An operator with no value isn't a complete filter.
       if (operatorNeedsValue(filterOp) && !afterOp.trim()) return null;
       // A value with a top-level AND/OR belongs to a compound expression,
       // not to this rule (splitting already handled AND; OR must survive).
       if (hasTopLevelJoiner(afterOp)) return null;
+      const rawValue = afterOp.trim();
+      const wasQuoted =
+        rawValue.length >= 2 &&
+        rawValue.startsWith("'") &&
+        rawValue.endsWith("'");
+      const unquoted = wasQuoted ? unquoteStringLiteral(rawValue) : rawValue;
+      if (operatorNeedsValue(filterOp)) {
+        if (wasQuoted) {
+          // Quoted numerics/booleans/NULL would rebuild unquoted
+          // (toSqlLiteral) and change type — leave them as raw SQL.
+          if (
+            /^null$/i.test(unquoted) ||
+            /^(true|false)$/i.test(unquoted) ||
+            /^-?\d+(\.\d+)?$/.test(unquoted)
+          ) {
+            return null;
+          }
+        } else {
+          // Unquoted values must be atomic (number, bool, NULL, or a bare
+          // word). Function calls (NOW()), lists, subqueries, or multi-word
+          // expressions would rebuild quoted and change meaning.
+          if (!/^(NULL|TRUE|FALSE|-?\d+(\.\d+)?|[A-Za-z_][\w]*)$/i.test(rawValue)) {
+            return null;
+          }
+        }
+      }
       return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${c}`,
         enabled: true,
         column: c,
         operator: filterOp,
-        value: operatorNeedsValue(filterOp) ? unquoteStringLiteral(afterOp.trim()) : "",
+        value: operatorNeedsValue(filterOp) ? unquoteStringLiteral(rawValue) : "",
       };
     }
     return null;
@@ -336,6 +395,27 @@ export function decomposeFilterQuery(
   const rules: FilterRule[] = [];
   const leftovers: string[] = [];
   const visit = (text: string, depth: number) => {
+    // AND binds tighter than OR — splitting a top-level `A OR B AND C` into
+    // separate AND terms and rejoining as `C AND (A OR B)` changes which rows
+    // match. Keep any expression with a top-level OR together as raw SQL.
+    if (hasTopLevelOr(text)) {
+      const whole = text.trim();
+      const asRule = parseSegmentToRule(whole, columns);
+      if (asRule) {
+        rules.push(asRule);
+        return;
+      }
+      // Peel one balanced paren layer only when the inside has no top-level
+      // OR (e.g. ((a=1 AND b=2))); otherwise keep the original verbatim so
+      // Apply never reorders OR/AND precedence.
+      const stripped = stripBalancedOuterParens(whole);
+      if (depth < 3 && stripped !== whole && !hasTopLevelOr(stripped)) {
+        visit(stripped, depth + 1);
+        return;
+      }
+      leftovers.push(whole);
+      return;
+    }
     for (const part of splitTopLevelAnd(text)) {
       const rule = parseSegmentToRule(part, columns);
       if (rule) {

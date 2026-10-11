@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   decomposeFilterQuery,
+  hasTopLevelOr,
   parseSegmentToRule,
   splitTopLevelAnd,
   stripBalancedOuterParens,
   stripLeadingWhereKeyword,
 } from "@/components/studio/toolbar/toolbar-filter-sort";
+import {
+  joinFilterClause,
+  parseQuickFilter,
+  toQuickLiteral,
+} from "@/components/studio/data-table-toolbar";
 
 const COLUMNS = ["id", "message_id", "status", "time_created"];
 
@@ -110,5 +116,64 @@ describe("decomposeFilterQuery", () => {
     expect(rules).toHaveLength(1);
     expect(rules[0].column).toBe("none");
     expect(remainder).toBe("");
+  });
+  test("top-level OR survives Apply unchanged (no AND-split reorder)", () => {
+    const input = `status = 'active' OR id = 1 AND message_id = 'x'`;
+    expect(hasTopLevelOr(input)).toBe(true);
+    const { rules, remainder } = decomposeFilterQuery(input, COLUMNS);
+    expect(rules[0].column).toBe("none");
+    expect(remainder).toBe(input);
+  });
+  test("leaves non-round-trippable SQL as remainder", () => {
+    expect(parseSegmentToRule(`time_created >= NOW()`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`status LIKE 'act%'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`status ILIKE '%act%'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`"code" = '123'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`"flag" = 'true'`, COLUMNS)).toBeNull();
+    const { remainder } = decomposeFilterQuery(`time_created >= NOW()`, COLUMNS);
+    expect(remainder).toBe(`time_created >= NOW()`);
+  });
+});
+
+describe("joinFilterClause", () => {
+  test("wraps existing OR filters so new clauses apply to all rows", () => {
+    expect(
+      joinFilterClause(`status = 'active' OR status = 'pending'`, `id > 10`),
+    ).toBe(`(status = 'active' OR status = 'pending') AND (id > 10)`);
+    expect(joinFilterClause(``, `id > 10`)).toBe(`id > 10`);
+  });
+});
+
+describe("toQuickLiteral", () => {
+  test("preserves explicitly quoted strings", () => {
+    expect(toQuickLiteral(`'null'`)).toBe(`'null'`);
+    expect(toQuickLiteral(`'123'`)).toBe(`'123'`);
+    expect(toQuickLiteral(`'true'`)).toBe(`'true'`);
+    expect(toQuickLiteral(`null`)).toBe(`NULL`);
+    expect(toQuickLiteral(`123`)).toBe(`123`);
+  });
+  test("emits mssql-compatible booleans", () => {
+    expect(toQuickLiteral(`true`, "mssql")).toBe(`1`);
+    expect(toQuickLiteral(`false`, "mssql")).toBe(`0`);
+    expect(toQuickLiteral(`true`, "postgres")).toBe(`TRUE`);
+  });
+});
+
+describe("parseQuickFilter", () => {
+  const cols = ["status", "enabled", "name"];
+  test("uses per-engine CAST for contains", () => {
+    expect(parseQuickFilter(`name ~ foo`, cols, "mysql")).toContain("CAST(`name` AS CHAR)");
+    expect(parseQuickFilter(`name ~ foo`, cols, "clickhouse")).toContain("AS String");
+    expect(parseQuickFilter(`name ~ foo`, cols, "mssql")).toContain("NVARCHAR(MAX)");
+    expect(parseQuickFilter(`name ~ foo`, cols, "postgres")).toContain("AS TEXT");
+  });
+  test("mssql booleans become 1/0", () => {
+    expect(parseQuickFilter(`enabled = true`, cols, "mssql")).toBe(`[enabled] = 1`);
+    expect(parseQuickFilter(`enabled = true`, cols, "postgres")).toBe(`"enabled" = TRUE`);
+  });
+  test("quoted 'null' stays a string", () => {
+    expect(parseQuickFilter(`status = 'null'`, cols, "postgres")).toBe(
+      `"status" = 'null'`,
+    );
   });
 });
