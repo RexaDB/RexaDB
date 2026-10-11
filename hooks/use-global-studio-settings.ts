@@ -653,20 +653,27 @@ export function useGlobalStudioSettings(persist = false) {
         // counter and actually refetch/apply instead of deferring again.
         inFlightStudioSaves -= 1;
       }
+      const settled = inFlightStudioSaves === 0;
       if (failed) {
         // Request-level failures resolve with { success: false } instead of
         // rejecting — never broadcast those as if they saved. Clear the
-        // marker so the next edit retries, and emit payload-less so deferred
-        // loaders refetch instead of staying blank.
-        if (seq === latestStudioSaveSeq) {
+        // marker so the next edit retries. Wake deferred loaders once every
+        // save has settled — otherwise a still-pending older save makes
+        // receivers drop the wake and starve.
+        if (settled) {
           lastSavedRef.current = null;
           emitSettingsSyncLocalChanged("studioSettings");
         }
         return;
       }
-      // Drop stale responses: only the newest save may broadcast, or an
-      // older response would undo a newer edit.
-      if (seq !== latestStudioSaveSeq) return;
+      // Drop stale values: only the newest save may broadcast its payload, or
+      // an older response would undo a newer edit. Still wake deferred
+      // loaders when the last pending save finishes so a newly mounted hook
+      // never stays unloaded with saving disabled.
+      if (seq !== latestStudioSaveSeq) {
+        if (settled) emitSettingsSyncLocalChanged("studioSettings");
+        return;
+      }
       emitSettingsSyncLocalChanged("studioSettings", payload as Record<string, unknown>);
     })();
   }, [

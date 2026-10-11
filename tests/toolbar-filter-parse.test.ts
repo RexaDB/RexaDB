@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildRuleClause,
   decomposeFilterQuery,
   hasTopLevelOr,
   parseSegmentToRule,
@@ -128,8 +129,8 @@ describe("decomposeFilterQuery", () => {
     expect(parseSegmentToRule(`time_created >= NOW()`, COLUMNS)).toBeNull();
     expect(parseSegmentToRule(`status LIKE 'act%'`, COLUMNS)).toBeNull();
     expect(parseSegmentToRule(`status ILIKE '%act%'`, COLUMNS)).toBeNull();
-    expect(parseSegmentToRule(`"code" = '123'`, COLUMNS)).toBeNull();
-    expect(parseSegmentToRule(`"flag" = 'true'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`"status" = '123'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`"status" = 'true'`, COLUMNS)).toBeNull();
     const { remainder } = decomposeFilterQuery(`time_created >= NOW()`, COLUMNS);
     expect(remainder).toBe(`time_created >= NOW()`);
   });
@@ -175,5 +176,26 @@ describe("parseQuickFilter", () => {
     expect(parseQuickFilter(`status = 'null'`, cols, "postgres")).toBe(
       `"status" = 'null'`,
     );
+  });
+});
+
+describe("buildRuleClause engine CAST", () => {
+  test("contains rebuild keeps the working per-engine cast", () => {
+    const rule = {
+      id: "t",
+      enabled: true,
+      column: "name",
+      operator: "contains" as const,
+      value: "foo",
+    };
+    expect(buildRuleClause(rule, "mysql")).toContain("CAST(`name` AS CHAR)");
+    expect(buildRuleClause(rule, "clickhouse")).toContain("AS String");
+    expect(buildRuleClause(rule, "mssql")).toContain("NVARCHAR(MAX)");
+    expect(buildRuleClause(rule, "postgres")).toContain("AS TEXT");
+  });
+  test("mysql quick-filter contains round-trips through parse", () => {
+    const clause = parseQuickFilter(`name ~ foo`, ["name"], "mysql")!;
+    const roundTripped = parseSegmentToRule(clause, ["name"]);
+    expect(roundTripped).toMatchObject({ column: "name", operator: "contains" });
   });
 });

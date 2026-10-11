@@ -465,6 +465,14 @@ function quoteString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/** Fuzzy-match CAST target per engine — must mirror the quick-filter builder. */
+function containsCastTarget(dbType: ToolbarFilterSortProps["dbType"]): string {
+  if (dbType === "mssql") return "NVARCHAR(MAX)";
+  if (dbType === "mysql") return "CHAR";
+  if (dbType === "clickhouse") return "String";
+  return "TEXT";
+}
+
 function toSqlLiteral(rawValue: string): string {
   const trimmed = rawValue.trim();
   if (!trimmed.length) return "''";
@@ -475,7 +483,7 @@ function toSqlLiteral(rawValue: string): string {
   return quoteString(trimmed);
 }
 
-function buildRuleClause(
+export function buildRuleClause(
   rule: FilterRule,
   dbType: ToolbarFilterSortProps["dbType"],
 ): string | null {
@@ -514,17 +522,11 @@ function buildRuleClause(
     case "lte":
       return `${column} <= ${literal}`;
     case "contains":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}%`)}`;
     case "starts_with":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`${rule.value.replace(/'/g, "''")}%`)}`;
     case "ends_with":
-      return dbType === "mssql"
-        ? `CAST(${column} AS NVARCHAR(MAX)) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`
-        : `CAST(${column} AS TEXT) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`;
+      return `CAST(${column} AS ${containsCastTarget(dbType)}) LIKE ${quoteString(`%${rule.value.replace(/'/g, "''")}`)}`;
     case "is_null":
       return `${column} IS NULL`;
     case "is_not_null":
