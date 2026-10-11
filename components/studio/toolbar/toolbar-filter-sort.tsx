@@ -333,17 +333,25 @@ export function parseSegmentToRule(
       // builder (which emits CAST(.. AS ..) LIKE '%v%'), so leave them raw.
       const opUpper = op.toUpperCase();
       if (opUpper === "LIKE" || opUpper === "ILIKE" || opUpper === "NOT LIKE") return null;
-      // An operator with no value isn't a complete filter.
+      // An operator with no value isn't a complete filter, and trailing junk
+      // after a valueless operator (`IS NULL foo`) must not be silently
+      // dropped — leave it raw.
       if (operatorNeedsValue(filterOp) && !afterOp.trim()) return null;
+      if (!operatorNeedsValue(filterOp) && afterOp.trim()) return null;
       // A value with a top-level AND/OR belongs to a compound expression,
       // not to this rule (splitting already handled AND; OR must survive).
       if (hasTopLevelJoiner(afterOp)) return null;
       const rawValue = afterOp.trim();
+      // Strict single-quoted literal: `'...'` with `''` escapes only. A
+      // starts-and-ends-with-quote check would accept `'a' 'b'` (SQL
+      // concatenation) and rebuild it as one literal — different rows.
+      const isStrictQuoted = /^'(?:[^']|'')*'$/.test(rawValue);
       const wasQuoted =
         rawValue.length >= 2 &&
         rawValue.startsWith("'") &&
         rawValue.endsWith("'");
-      const unquoted = wasQuoted ? unquoteStringLiteral(rawValue) : rawValue;
+      if (wasQuoted && !isStrictQuoted) return null;
+      const unquoted = isStrictQuoted ? unquoteStringLiteral(rawValue) : rawValue;
       // `= NULL` / `<> NULL` never survive Apply: the builder rewrites them
       // to `IS NULL` / `IS NOT NULL`, which changes semantics — leave raw.
       if (
@@ -353,7 +361,13 @@ export function parseSegmentToRule(
         return null;
       }
       if (operatorNeedsValue(filterOp)) {
-        if (wasQuoted) {
+        if (isStrictQuoted) {
+          // The builder trims values and drops empty ones: padded (`'  x  '`)
+          // or empty (`''`) strings would rebuild differently — or vanish, as
+          // empty values make buildRuleClause return null. Leave them raw.
+          if (unquoted !== unquoted.trim() || !unquoted.length) {
+            return null;
+          }
           // Quoted numerics/booleans/NULL would rebuild unquoted
           // (toSqlLiteral) and change type — leave them as raw SQL.
           if (

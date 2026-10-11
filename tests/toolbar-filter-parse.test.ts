@@ -142,6 +142,18 @@ describe("decomposeFilterQuery", () => {
     expect(parseSegmentToRule(`status <> NULL`, COLUMNS)).toBeNull();
     // ...but the canonical forms still parse.
     expect(parseSegmentToRule(`status IS NULL`, COLUMNS)?.operator).toBe("is_null");
+    // Concatenated literals, padded/empty strings, and trailing junk would
+    // rebuild differently (or vanish) — they must stay raw.
+    expect(parseSegmentToRule(`status = 'a' 'b'`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`status = '  padded  '`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`"status" = ''`, COLUMNS)).toBeNull();
+    expect(parseSegmentToRule(`status IS NULL junk`, COLUMNS)).toBeNull();
+    // Escaped quotes and % wildcards inside values still round-trip.
+    expect(parseSegmentToRule(`status = 'o''brien'`, COLUMNS)).toMatchObject({
+      column: "status",
+      operator: "eq",
+      value: `o'brien`,
+    });
     const { remainder } = decomposeFilterQuery(`time_created >= NOW()`, COLUMNS);
     expect(remainder).toBe(`time_created >= NOW()`);
   });

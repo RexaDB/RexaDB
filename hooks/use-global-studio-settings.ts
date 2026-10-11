@@ -458,14 +458,25 @@ export function useGlobalStudioSettings(persist = false) {
     applyFromRecord(merged);
     appliedRef.current = merged;
     // Recovery refetches (stale wakes after a failed save) apply without
-    // confirming, so unsaved edits stay marked until a save succeeds.
+    // confirming, so unsaved edits stay dirty until a save succeeds.
+    // Confirmed merges onto the previous baseline: incoming records can be
+    // sparse (empty/older settings omit fields that fall back to defaults),
+    // and replacing the baseline with a sparse record would make those
+    // defaults look like unsaved edits — permanently rejecting later cloud
+    // updates for them.
     if (opts?.confirmServerState !== false) {
-      confirmedRef.current = { ...incoming };
+      confirmedRef.current = {
+        ...(confirmedRef.current ?? prev),
+        ...incoming,
+      };
     }
   }, []);
 
   useEffect(() => {
     if (appliedRef.current === null) appliedRef.current = snapshotCurrent();
+    // Seed the server-acknowledged baseline with mount defaults too: a sparse
+    // load must not make untouched defaults look dirty.
+    if (confirmedRef.current === null) confirmedRef.current = snapshotCurrent();
     let cancelled = false;
     const mark = freshSeqRef.current;
     const load = async () => {
