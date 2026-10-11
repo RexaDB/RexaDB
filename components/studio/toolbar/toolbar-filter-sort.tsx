@@ -286,23 +286,29 @@ export function parseSegmentToRule(
     const colName = unquoteIdentifier(castMatch[1]);
     const col = columns.find((c) => c.toLowerCase() === colName.toLowerCase());
     if (col) {
-      let pattern = castMatch[2].replace(/''/g, "'");
-      let operator: FilterOperator = "contains";
+      const pattern = castMatch[2].replace(/''/g, "'");
+      let operator: FilterOperator | null = null;
+      let inner = pattern;
       if (pattern.startsWith("%") && pattern.endsWith("%") && pattern.length >= 2) {
-        pattern = pattern.slice(1, -1);
-      } else if (pattern.endsWith("%")) {
+        operator = "contains";
+        inner = pattern.slice(1, -1);
+      } else if (pattern.endsWith("%") && !pattern.startsWith("%")) {
         operator = "starts_with";
-        pattern = pattern.slice(0, -1);
-      } else if (pattern.startsWith("%")) {
+        inner = pattern.slice(0, -1);
+      } else if (pattern.startsWith("%") && !pattern.endsWith("%")) {
         operator = "ends_with";
-        pattern = pattern.slice(1);
+        inner = pattern.slice(1);
+      } else {
+        // `LIKE 'abc'` without wildcards is an exact match, not a contains
+        // — extracting it would rebuild as `%abc%` and widen the rows.
+        return null;
       }
       return {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         enabled: true,
         column: col,
         operator,
-        value: pattern,
+        value: inner,
       };
     }
   }
@@ -350,10 +356,12 @@ export function parseSegmentToRule(
             return null;
           }
         } else {
-          // Unquoted values must be atomic (number, bool, NULL, or a bare
-          // word). Function calls (NOW()), lists, subqueries, or multi-word
-          // expressions would rebuild quoted and change meaning.
-          if (!/^(NULL|TRUE|FALSE|-?\d+(\.\d+)?|[A-Za-z_][\w]*)$/i.test(rawValue)) {
+          // Unquoted values must rebuild byte-identical: numbers, booleans,
+          // and NULL. A bare word (`status = active`) is a column reference
+          // in SQL but would rebuild as the string `'active'` — leave it raw.
+          // Function calls (NOW()), lists, subqueries, or multi-word
+          // expressions are likewise left untouched.
+          if (!/^(NULL|TRUE|FALSE|-?\d+(\.\d+)?)$/i.test(rawValue)) {
             return null;
           }
         }

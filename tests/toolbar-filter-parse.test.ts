@@ -50,7 +50,6 @@ describe("parseSegmentToRule", () => {
     expect(rule?.value).toBe("msg_da180cd1100151hb8bBGTLxd1");
   });
   test("parses unquoted, null checks, and LIKE shapes", () => {
-    expect(parseSegmentToRule(`status = active`, COLUMNS)?.operator).toBe("eq");
     expect(parseSegmentToRule(`time_created >= 100`, COLUMNS)).toMatchObject({
       column: "time_created",
       operator: "gte",
@@ -131,6 +130,13 @@ describe("decomposeFilterQuery", () => {
     expect(parseSegmentToRule(`status ILIKE '%act%'`, COLUMNS)).toBeNull();
     expect(parseSegmentToRule(`"status" = '123'`, COLUMNS)).toBeNull();
     expect(parseSegmentToRule(`"status" = 'true'`, COLUMNS)).toBeNull();
+    // Bare words are column references, not strings — must stay raw so
+    // Apply doesn't rewrite `active` into `'active'`.
+    expect(parseSegmentToRule(`status = active`, COLUMNS)).toBeNull();
+    // LIKE without wildcards is an exact match, not a contains.
+    expect(
+      parseSegmentToRule(`CAST("status" AS TEXT) LIKE 'act'`, COLUMNS),
+    ).toBeNull();
     const { remainder } = decomposeFilterQuery(`time_created >= NOW()`, COLUMNS);
     expect(remainder).toBe(`time_created >= NOW()`);
   });

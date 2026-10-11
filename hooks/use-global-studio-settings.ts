@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   getGlobalStudioSettings,
   saveGlobalStudioSettings,
@@ -47,6 +48,9 @@ function stableStringify(value: unknown): string {
 }
 
 export const ZOOM_UPDATED_EVENT = "rexadb-zoom-updated";
+/** Fired when a studio-settings save fails its final retry (still local-only). */
+export const STUDIO_SETTINGS_SAVE_FAILED_EVENT =
+  "rexadb-studio-settings-save-failed";
 
 // Saves in flight across hook instances in this window. A load resolving
 // while a save is landing must defer to the save's broadcast (which carries
@@ -564,6 +568,11 @@ export function useGlobalStudioSettings(persist = false) {
   // (our own broadcast echo, cloud echo) must not re-save, or saves and
   // broadcasts ping-pong forever.
   const lastSavedRef = useRef<string | null>(null);
+  // Bounded retry: a failed snapshot retries once after a short delay, then
+  // notifies instead of looping forever. The tick re-runs the save effect
+  // below (lastSavedRef was cleared, so the snapshot no longer matches).
+  const [saveRetryTick, setSaveRetryTick] = useState(0);
+  const saveRetriesRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!persist || !isLoaded) return;
@@ -663,9 +672,27 @@ export function useGlobalStudioSettings(persist = false) {
         if (settled) {
           lastSavedRef.current = null;
           emitSettingsSyncLocalChanged("studioSettings");
+          const attempts = saveRetriesRef.current[snapshot] ?? 0;
+          if (attempts < 1) {
+            saveRetriesRef.current[snapshot] = attempts + 1;
+            window.setTimeout(() => setSaveRetryTick((t) => t + 1), 2000);
+          } else {
+            delete saveRetriesRef.current[snapshot];
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent(STUDIO_SETTINGS_SAVE_FAILED_EVENT, {
+                  detail: { at: Date.now() },
+                }),
+              );
+            }
+            toast.error(
+              "Couldn't save studio settings — your changes are kept locally and will retry on the next edit.",
+            );
+          }
         }
         return;
       }
+      delete saveRetriesRef.current[snapshot];
       // Drop stale values: only the newest save may broadcast its payload, or
       // an older response would undo a newer edit. Still wake deferred
       // loaders when the last pending save finishes so a newly mounted hook
@@ -679,6 +706,7 @@ export function useGlobalStudioSettings(persist = false) {
   }, [
     persist,
     isLoaded,
+    saveRetryTick,
     appZoom,
     executionMode,
     rowSpacing,
