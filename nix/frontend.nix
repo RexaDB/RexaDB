@@ -16,8 +16,7 @@ let
   npmDeps = pkgs.fetchNpmDeps {
     name = "rexadb-npm-deps-${version}";
     src = src;
-    # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
-    hash = lib.fakeHash;
+    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
   };
 in
 pkgs.stdenv.mkDerivation {

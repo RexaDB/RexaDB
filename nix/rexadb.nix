@@ -40,8 +40,7 @@ pkgs.rustPlatform.buildRustPackage {
   npmDeps = pkgs.fetchNpmDeps {
     name = "rexadb-npm-deps-${version}";
     src = src;
-    # TODO(#32): same value as the other root `fetchNpmDeps` hashes; fill from CI.
-    hash = lib.fakeHash;
+    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
   };
 
   nativeBuildInputs =
