@@ -7,8 +7,9 @@ pkgs.rustPlatform.buildRustPackage {
   version = "0.1.0"; # keep in sync with src-tauri/oracle-bridge/Cargo.toml
   src = "${src}/src-tauri/oracle-bridge";
   cargoLock.lockFile = ../src-tauri/oracle-bridge/Cargo.lock;
-  # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
-  cargoHash = lib.fakeHash;
+  # NOTE: no `cargoHash` — current nixpkgs `buildRustPackage` fetches each
+  # crate as a fixed-output derivation hashed from Cargo.lock (proven by CI:
+  # this package built green with the lockfile alone).
   doCheck = false;
 
   nativeBuildInputs = [

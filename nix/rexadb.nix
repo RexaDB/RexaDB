@@ -32,8 +32,9 @@ pkgs.rustPlatform.buildRustPackage {
   cargoRoot = "src-tauri";
   buildAndTestSubdir = "src-tauri";
   cargoLock.lockFile = ../src-tauri/Cargo.lock;
-  # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
-  cargoHash = lib.fakeHash;
+  # NOTE: no `cargoHash` — current nixpkgs `buildRustPackage` fetches each
+  # crate as a fixed-output derivation hashed from Cargo.lock (the
+  # oracle-bridge package already proved this on CI).
   doCheck = false;
 
   npmDeps = pkgs.fetchNpmDeps {
