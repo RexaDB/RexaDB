@@ -6,7 +6,7 @@
 #
 # How the pieces fit (mirrors `.github/workflows/build.yml`):
 # - `cargoLock` + `cargoHash`: hermetic Rust vendoring (fixed-output).
-# - `npmDeps` + `npmHooks.npmConfigHook`: offline npm cache so the hook's
+# - `npmDeps`: offline npm cache (v2, with packuments) so the hook's
 #   `beforeBuildCommand` (`next build`) runs in the sandbox; `configurePhase`
 #   installs it. Fonts are vendored (`app/fonts`), so no network needed.
 # - `postPatch` stages the sidecar (`externalBin`) and `resources`
@@ -40,6 +40,8 @@ pkgs.rustPlatform.buildRustPackage {
   npmDeps = pkgs.fetchNpmDeps {
     name = "rexadb-npm-deps-${version}";
     src = src;
+    # v2 also caches packuments (see nix/frontend.nix).
+    fetcherVersion = 2;
     hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
   };
 
@@ -47,8 +49,7 @@ pkgs.rustPlatform.buildRustPackage {
     with pkgs;
     [
       cargo-tauri.hook
-      nodejs
-      npmHooks.npmConfigHook
+      nodejs # provides npm/node for the manual `npm ci` below + `next build`
       pkg-config
       python3 # node-gyp fallback for native postinstalls during `npm ci`
       patch # bun-format patches (`patchedDependencies`, unknown to npm)
@@ -105,9 +106,18 @@ pkgs.rustPlatform.buildRustPackage {
     runHook preConfigure
     export HOME=$TMPDIR
     export CI=1
+    # Manual `npm ci` against a writable copy of the v2 cache
+    # (see nix/frontend.nix) — deliberately not via npmConfigHook,
+    # whose automatic postPatch install would duplicate this.
+    cp -r ${npmDeps} $TMPDIR/npm-cache
+    chmod -R u+w $TMPDIR/npm-cache
+    export npm_config_cache=$TMPDIR/npm-cache
     npm ci --offline --no-audit --no-fund
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
+    # `beforeBuildCommand` (`next build`) runs under plain sh during the
+    # tauri build below — put the local bins on PATH for it.
+    export PATH="$PWD/node_modules/.bin:$PATH"
     runHook postConfigure
   '';
 

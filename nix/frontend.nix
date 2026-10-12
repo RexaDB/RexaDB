@@ -16,7 +16,12 @@ let
   npmDeps = pkgs.fetchNpmDeps {
     name = "rexadb-npm-deps-${version}";
     src = src;
-    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
+    # v2 caches registry packuments as well as tarballs: `npm ci`
+    # re-resolves peer/override edges and needs packuments even with a
+    # complete lockfile (else ENOTCACHED under --offline).
+    fetcherVersion = 2;
+    # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
+    hash = lib.fakeHash;
   };
 in
 pkgs.stdenv.mkDerivation {
@@ -39,7 +44,12 @@ pkgs.stdenv.mkDerivation {
     export HOME=$TMPDIR
     export CI=1
     export NEXT_TELEMETRY_DISABLED=1
-    export npm_config_cache=${npmDeps}
+    # Writable copy: with fetcherVersion 2 a cache key can hold multiple
+    # entries and npm must write to the cache (same reason npmConfigHook
+    # copies it aside).
+    cp -r ${npmDeps} $TMPDIR/npm-cache
+    chmod -R u+w $TMPDIR/npm-cache
+    export npm_config_cache=$TMPDIR/npm-cache
     npm ci --offline --no-audit --no-fund
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)

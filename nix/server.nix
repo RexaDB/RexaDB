@@ -18,11 +18,14 @@ let
   npmDepsRoot = pkgs.fetchNpmDeps {
     name = "rexadb-npm-deps-${version}";
     src = src;
+    # v2 also caches packuments (see nix/frontend.nix).
+    fetcherVersion = 2;
     hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
   };
   npmDepsServer = pkgs.fetchNpmDeps {
     name = "rexadb-server-npm-deps-${version}";
     src = "${src}/server";
+    fetcherVersion = 2;
     # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
     hash = lib.fakeHash;
   };
@@ -57,9 +60,14 @@ pkgs.stdenv.mkDerivation {
     cd ./work
     export HOME=$TMPDIR
     export CI=1
-    export npm_config_cache=${npmDepsRoot}
+    # Writable cache copies (see nix/frontend.nix: fetcherVersion 2).
+    cp -r ${npmDepsRoot} $TMPDIR/npm-cache-root
+    chmod -R u+w $TMPDIR/npm-cache-root
+    export npm_config_cache=$TMPDIR/npm-cache-root
     npm ci --offline --no-audit --no-fund
-    export npm_config_cache=${npmDepsServer}
+    cp -r ${npmDepsServer} $TMPDIR/npm-cache-server
+    chmod -R u+w $TMPDIR/npm-cache-server
+    export npm_config_cache=$TMPDIR/npm-cache-server
     (cd server && npm ci --offline --no-audit --no-fund)
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
