@@ -71,11 +71,17 @@ in
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/rexadb-server";
         User = cfg.user;
-        StateDirectory = "rexadb";
-        StateDirectoryMode = "0750";
         Restart = "on-failure";
         NoNewPrivileges = true;
       };
     };
+
+    # Owns exactly the configured data dir (whatever it is) instead of a
+    # hardcoded StateDirectory, so custom `dataDir` values start cleanly.
+    systemd.tmpfiles.rules =
+      let
+        grp = if cfg.user == "rexadb" then "rexadb" else "users";
+      in
+      [ "d ${cfg.dataDir} 0750 ${cfg.user} ${grp} -" ];
   };
 }

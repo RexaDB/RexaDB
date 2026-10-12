@@ -42,10 +42,14 @@
           lib = pkgs.lib;
           # Keep in sync with package.json + src-tauri/tauri.conf.json.
           version = "1.3.23";
-          isLinux = pkgs.stdenv.isLinux;
+          isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
           frontend = pkgs.callPackage ./nix/frontend.nix { inherit version; src = self; };
-          rexadb_server = pkgs.callPackage ./nix/server.nix { inherit version; src = self; };
+          rexadb_server = pkgs.callPackage ./nix/server.nix {
+            inherit version;
+            src = self;
+            inherit java_bridge oracle_bridge;
+          };
           oracle_bridge = pkgs.callPackage ./nix/oracle-bridge.nix { src = self; };
           java_bridge = pkgs.callPackage ./nix/java-bridge.nix { inherit version; src = self; };
           # Evaluates everywhere (cheap), builds on Linux (webkit/system libs).

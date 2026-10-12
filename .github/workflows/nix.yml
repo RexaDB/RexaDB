@@ -7,15 +7,24 @@ on:
       - "flake.lock"
       - "nix/**"
       - ".envrc"
+      - ".npmrc"
       - "package.json"
+      - "package-lock.json"
       - "bun.lock"
+      - "next.config.mjs"
+      - "app/**"
+      - "components/**"
+      - "hooks/**"
+      - "lib/**"
+      - "public/**"
+      - "types/**"
       - "server/**"
       - "src-tauri/**"
       - "resources/java-bridge/**"
-      - "lib/db/*bridge-manager.ts"
+      - "patches/**"
       - ".github/workflows/nix.yml"
   push:
-    branches: ["main"]
+    branches: ["master"]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -28,10 +37,10 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
 
       - name: Evaluate flake (no builds)
         run: nix flake check --no-build
@@ -45,37 +54,43 @@ jobs:
       - name: Build java-bridge
         run: nix build .#java-bridge --print-build-logs
 
-  # Full Linux builds (order mirrors build.yml). Needs network for the
-  # pinned registries on first run; results land in the Nix cache after.
+  # Full Linux builds, one job per package so independent failures (e.g.
+  # fixed-output `got:` hashes) all surface in a single run.
   build-linux:
     runs-on: ubuntu-latest
     needs: smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [frontend, rexadb-server, rexadb-oracle-bridge, java-bridge, rexadb]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
 
-      - name: Build frontend
-        run: nix build .#frontend --out-link result-frontend --print-build-logs
+      - name: Build ${{ matrix.package }}
+        run: nix build .#${{ matrix.package }} --out-link result-${{ matrix.package }} --print-build-logs
+
+  # Sidecar health smoke (parity with build.yml smoke test).
+  smoke-server:
+    runs-on: ubuntu-latest
+    needs: build-linux
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
 
       - name: Build sidecar server
         run: nix build .#rexadb-server --out-link result-server --print-build-logs
 
-      - name: Build oracle bridge
-        run: nix build .#rexadb-oracle-bridge --out-link result-oracle --print-build-logs
-
-      - name: Build desktop app
-        run: nix build .#rexadb --out-link result-rexadb --print-build-logs
-
-      - name: Sidecar health smoke (parity with build.yml smoke test)
+      - name: Sidecar health check
         run: |
           set -euo pipefail
           export REXADB_USER_DATA_DIR=/tmp/rexadb-nix-smoke
           mkdir -p "$REXADB_USER_DATA_DIR"
-          SIDECAR=$(echo result-rexadb/bin/rexadb-server-*)
-          echo "sidecar: $SIDECAR"
-          "$SIDECAR" > /tmp/rexadb-nix-smoke.log 2>&1 &
+          ./result-server/bin/rexadb-server > /tmp/rexadb-nix-smoke.log 2>&1 &
           SRV_PID=$!
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:3867/health > /dev/null 2>&1; then

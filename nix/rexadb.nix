@@ -1,27 +1,22 @@
 { pkgs, lib, src, version, frontend, rexadb_server, oracle_bridge, java_bridge }:
 
-# RexaDB desktop binary (Tauri v2, Linux).
+# RexaDB desktop binary (Tauri v2, Linux) via the official nixpkgs
+# `cargo-tauri.hook` on top of `rustPlatform.buildRustPackage`
+# (nixpkgs manual: "Tauri" hook section).
 #
-# Build order mirrors `.github/workflows/build.yml`:
-#   1. prebuilt frontend → `out/` (tauri.conf `frontendDist: ../out`)
-#   2. compiled sidecar → `src-tauri/binaries/rexadb-server-<triple>`
-#      (tauri.conf `externalBin`; resolved exe-adjacent at runtime,
-#      same as the CI smoke test)
-#   3. `bridge.jar` + `jre/` + oracle bridge → `resources/...`
-#      (tauri.conf `resources`; consumed via `$RESOURCEDIR` by
-#      `lib/db/jdbc-bridge-manager.ts` / `oracle-bridge-manager.ts`)
-#   4. `cargo tauri build` with `--config` overlay clearing
-#      `beforeBuildCommand` (the frontend is already built; running
-#      `next build` again inside the sandbox would be impure).
-#      `--bundles none` emits just the binary; `installPhase` lays out
-#      a store-friendly tree instead of a .deb.
-#
-# Runtime layout rationale: both Tauri's `resource_dir()` (see
-# `src-tauri/src/lib.rs:544`) and the `$RESOURCEDIR` fallback resolve
-# against ONE resource base, so every resource lives under
-# `$out/share/rexadb` with symlinks beside the exe (`$out/bin`) to cover
-# the `resource_dir() == exe-dir` case. The wrapper sets
-# `RESOURCEDIR=$out/share/rexadb`.
+# How the pieces fit (mirrors `.github/workflows/build.yml`):
+# - `cargoLock` + `cargoHash`: hermetic Rust vendoring (fixed-output).
+# - `npmDeps` + `npmHooks.npmConfigHook`: offline npm cache so the hook's
+#   `beforeBuildCommand` (`next build`) runs in the sandbox; `configurePhase`
+#   installs it. Fonts are vendored (`app/fonts`), so no network needed.
+# - `postPatch` stages the sidecar (`externalBin`) and `resources`
+#   (`bridge.jar`, `jre/`, oracle bridge) that `tauri.conf.json` references
+#   but that are gitignored (absent from `$src`).
+# - `tauriBundleType = "none"` emits just the binary; `dontTauriInstall`
+#   disables the hook installer in favour of the store layout below, which
+#   satisfies both Tauri `resource_dir()` and `$RESOURCEDIR` lookups
+#   (see `src-tauri/src/lib.rs:544` + both bridge managers). The sidecar
+#   stays exe-adjacent like the CI smoke test.
 let
   triple =
     {
@@ -30,24 +25,44 @@ let
     }
     .${pkgs.stdenv.hostPlatform.system} or (throw "rexadb: only x86_64-linux / aarch64-linux are supported");
 in
-pkgs.stdenv.mkDerivation {
+pkgs.rustPlatform.buildRustPackage {
   pname = "rexadb";
-  inherit version src;
-  __noChroot = true; # see nix/frontend.nix (crates.io access; versions pinned by Cargo.lock + --locked)
-  dontUnpack = true; # explicit work copy below (writes out/, binaries/, resources/)
+  inherit version;
+  src = src;
+  cargoRoot = "src-tauri";
+  buildAndTestSubdir = "src-tauri";
+  cargoLock.lockFile = ../src-tauri/Cargo.lock;
+  # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
+  cargoHash = lib.fakeHash;
+  doCheck = false;
 
-  nativeBuildInputs = with pkgs; [
-    rustc
-    cargo
-    cargo-tauri # nixpkgs ships Tauri CLI v2 (matches @tauri-apps/cli ^2)
-    pkg-config
-    wrapGAppsHook4 # wraps $out/bin for GSettings/pixbuf/GIO lookups on NixOS
-    makeWrapper
-  ];
+  npmDeps = pkgs.fetchNpmDeps {
+    name = "rexadb-npm-deps-${version}";
+    src = src;
+    # TODO(#32): same value as the other root `fetchNpmDeps` hashes; fill from CI.
+    hash = lib.fakeHash;
+  };
 
-  # Mirrors the apt list in `.github/workflows/build.yml` (+ dbus for dialogs/tray).
+  nativeBuildInputs =
+    with pkgs;
+    [
+      cargo-tauri.hook
+      nodejs
+      npmHooks.npmConfigHook
+      pkg-config
+      python3 # node-gyp fallback for native postinstalls during `npm ci`
+      patch # bun-format patches (`patchedDependencies`, unknown to npm)
+      makeWrapper
+      copyDesktopItems
+    ]
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+      wrapGAppsHook4 # wraps $out/bin for GSettings/pixbuf/GIO lookups on NixOS
+    ];
+
+  # Mirrors the apt list in `.github/workflows/build.yml` (+ dbus, glib).
   buildInputs = with pkgs; [
     openssl
+  ] ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     webkitgtk_4_1
     gtk3
     libsoup_3
@@ -58,44 +73,48 @@ pkgs.stdenv.mkDerivation {
     glib
   ];
 
-  buildPhase = ''
-    runHook preBuild
-    cd "$NIX_BUILD_TOP"
-    cp -r "$src" ./work
-    chmod -R u+w ./work
-    cd ./work
-    export HOME=$TMPDIR
-    export CARGO_HOME=$TMPDIR/cargo
-    export CI=1
-    # Needed by `-sys` crates that run bindgen at build time.
-    export LIBCLANG_PATH=${pkgs.llvmPackages.libclang.lib}/lib
+  tauriBundleType = "none";
+  dontTauriInstall = true;
 
-    # 1. Prebuilt frontend where tauri.conf.json expects it.
-    cp -r ${frontend} ./out
+  desktopItems = [
+    (pkgs.makeDesktopItem {
+      name = "rexa-db";
+      exec = "rexa-db";
+      icon = "rexa-db";
+      desktopName = "RexaDB";
+      genericName = "Database Studio";
+      comment = "Modern desktop database studio";
+      categories = [ "Development" "Database" ];
+    })
+  ];
 
-    # 2. Sidecar for `externalBin: binaries/rexadb-server`.
+  postPatch = ''
+    # Sidecar for `externalBin: binaries/rexadb-server`.
     mkdir -p src-tauri/binaries
     cp ${rexadb_server}/bin/rexadb-server \
       src-tauri/binaries/rexadb-server-${triple}
 
-    # 3. Bundled resources (these dirs are gitignored, so absent from $src).
+    # Bundled resources (gitignored, so absent from $src).
     mkdir -p resources/java-bridge/dist resources/oracle-bridge
     cp ${java_bridge}/share/rexadb/bridge.jar resources/java-bridge/dist/
     cp -r ${java_bridge}/share/rexadb/jre resources/java-bridge/dist/
     cp ${oracle_bridge}/bin/rexadb-oracle-bridge resources/oracle-bridge/
+  '';
 
-    # 4. Desktop build. If `--bundles none` is ever rejected by a future
-    #    cargo-tauri, fall back to `--bundles deb` + `pkgs.dpkg` in
-    #    nativeBuildInputs.
-    printf '{"build":{"beforeBuildCommand":""}}' > $TMPDIR/tauri-overlay.json
-    cargo tauri build --bundles none --config $TMPDIR/tauri-overlay.json
-    runHook postBuild
+  configurePhase = ''
+    runHook preConfigure
+    export HOME=$TMPDIR
+    export CI=1
+    npm ci --offline --no-audit --no-fund
+    (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
+    (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
+    runHook postConfigure
   '';
 
   installPhase = ''
     runHook preInstall
-    cd "$NIX_BUILD_TOP/work"
-    mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge
+    mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge \
+      $out/share/icons/hicolor/128x128/apps
 
     cp src-tauri/target/release/rexa-db $out/share/rexadb/
     cp ${rexadb_server}/bin/rexadb-server \
@@ -109,10 +128,14 @@ pkgs.stdenv.mkDerivation {
     cp $out/share/rexadb/rexadb-server-${triple} $out/bin/
 
     # Exe-adjacent aliases so both `resource_dir() == $out/bin` and
-    # `$RESOURCEDIR == $out/share/rexadb` resolve (see header comment).
+    # `$RESOURCEDIR == $out/share/rexadb` resolve.
     ln -s ../share/rexadb/bridge.jar $out/bin/bridge.jar
     ln -s ../share/rexadb/jre $out/bin/jre
     ln -s ../share/rexadb/oracle-bridge $out/bin/oracle-bridge
+
+    # Launcher icon (from the Tauri bundle icons).
+    cp src-tauri/icons/128x128.png \
+      $out/share/icons/hicolor/128x128/apps/rexa-db.png
 
     makeWrapper $out/share/rexadb/rexa-db $out/bin/rexa-db \
       --set RESOURCEDIR $out/share/rexadb

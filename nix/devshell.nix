@@ -17,7 +17,7 @@ pkgs.mkShell {
       jdk21
       jq
     ]
-    ++ lib.optionals pkgs.stdenv.isLinux [
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       # Exposes $GSETTINGS_SCHEMAS_PATH etc. (used in shellHook below).
       wrapGAppsHook4
     ];
@@ -27,7 +27,7 @@ pkgs.mkShell {
     [
       openssl
     ]
-    ++ lib.optionals pkgs.stdenv.isLinux [
+    ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       webkitgtk_4_1
       gtk3
       libsoup_3
@@ -43,7 +43,7 @@ pkgs.mkShell {
       export NEXT_TELEMETRY_DISABLED=1
       export WEBKIT_DISABLE_DMABUF_RENDERER=1
     ''
-    + lib.optionalString pkgs.stdenv.isLinux ''
+    + lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
       # Needed on Wayland to report the correct display scale (NixOS wiki: Tauri).
       export XDG_DATA_DIRS="$GSETTINGS_SCHEMAS_PATH''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
     '';
