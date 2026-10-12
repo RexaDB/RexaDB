@@ -26,8 +26,7 @@ let
     name = "rexadb-server-npm-deps-${version}";
     src = "${src}/server";
     fetcherVersion = 2;
-    # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
-    hash = lib.fakeHash;
+    hash = "sha256-YrayOqLJCDPnI6k7A3Ze0WQ1yY6VuLfy/6Qqt4/lnSk=";
   };
   bunTarget =
     {
