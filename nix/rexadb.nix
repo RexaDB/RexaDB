@@ -14,11 +14,10 @@
 # - `postPatch` stages the sidecar (`externalBin`) and `resources`
 #   (`bridge.jar`, `jre/`, oracle bridge) that `tauri.conf.json` references
 #   but that are gitignored (absent from `$src`).
-# - `tauriBundleType = "none"` emits just the binary; `dontTauriInstall`
-#   disables the hook installer in favour of the store layout below, which
-#   satisfies both Tauri `resource_dir()` and `$RESOURCEDIR` lookups
-#   (see `src-tauri/src/lib.rs:544` + both bridge managers). The sidecar
-#   stays exe-adjacent like the CI smoke test.
+# - `tauriBundleType = "deb"` (this cargo-tauri rejects `--bundles none`);
+#   `installPhase` extracts the .deb and lays out a store-friendly tree
+#   instead of installing FHS paths — binary, triple-suffixed sidecar,
+#   resources, plus the real Tauri-generated .desktop entry + icons.
 let
   triple =
     {
@@ -58,7 +57,7 @@ pkgs.rustPlatform.buildRustPackage {
       python3 # node-gyp fallback for native postinstalls during `npm ci`
       patch # bun-format patches (`patchedDependencies`, unknown to npm)
       makeWrapper
-      copyDesktopItems
+      dpkg # extract the .deb the tauri build emits (`tauriBundleType`)
     ]
     ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
       wrapGAppsHook4 # wraps $out/bin for GSettings/pixbuf/GIO lookups on NixOS
@@ -78,20 +77,8 @@ pkgs.rustPlatform.buildRustPackage {
     glib
   ];
 
-  tauriBundleType = "none";
+  tauriBundleType = "deb";
   dontTauriInstall = true;
-
-  desktopItems = [
-    (pkgs.makeDesktopItem {
-      name = "rexa-db";
-      exec = "rexa-db";
-      icon = "rexa-db";
-      desktopName = "RexaDB";
-      genericName = "Database Studio";
-      comment = "Modern desktop database studio";
-      categories = [ "Development" "Database" ];
-    })
-  ];
 
   postPatch = ''
     # Sidecar for `externalBin: binaries/rexadb-server`.
@@ -136,19 +123,36 @@ pkgs.rustPlatform.buildRustPackage {
 
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge \
-      $out/share/icons/hicolor/128x128/apps
+    debs=(src-tauri/target/release/bundle/deb/*.deb)
+    (( ''${#debs[@]} == 1 )) || { echo "FATAL: expected exactly one .deb, found: ''${debs[*]}" >&2; exit 1; }
+    debroot=$TMPDIR/debroot
+    mkdir -p $debroot
+    dpkg -x "''${debs[0]}" $debroot
 
-    cp src-tauri/target/release/rexa-db $out/share/rexadb/
-    cp ${rexadb_server}/bin/rexadb-server \
-      $out/share/rexadb/rexadb-server-${triple}
-    cp ${java_bridge}/share/rexadb/bridge.jar $out/share/rexadb/
-    cp -r ${java_bridge}/share/rexadb/jre $out/share/rexadb/
-    cp ${oracle_bridge}/bin/rexadb-oracle-bridge \
-      $out/share/rexadb/oracle-bridge/
+    mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge
 
-    # Sidecar MUST be exe-adjacent (Tauri externalBin lookup, cf. CI smoke test).
-    cp $out/share/rexadb/rexadb-server-${triple} $out/bin/
+    test -f $debroot/usr/bin/rexa-db || { echo "FATAL: main binary missing in .deb" >&2; exit 1; }
+    cp $debroot/usr/bin/rexa-db $out/share/rexadb/
+
+    # Sidecar (Tauri externalBin) ships exe-adjacent in the deb; keep the
+    # triple-suffixed name (cf. CI smoke test) and mirror it beside the
+    # wrapper, which is where Tauri resolves it at runtime.
+    sidecar=$(find $debroot/usr/bin -maxdepth 1 -name 'rexadb-server-*' | head -1)
+    test -n "$sidecar" || { echo "FATAL: sidecar missing in .deb" >&2; find $debroot/usr/bin | head; exit 1; }
+    cp "$sidecar" $out/share/rexadb/
+    cp "$sidecar" $out/bin/
+
+    # Resources live under /usr/lib/<product> in the deb; locate by name
+    # rather than hardcoding the product dir.
+    jar=$(find $debroot/usr/lib -name bridge.jar | head -1)
+    test -n "$jar" || { echo "FATAL: bridge.jar missing in .deb" >&2; exit 1; }
+    cp "$jar" $out/share/rexadb/
+    jre=$(dirname "$jar")/jre
+    test -d "$jre" || { echo "FATAL: jre/ missing in .deb" >&2; exit 1; }
+    cp -r "$jre" $out/share/rexadb/
+    obridge=$(find $debroot/usr/lib -name rexadb-oracle-bridge | head -1)
+    test -n "$obridge" || { echo "FATAL: oracle bridge missing in .deb" >&2; exit 1; }
+    cp "$obridge" $out/share/rexadb/oracle-bridge/
 
     # Exe-adjacent aliases so both `resource_dir() == $out/bin` and
     # `$RESOURCEDIR == $out/share/rexadb` resolve.
@@ -156,9 +160,9 @@ pkgs.rustPlatform.buildRustPackage {
     ln -s ../share/rexadb/jre $out/bin/jre
     ln -s ../share/rexadb/oracle-bridge $out/bin/oracle-bridge
 
-    # Launcher icon (from the Tauri bundle icons).
-    cp src-tauri/icons/128x128.png \
-      $out/share/icons/hicolor/128x128/apps/rexa-db.png
+    # Real Tauri-generated launcher entry + icons from the deb.
+    test -d $debroot/usr/share/applications && cp -r $debroot/usr/share/applications $out/share/
+    test -d $debroot/usr/share/icons && cp -r $debroot/usr/share/icons $out/share/
 
     makeWrapper $out/share/rexadb/rexa-db $out/bin/rexa-db \
       --set RESOURCEDIR $out/share/rexadb
