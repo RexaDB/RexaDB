@@ -1,14 +1,16 @@
-{ pkgs, lib, src, version, frontend, rexadb_server, oracle_bridge, java_bridge }:
+{ pkgs, lib, src, version, rexadb_server, oracle_bridge, java_bridge }:
 
 # RexaDB desktop binary (Tauri v2, Linux) via the official nixpkgs
 # `cargo-tauri.hook` on top of `rustPlatform.buildRustPackage`
 # (nixpkgs manual: "Tauri" hook section).
 #
 # How the pieces fit (mirrors `.github/workflows/build.yml`):
-# - `cargoLock` + `cargoHash`: hermetic Rust vendoring (fixed-output).
-# - `npmDeps`: offline npm cache (v2, with packuments) so the hook's
-#   `beforeBuildCommand` (`next build`) runs in the sandbox; `configurePhase`
-#   installs it. Fonts are vendored (`app/fonts`), so no network needed.
+# - `cargoLock`: hermetic Rust vendoring (fixed-output, per-crate).
+# - `npmDeps`: offline npm cache (v2, with packuments); `configurePhase`
+#   installs it so the hook's `beforeBuildCommand` (`next build`) runs in
+#   the sandbox and emits `./out` for `frontendDist` in place.
+#   (The standalone `frontend` package builds the same export separately
+#   for inspection; the desktop build does not consume it.)
 # - `postPatch` stages the sidecar (`externalBin`) and `resources`
 #   (`bridge.jar`, `jre/`, oracle bridge) that `tauri.conf.json` references
 #   but that are gitignored (absent from `$src`).
@@ -115,6 +117,10 @@ pkgs.rustPlatform.buildRustPackage {
     chmod -R u+w $TMPDIR/npm-cache
     export npm_config_cache=$TMPDIR/npm-cache
     npm ci --offline --no-audit --no-fund
+    # Placeholder Supabase config for the tauri `beforeBuildCommand`
+    # (`next build`, same rationale as in nix/frontend.nix).
+    export NEXT_PUBLIC_SUPABASE_URL="https://nix-placeholder.supabase.co"
+    export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="nix-placeholder-key"
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
     # The sandbox has no /usr/bin/env, but package scripts use

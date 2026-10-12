@@ -50,6 +50,14 @@ pkgs.stdenv.mkDerivation {
     chmod -R u+w $TMPDIR/npm-cache
     export npm_config_cache=$TMPDIR/npm-cache
     npm ci --offline --no-audit --no-fund
+    # Placeholder Supabase config: the static export inlines
+    # NEXT_PUBLIC_* at build time and lib/supabase/client.ts throws
+    # without them. Real secrets must never enter the store; local-first
+    # features work fully, Supabase-backed features (sign-in, teams)
+    # fail gracefully at use time. Substitute your own values here for
+    # a cloud-connected build (see README).
+    export NEXT_PUBLIC_SUPABASE_URL="https://nix-placeholder.supabase.co"
+    export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="nix-placeholder-key"
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
     # The sandbox has no /usr/bin/env, but package scripts use

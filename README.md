@@ -102,6 +102,13 @@ Notes:
   `nix flake check --no-build` validates evaluation on all systems.
 - Like the other release builds, the Nix frontend build does not bake in
   `.env` secrets — provide runtime config the usual way.
+- Supabase config is baked at build time (`NEXT_PUBLIC_*`): the Nix
+  packages build with placeholder values, so all local-first features
+  work but Supabase-backed features (sign-in, teams) are inert. Real
+  secrets must never enter the Nix store; to make a cloud-connected
+  build, substitute your own values for `NEXT_PUBLIC_SUPABASE_URL` /
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `nix/frontend.nix` (and
+  `nix/rexadb.nix` for the desktop app).
 
 ## Links
 

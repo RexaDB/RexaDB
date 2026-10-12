@@ -6,9 +6,9 @@
 # - builds: plain `stdenv.mkDerivation`s driven by the repo's own lockfiles
 #   (`bun.lock` + `--frozen-lockfile`, `Cargo.lock` + `--frozen`), in the
 #   same order as `.github/workflows/build.yml`.
-# - desktop bundle: `cargo tauri build --bundles none` with a `--config`
-#   overlay that clears `beforeBuildCommand` (frontend prebuilt as
-#   `packages.frontend`); store layout in `nix/rexadb.nix` satisfies both
+# - desktop bundle: `cargo tauri build --bundles none`; the hook's
+#   `beforeBuildCommand` rebuilds the frontend in place from the same
+#   offline npm cache; store layout in `nix/rexadb.nix` satisfies both
 #   Tauri `resource_dir()` and `$RESOURCEDIR` lookups.
 #
 # Quick start:
@@ -54,7 +54,7 @@
           java_bridge = pkgs.callPackage ./nix/java-bridge.nix { inherit version; src = self; };
           # Evaluates everywhere (cheap), builds on Linux (webkit/system libs).
           rexadb = pkgs.callPackage ./nix/rexadb.nix {
-            inherit version frontend;
+            inherit version;
             inherit rexadb_server oracle_bridge java_bridge;
             src = self;
           };
