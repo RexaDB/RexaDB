@@ -20,8 +20,7 @@ let
     # re-resolves peer/override edges and needs packuments even with a
     # complete lockfile (else ENOTCACHED under --offline).
     fetcherVersion = 2;
-    # TODO(#32): replace with the `got: sha256-…` value from CI and commit.
-    hash = lib.fakeHash;
+    hash = "sha256-Z9BwKo88UNvqpOh7xkUW/E8cBQnF36RQF/9OX3n54j0=";
   };
 in
 pkgs.stdenv.mkDerivation {

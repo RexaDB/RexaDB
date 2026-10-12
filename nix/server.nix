@@ -20,13 +20,13 @@ let
     src = src;
     # v2 also caches packuments (see nix/frontend.nix).
     fetcherVersion = 2;
-    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
+    hash = "sha256-Z9BwKo88UNvqpOh7xkUW/E8cBQnF36RQF/9OX3n54j0=";
   };
   npmDepsServer = pkgs.fetchNpmDeps {
     name = "rexadb-server-npm-deps-${version}";
     src = "${src}/server";
     fetcherVersion = 2;
-    hash = "sha256-YrayOqLJCDPnI6k7A3Ze0WQ1yY6VuLfy/6Qqt4/lnSk=";
+    hash = "sha256-TSKmyfsnahnpYzPrdOs9ecdWlcxoTxDtKe4fo1h04mk=";
   };
   bunTarget =
     {
