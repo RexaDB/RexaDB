@@ -24,6 +24,14 @@ let
       "aarch64-linux" = "aarch64-unknown-linux-gnu";
     }
     .${pkgs.stdenv.hostPlatform.system} or (throw "rexadb: only x86_64-linux / aarch64-linux are supported");
+
+  npmDeps = pkgs.fetchNpmDeps {
+    name = "rexadb-npm-deps-${version}";
+    src = src;
+    # v2 also caches packuments (see nix/frontend.nix).
+    fetcherVersion = 2;
+    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
+  };
 in
 pkgs.rustPlatform.buildRustPackage {
   pname = "rexadb";
@@ -37,13 +45,7 @@ pkgs.rustPlatform.buildRustPackage {
   # oracle-bridge package already proved this on CI).
   doCheck = false;
 
-  npmDeps = pkgs.fetchNpmDeps {
-    name = "rexadb-npm-deps-${version}";
-    src = src;
-    # v2 also caches packuments (see nix/frontend.nix).
-    fetcherVersion = 2;
-    hash = "sha256-sVm0pTSUHniMUQuJRiOds5DgF5x5pXoAFjeOkq+llqE=";
-  };
+  inherit npmDeps;
 
   nativeBuildInputs =
     with pkgs;
