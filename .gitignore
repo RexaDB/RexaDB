@@ -125,3 +125,12 @@ skills-lock.json
 # Oracle bridge build output (binary + rust target, never commit)
 /resources/oracle-bridge/
 /src-tauri/oracle-bridge/target/
+
+# Nix
+/result
+/result-*
+/result-frontend
+/result-server
+/result-oracle
+/result-rexadb
+.direnv/

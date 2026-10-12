@@ -1,0 +1,91 @@
+name: Nix
+
+on:
+  pull_request:
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - ".envrc"
+      - "package.json"
+      - "bun.lock"
+      - "server/**"
+      - "src-tauri/**"
+      - "resources/java-bridge/**"
+      - "lib/db/*bridge-manager.ts"
+      - ".github/workflows/nix.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+  workflow_dispatch:
+
+jobs:
+  # Fast: evaluation, dev shell, and the one derivation with no
+  # registry/cargo dependencies (JDK compile only).
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Evaluate flake (no builds)
+        run: nix flake check --no-build
+
+      - name: Dev shell smoke (toolchain present)
+        run: |
+          nix develop --command bun --version
+          nix develop --command cargo --version
+          nix develop --command java -version
+
+      - name: Build java-bridge
+        run: nix build .#java-bridge --print-build-logs
+
+  # Full Linux builds (order mirrors build.yml). Needs network for the
+  # pinned registries on first run; results land in the Nix cache after.
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build frontend
+        run: nix build .#frontend --out-link result-frontend --print-build-logs
+
+      - name: Build sidecar server
+        run: nix build .#rexadb-server --out-link result-server --print-build-logs
+
+      - name: Build oracle bridge
+        run: nix build .#rexadb-oracle-bridge --out-link result-oracle --print-build-logs
+
+      - name: Build desktop app
+        run: nix build .#rexadb --out-link result-rexadb --print-build-logs
+
+      - name: Sidecar health smoke (parity with build.yml smoke test)
+        run: |
+          set -euo pipefail
+          export REXADB_USER_DATA_DIR=/tmp/rexadb-nix-smoke
+          mkdir -p "$REXADB_USER_DATA_DIR"
+          SIDECAR=$(echo result-rexadb/bin/rexadb-server-*)
+          echo "sidecar: $SIDECAR"
+          "$SIDECAR" > /tmp/rexadb-nix-smoke.log 2>&1 &
+          SRV_PID=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3867/health > /dev/null 2>&1; then
+              echo "sidecar /health OK after ~${i}s"
+              kill $SRV_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "sidecar never became healthy; log:"
+          cat /tmp/rexadb-nix-smoke.log
+          kill $SRV_PID || true
+          exit 1

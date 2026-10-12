@@ -53,6 +53,56 @@ npm run dev
 npm run tauri:dev
 ```
 
+## Install with Nix (NixOS / nix)
+
+RexaDB ships a Nix flake (`flake.nix`, `nix/`) with a reproducible dev
+shell, per-component packages, the desktop app, and NixOS / Home Manager
+modules (Linux-first; macOS gets `nix develop` + headless packages).
+
+```bash
+# full toolchain: bun, node, rust, cargo-tauri, JDK 21, WebKitGTK deps
+nix develop
+
+# build pieces
+nix build .#frontend        # Next.js static export
+nix build .#rexadb-server   # compiled sidecar server
+nix build .#rexadb-oracle-bridge
+nix build .#java-bridge     # bridge.jar + minimal JRE
+
+# desktop app (Linux) — run it, or install via the HM module
+nix build .#rexadb
+nix run .                   # launch RexaDB
+nix run .#server            # sidecar only (REXADB_SERVER_PORT=3867)
+```
+
+NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
+
+```nix
+services.rexadb = {
+  enable = true;
+  package = inputs.rexadb.packages.${pkgs.system}.rexadb-server;
+};
+```
+
+Home Manager:
+
+```nix
+programs.rexadb = {
+  enable = true;
+  package = inputs.rexadb.packages.${pkgs.system}.rexadb;
+};
+```
+
+Notes:
+
+- First run generates `flake.lock` (needs network); please commit it.
+- `.envrc` (`use flake`, for direnv users) is covered by the repo's
+  `.env*` gitignore rule — `git add -f .envrc` to commit it.
+- `packages.rexadb` is Linux-only (`webkitgtk_4_1` / Tauri bundling).
+  `nix flake check --no-build` validates evaluation on all systems.
+- Like the other release builds, the Nix frontend build does not bake in
+  `.env` secrets — provide runtime config the usual way.
+
 ## Links
 
 - Website: https://www.rexadb.app
