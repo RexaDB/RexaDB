@@ -2,8 +2,9 @@
 
 # Next.js static export (`out/`) for Tauri `frontendDist`, built hermetically:
 # - JS deps come from `fetchNpmDeps` (fixed-output prefetch of
-#   `package-lock.json`; `.npmrc` sets `legacy-peer-deps` to match bun's
-#   lenient peer resolution for better-drizzle/drizzle-orm).
+#   `package-lock.json`; `package.json` `overrides` pin bun-tolerated
+#   peer resolutions — better-drizzle/drizzle-orm, @types/react-dom
+#   — so strict npm resolution matches the working bun tree).
 # - Fonts are vendored (`app/fonts`, `next/font/local`) so `next build`
 #   never touches fonts.googleapis.com.
 # - bun-format patches (`patchedDependencies`, unknown to npm) are applied

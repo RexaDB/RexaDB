@@ -130,5 +130,13 @@
   "patchedDependencies": {
     "@glideapps/glide-data-grid@6.0.4-alpha24": "patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch",
     "better-drizzle@0.1.1": "patches/better-drizzle@0.1.1.patch"
+  },
+  "overrides": {
+    "better-drizzle": {
+      "drizzle-orm": "$drizzle-orm"
+    },
+    "@types/react-dom": {
+      "@types/react": "$@types/react"
+    }
   }
 }
