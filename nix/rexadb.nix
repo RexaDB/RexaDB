@@ -117,6 +117,9 @@ pkgs.rustPlatform.buildRustPackage {
     npm ci --offline --no-audit --no-fund
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
+    # The sandbox has no /usr/bin/env, but binstubs use #!/usr/bin/env node
+    # (this also covers the tauri `beforeBuildCommand` below).
+    patchShebangs node_modules/.bin
     # `beforeBuildCommand` (`next build`) runs under plain sh during the
     # tauri build below — put the local bins on PATH for it.
     export PATH="$PWD/node_modules/.bin:$PATH"

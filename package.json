@@ -32,6 +32,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@duckdb/node-api": "^1.5.3-r.1",
+    "@earendil-works/pi-ai": "^0.84.2",
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@glideapps/glide-data-grid-cells": "6.0.4-alpha24",

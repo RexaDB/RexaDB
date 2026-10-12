@@ -52,6 +52,8 @@ pkgs.stdenv.mkDerivation {
     npm ci --offline --no-audit --no-fund
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
+    # The sandbox has no /usr/bin/env, but binstubs use #!/usr/bin/env node.
+    patchShebangs node_modules/.bin
     NODE_ENV=production npm run build
     runHook postBuild
   '';
