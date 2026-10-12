@@ -26,6 +26,8 @@ import { useGlideGridTheme, useGlideHoverColors } from "./theme";
 import { computeAutoColumnWidths, buildGridColumns } from "./columns";
 import { REXA_HEADER_ICONS, HEADER_ICON_KEYS } from "./header-icons";
 import { NoResultsState, WhimsicalEmptyState } from "./states";
+import { InfiniteScrollingFooter } from "./infinite-scrolling-footer";
+import { shouldLoadTableBatch } from "@/lib/studio/table-batches";
 import { PaginationFooter } from "./pagination-footer";
 import { JsonCellEditorSheet, type JsonCellEditorState } from "./json-cell-editor-sheet";
 import {
@@ -187,6 +189,11 @@ export const DataGrid = React.memo(function DataGrid({
   error,
   selectedTable,
   selectedSchema,
+  infiniteScrolling = false,
+  loadingMore = false,
+  hasMoreRows = false,
+  loadMoreError = null,
+  onLoadMore,
   pageSize,
   page,
   totalCount,
@@ -345,6 +352,29 @@ export const DataGrid = React.memo(function DataGrid({
   const [isResizingFK, setIsResizingFK] = useState(false);
 
   const rows: any[] = useMemo(() => results?.rows ?? [], [results]);
+  const visibleRegionRef = useRef<Rectangle | null>(null);
+
+  const loadMoreIfNeeded = useCallback((range: Rectangle) => {
+    if (infiniteScrolling && shouldLoadTableBatch({
+      visibleEnd: range.y + range.height,
+      rowCount: rows.length,
+      loading: loading || loadingMore,
+      hasMore: hasMoreRows,
+      error: loadMoreError,
+    })) {
+      onLoadMore?.();
+    }
+  }, [infiniteScrolling, rows.length, loading, loadingMore, hasMoreRows, loadMoreError, onLoadMore]);
+
+  const onVisibleRegionChanged = useCallback((range: Rectangle) => {
+    visibleRegionRef.current = range;
+    loadMoreIfNeeded(range);
+  }, [loadMoreIfNeeded]);
+
+  useEffect(() => {
+    if (visibleRegionRef.current) loadMoreIfNeeded(visibleRegionRef.current);
+  }, [loadMoreIfNeeded]);
+
   const fields: Array<{ name: string }> = useMemo(
     () => results?.fields ?? [],
     [results],
@@ -1693,6 +1723,7 @@ export const DataGrid = React.memo(function DataGrid({
           drawHeader={onDrawHeader}
           overscrollX={0}
           overscrollY={0}
+          onVisibleRegionChanged={onVisibleRegionChanged}
           onCellEdited={onCellEdited}
           onColumnResize={onColumnResize}
           onItemHovered={onItemHovered}
@@ -1931,7 +1962,19 @@ export const DataGrid = React.memo(function DataGrid({
         onSetNull={setExpandedJsonNull}
         onDiscard={discardExpandedJsonChange}
       />
-      {showPaginationFooter ? (
+      {infiniteScrolling ? (
+        <InfiniteScrollingFooter
+          recordCount={rows.length}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          loading={loading}
+          loadingMore={loadingMore}
+          hasMoreRows={hasMoreRows}
+          error={loadMoreError}
+          onLoadMore={onLoadMore}
+          onPageSizeChange={onPageSizeChange}
+        />
+      ) : showPaginationFooter ? (
         <PaginationFooter
           page={page}
           pageSize={pageSize}

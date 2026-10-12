@@ -1,5 +1,9 @@
+// services
 import { isDesktopRuntime } from "@/lib/desktop";
 import { API_BASE } from "@/lib/api-base";
+import { decryptVaultSecret, encryptVaultSecret, getCredentialStorageMode } from "./local-vault";
+
+// utils
 import {
   applyRowDriverSettings,
   hasConnectionSecret,
@@ -7,7 +11,6 @@ import {
   restorePostgresPassword,
   stripConnectionSecrets,
 } from "./connection-secret-utils";
-import { decryptVaultSecret, encryptVaultSecret, getCredentialStorageMode } from "./local-vault";
 export { hasConnectionSecret, stripConnectionSecrets } from "./connection-secret-utils";
 
 export type CredentialPayload = Record<string, any> & {
@@ -19,10 +22,51 @@ export type CredentialPayload = Record<string, any> & {
   credentialStorageMode?: "keychain" | "vault" | "plaintext";
 };
 
+export function isDesktopKeychainConnectionUnavailable(connection: CredentialPayload): boolean {
+  return typeof connection.credentialRef === "string"
+    && Boolean(connection.credentialRef)
+    && !connection.credentialRef.startsWith("vault:")
+    && !isDesktopRuntime();
+}
+
 async function invoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
   if (!isDesktopRuntime()) throw new Error("Credential keychain is available only in the desktop app.");
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, args);
+}
+
+function parseStoredBundle(raw: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Could not unlock saved credentials: the stored credential bundle is invalid.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Could not unlock saved credentials: the stored credential bundle is invalid.");
+  }
+  const bundle: Record<string, unknown> = {};
+  for (const field of ["connectionString", "password", "authToken"] as const) {
+    const value = (parsed as Record<string, unknown>)[field];
+    if (value === undefined) continue;
+    if (value !== null && typeof value !== "string") {
+      throw new Error("Could not unlock saved credentials: the stored credential bundle is invalid.");
+    }
+    if (field === "connectionString" && value === null) continue;
+    bundle[field] = value;
+  }
+  return bundle;
+}
+
+async function storeKeychainBundle(reference: string, value: string, removeOnFailure = false) {
+  try {
+    await invoke("connection_credential_set", { reference, value });
+    const saved = await invoke<string>("connection_credential_get", { reference });
+    if (saved !== value) throw new Error("Keychain verification failed.");
+  } catch {
+    if (removeOnFailure) await invoke("connection_credential_delete", { reference }).catch(() => undefined);
+    throw new Error("Could not save and verify credentials in the system keychain. Your connection has not been saved. Unlock the keychain or choose Encrypted vault in Settings → Security and retry.");
+  }
 }
 
 async function readStoredBundle(payload: CredentialPayload): Promise<Record<string, unknown> | null> {
@@ -32,9 +76,7 @@ async function readStoredBundle(payload: CredentialPayload): Promise<Record<stri
     const raw = ref.startsWith("vault:")
       ? await decryptVaultSecret(ref, payload.credentialSecret || "")
       : await invoke<string>("connection_credential_get", { reference: ref });
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
+    return parseStoredBundle(raw);
   } catch {
     return null;
   }
@@ -58,7 +100,7 @@ async function refreshStoredBundle(
   if (ref.startsWith("vault:")) {
     return await encryptVaultSecret(ref, bundle);
   }
-  await invoke("connection_credential_set", { reference: ref, value: bundle });
+  await storeKeychainBundle(ref, bundle);
   return null;
 }
 
@@ -154,7 +196,7 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
   }
   const ref = mode === "vault" ? `vault:${crypto.randomUUID()}` : crypto.randomUUID();
   const credentialSecret = ref.startsWith("vault:") ? await encryptVaultSecret(ref, bundle) : null;
-  if (!credentialSecret) await invoke("connection_credential_set", { reference: ref, value: bundle });
+  if (!credentialSecret) await storeKeychainBundle(ref, bundle, true);
   return {
     ...payload,
     connectionString: payload.connectionString ? stripConnectionSecrets(payload.connectionString) : payload.connectionString,
@@ -167,23 +209,20 @@ export async function protectConnectionPayload<T extends CredentialPayload>(payl
 }
 
 export async function hydrateConnection<T extends CredentialPayload>(connection: T): Promise<T> {
-  if (!connection.credentialRef) return connection;
+  if (!connection.credentialRef) {
+    if (typeof connection.connectionString !== "string" || !connection.password) return connection;
+    return {
+      ...connection,
+      connectionString: restorePostgresPassword(connection.connectionString, String(connection.username || ""), connection.password),
+    } as T;
+  }
+  if (isDesktopKeychainConnectionUnavailable(connection)) {
+    throw new Error("This connection’s password is stored in the desktop keychain, which the browser cannot access. Open it in the desktop app, or duplicate the connection and re-enter its password for browser use.");
+  }
   const raw = connection.credentialRef.startsWith("vault:")
     ? await decryptVaultSecret(connection.credentialRef, connection.credentialSecret || "")
     : await invoke<string>("connection_credential_get", { reference: connection.credentialRef });
-  let secret: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("Invalid credential bundle.");
-    }
-    secret = parsed as Record<string, unknown>;
-  } catch {
-    throw new Error("Could not unlock saved credentials.");
-  }
-  // Only forward plain string secrets to the sidecar cache; never forward
-  // objects that would make node-postgres see a non-string password.
-  const cacheSecret: Record<string, string | null> = {};
+  let secret = parseStoredBundle(raw);
   // Defense in depth: if the row's saved target no longer matches the
   // bundle's target (e.g. a save made before stale-reference detection
   // paired a new URL with an old reference), never replay the old URL and
@@ -213,18 +252,6 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
       secret = { ...secret, connectionString: merged };
     }
   }
-  for (const field of ["connectionString", "password", "authToken"] as const) {
-    const value = secret[field];
-    if (value === null || typeof value === "string") cacheSecret[field] = value;
-  }
-  try {
-    await fetch(new URL("/api/connections/credential-cache", API_BASE), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference: connection.credentialRef, secret: cacheSecret }),
-    });
-  } catch {
-    // The UI can still use its keychain-hydrated URL if the sidecar cache is unavailable.
-  }
   const hydrated = { ...connection, ...secret } as T;
   const bundlePassword = typeof secret.password === "string" ? secret.password : "";
   const rowPassword =
@@ -240,11 +267,26 @@ export async function hydrateConnection<T extends CredentialPayload>(connection:
           password,
         )
       : hydrated.connectionString;
-  // Unlock succeeded, so previously flagged errors (cancelled vault prompt,
-  // temporarily locked keychain) are resolved: never carry a stale
-  // credentialError forward onto usable credentials.
-  const { credentialError: _resolved, ...restored } = hydrated as Record<string, unknown>;
-  return { ...restored, connectionString } as T;
+  const restored: Record<string, unknown> = { ...hydrated };
+  delete restored.credentialError;
+  const resolved = { ...restored, connectionString, ...(password ? { password } : {}) } as T;
+  if (!hasConnectionSecret(resolved)) {
+    throw new Error("Could not unlock saved credentials: the stored bundle has no password or token. Edit this connection and re-enter its credentials.");
+  }
+  const cacheSecret: Record<string, string | null> = {};
+  for (const field of ["connectionString", "password", "authToken"] as const) {
+    const value = resolved[field];
+    if (value === null || typeof value === "string") cacheSecret[field] = value;
+  }
+  try {
+    await fetch(new URL("/api/connections/credential-cache", API_BASE), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference: connection.credentialRef, secret: cacheSecret }),
+    });
+  } catch {
+    // the ui can still use its restored url if the sidecar cache is unavailable.
+  }
+  return resolved;
 }
 
 export async function deleteConnectionCredential(reference: string): Promise<void> {

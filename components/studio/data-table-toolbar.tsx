@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+
+// components
 import { ToolbarSelectionActions } from "./toolbar/toolbar-selection-actions";
 import { ToolbarFilterSort, stripLeadingWhereKeyword } from "./toolbar/toolbar-filter-sort";
 import { ToolbarGlobalActions } from "./toolbar/toolbar-global-actions";
@@ -9,7 +11,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { LayoutTable01Icon } from "@hugeicons/core-free-icons";
 import { Loader2 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import {
   Popover,
   PopoverAnchor,
@@ -25,10 +26,15 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
+
+// utils
+import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api-base";
 import { getGlobalAiSettings } from "@/lib/api/actions-client";
 import { readSseStream } from "@/lib/ai/read-sse-stream";
 import { formatShortcutForPlatform } from "@/lib/studio/keybindings";
+
+// types
 import type { GlobalAiSettings } from "@/lib/api/actions-client";
 import type { ConnectionDbType } from "@/lib/db/connection-type";
 import type {
@@ -375,8 +381,8 @@ async function runAgentFilter(opts: {
 
 export function DataTableToolbar(props: DataTableToolbarProps) {
   const { selectedRows } = props;
-  // Shared by both bar states — either one can kick off an AI filter.
-  const [aiBusy, setAiBusy] = useState(false);
+
+  const [aiBusy, setAiBusy] = useState<boolean>(false);
 
   const columnList = props.tableStructure?.length
     ? props.tableStructure.map((c: any) => ({
@@ -415,7 +421,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
     />
   );
 
-  const ColumnsDropdown = (
+  const columnsDropdown = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="font-normal dark:border-white/15 dark:bg-white/[0.02]">
@@ -450,23 +456,49 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   );
 
   const toolbarItems = [
-    { id: "filter", label: "Filter and sort", content: <><ToolbarFilterSort
-      filterQuery={props.filterQuery} setFilterQuery={props.setFilterQuery}
-      sortConfig={props.sortConfig} setSortConfig={props.setSortConfig}
-      refreshTableData={props.refreshTableData} selectedTable={props.selectedTable}
-      selectedSchema={props.selectedSchema} results={props.results} dbType={props.dbType}
-      globalSearchQuery={props.globalSearchQuery} setGlobalSearchQuery={props.setGlobalSearchQuery}
-      setGlobalSearchScope={props.setGlobalSearchScope}
-    /></> },
-    { id: "views", label: "Saved views", content: <SavedTableViews
-      connectionString={props.connectionString} table={props.selectedTable}
-      schema={props.selectedSchema} filter={props.filterQuery} sort={props.sortConfig}
-      onApply={(filter, sort) => {
-        props.setFilterQuery(filter); props.setSortConfig(sort);
-        if (props.selectedTable) props.refreshTableData(props.selectedTable, props.selectedSchema, filter, sort);
-      }}
-    /> },
-    { id: "columns", label: "Columns", content: ColumnsDropdown },
+    {
+      id: "filter",
+      label: "Filter and sort",
+      content: (
+        <div className={selectedRows.size > 0 ? "hidden" : "contents"}>
+          <ToolbarFilterSort
+            filterQuery={props.filterQuery}
+            setFilterQuery={props.setFilterQuery}
+            sortConfig={props.sortConfig}
+            setSortConfig={props.setSortConfig}
+            refreshTableData={props.refreshTableData}
+            selectedTable={props.selectedTable}
+            selectedSchema={props.selectedSchema}
+            results={props.results}
+            dbType={props.dbType}
+            globalSearchQuery={props.globalSearchQuery}
+            setGlobalSearchQuery={props.setGlobalSearchQuery}
+            setGlobalSearchScope={props.setGlobalSearchScope}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "views",
+      label: "Saved views",
+      content: (
+        <SavedTableViews
+          connectionString={props.connectionString}
+          table={props.selectedTable}
+          schema={props.selectedSchema}
+          filter={props.filterQuery}
+          sort={props.sortConfig}
+          onApply={(filter, sort) => {
+            props.setFilterQuery(filter);
+            props.setSortConfig(sort);
+            if (props.selectedTable) {
+              props.refreshTableData(props.selectedTable, props.selectedSchema, filter, sort);
+            }
+          }}
+        />
+      ),
+    },
+    { id: "columns", label: "Columns", content: columnsDropdown },
     { id: "actions", label: "Table actions", content: toolbarGlobalActions },
   ];
 
@@ -493,71 +525,32 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       aiBusy={aiBusy}
       setAiBusy={setAiBusy}
     >
-      <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
-    </UnifiedSearchBar>
-  );
-
-  const selectionSearchBar = (
-    <UnifiedSearchBar
-      globalSearchQuery={props.globalSearchQuery}
-      setGlobalSearchQuery={props.setGlobalSearchQuery}
-      globalSearchScope={props.globalSearchScope}
-      setGlobalSearchScope={props.setGlobalSearchScope}
-      supportsWholeTableSearch={props.supportsWholeTableSearch}
-      selectedTable={props.selectedTable}
-      selectedSchema={props.selectedSchema}
-      tableColumns={tableColumns}
-      filterQuery={props.filterQuery}
-      setFilterQuery={props.setFilterQuery}
-      sortConfig={props.sortConfig}
-      refreshTableData={props.refreshTableData}
-      dbType={props.dbType}
-      connectionId={props.connectionId}
-      connectionString={props.connectionString}
-      aiBusy={aiBusy}
-      setAiBusy={setAiBusy}
-    >
-      <ToolbarLayout items={toolbarItems} connectionString={props.connectionString} />
+      <ToolbarLayout
+        items={toolbarItems}
+        connectionString={props.connectionString}
+        leadingContent={
+          <div className={selectedRows.size > 0 ? "flex min-w-0 max-w-full flex-wrap items-center gap-2" : "hidden"}>
+            <ToolbarSelectionActions
+              selectedRows={props.selectedRows}
+              setSelectedRows={props.setSelectedRows}
+              exportData={props.exportData}
+              copyData={props.copyData}
+              handleDeleteRows={props.handleDeleteRows}
+              isDeleting={props.isDeleting}
+              deleteDisabled={props.isPermissionPreview}
+            />
+          </div>
+        }
+      />
     </UnifiedSearchBar>
   );
 
   return (
-    <div className="relative border-b border-border bg-studio-bg h-12 shrink-0 overflow-hidden">
-      {/* Default State */}
-      <div
-        className={cn(
-          "flex items-center px-4 h-full w-full transition-all duration-300 ease-in-out absolute inset-0 gap-2",
-          selectedRows.size > 0
-            ? "-translate-y-full opacity-0 pointer-events-none"
-            : "translate-y-0 opacity-100",
-        )}
-      >
+    <div className="relative min-h-12 shrink-0 border-b border-border bg-studio-bg">
+      <div className="flex min-h-12 min-w-0 items-center px-4">
         {searchBar}
       </div>
 
-      {/* Selection State */}
-      <div
-        className={cn(
-          "flex items-center px-4 h-full w-full transition-all duration-300 ease-in-out absolute inset-0 gap-2",
-          selectedRows.size > 0
-            ? "translate-y-0 opacity-100"
-            : "translate-y-full opacity-0 pointer-events-none",
-        )}
-      >
-        <ToolbarSelectionActions
-          selectedRows={props.selectedRows}
-          setSelectedRows={props.setSelectedRows}
-          exportData={props.exportData}
-          copyData={props.copyData}
-          handleDeleteRows={props.handleDeleteRows}
-          isDeleting={props.isDeleting}
-          deleteDisabled={props.isPermissionPreview}
-        />
-
-        <div className="flex flex-1 items-center gap-2">
-          {selectionSearchBar}
-        </div>
-      </div>
       {aiBusy && <AiBeamRing />}
     </div>
   );
@@ -807,78 +800,81 @@ function UnifiedSearchBar({
             }
             inputRef.current?.focus();
           }}
-          className="relative flex h-full min-w-0 flex-1 cursor-text items-center bg-background"
+          className="flex min-h-12 min-w-0 flex-1 cursor-text flex-wrap items-center gap-x-2 bg-background"
         >
-          <input
-            ref={inputRef}
-            value={globalSearchQuery}
-            onChange={(e) => {
-              setGlobalSearchQuery(e.target.value);
-              setActiveIdx(0);
-            }}
-            onFocus={() => setFocused(true)}
-            onScroll={() => {
-              const input = inputRef.current;
-              const measure = measureRef.current;
-              if (!input || !measure) return;
-              const end = measure.scrollWidth - input.scrollLeft + 8;
-              setHintLeft(Math.max(0, Math.min(end, input.clientWidth - 264)));
-            }}
-            onBlur={() => {
-              window.setTimeout(() => {
-                setFocused(false);
-                setAssistOpen(false);
-              }, 120);
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholderText}
-            className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-          {/* Hidden mirror of the text/placeholder — positions the hint. */}
-          <span
-            ref={measureRef}
-            aria-hidden="true"
-            className="pointer-events-none invisible absolute top-0 left-0 max-w-none text-sm whitespace-pre"
-          >
-            {globalSearchQuery || placeholderText}
-          </span>
-          {hintLeft !== null && focused && (
-            <div
-              style={{ left: hintLeft }}
-              className="absolute top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-1"
+          <div className="relative flex h-12 min-w-0 flex-[1_0_16rem] items-center">
+            <input
+              ref={inputRef}
+              value={globalSearchQuery}
+              onChange={(e) => {
+                setGlobalSearchQuery(e.target.value);
+                setActiveIdx(0);
+              }}
+              onFocus={() => setFocused(true)}
+              onScroll={() => {
+                const input = inputRef.current;
+                const measure = measureRef.current;
+                if (!input || !measure) return;
+                const end = measure.scrollWidth - input.scrollLeft + 8;
+                setHintLeft(Math.max(0, Math.min(end, input.clientWidth - 264)));
+              }}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  setFocused(false);
+                  setAssistOpen(false);
+                }, 120);
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholderText}
+              className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+            {/* Hidden mirror of the text/placeholder — positions the hint. */}
+            <span
+              ref={measureRef}
+              aria-hidden="true"
+              className="pointer-events-none invisible absolute top-0 left-0 max-w-none text-sm whitespace-pre"
             >
-              <button
-                type="button"
-                title={`Open filter autocomplete (${filterKeys})`}
-                aria-label="Open filter autocomplete"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (assistOpen) setAssistOpen(false);
-                  else openAssist();
-                }}
-                className="flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1 py-0.5 font-mono text-[10px] whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground"
+              {globalSearchQuery || placeholderText}
+            </span>
+            {hintLeft !== null && focused && (
+              <div
+                style={{ left: hintLeft }}
+                className="absolute top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-1"
               >
-                {filterKeys} for filtering
-              </button>
-              <button
-                type="button"
-                title={`Create a filter with the default AI agent (${aiKeys})`}
-                aria-label="Create an AI filter"
-                disabled={aiBusy || !globalSearchQuery.trim()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void createAiFilter();
-                }}
-                className="flex shrink-0 items-center gap-1 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[10px] whitespace-nowrap text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {aiBusy ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : null}
-                {aiKeys} for AI filter
-              </button>
-            </div>
-          )}
-          <div className="flex min-w-0 shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  title={`Open filter autocomplete (${filterKeys})`}
+                  aria-label="Open filter autocomplete"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (assistOpen) setAssistOpen(false);
+                    else openAssist();
+                  }}
+                  className="flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1 py-0.5 font-mono text-[10px] whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {filterKeys} for filtering
+                </button>
+                <button
+                  type="button"
+                  title={`Create a filter with the default AI agent (${aiKeys})`}
+                  aria-label="Create an AI filter"
+                  disabled={aiBusy || !globalSearchQuery.trim()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void createAiFilter();
+                  }}
+                  className="flex shrink-0 items-center gap-1 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[10px] whitespace-nowrap text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {aiBusy ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : null}
+                  {aiKeys} for AI filter
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 py-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button

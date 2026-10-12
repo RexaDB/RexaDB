@@ -49,6 +49,7 @@ let latestStudioSaveSeq = 0;
 interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   appZoom: number;
   executionMode: "direct" | "review";
+  infiniteTableScrolling: boolean;
   rowSpacing: "compact" | "standard" | "relaxed";
   alternatingRowColors: boolean;
   editorFontSize: string;
@@ -102,6 +103,7 @@ export function useGlobalStudioSettings(persist = false) {
   const [executionMode, setExecutionMode] = useState<"direct" | "review">(
     "direct",
   );
+  const [infiniteTableScrolling, setInfiniteTableScrolling] = useState<boolean>(false);
   const [rowSpacing, setRowSpacing] = useState<
     "compact" | "standard" | "relaxed"
   >("standard");
@@ -195,6 +197,8 @@ export function useGlobalStudioSettings(persist = false) {
   const applyFromRecord = (d: Record<string, any>) => {
     if (d.appZoom !== undefined) setAppZoom(d.appZoom);
     if (d.executionMode) setExecutionMode(d.executionMode);
+    if (typeof d.infiniteTableScrolling === "boolean")
+      setInfiniteTableScrolling(d.infiniteTableScrolling);
     if (d.rowSpacing) setRowSpacing(d.rowSpacing);
     if (d.alternatingRowColors !== undefined)
       setAlternatingRowColors(d.alternatingRowColors);
@@ -598,6 +602,7 @@ export function useGlobalStudioSettings(persist = false) {
     const payload = {
       appZoom,
       executionMode,
+      infiniteTableScrolling,
       rowSpacing,
       alternatingRowColors,
       editorFontSize,
@@ -728,6 +733,7 @@ export function useGlobalStudioSettings(persist = false) {
     saveRetryTick,
     appZoom,
     executionMode,
+    infiniteTableScrolling,
     rowSpacing,
     alternatingRowColors,
     editorFontSize,
@@ -815,6 +821,8 @@ export function useGlobalStudioSettings(persist = false) {
     setAppZoom,
     executionMode,
     setExecutionMode,
+    infiniteTableScrolling,
+    setInfiniteTableScrolling,
     rowSpacing,
     setRowSpacing,
     alternatingRowColors,

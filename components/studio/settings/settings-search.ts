@@ -30,6 +30,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "app-font", section: "general", title: "App Font", description: "Customize the application font family.", keywords: ["font", "typography", "text", "family"] },
   { id: "icon-theme", section: "general", title: "Icon Theme", description: "Choose the icon pack used across the app.", keywords: ["icons", "pack", "lucide", "solar"] },
   { id: "zoom", section: "general", title: "Zoom Level", description: "Scale the whole application UI.", keywords: ["zoom", "scale", "size"] },
+  { id: "infinite-table-scrolling", section: "general", title: "Infinite scrolling", description: "Load more table rows as you scroll. Turn off to use page-by-page navigation.", keywords: ["table", "grid", "infinite", "scroll", "pagination", "rows"] },
   { id: "row-spacing", section: "general", title: "Row Spacing", description: "Adjust the vertical spacing between rows in data tables.", keywords: ["rows", "density", "compact", "comfortable", "table", "grid"] },
   { id: "tui-mode", section: "general", title: "Terminal UI", description: "Switch the app to a blocky terminal-style UI with mono typography.", keywords: ["terminal", "tui", "mono", "experimental"] },
   { id: "tui-theme", section: "general", title: "Terminal Theme", description: "Choose light, dark, or follow system while in terminal UI.", keywords: ["terminal", "tui", "theme"] },

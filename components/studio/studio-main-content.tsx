@@ -767,6 +767,11 @@ export function StudioMainContent({
   };
 
   const tableGridProps = {
+    infiniteScrolling: studio.infiniteScrolling,
+    loadingMore: studio.loadingMore,
+    hasMoreRows: studio.hasMoreRows,
+    loadMoreError: studio.loadMoreError,
+    onLoadMore: studio.loadMoreTableRows,
     results,
     tableStructure,
     hiddenColumns: hiddenColumnNames,
@@ -1086,6 +1091,8 @@ export function StudioMainContent({
         isPermissionPreview: Boolean(cachedPermissionContext),
       },
       gridProps: {
+        infiniteScrolling: Boolean(cached?.infiniteScrolling),
+        hasMoreRows: Boolean(cached?.hasMoreRows),
         results: cachedResults,
         tableStructure: cachedStructure,
         enums,

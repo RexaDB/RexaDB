@@ -70,6 +70,11 @@ export interface DataGridProps {
   setSortConfig: (
     config: { column: string; direction: "ASC" | "DESC" } | null,
   ) => void;
+  infiniteScrolling?: boolean;
+  loadingMore?: boolean;
+  hasMoreRows?: boolean;
+  loadMoreError?: string | null;
+  onLoadMore?: () => void;
   pageSize: number;
   page: number;
   totalCount: number | null;
