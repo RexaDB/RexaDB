@@ -109,6 +109,13 @@ Notes:
   build, substitute your own values for `NEXT_PUBLIC_SUPABASE_URL` /
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `nix/frontend.nix` (and
   `nix/rexadb.nix` for the desktop app).
+- The Nix desktop build ships with the Tauri auto-updater disabled (it
+  would otherwise require the release signing key, which never enters
+  PR/fork builds — signing stays tag-gated in `build.yml`). Update via
+  `nix flake update` instead.
+- Tag pushes additionally attach `RexaDB_<version>_nix_amd64.deb` to the
+  GitHub release as a manual-install asset (it is not an updater target;
+  `latest.json` keeps pointing at the official signed builds).
 
 ## Links
 

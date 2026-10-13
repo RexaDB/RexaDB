@@ -16,8 +16,14 @@
 #   but that are gitignored (absent from `$src`).
 # - `tauriBundleType = "deb"` (this cargo-tauri rejects `--bundles none`);
 #   `installPhase` extracts the .deb and lays out a store-friendly tree
-#   instead of installing FHS paths — binary, triple-suffixed sidecar,
-#   resources, plus the real Tauri-generated .desktop entry + icons.
+#   instead of installing FHS paths — binary, sidecar, resources, the
+#   .deb itself (for the tag-release job), plus the real Tauri-generated
+#   .desktop entry + icons.
+# - Updater DISABLED via a `--config` overlay (`tauriBuildFlags`): the
+#   updater pubkey in tauri.conf.json would otherwise make the build
+#   demand TAURI_SIGNING_PRIVATE_KEY. Release signing stays tag-gated in
+#   build.yml; Nix builds (PRs, forks, user machines) must not need
+#   secrets. Nix users update via nix, not the in-app updater.
 let
   triple =
     {
@@ -79,8 +85,18 @@ pkgs.rustPlatform.buildRustPackage {
 
   tauriBundleType = "deb";
   dontTauriInstall = true;
+  # Deactivates the updater plugin (merged over tauri.conf.json): without
+  # this the bundler demands TAURI_SIGNING_PRIVATE_KEY. Relative to
+  # src-tauri/, where the hook runs the build (see postPatch below).
+  tauriBuildFlags = [ "--config" "tauri.nix-overlay.json" ];
 
   postPatch = ''
+    # Disable the auto-updater for Nix builds (no secrets in PRs/forks;
+    # release signing stays in build.yml). Tauri merges --config files.
+    cat > src-tauri/tauri.nix-overlay.json <<'EOF'
+    {"plugins": {"updater": {"active": false}}}
+    EOF
+
     # Sidecar for `externalBin: binaries/rexadb-server`.
     mkdir -p src-tauri/binaries
     cp ${rexadb_server}/bin/rexadb-server \
@@ -132,6 +148,11 @@ pkgs.rustPlatform.buildRustPackage {
     dpkg -x "''${debs[0]}" $debroot
 
     mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge
+
+    # Keep the .deb itself: the tag-release job uploads it to the GitHub
+    # release (renamed to *_nix_amd64.deb to avoid clashing with the
+    # Arch-built .deb).
+    cp "''${debs[0]}" $out/share/rexadb/
 
     test -f $debroot/usr/bin/rexa-db || { echo "FATAL: main binary missing in .deb" >&2; exit 1; }
     cp $debroot/usr/bin/rexa-db $out/share/rexadb/
