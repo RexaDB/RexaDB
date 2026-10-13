@@ -73,6 +73,9 @@ nix build .#java-bridge     # bridge.jar + minimal JRE
 nix build .#rexadb
 nix run .                   # launch RexaDB
 nix run .#server            # sidecar only (REXADB_SERVER_PORT=3867)
+
+# optional: install into your profile
+nix profile install .#rexadb
 ```
 
 NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
@@ -112,10 +115,11 @@ Notes:
 - The Nix desktop build ships with the Tauri auto-updater disabled (it
   would otherwise require the release signing key, which never enters
   PR/fork builds — signing stays tag-gated in `build.yml`). Update via
-  `nix flake update` instead.
-- Tag pushes additionally attach `RexaDB_<version>_nix_amd64.deb` to the
-  GitHub release as a manual-install asset (it is not an updater target;
-  `latest.json` keeps pointing at the official signed builds).
+  `nix flake update` / `nix profile upgrade` instead.
+- Portable `.deb` / AppImage installers come from the normal release
+  workflows (`build.yml`, `arch-appimage.yml`). The Nix build’s internal
+  Tauri `.deb` is only used to lay out store paths; it is not a portable
+  Debian package and is not uploaded to GitHub releases.
 
 ## Links
 

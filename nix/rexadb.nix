@@ -15,10 +15,11 @@
 #   (`bridge.jar`, `jre/`, oracle bridge) that `tauri.conf.json` references
 #   but that are gitignored (absent from `$src`).
 # - `tauriBundleType = "deb"` (this cargo-tauri rejects `--bundles none`);
-#   `installPhase` extracts the .deb and lays out a store-friendly tree
-#   instead of installing FHS paths — binary, sidecar, resources, the
-#   .deb itself (for the tag-release job), plus the real Tauri-generated
-#   .desktop entry + icons.
+#   `installPhase` extracts that intermediate .deb and lays out a
+#   store-friendly tree (binary, sidecar, resources, .desktop + icons).
+#   The .deb itself is not kept or released: it links against /nix/store
+#   and is not a portable Debian installer. Portable .deb assets stay in
+#   build.yml / arch-appimage.yml.
 # - Updater DISABLED via a `--config` overlay (`tauriBuildFlags`): the
 #   updater pubkey in tauri.conf.json would otherwise make the build
 #   demand TAURI_SIGNING_PRIVATE_KEY. Release signing stays tag-gated in
@@ -177,11 +178,6 @@ pkgs.rustPlatform.buildRustPackage {
     dpkg -x "''${debs[0]}" $debroot
 
     mkdir -p $out/bin $out/share/rexadb $out/share/rexadb/oracle-bridge
-
-    # Keep the .deb itself: the tag-release job uploads it to the GitHub
-    # release (renamed to *_nix_amd64.deb to avoid clashing with the
-    # Arch-built .deb).
-    cp "''${debs[0]}" $out/share/rexadb/
 
     test -f $debroot/usr/bin/rexa-db || { echo "FATAL: main binary missing in .deb" >&2; exit 1; }
     cp $debroot/usr/bin/rexa-db $out/share/rexadb/
