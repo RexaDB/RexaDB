@@ -205,8 +205,11 @@ export function DangerZoneSetting() {
       }
 
       if (failures.length > 0) {
+        // Steps run sequentially with no rollback: earlier steps may already
+        // be applied, so report a partial reset honestly instead of claiming
+        // nothing changed.
         toast.error(
-          `Reset aborted — ${failures.length} step${failures.length === 1 ? "" : "s"} failed. Nothing was cleared.`,
+          `Reset stopped partway — some data was already cleared and ${failures.length} step${failures.length === 1 ? "" : "s"} failed. Fix the issue and run it again to finish.`,
           { description: failures.slice(0, 3).join("\n") },
         );
         setResetting(false);
@@ -293,8 +296,10 @@ export function DangerZoneSetting() {
             <li>Workspace connection (you will be signed out of it)</li>
           </ul>
           <p className="text-xs text-muted-foreground">
-            Saved database connections are kept. If any step fails, the reset
-            aborts before anything is cleared. This cannot be undone. Type{" "}
+            Saved database connections are kept. Steps apply in order with
+            no rollback: if a step fails, the reset stops and earlier steps
+            may already be applied — fix the issue and run it again to
+            finish. This cannot be undone. Type{" "}
             <span className="font-mono font-semibold text-foreground">
               {CONFIRM_PHRASE}
             </span>{" "}

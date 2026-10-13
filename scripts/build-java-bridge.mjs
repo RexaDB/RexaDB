@@ -6,7 +6,7 @@
 import { spawnSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -40,7 +40,38 @@ function have(cmd) {
   }
 }
 
+// Resolve a JDK root from the javac on PATH: <root>/bin/javac.
+// Returns null when it cannot be determined or has no jmods (build.sh then
+// reports the problem itself).
+function resolveJavaHome() {
+  try {
+    let raw = "";
+    if (isWindows) {
+      const found = spawnSync("where", ["javac"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      raw = (typeof found.stdout === "string" ? found.stdout : "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0 && !line.startsWith("INFO: ")) || "";
+    } else {
+      const found = spawnSync("sh", ["-c", "command -v javac"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      raw = typeof found.stdout === "string" ? found.stdout.trim() : "";
+    }
+    if (!raw) return null;
+    const home = dirname(dirname(realpathSync(raw)));
+    return existsSync(join(home, "jmods")) ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 let args;
+let extraEnv = {};
 if (process.platform === "linux" && have("docker")) {
   // The --docker build runs inside a Linux container, so its JRE only runs
   // on Linux. Native JDKs are used everywhere else.
@@ -49,6 +80,18 @@ if (process.platform === "linux" && have("docker")) {
 } else if (have("javac")) {
   console.log("[build-java-bridge] Building via local JDK...");
   args = [];
+  // build.sh falls back to the macOS-only /usr/libexec/java_home when
+  // JAVA_HOME is unset, which fails on Linux/Windows despite a working JDK.
+  // Resolve it from the javac on PATH (its grandparent dir). macOS keeps
+  // the java_home fallback, where /usr/bin/javac is a wrapper whose
+  // resolved path is not a JDK root.
+  if (!process.env.JAVA_HOME && process.platform !== "darwin") {
+    const derived = resolveJavaHome();
+    if (derived) {
+      console.log(`[build-java-bridge] Using JAVA_HOME=${derived}`);
+      extraEnv = { JAVA_HOME: derived };
+    }
+  }
 } else {
   console.error("[build-java-bridge] Need a JDK 21+ to build the Java bridge.");
   console.error("  - Install one, e.g. `brew install openjdk@21`");
@@ -61,7 +104,11 @@ if (process.platform === "linux" && have("docker")) {
   process.exit(1);
 }
 
-const build = spawnSync("bash", [BUILD_SH, ...args], { stdio: "inherit", cwd: ROOT });
+const build = spawnSync("bash", [BUILD_SH, ...args], {
+  stdio: "inherit",
+  cwd: ROOT,
+  env: { ...process.env, ...extraEnv },
+});
 if (build.status !== 0) {
   console.error(`[build-java-bridge] build.sh failed (${build.status})`);
   process.exit(build.status ?? 1);
