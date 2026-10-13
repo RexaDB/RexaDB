@@ -136,10 +136,12 @@ pkgs.rustPlatform.buildRustPackage {
     test -f $debroot/usr/bin/rexa-db || { echo "FATAL: main binary missing in .deb" >&2; exit 1; }
     cp $debroot/usr/bin/rexa-db $out/share/rexadb/
 
-    # Sidecar (Tauri externalBin) ships exe-adjacent in the deb; keep the
-    # triple-suffixed name (cf. CI smoke test) and mirror it beside the
-    # wrapper, which is where Tauri resolves it at runtime.
-    sidecar=$(find $debroot/usr/bin -maxdepth 1 -name 'rexadb-server-*' | head -1)
+    # Sidecar (Tauri externalBin) ships exe-adjacent in the deb. Tauri
+    # strips the target suffix when bundling, so the file is plain
+    # `rexadb-server` (match the suffixed staging name too, in case a
+    # future cargo-tauri keeps it). Keep the shipped basename and mirror
+    # it beside the wrapper, which is where Tauri resolves it at runtime.
+    sidecar=$(find $debroot/usr/bin -maxdepth 1 \( -name 'rexadb-server-*' -o -name 'rexadb-server' \) | head -1)
     test -n "$sidecar" || { echo "FATAL: sidecar missing in .deb" >&2; find $debroot/usr/bin | head; exit 1; }
     cp "$sidecar" $out/share/rexadb/
     cp "$sidecar" $out/bin/
