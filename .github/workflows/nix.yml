@@ -1,26 +1,10 @@
 name: Nix
 
 on:
-  # Narrow on purpose: the flake builds the whole tree, but running the full
-  # Nix matrix on every code PR is too expensive. PRs only run Nix CI when
-  # they touch the flake definition itself or dependency manifests (lockfiles,
-  # bun patches, Cargo locks) — the changes that most often break Nix builds.
-  # Plain app/source changes are validated by the regular build workflows and
-  # by Nix on push to master / tags / manual dispatch.
-  pull_request:
-    paths:
-      - "flake.nix"
-      - "flake.lock"
-      - "nix/**"
-      - ".envrc"
-      - "package.json"
-      - "package-lock.json"
-      - "bun.lock"
-      - "server/package-lock.json"
-      - "patches/**"
-      - "src-tauri/**/Cargo.lock"
-      - "resources/java-bridge/**"
-      - ".github/workflows/nix.yml"
+  # No pull_request trigger on purpose: the flake builds the whole tree, so
+  # path filters still matched nearly every code PR and ran the full Nix
+  # matrix each time. Nix CI runs on push to master, tags, and manual
+  # dispatch instead. Keep the push paths narrow for the same reason.
   push:
     branches: ["master"]
     paths:

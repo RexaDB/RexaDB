@@ -25,6 +25,15 @@ import {
   saveAppFontFamily,
   saveKeybindingsFile,
   saveGlobalAiSettings,
+  getConnectionsResult,
+  saveStudioTabs,
+  saveStudioFolders,
+  saveStudioSnippets,
+  saveStudioHistory,
+  saveStudioTags,
+  saveStudioDashboards,
+  saveStudioNotes,
+  clearSearchIndex,
 } from "@/lib/api/actions-client";
 import {
   getDefaultKeybindings,
@@ -84,32 +93,129 @@ export function DangerZoneSetting() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [resetting, setResetting] = useState(false);
+  const [resetStep, setResetStep] = useState<string | null>(null);
 
   const confirmed = confirmText.trim().toUpperCase() === CONFIRM_PHRASE;
 
   const handleReset = async () => {
     if (!confirmed || resetting) return;
     setResetting(true);
+    const failures: string[] = [];
+
+    // Every persistence call below resolves with `{ success: false }` on
+    // failure instead of throwing, so each step is checked explicitly. Any
+    // failure aborts before local caches are wiped or the app reloads.
+    const runStep = async (
+      label: string,
+      run: () => Promise<unknown>,
+    ): Promise<void> => {
+      setResetStep(label);
+      try {
+        const res = (await run()) as {
+          success?: boolean;
+          error?: string;
+        } | null;
+        if (
+          res &&
+          typeof res === "object" &&
+          "success" in res &&
+          res.success === false
+        ) {
+          failures.push(
+            `${label}${typeof res.error === "string" && res.error ? `: ${res.error}` : ""}`,
+          );
+        }
+      } catch (err) {
+        failures.push(
+          `${label}${err instanceof Error && err.message ? `: ${err.message}` : ""}`,
+        );
+      }
+    };
+
     try {
-      // Persisted preferences back to factory defaults. Every save below uses
+      // 1. Global preferences back to factory defaults. Every save uses
       // replace semantics server-side, so empty/default payloads truly reset.
-      await saveGlobalStudioSettings({});
-      await saveGlobalAppThemeSettings({
-        appThemeId: "rexadb-dark",
-        customAppThemes: "[]",
-      });
-      await saveGlobalEditorThemeSettings({
-        editorThemeId: "auto",
-        customEditorThemes: "[]",
-      });
-      await saveAppFontFamily("");
-      await saveKeybindingsFile(
-        normalizeKeybindingsForPlatform(getDefaultKeybindings()),
+      await runStep("App preferences", () => saveGlobalStudioSettings({}));
+      await runStep("App theme", () =>
+        saveGlobalAppThemeSettings({
+          appThemeId: "rexadb-dark",
+          customAppThemes: "[]",
+        }),
+      );
+      await runStep("Editor theme", () =>
+        saveGlobalEditorThemeSettings({
+          editorThemeId: "auto",
+          customEditorThemes: "[]",
+        }),
+      );
+      await runStep("App font", () => saveAppFontFamily(""));
+      await runStep("Keybindings", () =>
+        saveKeybindingsFile(
+          normalizeKeybindingsForPlatform(getDefaultKeybindings()),
+        ),
       );
       // Server-side normalizer refills pinned provider defaults (empty keys).
-      await saveGlobalAiSettings({});
+      await runStep("AI providers", () => saveGlobalAiSettings({}));
 
-      // Workspace session + saved credentials.
+      // 2. Per-connection workspace content. Tabs, dashboards, notes, and
+      // friends also live in backend SQLite — clearing browser storage alone
+      // leaves them to be restored on next open. Connections themselves stay.
+      const conns = await getConnectionsResult();
+      if (!conns.ok) {
+        failures.push(
+          `Load connections${conns.error ? `: ${conns.error}` : ""}`,
+        );
+      } else {
+        for (const conn of conns.data) {
+          const id = (conn as { id?: unknown })?.id;
+          if (typeof id !== "number") continue;
+          const name =
+            typeof (conn as { name?: unknown })?.name === "string" &&
+            (conn as { name: string }).name
+              ? (conn as { name: string }).name
+              : `connection ${id}`;
+          await runStep(`Tabs (${name})`, () => saveStudioTabs(id, []));
+          await runStep(`Folders (${name})`, () => saveStudioFolders(id, []));
+          await runStep(`Snippets (${name})`, () => saveStudioSnippets(id, []));
+          await runStep(`Query history (${name})`, () =>
+            saveStudioHistory(id, []),
+          );
+          await runStep(`Tags (${name})`, () => saveStudioTags(id, []));
+          await runStep(`Dashboards (${name})`, () =>
+            saveStudioDashboards(id, { dashboards: [], folders: [] }),
+          );
+          await runStep(`Notes (${name})`, () =>
+            saveStudioNotes(id, { notes: [] }),
+          );
+          const connectionString = (conn as { connectionString?: unknown })
+            ?.connectionString;
+          if (
+            typeof connectionString === "string" &&
+            connectionString.length > 0
+          ) {
+            await runStep(`Search index (${name})`, () =>
+              clearSearchIndex(connectionString),
+            );
+          } else {
+            failures.push(
+              `Search index (${name}): credentials locked — unlock the connection and retry`,
+            );
+          }
+        }
+      }
+
+      if (failures.length > 0) {
+        toast.error(
+          `Reset aborted — ${failures.length} step${failures.length === 1 ? "" : "s"} failed. Nothing was cleared.`,
+          { description: failures.slice(0, 3).join("\n") },
+        );
+        setResetting(false);
+        setResetStep(null);
+        return;
+      }
+
+      // 3. Workspace session + saved credentials (best-effort teardown; the
+      // storage wipe + reload below signs out regardless).
       try {
         await disconnectStudioWorkspace();
       } catch {
@@ -130,6 +236,7 @@ export function DangerZoneSetting() {
     } catch {
       toast.error("Reset failed partway — some settings may remain.");
       setResetting(false);
+      setResetStep(null);
     }
   };
 
@@ -144,8 +251,9 @@ export function DangerZoneSetting() {
           <div className="flex flex-col">
             <span className="font-medium text-xs">Danger Zone</span>
             <span className="text-xs text-muted-foreground">
-              Reset all preferences to factory defaults, clear local caches,
-              and disconnect the workspace. Saved connections are kept.
+              Reset all preferences to factory defaults, wipe per-connection
+              workspace content and local caches, and disconnect the workspace.
+              Saved connections are kept.
             </span>
           </div>
         </div>
@@ -177,11 +285,16 @@ export function DangerZoneSetting() {
             <li>Appearance, editor, grid, tab, and behavior preferences</li>
             <li>Custom app, editor, and icon themes</li>
             <li>Keybindings and AI provider settings (including API keys)</li>
-            <li>Local caches (tabs, dashboards, notes, search index)</li>
+            <li>
+              Per-connection content: open tabs, dashboards, notes, snippets,
+              folders, query history, and search index
+            </li>
+            <li>Local caches in this browser</li>
             <li>Workspace connection (you will be signed out of it)</li>
           </ul>
           <p className="text-xs text-muted-foreground">
-            Saved database connections are kept. This cannot be undone. Type{" "}
+            Saved database connections are kept. If any step fails, the reset
+            aborts before anything is cleared. This cannot be undone. Type{" "}
             <span className="font-mono font-semibold text-foreground">
               {CONFIRM_PHRASE}
             </span>{" "}
@@ -214,7 +327,7 @@ export function DangerZoneSetting() {
               {resetting ? (
                 <>
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  Resetting…
+                  {resetStep ? `Resetting ${resetStep}…` : "Resetting…"}
                 </>
               ) : (
                 "Reset Everything"
