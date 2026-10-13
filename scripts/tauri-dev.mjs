@@ -6,6 +6,23 @@ import { join } from 'path';
 
 const tauriConfigPath = join(process.cwd(), 'src-tauri', 'tauri.conf.json');
 
+// Tauri validates bundle.resources at compile time and dist/ is gitignored,
+// so ensure the JDBC bridge (bridge.jar + JRE) exists before launching.
+{
+  const { spawnSync } = await import('child_process');
+  const { existsSync } = await import('fs');
+  const bridgeJar = join(process.cwd(), 'resources', 'java-bridge', 'dist', 'bridge.jar');
+  const jreJava = join(process.cwd(), 'resources', 'java-bridge', 'dist', 'jre', 'bin', 'java');
+  if (!existsSync(bridgeJar) || !existsSync(jreJava)) {
+    console.log('[Tauri Dev] Java bridge artifacts missing, building...');
+    const build = spawnSync('bun', ['run', 'scripts/build-java-bridge.mjs'], { stdio: 'inherit' });
+    if (build.status !== 0) {
+      console.error('[Tauri Dev] Java bridge build failed — aborting.');
+      process.exit(build.status ?? 1);
+    }
+  }
+}
+
 // Read original config
 const originalConfig = readFileSync(tauriConfigPath, 'utf-8');
 const config = JSON.parse(originalConfig);

@@ -115,6 +115,7 @@ import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
 import { CredentialStorageSetting } from "@/components/studio/settings/credential-storage-setting";
 import { LocalStudioServerCard } from "@/components/studio/settings/local-studio-server-card";
+import { DangerZoneSetting } from "@/components/studio/settings/danger-zone-setting";
 
 function AddThemeMenu({
   onBrowseThemes,
@@ -2848,6 +2849,10 @@ export function SettingsView({
                     </button>
                   </div>
                 ))}
+              </div>
+
+              <div className="space-y-1 mt-8">
+                <DangerZoneSetting />
               </div>
             </section>
           ) : null}
