@@ -31,7 +31,7 @@ let
     src = src;
     # v2 also caches packuments (see nix/frontend.nix).
     fetcherVersion = 2;
-    hash = "sha256-Y8mAKK57pCBep2Cdr+riJ4oXKcD60BEZvVrkASICf1g=";
+    hash = "sha256-lHYZBkYk5tvnHLmImTXOnwfUdo2kaaNT707Gs3+2WAc=";
   };
 in
 pkgs.rustPlatform.buildRustPackage {
