@@ -1,27 +1,10 @@
 name: Nix
 
 on:
-  pull_request:
-    paths:
-      - "flake.nix"
-      - "flake.lock"
-      - "nix/**"
-      - ".envrc"
-      - "package.json"
-      - "package-lock.json"
-      - "bun.lock"
-      - "next.config.mjs"
-      - "app/**"
-      - "components/**"
-      - "hooks/**"
-      - "lib/**"
-      - "public/**"
-      - "types/**"
-      - "server/**"
-      - "src-tauri/**"
-      - "resources/java-bridge/**"
-      - "patches/**"
-      - ".github/workflows/nix.yml"
+  # No pull_request trigger on purpose: the flake builds the whole tree, so
+  # path filters still matched nearly every code PR and ran the full Nix
+  # matrix each time. Nix CI runs on push to master, tags, and manual
+  # dispatch instead. Keep the push paths narrow for the same reason.
   push:
     branches: ["master"]
     paths:
