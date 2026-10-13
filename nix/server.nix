@@ -41,6 +41,10 @@ pkgs.stdenv.mkDerivation {
   pname = "rexadb-server";
   inherit version src;
   dontUnpack = true;
+  # bun --compile embeds the app payload in the ELF. Nix's default strip
+  # removes it and leaves a stub that just prints `bun` usage help — which
+  # is exactly what smoke-server saw on CI.
+  dontStrip = true;
 
   nativeBuildInputs = [
     pkgs.bun # only the compiler; deps resolve from npm-installed node_modules
@@ -84,5 +88,17 @@ pkgs.stdenv.mkDerivation {
     cp ${oracle_bridge}/bin/rexadb-oracle-bridge $out/share/rexadb/oracle-bridge/
     wrapProgram $out/bin/rexadb-server --set RESOURCEDIR $out/share/rexadb
     runHook postInstall
+  '';
+
+  # After fixup (strip/patchelf): bun --compile binaries are ~50–100MB; a
+  # stripped stub is a few MB and only prints usage. Guard against that.
+  postFixup = ''
+    wrapped=$out/bin/.rexadb-server-wrapped
+    test -f "$wrapped" || { echo "FATAL: missing $wrapped" >&2; exit 1; }
+    size=$(stat -c%s "$wrapped")
+    if (( size < 20000000 )); then
+      echo "FATAL: $wrapped is only $size bytes after fixup (expected >= 20MB; strip may have destroyed the bun payload)" >&2
+      exit 1
+    fi
   '';
 }
