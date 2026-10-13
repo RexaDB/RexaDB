@@ -85,17 +85,24 @@ pkgs.rustPlatform.buildRustPackage {
 
   tauriBundleType = "deb";
   dontTauriInstall = true;
-  # Deactivates the updater plugin (merged over tauri.conf.json): without
-  # this the bundler demands TAURI_SIGNING_PRIVATE_KEY. Relative to
-  # src-tauri/, where the hook runs the build (see postPatch below).
-  tauriBuildFlags = [ "--config" "tauri.nix-overlay.json" ];
 
   postPatch = ''
     # Disable the auto-updater for Nix builds (no secrets in PRs/forks;
-    # release signing stays in build.yml). Tauri merges --config files.
-    cat > src-tauri/tauri.nix-overlay.json <<'EOF'
-    {"plugins": {"updater": {"active": false}}}
-    EOF
+    # release signing stays in build.yml): edit tauri.conf.json in place
+    # rather than a --config overlay, so there is no merge/path risk and
+    # the result is asserted below. Nix users update via nix, not the
+    # in-app updater.
+    node -e "
+      const fs = require('fs');
+      const p = 'src-tauri/tauri.conf.json';
+      const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (!c.plugins || !c.plugins.updater) throw new Error('updater plugin config not found in ' + p);
+      c.plugins.updater.active = false;
+      fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+      const check = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (check.plugins.updater.active !== false) throw new Error('updater still active after edit');
+      console.log('updater disabled in tauri.conf.json');
+    "
 
     # Sidecar for `externalBin: binaries/rexadb-server`.
     mkdir -p src-tauri/binaries
