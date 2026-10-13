@@ -92,16 +92,22 @@ pkgs.rustPlatform.buildRustPackage {
     # rather than a --config overlay, so there is no merge/path risk and
     # the result is asserted below. Nix users update via nix, not the
     # in-app updater.
+    # NOTE: `plugins.updater.active` alone is NOT enough — the bundler
+    # signs whenever `bundle.createUpdaterArtifacts` is true, independent
+    # of plugin activity. Both must go.
     node -e "
       const fs = require('fs');
       const p = 'src-tauri/tauri.conf.json';
       const c = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!c.plugins || !c.plugins.updater) throw new Error('updater plugin config not found in ' + p);
+      if (!c.bundle) throw new Error('bundle config not found in ' + p);
       c.plugins.updater.active = false;
+      c.bundle.createUpdaterArtifacts = false;
       fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
       const check = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (check.plugins.updater.active !== false) throw new Error('updater still active after edit');
-      console.log('updater disabled in tauri.conf.json');
+      if (check.bundle.createUpdaterArtifacts !== false) throw new Error('createUpdaterArtifacts still true after edit');
+      console.log('updater disabled in tauri.conf.json (plugin + artifacts)');
     "
 
     # Sidecar for `externalBin: binaries/rexadb-server`.
