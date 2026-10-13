@@ -154,8 +154,24 @@ pkgs.rustPlatform.buildRustPackage {
 
   installPhase = ''
     runHook preInstall
-    debs=(src-tauri/target/release/bundle/deb/*.deb)
-    (( ''${#debs[@]} == 1 )) || { echo "FATAL: expected exactly one .deb, found: ''${debs[*]}" >&2; exit 1; }
+    # cargo-tauri.hook builds with --target ${triple}, so the .deb lands under
+    # target/<triple>/release/bundle/deb/. CARGO_TARGET_DIR is at the source
+    # root (not under cargoRoot/src-tauri). Keep a few fallbacks for older
+    # layouts in case the hook changes.
+    shopt -s nullglob
+    debs=(
+      target/${triple}/release/bundle/deb/*.deb
+      src-tauri/target/${triple}/release/bundle/deb/*.deb
+      target/release/bundle/deb/*.deb
+      src-tauri/target/release/bundle/deb/*.deb
+    )
+    if (( ''${#debs[@]} != 1 )); then
+      echo "FATAL: expected exactly one .deb, found ''${#debs[@]}:" >&2
+      printf '  %s\n' "''${debs[@]}" >&2
+      echo "all .deb under $PWD:" >&2
+      find . -name '*.deb' -type f 2>/dev/null | head -20 >&2 || true
+      exit 1
+    fi
     debroot=$TMPDIR/debroot
     mkdir -p $debroot
     dpkg -x "''${debs[0]}" $debroot
