@@ -32,6 +32,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@duckdb/node-api": "^1.5.3-r.1",
+    "@earendil-works/pi-ai": "^0.84.2",
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
     "@glideapps/glide-data-grid-cells": "6.0.4-alpha24",
@@ -61,11 +62,11 @@
     "@tanstack/react-virtual": "^3.14.13",
     "@tauri-apps/api": "^2.12.0",
     "@tauri-apps/cli": "^2.12.0",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-fs": "^2",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-shell": "^2",
-    "@tauri-apps/plugin-updater": "^2",
+    "@tauri-apps/plugin-dialog": "2.7.1",
+    "@tauri-apps/plugin-fs": "2.5.1",
+    "@tauri-apps/plugin-process": "2.3.1",
+    "@tauri-apps/plugin-shell": "2.3.5",
+    "@tauri-apps/plugin-updater": "2.10.1",
     "@xyflow/react": "^12.10.0",
     "better-drizzle": "0.1.1",
     "better-sqlite3": "^12.6.2",
@@ -130,5 +131,13 @@
   "patchedDependencies": {
     "@glideapps/glide-data-grid@6.0.4-alpha24": "patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch",
     "better-drizzle@0.1.1": "patches/better-drizzle@0.1.1.patch"
+  },
+  "overrides": {
+    "better-drizzle": {
+      "drizzle-orm": "$drizzle-orm"
+    },
+    "@types/react-dom": {
+      "@types/react": "$@types/react"
+    }
   }
 }

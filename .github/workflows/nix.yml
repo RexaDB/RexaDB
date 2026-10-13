@@ -1,0 +1,114 @@
+name: Nix
+
+on:
+  pull_request:
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - ".envrc"
+      - "package.json"
+      - "package-lock.json"
+      - "bun.lock"
+      - "next.config.mjs"
+      - "app/**"
+      - "components/**"
+      - "hooks/**"
+      - "lib/**"
+      - "public/**"
+      - "types/**"
+      - "server/**"
+      - "src-tauri/**"
+      - "resources/java-bridge/**"
+      - "patches/**"
+      - ".github/workflows/nix.yml"
+  push:
+    branches: ["master"]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+    # Tag pushes still build/smoke the flake; portable release assets stay
+    # in build.yml / arch-appimage.yml (this workflow does not upload a .deb).
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # Fast: evaluation, dev shell, and the one derivation with no
+  # registry/cargo dependencies (JDK compile only).
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
+
+      - name: Evaluate flake (no builds)
+        run: nix flake check --no-build
+
+      - name: Dev shell smoke (toolchain present)
+        run: |
+          nix develop --command bun --version
+          nix develop --command cargo --version
+          nix develop --command java -version
+
+      - name: Build java-bridge
+        run: nix build .#java-bridge --print-build-logs
+
+  # Full Linux builds, one job per package so independent failures (e.g.
+  # fixed-output `got:` hashes) all surface in a single run.
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [frontend, rexadb-server, rexadb-oracle-bridge, java-bridge, rexadb]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
+
+      - name: Build ${{ matrix.package }}
+        run: nix build .#${{ matrix.package }} --out-link result-${{ matrix.package }} --print-build-logs
+
+  # Sidecar health smoke (parity with build.yml smoke test).
+  smoke-server:
+    runs-on: ubuntu-latest
+    needs: build-linux
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
+
+      - name: Build sidecar server
+        run: nix build .#rexadb-server --out-link result-server --print-build-logs
+
+      - name: Sidecar health check
+        run: |
+          set -euo pipefail
+          export REXADB_USER_DATA_DIR=/tmp/rexadb-nix-smoke
+          mkdir -p "$REXADB_USER_DATA_DIR"
+          ./result-server/bin/rexadb-server > /tmp/rexadb-nix-smoke.log 2>&1 &
+          SRV_PID=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3867/health > /dev/null 2>&1; then
+              echo "sidecar /health OK after ~${i}s"
+              kill $SRV_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "sidecar never became healthy; log:"
+          cat /tmp/rexadb-nix-smoke.log
+          kill $SRV_PID || true
+          exit 1
+
+  # Intentionally no tag-release .deb upload. The Tauri .deb produced inside
+  # the Nix build links against /nix/store (and the sidecar wrapper does too),
+  # so it is not a portable Debian installer. Portable .deb/.AppImage assets
+  # stay in build.yml / arch-appimage.yml. Nix users install via the flake,
+  # Home Manager, or the NixOS module.

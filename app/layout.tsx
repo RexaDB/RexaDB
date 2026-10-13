@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { Metadata } from "next";
-import { Outfit, Tajawal } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "@glideapps/glide-data-grid/dist/index.css";
 
@@ -22,15 +22,28 @@ import { SettingsMigrationGate } from "@/components/gates/settings-migration-gat
 import { ExtensionProvider } from "@/lib/extensions/react";
 import { CredentialVaultPrompt } from "@/components/providers/credential-vault-prompt";
 
-const outfit = Outfit({
-  subsets: ["latin"],
+// Self-hosted (was next/font/google): identical files, vendored under
+// app/fonts so production builds never touch fonts.googleapis.com.
+// This also keeps sandboxed/offline builds (e.g. Nix) hermetic.
+const outfit = localFont({
+  src: "./fonts/Outfit-latin.woff2",
   variable: "--font-outfit",
+  weight: "100 900",
+  display: "swap",
 });
 
-const tajawalArabic = Tajawal({
-  subsets: ["arabic"],
+const tajawalArabic = localFont({
+  src: [
+    { path: "./fonts/Tajawal-arabic-200.woff2", weight: "200" },
+    { path: "./fonts/Tajawal-arabic-300.woff2", weight: "300" },
+    { path: "./fonts/Tajawal-arabic-400.woff2", weight: "400" },
+    { path: "./fonts/Tajawal-arabic-500.woff2", weight: "500" },
+    { path: "./fonts/Tajawal-arabic-700.woff2", weight: "700" },
+    { path: "./fonts/Tajawal-arabic-800.woff2", weight: "800" },
+    { path: "./fonts/Tajawal-arabic-900.woff2", weight: "900" },
+  ],
   variable: "--font-arabic",
-  weight: ["200", "300", "400", "500", "700", "800", "900"],
+  display: "swap",
 });
 
 export default function RootLayout({
