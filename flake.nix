@@ -22,6 +22,15 @@
 {
   description = "RexaDB — modern database studio (Nix flake)";
 
+  # Prebuilt release binaries. Replace PASTE_PUBLIC_KEY with the key shown
+  # on https://app.cachix.org/cache/rexadb after creating the cache —
+  # until then, remove the extra-trusted-public-keys line (nix falls back
+  # to building from source).
+  nixConfig = {
+    extra-substituters = [ "https://rexadb.cachix.org" ];
+    extra-trusted-public-keys = [ "rexadb.cachix.org-1:PASTE_PUBLIC_KEY" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
@@ -40,8 +49,9 @@
         let
           pkgs = import nixpkgs { inherit system; };
           lib = pkgs.lib;
-          # Keep in sync with package.json + src-tauri/tauri.conf.json.
-          version = "1.3.23";
+          # Keep in sync with package.json + src-tauri/tauri.conf.json
+          # (release-bump.sh updates this too).
+          version = "1.3.24";
           isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
           frontend = pkgs.callPackage ./nix/frontend.nix { inherit version; src = self; };
