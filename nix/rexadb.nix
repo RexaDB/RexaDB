@@ -96,7 +96,9 @@ pkgs.rustPlatform.buildRustPackage {
   configurePhase = ''
     runHook preConfigure
     export HOME=$TMPDIR
-    export CI=1
+    # `true`, not `1`: the cargo-tauri hook forwards $CI as `--ci $CI`
+    # and tauri only accepts true/false.
+    export CI=true
     # Manual `npm ci` against a writable copy of the v2 cache
     # (see nix/frontend.nix) — deliberately not via npmConfigHook,
     # whose automatic postPatch install would duplicate this.
