@@ -78,6 +78,13 @@ nix run .#server            # sidecar only (REXADB_SERVER_PORT=3867)
 nix profile install .#rexadb
 ```
 
+Tagged releases push prebuilt `x86_64-linux` binaries to the
+[rexadb Cachix cache](https://rexadb.cachix.org) (see `nixConfig` in
+`flake.nix`), so `nix run` / `nix profile install` download instead of
+compiling on that platform — no setup needed on your end. Other systems
+(`aarch64-linux`, macOS) still build from source. If you see a trust warning
+about the cache key, update your flake input to the latest release tag.
+
 NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
 
 ```nix
@@ -98,7 +105,8 @@ programs.rexadb = {
 
 Notes:
 
-- First run generates `flake.lock` (needs network); please commit it.
+- `flake.lock` is committed for reproducible builds; run `nix flake update`
+  to bump inputs.
 - `.envrc` (`use flake`, for direnv users) is covered by the repo's
   `.env*` gitignore rule — `git add -f .envrc` to commit it.
 - `packages.rexadb` is Linux-only (`webkitgtk_4_1` / Tauri bundling).

@@ -6,9 +6,9 @@
 #   1. Refuse to run with dirty tracked files (commit or stash first)
 #   2. Switch to master and fast-forward it from origin
 #   3. Verify everything builds (Next.js + sidecar server) BEFORE bumping
-#   4. Bump version in package.json + Tauri files
+#   4. Bump version in package.json + Tauri files + flake.nix
 #        (src-tauri/tauri.conf.json, src-tauri/Cargo.toml,
-#         src-tauri/Cargo.lock [rexa-db entry only])
+#         src-tauri/Cargo.lock [rexa-db entry only], flake.nix [version only])
 #   5. Commit ("chore: bump version to X.Y.Z") and create lightweight tag vX.Y.Z
 #   6. Optionally push commit + tag with --push
 #
@@ -161,7 +161,7 @@ fi
 if [[ "$ASSUME_YES" != true ]]; then
   echo ""
   echo -e "  Bump ${BOLD}${CURRENT_VERSION}${NC} → ${BOLD}${GREEN}${NEW_VERSION}${NC} on ${BOLD}master${NC}$( [[ "$PUSH" == true ]] && echo " + push to origin" || echo " (no push)" )?"
-  echo -e "  Files: package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock"
+  echo -e "  Files: package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, flake.nix"
   read -r -p "  Continue? [y/N] " answer
   if ! [[ "$answer" =~ ^[Yy]$ ]]; then
     log "Aborted."
@@ -181,6 +181,7 @@ const edits = [
   ['./package.json', '\"version\": \"' + from + '\"'],
   ['./src-tauri/tauri.conf.json', '\"version\": \"' + from + '\"'],
   ['./src-tauri/Cargo.toml', 'version = \"' + from + '\"'],
+  ['./flake.nix', 'version = \"' + from + '\"'],
 ];
 for (const [file, needle] of edits) {
   const content = fs.readFileSync(file, 'utf8');
@@ -222,7 +223,10 @@ if (!tomlMatch || tomlMatch[1] !== newV) failures.push('Cargo.toml version=' + (
 const lock = fs.readFileSync('./src-tauri/Cargo.lock', 'utf8');
 const lockMatch = lock.match(/name\s*=\s*\"rexa-db\"\s*\nversion\s*=\s*\"([^\"]+)\"/);
 if (!lockMatch || lockMatch[1] !== newV) failures.push('Cargo.lock rexa-db version=' + (lockMatch ? lockMatch[1] : '<none>'));
-for (const v of [pkg.version, tauri.version, tomlMatch && tomlMatch[1], lockMatch && lockMatch[1]]) {
+const flake = fs.readFileSync('./flake.nix', 'utf8');
+const flakeMatch = flake.match(/^\s*version\s*=\s*\"([^\"]+)\";/m);
+if (!flakeMatch || flakeMatch[1] !== newV) failures.push('flake.nix version=' + (flakeMatch ? flakeMatch[1] : '<none>'));
+for (const v of [pkg.version, tauri.version, tomlMatch && tomlMatch[1], lockMatch && lockMatch[1], flakeMatch && flakeMatch[1]]) {
   if (v === oldV) failures.push('stale version ' + oldV + ' still present');
 }
 if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
@@ -232,10 +236,10 @@ if [[ $? -ne 0 ]]; then
   fail "Stale version $CURRENT_VERSION still present after bump."
   exit 1
 fi
-success "Version bumped to $NEW_VERSION in all 4 files"
+success "Version bumped to $NEW_VERSION in all 5 files"
 
 # ── Step 6: commit + lightweight tag (matches existing vX.Y.Z tag style) ────
-git add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json
+git add package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json flake.nix
 git commit -m "chore: bump version to ${NEW_VERSION}"
 git tag "v${NEW_VERSION}"
 success "Committed ($(git rev-parse --short HEAD)) and tagged v${NEW_VERSION}"

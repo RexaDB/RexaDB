@@ -95,3 +95,35 @@ jobs:
   # so it is not a portable Debian installer. Portable .deb/.AppImage assets
   # stay in build.yml / arch-appimage.yml. Nix users install via the flake,
   # Home Manager, or the NixOS module.
+
+  # Publish prebuilt binaries so Nix users don't compile from source.
+  # Runs on tags only (releases). The token is checked at step level via a
+  # job env var — `secrets` must not appear in a job-level `if` — so the job
+  # succeeds trivially until the repo secret CACHIX_AUTH_TOKEN is set
+  # (create the `rexadb` cache at https://cachix.org, then paste its public
+  # key into flake.nix `nixConfig`). The cachix action installs a store
+  # hook, so the nix build below pushes every new store path automatically.
+  push-to-cache:
+    runs-on: ubuntu-latest
+    needs: build-linux
+    if: startsWith(github.ref, 'refs/tags/')
+    env:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: DeterminateSystems/nix-installer-action@2cb76beab460be7e44442c7ebdcbc30b638416df # main
+      - uses: DeterminateSystems/magic-nix-cache-action@f69a2d3e148e90223fe63ab6e3f6331f2e7e33dc # main
+
+      - name: Enable Cachix push
+        if: env.CACHIX_AUTH_TOKEN != ''
+        uses: cachix/cachix-action@ad2ddac53f961de1989924296a1f236fcfbaa4fc # v15
+        with:
+          name: rexadb
+          authToken: ${{ env.CACHIX_AUTH_TOKEN }}
+
+      - name: Build + push all packages
+        if: env.CACHIX_AUTH_TOKEN != ''
+        run: |
+          nix build .#frontend .#rexadb-server .#rexadb-oracle-bridge .#java-bridge .#rexadb \
+            --print-build-logs
