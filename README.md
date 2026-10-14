@@ -85,6 +85,25 @@ compiling on that platform — no setup needed on your end. Other systems
 (`aarch64-linux`, macOS) still build from source. If you see a trust warning
 about the cache key, update your flake input to the latest release tag.
 
+If Nix prints `ignoring untrusted substituter 'https://rexadb.cachix.org',
+you are not a trusted user` and starts compiling anyway, your daemon runs
+multi-user (default on NixOS / Determinate / macOS installs): only
+`trusted-users` may add caches, so the flake's cache config is discarded.
+Fix it once on your machine — add yourself to the system config and restart
+the daemon:
+
+```bash
+# Linux (NixOS: set nix.settings.trusted-users instead)
+echo "trusted-users = root $USER" | sudo tee -a /etc/nix/nix.conf
+sudo systemctl restart nix-daemon
+
+# macOS
+echo "trusted-users = root $USER" | sudo tee -a /etc/nix/nix.conf
+sudo launchctl kickstart -k system/org.nixos.nix-daemon
+```
+
+Single-user Nix installs are unaffected (every user is trusted).
+
 NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
 
 ```nix

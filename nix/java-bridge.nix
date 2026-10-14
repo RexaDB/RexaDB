@@ -3,10 +3,11 @@
 # JDBC bridge (`bridge.jar` + minimal JRE) via `resources/java-bridge/build.sh`
 # (native path, same jlink module set). The script only looks for jmods at
 # `$JAVA_HOME/jmods` / `$JAVA_HOME/../jmods`, whose layout varies per JDK
-# distribution (see the Arch-CI symlink workaround in
-# `.github/workflows/arch-appimage.yml`), so we stage a writable JAVA_HOME
-# shim with `bin/` + `jmods/` linked in and fail loudly if the outputs that
-# `lib/db/jdbc-bridge-manager.ts` requires are missing.
+# distribution (Temurin `lib/openjdk`, Zulu macOS `Contents/Home` bundles,
+# plain prefixes — often behind symlinks), so we resolve jmods from the real
+# `javac` location first, fall back to a symlink-following sweep, stage a
+# writable JAVA_HOME shim with `bin/` + `jmods/` linked in, and fail loudly
+# if the outputs that `lib/db/jdbc-bridge-manager.ts` requires are missing.
 pkgs.stdenv.mkDerivation {
   pname = "rexadb-java-bridge";
   inherit version;
@@ -22,17 +23,31 @@ pkgs.stdenv.mkDerivation {
     chmod -R u+w ./work
     cd ./work
     export HOME=$TMPDIR
-    jmodsDir=$(find "${pkgs.jdk21}" -maxdepth 5 -type d -name jmods -print -quit)
-    if [ -z "$jmodsDir" ]; then
-      echo "FATAL: jmods not found under ${pkgs.jdk21}" >&2
+    # javac comes from nativeBuildInputs (pkgs.jdk21). Resolve through
+    # symlinks first: wrappers/shims mean `command -v` alone may not sit
+    # next to the real tree (notably Zulu macOS bundles).
+    javacBin="$(command -v javac)"
+    if [ -z "$javacBin" ]; then
+      echo "FATAL: javac not on PATH (pkgs.jdk21 missing from nativeBuildInputs?)" >&2
       exit 1
     fi
-    jdkBin=""
-    for d in "${pkgs.jdk21}/lib/openjdk/bin" "${pkgs.jdk21}/bin"; do
-      if [ -x "$d/javac" ]; then jdkBin="$d"; break; fi
+    jdkBin="$(dirname "$(readlink -f "$javacBin")")"
+    # jmods usually sits next to bin/ (Temurin lib/openjdk, Zulu
+    # Contents/Home, plain prefixes); walk up for odd nests, then fall back
+    # to a symlink-following sweep of the whole JDK package.
+    jmodsDir=""
+    probe="$jdkBin"
+    for _ in 1 2 3; do
+      if [ -d "$probe/../jmods" ]; then jmodsDir="$probe/../jmods"; break; fi
+      probe="$(dirname "$probe")"
     done
-    if [ -z "$jdkBin" ]; then
-      echo "FATAL: javac not found under ${pkgs.jdk21}" >&2
+    if [ -z "$jmodsDir" ]; then
+      jmodsDir=$(find -L "${pkgs.jdk21}" -maxdepth 8 -type d -name jmods -print -quit)
+    fi
+    if [ -z "$jmodsDir" ]; then
+      echo "FATAL: jmods not found (javac at $javacBin -> $jdkBin/javac)" >&2
+      echo "Top-level JDK layout:" >&2
+      ls "${pkgs.jdk21}" >&2 || true
       exit 1
     fi
     mkdir -p $TMPDIR/javahome
