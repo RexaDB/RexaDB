@@ -78,10 +78,11 @@ nix run .#server            # sidecar only (REXADB_SERVER_PORT=3867)
 nix profile install .#rexadb
 ```
 
-Tagged releases push prebuilt binaries to the
+Tagged releases push prebuilt `x86_64-linux` binaries to the
 [rexadb Cachix cache](https://rexadb.cachix.org) (see `nixConfig` in
 `flake.nix`), so `nix run` / `nix profile install` download instead of
-compiling — no setup needed on your end. If you see a trust warning
+compiling on that platform — no setup needed on your end. Other systems
+(`aarch64-linux`, macOS) still build from source. If you see a trust warning
 about the cache key, update your flake input to the latest release tag.
 
 NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
