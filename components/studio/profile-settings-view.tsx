@@ -128,14 +128,19 @@ export function ProfileSettingsView() {
 
     setIsProfileSaving(true);
     try {
+      // Upsert, not update: fresh-Neon users have no profiles row yet, and a
+      // bare update would silently change 0 rows while reporting success.
       const { error } = await (await getBackendClient())
         .from("profiles")
-        .update({
-          email: nextEmail,
-          full_name: nextName || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", profileId);
+        .upsert(
+          {
+            id: profileId,
+            email: nextEmail,
+            full_name: nextName || null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "id" },
+        );
 
       if (error) throw error;
 

@@ -147,6 +147,24 @@ export async function syncAuthenticatedUserProfile<T extends UserLike>(user: T) 
     supabaseId: user.id,
   });
 
+  // Best-effort: ensure the cloud profiles row exists so later updates (and
+  // author-name lookups) never hit a missing row. Local sync succeeding
+  // matters more than this, so failures are swallowed.
+  try {
+    const client = await getBackendClient();
+    await client.from("profiles").upsert(
+      {
+        id: user.id,
+        email: normalizeText(user.email),
+        full_name: name,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    );
+  } catch {
+    // Ignore: profile save UI upserts again on demand.
+  }
+
   return {
     name,
     result,

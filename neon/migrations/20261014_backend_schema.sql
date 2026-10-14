@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   full_name text,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Upgrade path for branches initialized before the email column existed:
+-- CREATE TABLE IF NOT EXISTS skips existing tables, so add it idempotently.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email text;
 
 -- ---------------------------------------------------------------------------
 -- user_settings_sync (lib/supabase/settings-sync.ts)
