@@ -191,9 +191,10 @@ async function persistEntitlement(userId: string, envelope: SignedEntitlementEnv
 }
 
 async function fetchSignedEntitlement(accessToken: string) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
-  const response = await fetch(`${supabaseUrl}/functions/v1/entitlement`, {
+  const { getEdgeFunctionUrl } = await import("@/lib/supabase/backend-client");
+  const url = getEdgeFunctionUrl("entitlement");
+  if (!url) throw new Error("Missing NEXT_PUBLIC_NEON_URL or NEXT_PUBLIC_SUPABASE_URL");
+  const response = await fetch(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`,

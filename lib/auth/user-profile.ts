@@ -7,7 +7,7 @@ import {
   getStoredUserProfile,
   upsertUserProfile,
 } from "@/lib/api/actions-client";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendClient } from "@/lib/supabase/backend-client";
 
 export const LOCAL_MODE_STORAGE_KEY = "rexa-db-local-mode";
 export const LOCAL_NAME_STORAGE_KEY = "rexa-db-local-name";
@@ -71,11 +71,12 @@ async function resolveSupabaseUserDisplayName(user: UserLike) {
 
   if (!resolvedName || isSameAsEmail(resolvedName, email)) {
     try {
-      const { data } = await supabase
+      const supabase = await getBackendClient();
+      const { data } = (await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
-        .maybeSingle<{ full_name: string | null }>();
+        .maybeSingle()) as { data: { full_name: string | null } | null };
 
       const cloudName = normalizeText(data?.full_name);
       if (cloudName && !isSameAsEmail(cloudName, email)) {

@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/client";
+import { getBackendClient } from "@/lib/supabase/backend-client";
 
 export interface CommunityTheme {
   id: string;
@@ -25,6 +25,7 @@ export async function fetchCommunityThemes(
 ): Promise<{ themes: CommunityTheme[]; error: string | null }> {
   const { type, search, limit = 50, offset = 0 } = params;
 
+  const supabase = await getBackendClient();
   let query = supabase
     .from("community_themes")
     .select("*", { count: "exact" })
@@ -57,6 +58,7 @@ export async function publishTheme(params: {
   themeType: "app" | "editor";
   themeJson: Record<string, unknown>;
 }): Promise<{ id: string | null; error: string | null }> {
+  const supabase = await getBackendClient();
   const { data: id, error } = await supabase.rpc("publish_community_theme", {
     p_name: params.name,
     p_description: params.description,
@@ -74,6 +76,7 @@ export async function publishTheme(params: {
 export async function incrementDownloadCount(
   themeId: string
 ): Promise<{ error: string | null }> {
+  const supabase = await getBackendClient();
   const { error } = await supabase.rpc("increment_theme_downloads", {
     theme_id: themeId,
   });
@@ -88,6 +91,7 @@ export async function incrementDownloadCount(
 export async function deletePublishedTheme(
   themeId: string
 ): Promise<{ error: string | null }> {
+  const supabase = await getBackendClient();
   const { error } = await supabase
     .from("community_themes")
     .delete()
@@ -103,6 +107,7 @@ export async function deletePublishedTheme(
 export async function fetchUserPublishedThemes(
   userId: string
 ): Promise<{ themes: CommunityTheme[]; error: string | null }> {
+  const supabase = await getBackendClient();
   const { data, error } = await supabase
     .from("community_themes")
     .select("*")
