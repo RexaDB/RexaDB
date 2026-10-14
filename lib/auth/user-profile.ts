@@ -148,19 +148,26 @@ export async function syncAuthenticatedUserProfile<T extends UserLike>(user: T) 
   });
 
   // Best-effort: ensure the cloud profiles row exists so later updates (and
-  // author-name lookups) never hit a missing row. Local sync succeeding
-  // matters more than this, so failures are swallowed.
+  // author-name lookups) never hit a missing row. Insert-only: never
+  // overwrite an existing row, otherwise a reload would write the stale
+  // auth-metadata name back over a name the user edited in Profile Settings
+  // (which writes profiles only). Local sync succeeding matters more than
+  // this, so failures (including a lost insert race) are swallowed.
   try {
     const client = await getBackendClient();
-    await client.from("profiles").upsert(
-      {
+    const { data: existing } = await client
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!existing) {
+      await client.from("profiles").insert({
         id: user.id,
         email: normalizeText(user.email),
         full_name: name,
         updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    );
+      });
+    }
   } catch {
     // Ignore: profile save UI upserts again on demand.
   }
