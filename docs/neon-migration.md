@@ -8,10 +8,10 @@ Target: Neon project **RexaDB Backend** (`shy-mouse-25854751`), branch `main`
 
 | Supabase | Neon |
 |---|---|
-| GoTrue Auth (`supabase.auth.*`) | Neon Managed Better Auth (Data API). Client: `@neondatabase/neon-js` + `SupabaseAuthAdapter` — existing `auth.*` / `from()` call sites unchanged |
-| `public.profiles, user_settings_sync, community_themes, subscription_plans, user_subscriptions` | Same tables, recreated by `neon/migrations/20261014_backend_schema.sql` |
-| RPCs `save_user_settings_sync, publish_community_theme, increment_theme_downloads, log_app_error` (+ new `app_errors` table) | Same signatures, re-created in the migration SQL |
-| Edge Functions `entitlement, planetscale-oauth-callback, planetscale-oauth-refresh` | Same slugs under the Neon base URL (`getEdgeFunctionUrl()`), to be deployed as Neon Functions |
+| GoTrue Auth (`supabase.auth.*`) | Neon Managed Better Auth (Data API). **All** sign-in/session call sites (`auth-page`, `onboarding-flow`, `nav-user`, `connections-*`, `use-auth-state`) go through `getBackendAuth()` so the session lives on the same client as the data calls |
+| `public.profiles, user_settings_sync, community_themes, subscription_plans, user_subscriptions, cloud_connections` | Same tables, recreated by `neon/migrations/20261014_backend_schema.sql` |
+| RPCs `save_user_settings_sync, publish_community_theme, increment_theme_downloads, log_app_error, save/delete_cloud_connection` (+ new `app_errors` table) | Same signatures, re-created in the migration SQL. `save_user_settings_sync` guards staleness atomically in `ON CONFLICT ... WHERE` (no lost-update race); `publish_community_theme` fills `author_name` from `profiles` |
+| Edge Functions `entitlement, subscribe, planetscale-oauth-callback, planetscale-oauth-refresh` | Same slugs under the Neon base URL (`getEdgeFunctionUrl()` / `invokeBackendFunction()`), to be deployed as Neon Functions |
 | `auth.sessions` trigger `enforce_session_limit_webhook` | Not ported — no `auth` schema on Neon. Enforce session limits in app middleware instead |
 
 ## How to use

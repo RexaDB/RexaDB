@@ -15,7 +15,7 @@ import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
 import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 import { loadStoredDisplayName, syncAuthenticatedUserProfile } from "@/lib/auth/user-profile";
 import { ONBOARDING_COMPLETE_KEY } from "@/lib/onboarding";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -113,7 +113,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
 
     const hydrate = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await (await getBackendAuth()).getSession();
         if (data.session?.user) {
           markOnboardingComplete();
           const synced = await syncAuthenticatedUserProfile(data.session.user);

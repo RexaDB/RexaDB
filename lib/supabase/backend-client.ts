@@ -59,6 +59,55 @@ export async function getBackendClient(): Promise<any> {
   return cached;
 }
 
+/** Auth namespace of the selected backend client. Sign-in, session reads,
+ * listeners, and sign-out MUST go through this (not @/lib/supabase/client
+ * directly), otherwise the session lives on a different client than the data
+ * calls and Neon mode reports "Not signed in." while the UI looks authed. */
+export async function getBackendAuth(): Promise<any> {
+  const client = await getBackendClient();
+  return client.auth;
+}
+
+/** Invoke an app-backend function (subscribe, entitlement, OAuth refresh).
+ * Neon mode calls the Neon Function URL directly; Supabase mode uses
+ * functions.invoke. Returns a { data, error } pair in both modes. */
+export async function invokeBackendFunction(
+  slug: string,
+  body?: Record<string, unknown>,
+): Promise<{ data: any; error: { message: string } | null }> {
+  if (isNeonBackend()) {
+    const url = getEdgeFunctionUrl(slug);
+    if (!url) return { data: null, error: { message: "No backend URL configured." } };
+    try {
+      const auth = await getBackendAuth();
+      let token: string | null = null;
+      try {
+        const { data } = await auth.getSession();
+        token = data?.session?.access_token ?? null;
+      } catch {
+        token = null;
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body ?? {}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { data: null, error: { message: (data as any)?.error || `Function ${slug} failed (${res.status}).` } };
+      }
+      return { data, error: null };
+    } catch (e) {
+      return { data: null, error: { message: e instanceof Error ? e.message : String(e) } };
+    }
+  }
+  const client = await getBackendClient();
+  return client.functions.invoke(slug, { body: body ?? {} });
+}
+
 /** Synchronous accessor for already-initialized call sites. Falls back async. */
 export async function backendFrom(table: string): Promise<any> {
   const client = await getBackendClient();

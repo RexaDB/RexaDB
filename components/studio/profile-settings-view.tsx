@@ -14,7 +14,7 @@ import {
   buildEntitlementProfileMeta,
   formatEntitlementPlanLabel,
 } from "@/lib/billing/entitlement-display";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendClient } from "@/lib/supabase/backend-client";
 
 interface ProfileRecord {
   id: string;
@@ -69,11 +69,11 @@ export function ProfileSettingsView() {
       if (isSessionActive && user) {
         setProfileId(user.id);
 
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile, error: profileError } = (await (await getBackendClient())
           .from("profiles")
           .select("id, email, full_name")
           .eq("id", user.id)
-          .maybeSingle<ProfileRecord>();
+          .maybeSingle()) as { data: ProfileRecord | null; error: { message: string } | null };
 
         if (profileError) throw profileError;
 
@@ -128,7 +128,7 @@ export function ProfileSettingsView() {
 
     setIsProfileSaving(true);
     try {
-      const { error } = await supabase
+      const { error } = await (await getBackendClient())
         .from("profiles")
         .update({
           email: nextEmail,

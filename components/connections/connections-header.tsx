@@ -19,7 +19,7 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
 import { SpacetimeDbBrandImage, SupabaseLogo, NeonLogo } from "@/components/shared/provider-logo";
 import {
@@ -120,7 +120,7 @@ export function ConnectionsHeader({
 
     const hydrate = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await (await getBackendAuth()).getSession();
         if (data.session?.user) {
           await applySession(data.session.user);
           return;
@@ -130,24 +130,29 @@ export function ConnectionsHeader({
     };
     void hydrate();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        void applySession(session.user);
-      } else {
-        void applyLocal();
-      }
+    let subscription: { unsubscribe: () => void } | null = null;
+    let cancelled = false;
+    void getBackendAuth().then((auth) => {
+      if (cancelled) return;
+      const { data } = auth.onAuthStateChange((_event: any, session: any) => {
+        if (session?.user) {
+          void applySession(session.user);
+        } else {
+          void applyLocal();
+        }
+      });
+      subscription = data.subscription;
     });
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      cancelled = true;
+      subscription?.unsubscribe();
     };
   }, []);
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await (await getBackendAuth()).signOut();
     if (error) {
       toast.error(error.message);
       return;

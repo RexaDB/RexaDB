@@ -27,6 +27,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid PRIMARY KEY,
+  email text,
   full_name text,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -64,7 +65,10 @@ END;
 $$;
 
 -- Last-write-wins on client_updated_at so offline devices don't clobber newer
--- settings. Returns the winning row with an `applied` flag.
+-- settings. The timestamp guard lives inside ON CONFLICT ... WHERE so it is
+-- evaluated under the row lock: concurrent saves race atomically and the loser
+-- gets the winning row back with applied=false. Returns the winning row with
+-- an `applied` flag.
 CREATE OR REPLACE FUNCTION public.save_user_settings_sync(
   p_payload jsonb,
   p_client_updated_at timestamptz
@@ -78,21 +82,26 @@ DECLARE
   v_uid uuid := auth_uid();
   v_row public.user_settings_sync%ROWTYPE;
   v_applied boolean := false;
+  v_count integer := 0;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'Not signed in.' USING ERRCODE = '28000';
   END IF;
 
-  SELECT * INTO v_row FROM public.user_settings_sync WHERE user_id = v_uid;
+  INSERT INTO public.user_settings_sync AS s (user_id, payload, client_updated_at, updated_at)
+  VALUES (v_uid, COALESCE(p_payload, '{}'::jsonb), p_client_updated_at, now())
+  ON CONFLICT (user_id) DO UPDATE SET
+    payload = EXCLUDED.payload,
+    client_updated_at = EXCLUDED.client_updated_at,
+    updated_at = now()
+  WHERE EXCLUDED.client_updated_at >= s.client_updated_at
+  RETURNING * INTO v_row;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
 
-  IF v_row.user_id IS NULL OR p_client_updated_at >= v_row.client_updated_at THEN
-    INSERT INTO public.user_settings_sync (user_id, payload, client_updated_at, updated_at)
-    VALUES (v_uid, COALESCE(p_payload, '{}'::jsonb), p_client_updated_at, now())
-    ON CONFLICT (user_id) DO UPDATE SET
-      payload = EXCLUDED.payload,
-      client_updated_at = EXCLUDED.client_updated_at,
-      updated_at = now()
-    RETURNING * INTO v_row;
+  IF v_count = 0 THEN
+    -- Rejected as stale: load the winning row so the caller can converge.
+    SELECT * INTO v_row FROM public.user_settings_sync WHERE user_id = v_uid;
+  ELSE
     v_applied := true;
   END IF;
 
@@ -140,6 +149,7 @@ AS $$
 DECLARE
   v_uid uuid := auth_uid();
   v_id uuid;
+  v_author_name text;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'Not signed in.' USING ERRCODE = '28000';
@@ -147,8 +157,11 @@ BEGIN
   IF p_theme_type NOT IN ('app', 'editor') THEN
     RAISE EXCEPTION 'Invalid theme type.' USING ERRCODE = '22023';
   END IF;
-  INSERT INTO public.community_themes (name, description, theme_type, theme_json, author_id)
-  VALUES (p_name, COALESCE(p_description, ''), p_theme_type, COALESCE(p_theme_json, '{}'::jsonb), v_uid)
+  -- Credit the author: fall back to '' when the user has no profile row so
+  -- the marketplace never shows a null name.
+  SELECT full_name INTO v_author_name FROM public.profiles WHERE id = v_uid;
+  INSERT INTO public.community_themes (name, description, theme_type, theme_json, author_id, author_name)
+  VALUES (p_name, COALESCE(p_description, ''), p_theme_type, COALESCE(p_theme_json, '{}'::jsonb), v_uid, COALESCE(v_author_name, ''))
   RETURNING id INTO v_id;
   RETURN v_id;
 END;
@@ -254,6 +267,79 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- cloud_connections (components/connections/connection-manager.tsx cloud sync)
+-- Encrypted connection strings synced per user; upsert keyed on (user, name)
+-- so pushes are idempotent.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.cloud_connections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  name text NOT NULL,
+  encrypted_connection text NOT NULL,
+  iv text NOT NULL,
+  salt text NOT NULL,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, name)
+);
+CREATE INDEX IF NOT EXISTS cloud_connections_user_sort_idx
+  ON public.cloud_connections (user_id, sort_order ASC);
+
+CREATE OR REPLACE FUNCTION public.save_cloud_connection(
+  p_id uuid,
+  p_name text,
+  p_encrypted_connection text,
+  p_iv text,
+  p_salt text,
+  p_sort_order integer
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth_uid();
+  v_id uuid;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not signed in.' USING ERRCODE = '28000';
+  END IF;
+  INSERT INTO public.cloud_connections AS c
+    (id, user_id, name, encrypted_connection, iv, salt, sort_order, updated_at)
+  VALUES (
+    COALESCE(p_id, gen_random_uuid()), v_uid, p_name,
+    p_encrypted_connection, p_iv, p_salt, COALESCE(p_sort_order, 0), now()
+  )
+  ON CONFLICT (user_id, name) DO UPDATE SET
+    encrypted_connection = EXCLUDED.encrypted_connection,
+    iv = EXCLUDED.iv,
+    salt = EXCLUDED.salt,
+    sort_order = EXCLUDED.sort_order,
+    updated_at = now()
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_cloud_connection(p_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth_uid();
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not signed in.' USING ERRCODE = '28000';
+  END IF;
+  DELETE FROM public.cloud_connections WHERE id = p_id AND user_id = v_uid;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security (Neon Data API enforces these; review after pg_restore
 -- with --no-acl since Supabase grants are intentionally dropped)
 -- ---------------------------------------------------------------------------
@@ -263,6 +349,7 @@ ALTER TABLE public.community_themes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_errors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cloud_connections ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "profiles_owner_read" ON public.profiles;
 CREATE POLICY "profiles_owner_read" ON public.profiles
@@ -295,3 +382,7 @@ CREATE POLICY "subscriptions_owner_read" ON public.user_subscriptions
 DROP POLICY IF EXISTS "app_errors_anon_insert" ON public.app_errors;
 CREATE POLICY "app_errors_anon_insert" ON public.app_errors
   FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "cloud_connections_owner" ON public.cloud_connections;
+CREATE POLICY "cloud_connections_owner" ON public.cloud_connections
+  FOR ALL USING (user_id = auth_uid()) WITH CHECK (user_id = auth_uid());

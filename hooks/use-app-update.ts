@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { markEntitlementRefreshPending } from "@/lib/billing/entitlement-resolver";
-import { supabase } from "@/lib/supabase/client";
+import { invokeBackendFunction } from "@/lib/supabase/backend-client";
 import { isDesktopRuntime, isWindowsDesktopRuntime } from "@/lib/desktop";
 
 const DEBUG = true;
@@ -256,8 +256,8 @@ export function useAppUpdate() {
   }, []);
 
   const handleRenewOtl = useCallback(async () => {
-    const { data, error } = await supabase.functions.invoke("subscribe", {
-      body: { planCode: "otl" },
+    const { data, error } = await invokeBackendFunction("subscribe", {
+      planCode: "otl",
     });
     if (error || data?.error) return;
     if (data?.checkoutUrl) {
