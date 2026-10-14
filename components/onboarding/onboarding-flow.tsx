@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Check, ChevronLeft } from "@/lib/icon-theme/lucide-react";
 import { BUILTIN_APP_THEMES } from "@/lib/studio/app-themes";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 import {
   activateLocalUserProfile,
   syncAuthenticatedUserProfile,
@@ -124,7 +124,7 @@ export function OnboardingFlow({
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await (await getBackendAuth()).signInWithOtp({
       email: normalizedEmail,
       options: {
         shouldCreateUser: authMode === "sign-up",
@@ -150,7 +150,7 @@ export function OnboardingFlow({
     }
 
     setLoading(true);
-    const { data, error } = await supabase.auth.verifyOtp({
+    const { data, error } = await (await getBackendAuth()).verifyOtp({
       email: email.trim().toLowerCase(),
       token,
       type: authMode === "sign-up" ? "signup" : "email",
@@ -184,7 +184,7 @@ export function OnboardingFlow({
       return;
     }
     setLoading(true);
-    await supabase.auth.signOut().catch(() => {});
+    await (await getBackendAuth()).signOut().catch(() => {});
     const result = await activateLocalUserProfile(trimmed);
     setLoading(false);
     if (!result.result.success) {

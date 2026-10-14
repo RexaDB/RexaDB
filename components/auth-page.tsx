@@ -9,7 +9,7 @@ import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import { version } from "../package.json";
 import { useGlobalAppTheme } from "@/hooks/use-global-app-theme";
 import { useGlobalAppFontFamily } from "@/hooks/use-global-app-font-family";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
 import {
   activateLocalUserProfile,
@@ -40,7 +40,7 @@ export function AuthPage() {
 
     const checkSession = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await (await getBackendAuth()).getSession();
         console.log(
           "[AUTH TRACE] auth-page checkSession, hasSession:",
           !!data.session?.user,
@@ -100,7 +100,7 @@ export function AuthPage() {
     }
 
     setAuthLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await (await getBackendAuth()).signInWithOtp({
       email: normalizedEmail,
       options: {
         shouldCreateUser: authMode === "sign-up",
@@ -129,7 +129,7 @@ export function AuthPage() {
 
     setAuthLoading(true);
     console.log("[AUTH TRACE] verifyOtp starting...");
-    const { data: otpData, error } = await supabase.auth.verifyOtp({
+    const { data: otpData, error } = await (await getBackendAuth()).verifyOtp({
       email: email.trim().toLowerCase(),
       token,
       type: authMode === "sign-up" ? "signup" : "email",
@@ -181,8 +181,8 @@ export function AuthPage() {
       return;
     }
     console.log("[AUTH TRACE] handleContinueLocal, name:", trimmed);
-    // Clear any stale Supabase session so local mode is clean
-    await supabase.auth.signOut().catch(() => {});
+    // Clear any stale backend session so local mode is clean
+    await (await getBackendAuth()).signOut().catch(() => {});
     console.log("[AUTH TRACE] handleContinueLocal signOut done");
     const localResult = await activateLocalUserProfile(trimmed);
     console.log(
