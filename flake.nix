@@ -22,13 +22,11 @@
 {
   description = "RexaDB — modern database studio (Nix flake)";
 
-  # Prebuilt release binaries. Replace PASTE_PUBLIC_KEY with the key shown
-  # on https://app.cachix.org/cache/rexadb after creating the cache —
-  # until then, remove the extra-trusted-public-keys line (nix falls back
-  # to building from source).
+  # Prebuilt release binaries (x86_64-linux). Served from the `rexadb`
+  # Cachix cache, populated by the push-to-cache job on release tags.
   nixConfig = {
     extra-substituters = [ "https://rexadb.cachix.org" ];
-    extra-trusted-public-keys = [ "rexadb.cachix.org-1:PASTE_PUBLIC_KEY" ];
+    extra-trusted-public-keys = [ "rexadb.cachix.org-1:pVrB+j93ten7xXFzxhAdQ2m/Eco2yiwfBT0Wk5QgYww=" ];
   };
 
   inputs = {
