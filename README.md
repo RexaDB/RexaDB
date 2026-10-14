@@ -87,22 +87,32 @@ about the cache key, update your flake input to the latest release tag.
 
 If Nix prints `ignoring untrusted substituter 'https://rexadb.cachix.org',
 you are not a trusted user` and starts compiling anyway, your daemon runs
-multi-user (default on NixOS / Determinate / macOS installs): only
-`trusted-users` may add caches, so the flake's cache config is discarded.
-Fix it once on your machine — add yourself to the system config and restart
-the daemon:
+multi-user (default on NixOS / Determinate / macOS installs): it discards
+cache settings that come from flakes. Register the cache in the system
+config instead — this trusts exactly this cache and grants nothing else:
 
 ```bash
-# Linux (NixOS: set nix.settings.trusted-users instead)
-echo "trusted-users = root $USER" | sudo tee -a /etc/nix/nix.conf
+# Linux (NixOS: set nix.settings.extra-substituters /
+# nix.settings.extra-trusted-public-keys declaratively instead)
+printf '%s\n' \
+  'extra-substituters = https://rexadb.cachix.org' \
+  'extra-trusted-public-keys = rexadb.cachix.org-1:pVrB+j93ten7xXFzxhAdQ2m/Eco2yiwfBT0Wk5QgYww=' \
+  | sudo tee -a /etc/nix/nix.conf
 sudo systemctl restart nix-daemon
 
 # macOS
-echo "trusted-users = root $USER" | sudo tee -a /etc/nix/nix.conf
+printf '%s\n' \
+  'extra-substituters = https://rexadb.cachix.org' \
+  'extra-trusted-public-keys = rexadb.cachix.org-1:pVrB+j93ten7xXFzxhAdQ2m/Eco2yiwfBT0Wk5QgYww=' \
+  | sudo tee -a /etc/nix/nix.conf
 sudo launchctl kickstart -k system/org.nixos.nix-daemon
 ```
 
-Single-user Nix installs are unaffected (every user is trusted).
+Alternative: add yourself to `trusted-users` (`root $USER` in the same
+file). That also fixes every other flake-provided cache at once, but it is
+much broader — a trusted user may configure *any* substituter and use other
+restricted settings — so prefer the scoped lines above unless you know you
+want that. Single-user Nix installs are unaffected (every user is trusted).
 
 NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
 
