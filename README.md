@@ -105,7 +105,8 @@ programs.rexadb = {
 
 Notes:
 
-- First run generates `flake.lock` (needs network); please commit it.
+- `flake.lock` is committed for reproducible builds; run `nix flake update`
+  to bump inputs.
 - `.envrc` (`use flake`, for direnv users) is covered by the repo's
   `.env*` gitignore rule — `git add -f .envrc` to commit it.
 - `packages.rexadb` is Linux-only (`webkitgtk_4_1` / Tauri bundling).
