@@ -7,12 +7,20 @@ const pool = makePool();
 export default {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    // Paths: /updates/mac/latest-mac.yml or /updates/latest-mac.yml
+    // Strip the function slug so the short form keeps platform=mac.
     const parts = url.pathname.split("/").filter(Boolean);
-    const tail = parts.slice(-2);
+    const updatesIdx = parts.indexOf("updates");
+    const after = updatesIdx >= 0 ? parts.slice(updatesIdx + 1) : parts;
 
     let platform = "mac";
-    const filename = tail[1] ?? tail[0] ?? "";
-    if (tail.length === 2) platform = tail[0];
+    let filename = "";
+    if (after.length >= 2) {
+      platform = after[0];
+      filename = after[1];
+    } else if (after.length === 1) {
+      filename = after[0];
+    }
 
     if (filename !== "latest-mac.yml") {
       return new Response("Not found", { status: 404 });

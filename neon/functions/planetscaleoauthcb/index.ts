@@ -98,7 +98,7 @@ export default {
           description: url.searchParams.get("error_description"),
         });
         return html(
-          `Login failed: ${oauthError}. You can close this tab and try again.`,
+          "Login failed. You can close this tab and try again.",
           400,
         );
       }

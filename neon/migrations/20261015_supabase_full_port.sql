@@ -240,6 +240,23 @@ CREATE TABLE IF NOT EXISTS public."user_subscriptions" (
   PRIMARY KEY ("id")
 );
 
+-- Theme marketplace (lib/supabase/theme-marketplace.ts). Present on the
+-- earlier Neon schema and required by publish/increment RPCs below; included
+-- here so a fresh DB built from this file alone can browse/publish themes.
+CREATE TABLE IF NOT EXISTS public."community_themes" (
+  "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+  "name" text NOT NULL,
+  "description" text NOT NULL DEFAULT ''::text,
+  "theme_type" text NOT NULL,
+  "theme_json" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "author_id" uuid,
+  "author_name" text NOT NULL DEFAULT ''::text,
+  "downloads" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+  PRIMARY KEY ("id"),
+  CONSTRAINT community_themes_theme_type_check CHECK (theme_type IN ('app', 'editor'))
+);
 
 -- Unique constraints (required by ON CONFLICT upserts).
 
@@ -263,21 +280,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS sponsors_provider_order_id_key ON public.spons
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_subscriptions_user_id_key ON public.user_subscriptions USING btree (user_id);
 
+CREATE INDEX IF NOT EXISTS community_themes_type_downloads_idx
+  ON public.community_themes USING btree (theme_type, downloads DESC);
+
+CREATE INDEX IF NOT EXISTS community_themes_author_idx
+  ON public.community_themes USING btree (author_id, created_at DESC);
+
 
 -- Caller id. On Supabase this would be auth.uid(); on Neon there is no
--- GoTrue auth schema (the `auth` schema is reserved for Neon's managed
+-- GoTrue auth schema (the auth schema is reserved for Neon's managed
 -- infrastructure), so callers establish identity explicitly:
 --   * direct pg callers (Neon Functions): SET LOCAL app.current_user_id
 --   * PostgREST-style callers: request.jwt.claim.sub
 -- All ported function bodies and policies call public.auth_uid().
 CREATE OR REPLACE FUNCTION public.auth_uid()
 RETURNS uuid LANGUAGE plpgsql STABLE AS $fn$
+DECLARE
+  v uuid;
 BEGIN
+  -- Prefer an explicit session setting (Neon Functions via callAsUser).
+  -- Only fall through when it is unset/empty; a bare RETURN NULLIF(...) would
+  -- exit early with NULL and skip the JWT claim used by the Data API.
   BEGIN
-    RETURN NULLIF(current_setting('app.current_user_id', true), '')::uuid;
+    v := NULLIF(current_setting('app.current_user_id', true), '')::uuid;
   EXCEPTION WHEN OTHERS THEN
-    NULL;
+    v := NULL;
   END;
+  IF v IS NOT NULL THEN
+    RETURN v;
+  END IF;
   BEGIN
     RETURN NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
   EXCEPTION WHEN OTHERS THEN
@@ -286,6 +317,8 @@ BEGIN
 END;
 $fn$;
 
+-- 20261014 returned void; CREATE OR REPLACE cannot change the result type.
+DROP FUNCTION IF EXISTS public.delete_cloud_connection(uuid);
 CREATE OR REPLACE FUNCTION public.delete_cloud_connection(p_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -506,82 +539,10 @@ begin
   return new;
 end;
 $function$;
-CREATE OR REPLACE FUNCTION public.subscribe_to_plan(p_plan_code subscription_plan, p_interval text DEFAULT 'month'::text, p_provider_subscription_id text DEFAULT NULL::text, p_provider_customer_id text DEFAULT NULL::text, p_cancel_at_period_end boolean DEFAULT false, p_status subscription_status DEFAULT 'active'::subscription_status, p_user_id uuid DEFAULT public.auth_uid())
- RETURNS user_subscriptions
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-declare
-  v_user_id uuid;
-  v_plan public.subscription_plans%rowtype;
-  v_ends_at timestamptz;
-  v_row public.user_subscriptions%rowtype;
-begin
-  v_user_id := coalesce(p_user_id, public.auth_uid());
-  if v_user_id is null then
-    raise exception 'Missing user id';
-  end if;
-
-  if p_interval not in ('month', 'year') then
-    raise exception 'Invalid interval: %', p_interval;
-  end if;
-
-  select *
-  into v_plan
-  from public.subscription_plans
-  where code = p_plan_code
-    and is_active = true;
-
-  if not found then
-    raise exception 'Plan not found or inactive: %', p_plan_code;
-  end if;
-
-  v_ends_at := case
-    when p_status = 'canceled' then now()
-    when p_interval = 'year' then now() + interval '1 year'
-    else now() + interval '1 month'
-  end;
-
-  insert into public.user_subscriptions (
-    user_id,
-    plan,
-    status,
-    started_at,
-    ends_at,
-    stripe_subscription_id
-  )
-  values (
-    v_user_id,
-    p_plan_code,
-    p_status,
-    now(),
-    v_ends_at,
-    p_provider_subscription_id
-  )
-  on conflict (user_id)
-  do update
-    set plan = excluded.plan,
-        status = excluded.status,
-        started_at = excluded.started_at,
-        ends_at = excluded.ends_at,
-        stripe_subscription_id = excluded.stripe_subscription_id,
-        updated_at = now()
-  returning *
-  into v_row;
-
-  if p_provider_customer_id is not null then
-    insert into public.billing_customers (user_id, provider, provider_customer_id)
-    values (v_user_id, 'stripe', p_provider_customer_id)
-    on conflict (provider, user_id)
-    do update
-      set provider_customer_id = excluded.provider_customer_id,
-          updated_at = now();
-  end if;
-
-  return v_row;
-end;
-$function$;
+-- Single subscribe_to_plan signature. The prior 7-arg overload shared the
+-- same first seven types as this 8-arg form (8th defaults to null), so
+-- handlers passing seven untyped params were ambiguous. Drop the 7-arg form.
+DROP FUNCTION IF EXISTS public.subscribe_to_plan(subscription_plan, text, text, text, boolean, subscription_status, uuid);
 CREATE OR REPLACE FUNCTION public.subscribe_to_plan(p_plan_code subscription_plan, p_interval text DEFAULT 'month'::text, p_provider_subscription_id text DEFAULT NULL::text, p_provider_customer_id text DEFAULT NULL::text, p_cancel_at_period_end boolean DEFAULT false, p_status subscription_status DEFAULT 'active'::subscription_status, p_user_id uuid DEFAULT public.auth_uid(), p_updates_until timestamp with time zone DEFAULT NULL::timestamp with time zone)
  RETURNS user_subscriptions
  LANGUAGE plpgsql
@@ -732,6 +693,8 @@ ALTER TABLE public.blog ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE public.cloud_connections ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.community_themes ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE public.contact_requests ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
@@ -775,6 +738,15 @@ CREATE POLICY "Enable read access for all users" ON public.blog FOR SELECT USING
 DROP POLICY IF EXISTS "cloud_connections_select" ON public.cloud_connections;
 
 CREATE POLICY "cloud_connections_select" ON public.cloud_connections FOR SELECT USING ((public.auth_uid() = user_id));
+
+DROP POLICY IF EXISTS "themes_public_read" ON public.community_themes;
+
+CREATE POLICY "themes_public_read" ON public.community_themes FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "themes_author_write" ON public.community_themes;
+
+CREATE POLICY "themes_author_write" ON public.community_themes
+  FOR ALL USING ((public.auth_uid() = author_id)) WITH CHECK ((public.auth_uid() = author_id));
 
 DROP POLICY IF EXISTS "notifications_insert_own" ON public.notifications;
 
@@ -833,4 +805,12 @@ CREATE POLICY "Users can view their own subscriptions" ON public.user_subscripti
 DROP POLICY IF EXISTS "profiles_self_insert" ON public.profiles;
 CREATE POLICY "profiles_self_insert" ON public.profiles
   FOR INSERT WITH CHECK (public.auth_uid() = id);
+
+-- Billing writers accept arbitrary p_user_id and run as SECURITY DEFINER.
+-- Restrict EXECUTE to the trusted server role (Neon Functions use
+-- neondb_owner via DATABASE_URL). Data API / anon callers must not invoke them.
+REVOKE ALL ON FUNCTION public.subscribe_to_plan(subscription_plan, text, text, text, boolean, subscription_status, uuid, timestamp with time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.extend_otl_updates(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.subscribe_to_plan(subscription_plan, text, text, text, boolean, subscription_status, uuid, timestamp with time zone) TO neondb_owner;
+GRANT EXECUTE ON FUNCTION public.extend_otl_updates(uuid) TO neondb_owner;
 
