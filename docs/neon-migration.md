@@ -15,7 +15,7 @@ Declared in `neon.ts` (auth + avatars bucket + 10 functions). Local linkage:
 | 4 custom enums, 10 unique constraints, 19 RLS policies, 4 triggers, 12 live RPCs | `neon/migrations/20261015_supabase_full_port.sql` (single source of truth, idempotent) |
 | `auth.users` (87 users) | 87 users recreated in Neon Auth (`neon neon-auth user create`). **Passwords cannot transfer** — users sign in via password reset / OAuth |
 | `avatars` bucket (3 PNGs, ETag-verified) | Neon Object Storage `avatars` bucket |
-| 10 edge functions | 10 Neon Functions (Node 24, `pg` Pool on injected `DATABASE_URL`) |
+| 10 edge functions (ported, smoke-tested) | 10 Neon Functions in `neon/functions/*` — **deployment deferred**: Supabase functions stay authoritative until client cutover (see below) |
 | `auth.sessions` INSERT webhook | `enforcesessionlimit` sweeper (single-user webhook shape + full sweep; wire a cron trigger) |
 
 ## Function slug map (Neon slugs ≤ 20 chars)
@@ -32,6 +32,21 @@ Declared in `neon.ts` (auth + avatars bucket + 10 functions). Local linkage:
 | planetscale-oauth-callback | planetscaleoauthcb |
 | planetscale-oauth-refresh | planetscaleoauthref |
 | enforce-session-limit | enforcesessionlimit |
+
+## Cutover status (2026-10-15): functions NOT cut over yet
+
+Deliberately deferred: the Neon function code is written, deployed once,
+smoke-tested, then removed again. Supabase edge functions + Supabase Auth
+remain the live backend. Rationale: the functions verify Supabase JWTs, so
+they can only take traffic after clients sign in via Neon Auth — otherwise
+every authenticated call 401s.
+
+To cut over later:
+1. Set function secrets (list above) via `neon functions deploy <slug> --src neon/functions/<slug> --env KEY=VALUE`.
+2. Re-add the `functions` block to `neon.ts` (see git history) and `neon deploy`.
+3. Point clients at Neon (`NEXT_PUBLIC_NEON_URL`) + Neon Auth sign-in.
+4. Repoint Stripe/Polar webhooks + PlanetScale redirect URI to the Neon URLs.
+5. Keep Supabase project read-only for a week, then decommission.
 
 ## Secrets to set (function env)
 
