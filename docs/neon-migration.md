@@ -22,7 +22,7 @@ Declared in `neon.ts` (auth + avatars bucket + 10 functions). Local linkage:
 
 | Supabase slug | Neon slug |
 |---|---|
-| entitlement | entitlement |
+| (removed — app is free) | — |
 | updates | updates |
 | redeem-gift-code | redeemgiftcode (dead upstream: no gift tables — ported verbatim) |
 | create-portal-session | createportalsession |
@@ -52,7 +52,7 @@ To cut over later:
 
 These were NOT migrated (values never leave their vaults). Set before cutover:
 
-- `REXADB_ENTITLEMENT_PRIVATE_KEY` (entitlement signing)
+- Entitlement/subscription signing key no longer applicable (app is fully free).
 - `POLAR_ACCESS_TOKEN`, `POLAR_ENV`, `POLAR_WEBHOOK_SECRET` (+ `POLAR_SPONSOR_PRODUCT_ID`, `POLAR_MONTHLY_SPONSOR_PRODUCT_ID`)
 - `PLANETSCALE_CLIENT_ID`, `PLANETSCALE_CLIENT_SECRET`, `PLANETSCALE_REDIRECT_URI`
 - `APP_URL`
@@ -70,7 +70,7 @@ Deploy a function with env: `neon functions deploy <slug> --src neon/functions/<
 4. `+profiles_self_insert` RLS policy (client-side profile upsert needs it).
 5. `save_user_settings_sync`: upstream validations + atomic `ON CONFLICT ... WHERE` guard (no lost-update race; rejected saves return the winning row).
 6. Skipped dead code: `redeem_gift_code` RPC + workspace RPCs (reference dropped tables), `handle_new_user` / session triggers (no auth schema; profile creation happens client-side).
-7. `subscribe`/`planetscale`/`entitlement` client URLs must move from `...supabase.co/functions/v1/<slug>` to the Neon function URLs (see `getEdgeFunctionUrl()` / `invokeBackendFunction()`).
+7. `subscribe`/`planetscale`/`stripe-webhook`-related client URLs must move from `...supabase.co/functions/v1/<slug>` to the Neon function URLs (see `getEdgeFunctionUrl()` / `invokeBackendFunction()`). (entitlement no longer exists.)
 
 ## Verification performed
 

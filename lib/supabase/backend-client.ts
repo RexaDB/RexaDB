@@ -29,7 +29,7 @@ export function getFunctionsBaseUrl(): string | null {
   return supabaseUrl || null;
 }
 
-/** Edge-function style URL for entitlement / OAuth callbacks. */
+/** Edge-function style URL for OAuth callbacks. */
 export function getEdgeFunctionUrl(slug: string): string | null {
   const base = getFunctionsBaseUrl();
   if (!base) return null;
@@ -68,7 +68,7 @@ export async function getBackendAuth(): Promise<any> {
   return client.auth;
 }
 
-/** Invoke an app-backend function (subscribe, entitlement, OAuth refresh).
+/** Invoke an app-backend function (subscribe, polar sponsorship, OAuth refresh).
  * Neon mode calls the Neon Function URL directly; Supabase mode uses
  * functions.invoke. Returns a { data, error } pair in both modes. */
 export async function invokeBackendFunction(
