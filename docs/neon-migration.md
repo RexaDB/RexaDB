@@ -1,66 +1,80 @@
-# Supabase → Neon backend migration
+# Supabase → Neon full backend migration (autumn-firefly)
 
-Source: Supabase project `yjdsrmnpbhgfqrubvicz`
-Target: Neon project **RexaDB Backend** (`shy-mouse-25854751`), branch `main`
-(`br-nameless-dust-b4dr6oh3`), database `neondb`, region `aws-us-east-2`, PG 18.
+Source: Supabase project `yjdsrmnpbhgfqrubvicz` (via RexaDB MCP `Rexa DB` connection).
+Target: Neon project **autumn-firefly-28557969**, branch `production`
+(`br-cool-bread-b5syllp3`), database `neondb`, region `aws-us-east-2`, PG 18.
+
+Declared in `neon.ts` (auth + avatars bucket + 10 functions). Local linkage:
+`.neon` (gitignored). Skills installed via `neon skills -s neon -s neon-functions`.
 
 ## What moved
 
 | Supabase | Neon |
 |---|---|
-| GoTrue Auth (`supabase.auth.*`) | Neon Managed Better Auth (Data API). **All** sign-in/session call sites (`auth-page`, `onboarding-flow`, `nav-user`, `connections-*`, `use-auth-state`) go through `getBackendAuth()` so the session lives on the same client as the data calls |
-| `public.profiles, user_settings_sync, community_themes, subscription_plans, user_subscriptions, cloud_connections` | Same tables, recreated by `neon/migrations/20261014_backend_schema.sql` |
-| RPCs `save_user_settings_sync, publish_community_theme, increment_theme_downloads, log_app_error, save/delete_cloud_connection` (+ new `app_errors` table) | Same signatures, re-created in the migration SQL. `save_user_settings_sync` guards staleness atomically in `ON CONFLICT ... WHERE` (no lost-update race); `publish_community_theme` fills `author_name` from `profiles` |
-| Edge Functions `entitlement, subscribe, planetscale-oauth-callback, planetscale-oauth-refresh` | Same slugs under the Neon base URL (`getEdgeFunctionUrl()` / `invokeBackendFunction()`), to be deployed as Neon Functions |
-| `auth.sessions` trigger `enforce_session_limit_webhook` | Not ported — no `auth` schema on Neon. Enforce session limits in app middleware instead |
+| 16 Supabase `public` tables (496 rows, verified 1:1) + `community_themes` for the marketplace | Same tables, data loaded via one-off `dbmigrate` function (deleted after); themes table included in the source-of-truth migration |
+| 4 custom enums, 10 unique constraints, RLS policies, 4 triggers, live RPCs | `neon/migrations/20261015_supabase_full_port.sql` (single source of truth, idempotent) |
+| `auth.users` (87 users) | 87 users recreated in Neon Auth (`neon neon-auth user create`). **Passwords cannot transfer** — users sign in via password reset / OAuth |
+| `avatars` bucket (3 PNGs, ETag-verified) | Neon Object Storage `avatars` bucket |
+| 10 edge functions (ported, smoke-tested) | 10 Neon Functions in `neon/functions/*` — **deployment deferred**: Supabase functions stay authoritative until client cutover (see below) |
+| `auth.sessions` INSERT webhook | `enforcesessionlimit` sweeper (single-user webhook shape + full sweep; wire a cron trigger) |
 
-## How to use
+## Function slug map (Neon slugs ≤ 20 chars)
 
-```bash
-# New backend (Neon Data API + Managed Better Auth)
-NEXT_PUBLIC_NEON_URL=https://<neon-host>/neondb bun run dev
+| Supabase slug | Neon slug |
+|---|---|
+| (removed — app is free) | — |
+| updates | updates |
+| redeem-gift-code | redeemgiftcode (dead upstream: no gift tables — ported verbatim) |
+| create-portal-session | createportalsession |
+| polar-sponsor-checkout | polarsponsorcheckout |
+| subscribe | subscribe |
+| stripe-webhook | stripewebhook |
+| planetscale-oauth-callback | planetscaleoauthcb |
+| planetscale-oauth-refresh | planetscaleoauthref |
+| enforce-session-limit | enforcesessionlimit |
 
-# Old backend (Supabase, fallback while cutting over)
-NEXT_PUBLIC_SUPABASE_URL=https://yjdsrmnpbhgfqrubvicz.supabase.co \
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... bun run dev
-```
+## Cutover status (2026-10-15): functions NOT cut over yet
 
-`lib/supabase/backend-client.ts` picks Neon when `NEXT_PUBLIC_NEON_URL` is set,
-otherwise Supabase. No other code changes needed at call sites.
+Deliberately deferred: the Neon function code is written, deployed once,
+smoke-tested, then removed again. Supabase edge functions + Supabase Auth
+remain the live backend. Rationale: the functions verify Supabase JWTs, so
+they can only take traffic after clients sign in via Neon Auth — otherwise
+every authenticated call 401s.
 
-## Data migration (owner run, one time)
+To cut over later:
+1. Set function secrets (list above) via `neon functions deploy <slug> --src neon/functions/<slug> --env KEY=VALUE`.
+2. Re-add the `functions` block to `neon.ts` (see git history) and `neon deploy`.
+3. Point clients at Neon (`NEXT_PUBLIC_NEON_URL`) + Neon Auth sign-in.
+4. Repoint Stripe/Polar webhooks + PlanetScale redirect URI to the Neon URLs.
+5. Keep Supabase project read-only for a week, then decommission.
 
-Requires the Supabase DB password (Dashboard → Project Settings → Database)
-and the Neon connection string (Console → Connect). Use **unpooled**
-connections for `pg_dump`, `--no-owner --no-acl` on restore (Supabase
-ownership/ACLs are tied to its auth system and must be dropped; RLS is
-re-applied by the migration SQL):
+## Secrets to set (function env)
 
-```bash
-pg_dump -Fc -v \
-  -d "postgresql://postgres:<supabase-db-password>@db.yjdsrmnpbhgfqrubvicz.supabase.co:5432/postgres" \
-  --schema=public -f supabase_dump.bak
+These were NOT migrated (values never leave their vaults). Set before cutover:
 
-pg_restore -d "<neon-connection-string>" -v --no-owner --no-acl supabase_dump.bak
-```
+- Entitlement/subscription signing key no longer applicable (app is fully free).
+- `POLAR_ACCESS_TOKEN`, `POLAR_ENV`, `POLAR_WEBHOOK_SECRET` (+ `POLAR_SPONSOR_PRODUCT_ID`, `POLAR_MONTHLY_SPONSOR_PRODUCT_ID`)
+- `PLANETSCALE_CLIENT_ID`, `PLANETSCALE_CLIENT_SECRET`, `PLANETSCALE_REDIRECT_URI`
+- `APP_URL`
+- `LEGACY_SUPABASE_URL` + `LEGACY_SUPABASE_ANON_KEY` (transitional JWT verification until clients sign in via Neon Auth — then drop)
+- `CRON_SECRET`, `MAX_SESSIONS=2` (session sweeper; already set on the deployed function)
+- `AVATAR_BASE_URL` (optional; sponsor avatar prefix check, else legacy Supabase path)
 
-Then re-run `neon/migrations/20261014_backend_schema.sql` to ensure
-functions/policies exist, and verify row counts per table.
+Deploy a function with env: `neon functions deploy <slug> --src neon/functions/<slug> --env KEY=VALUE`.
 
-For near-zero downtime instead, use logical replication:
-https://neon.com/docs/guides/logical-replication-supabase-to-neon
+## Deliberate deviations from Supabase
 
-## Auth caveat
+1. No `auth` schema (reserved for Neon's managed infra): `public.auth_uid()` shim reads `app.current_user_id` (set by functions via `callAsUser`) when set, otherwise `request.jwt.claim.sub` (Data API). All ported RPCs/policies call it.
+1b. `subscribe_to_plan` / `extend_otl_updates` EXECUTE revoked from `PUBLIC` and granted only to `neondb_owner` (Neon Functions). Single 8-arg `subscribe_to_plan` signature (7-arg overload dropped).
+2. FK constraints omitted (auth-linked FKs invalid on Neon; none exist in `public`).
+3. Serial sequences → `GENERATED BY DEFAULT AS IDENTITY`.
+4. `+profiles_self_insert` RLS policy (client-side profile upsert needs it).
+5. `save_user_settings_sync`: upstream validations + atomic `ON CONFLICT ... WHERE` guard (no lost-update race; rejected saves return the winning row).
+6. Skipped dead code: `redeem_gift_code` RPC + workspace RPCs (reference dropped tables), `handle_new_user` / session triggers (no auth schema; profile creation happens client-side).
+7. `subscribe`/`planetscale`/`stripe-webhook`-related client URLs must move from `...supabase.co/functions/v1/<slug>` to the Neon function URLs (see `getEdgeFunctionUrl()` / `invokeBackendFunction()`). (entitlement no longer exists.)
 
-Password-based `auth.users` **cannot** transfer (Supabase vs Better Auth use
-incompatible password hashes). Plan: users sign up again on Neon or sign in
-via OAuth. Do not attempt to copy `auth.*` schemas.
+## Verification performed
 
-## Post-migration checklist
-
-- [ ] Enable Data API + Managed Better Auth on the Neon branch
-- [ ] Deploy `entitlement` + planetscale OAuth functions as Neon Functions
-- [ ] Set `NEXT_PUBLIC_NEON_URL` in all environments (`.env`, nix, CI, Tauri)
-- [ ] Smoke test: sign-up, sign-in, session persist, settings sync, themes,
-      entitlement refresh, error logging
-- [ ] Remove Supabase env + `@supabase/supabase-js` once cut over
+- Row counts match per table (12 non-empty tables, 496 rows)
+- All 10 function endpoints respond with behavior-correct codes; `updates` serves DB-backed YAML shape; session sweeper tested live (3 sessions → oldest revoked, newest 2 kept)
+- Storage ETags match Supabase metadata byte-for-byte

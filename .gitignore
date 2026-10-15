@@ -134,3 +134,4 @@ skills-lock.json
 /result-oracle
 /result-rexadb
 .direnv/
+.neon
