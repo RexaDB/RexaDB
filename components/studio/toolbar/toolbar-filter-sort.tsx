@@ -1032,20 +1032,50 @@ export function ToolbarFilterSort({
     dbType,
   ]);
 
+  const handleClearFilters = () => {
+    setDraftRules([makeRule("")]);
+    setCustomWhere("");
+    setFilterQuery("");
+    setGlobalSearchQuery?.("");
+    setGlobalSearchScope?.("page");
+
+    if (selectedTable) {
+      refreshTableData(selectedTable, selectedSchema, "", sortConfig);
+    }
+
+    setIsFilterMenuOpen(false);
+  };
+
   return (
     <>
       <Popover open={isFilterMenuOpen} onOpenChange={setIsFilterMenuOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={prepareDialog}
-            className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${filterQuery ? "text-blue-500 bg-blue-500/10" : ""}`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            {filterQuery ? "Filtered" : "Filter"}
-          </Button>
-        </PopoverTrigger>
+        <div className="inline-flex shrink-0 items-center">
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={prepareDialog}
+              className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${filterQuery.trim() ? "rounded-r-none text-blue-500 bg-blue-500/10" : ""}`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              {filterQuery.trim() ? "Filtered" : "Filter"}
+            </Button>
+          </PopoverTrigger>
+
+          {filterQuery.trim() ? (
+            <Button
+              variant="outline"
+              size="icon-sm"
+              className="-ml-px rounded-l-none bg-blue-500/10 text-blue-500 hover:text-blue-500 dark:border-white/15 dark:bg-white/[0.02]"
+              aria-label="Clear filters"
+              title="Clear filters"
+              onClick={handleClearFilters}
+            >
+              <X className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
+
         <PopoverContent
           align="end"
           sideOffset={6}
@@ -1259,28 +1289,7 @@ export function ToolbarFilterSort({
               </div>
             </div>
 
-            <div className="px-3 flex items-center justify-between gap-2 pt-1">
-              <Button
-                variant="outline"
-                className="h-8 px-3 text-xs border-border"
-                onClick={() => {
-                  setDraftRules([makeRule("")]);
-                  setCustomWhere("");
-                  setFilterQuery("");
-                  if (setGlobalSearchQuery) setGlobalSearchQuery("");
-                  if (setGlobalSearchScope) setGlobalSearchScope("page");
-                  if (selectedTable)
-                    refreshTableData(
-                      selectedTable,
-                      selectedSchema,
-                      "",
-                      sortConfig,
-                    );
-                  setIsFilterMenuOpen(false);
-                }}
-              >
-                Clear filters
-              </Button>
+            <div className="px-3 flex items-center justify-end gap-2 pt-1">
               <Button
                 className="h-8 px-3 text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
                 onClick={handleApplyFilter}
