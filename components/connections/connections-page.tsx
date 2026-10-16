@@ -549,12 +549,18 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     if (standaloneAnalytics) {
       return (
         <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg text-foreground">
-          <div className="flex shrink-0 items-center gap-2 border-b border-studio-border bg-studio-header-bg/90 px-4 z-20">
-            <div className="flex h-12 items-center gap-2">
+          <header
+            className="app-drag-region relative z-20 flex h-12 shrink-0 select-none items-center gap-2 border-b border-studio-border bg-studio-header-bg/90 px-4"
+            data-tauri-drag-region="deep"
+          >
+            {isMac && <div className="w-[72px] shrink-0" />}
+
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1 text-muted-foreground hover:text-foreground"
+                className="no-drag gap-1 text-muted-foreground hover:text-foreground"
+                data-tauri-drag-region="false"
                 onClick={() => setStandaloneAnalytics(null)}
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -564,7 +570,16 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
                 Analytics — {standaloneAnalytics.name}
               </span>
             </div>
-          </div>
+
+            {canUseDesktop && !isMac && (
+              <WindowControls
+                isMaximized={isMaximized}
+                onMinimize={() => sendWindowAction("minimize")}
+                onMaximizeToggle={() => sendWindowAction("maximize-toggle")}
+                onClose={() => sendWindowAction("close")}
+              />
+            )}
+          </header>
           <div className="flex min-h-0 flex-1">
             <ConnectionAnalytics
               connectionId={standaloneAnalytics.id}
