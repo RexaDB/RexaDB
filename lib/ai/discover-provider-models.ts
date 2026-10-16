@@ -12,6 +12,22 @@ type ModelDiscoveryInput = {
 
 type ModelRecord = Record<string, unknown>;
 
+const NON_CHAT_MODEL_PATTERNS = [
+  /(?:^|[/:])(?:text-(?:embedding|search|similarity|moderation)|(?:omni-)?moderation|whisper|tts|dall[-·]e|(?:chat)?gpt-image|sora)(?:[-:.]|$)/i,
+  /(?:^|[-/:_])(?:embed(?:ding|dings)?|rerank(?:er)?|transcribe|transcription|realtime|tts)(?:[-/:_]|$)/i,
+  /(?:^|[/:])(?:(?:text|code)-)?(?:davinci|babbage|curie|ada)(?:[-:]|$)/i,
+];
+
+function isChatCapableModel(id: string, record: ModelRecord): boolean {
+  if (NON_CHAT_MODEL_PATTERNS.some((pattern) => pattern.test(id))) return false;
+
+  const outputModalities = asRecord(record.architecture).output_modalities;
+  if (Array.isArray(outputModalities) && !outputModalities.includes("text")) return false;
+
+  // openai-compatible lists can omit capabilities, so unknown custom ids remain available.
+  return true;
+}
+
 function asRecord(value: unknown): ModelRecord {
   return value !== null && typeof value === "object" ? value as ModelRecord : {};
 }
@@ -91,6 +107,7 @@ export async function fetchAiProviderModels(input: ModelDiscoveryInput): Promise
       const rawId = nonEmptyString(format === "google" ? record.name : record.id);
       if (!rawId) continue;
       const id = format === "google" ? rawId.replace(/^models\//, "") : rawId;
+      if (format === "openai" && !isChatCapableModel(id, record)) continue;
       const name = nonEmptyString(record.display_name) || nonEmptyString(record.displayName) ||
         (format === "google" ? id : nonEmptyString(record.name)) || id;
       models.set(id, { id, name });
