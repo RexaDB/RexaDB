@@ -223,7 +223,6 @@ import {
   removeNeonCliAccount,
   type NeonCliAccount,
 } from "@/lib/neon-cli/profile-store";
-import { detectNeonCli } from "@/lib/neon-cli/detect";
 import { isNeonCliConnectionString } from "@/lib/neon-cli/pointer";
 import { PlanetscaleLoginDialog } from "@/components/planetscale/planetscale-login-dialog";
 import { PlanetscaleAccountsScreen } from "@/components/planetscale/planetscale-account-screen";
@@ -1268,8 +1267,6 @@ export function ConnectionManager({
     () =>
       typeof window === "undefined" ? null : (getNeonCliAccounts()[0]?.id ?? null),
   );
-  const [neonCliInstalled, setNeonCliInstalled] = useState<boolean | null>(null);
-  const [neonCliChecking, setNeonCliChecking] = useState(false);
   const [neonReconnectProfile, setNeonReconnectProfile] = useState<string | null>(null);
   const [neonReloadSignal, setNeonReloadSignal] = useState(0);
   const [planetscaleLoginOpen, setPlanetscaleLoginOpen] = useState(false);
@@ -2683,43 +2680,15 @@ export function ConnectionManager({
     return res;
   };
 
-  const checkNeonCli = useCallback(async () => {
-    setNeonCliChecking(true);
-    try {
-      const result = await detectNeonCli();
-      setNeonCliInstalled(result.installed);
-      return result.installed;
-    } finally {
-      setNeonCliChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkNeonCli();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleAddNeonAccount = useCallback(async () => {
-    const installed = neonCliInstalled ?? (await checkNeonCli());
-    if (!installed) {
-      if (onOpenNeonAccounts) onOpenNeonAccounts();
-      else navigateConnectionScreen("neon-cli");
-      return;
-    }
+  const handleAddNeonAccount = useCallback(() => {
     setNeonReconnectProfile(null);
     setNeonLoginOpen(true);
-  }, [neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
+  }, []);
 
-  const handleReconnectNeonAccount = useCallback(async (profileName: string) => {
-    const installed = neonCliInstalled ?? (await checkNeonCli());
-    if (!installed) {
-      if (onOpenNeonAccounts) onOpenNeonAccounts();
-      else navigateConnectionScreen("neon-cli");
-      return;
-    }
+  const handleReconnectNeonAccount = useCallback((profileName: string) => {
     setNeonReconnectProfile(profileName);
     setNeonLoginOpen(true);
-  }, [neonCliInstalled, checkNeonCli, onOpenNeonAccounts]);
+  }, []);
 
   const handleRemoveNeonAccount = useCallback((id: string) => {
     removeNeonCliAccount(id);
@@ -6015,11 +5984,8 @@ export function ConnectionManager({
                   existingConnectionStrings={connections.map(
                     (c) => c.connectionString,
                   )}
-                  cliInstalled={neonCliInstalled}
-                  checkingCli={neonCliChecking}
-                  onRecheckCli={() => void checkNeonCli()}
                   onConnectDatabase={handleNeonConnectDatabase}
-                  onReconnectAccount={(profileName) => void handleReconnectNeonAccount(profileName)}
+                  onReconnectAccount={handleReconnectNeonAccount}
                   reloadSignal={neonReloadSignal}
                 />
               </div>
@@ -6192,7 +6158,7 @@ export function ConnectionManager({
                         </div>
                         <div className="text-xs text-muted-foreground line-clamp-2">
                           {neonAccounts.length === 0
-                            ? "Sign in (via Neon CLI) to browse and connect your projects"
+                            ? "Sign in to browse and connect your projects"
                             : neonAccounts.length === 1
                               ? `Signed in as ${
                                   neonAccounts[0]?.label || neonAccounts[0]?.profileName
@@ -7158,10 +7124,10 @@ export function ConnectionManager({
                       ) : isNeonCliConnectionString(connectionString) ? (
                         <div className="space-y-2 rounded-lg border border-border/60 bg-muted/40 p-3">
                           <Label className="text-sm font-medium">
-                            Neon CLI connection
+                            Neon connection
                           </Label>
                           <p className="text-xs text-muted-foreground">
-                            This connection is managed by the Neon CLI. Rename it
+                            This connection is managed via your Neon account. Rename it
                             here, or connect the database again from the Neon
                             screen to change the project, branch, database or
                             role.

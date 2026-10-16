@@ -15,7 +15,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NeonLogo } from "@/components/shared/provider-logo";
-import { NeonInstallPrompt } from "@/components/neon/neon-install-prompt";
 import {
   AccountChips,
   ProviderAccountsHeader,
@@ -66,9 +65,6 @@ import type { NeonCliAccount } from "@/lib/neon-cli/profile-store";
 interface NeonAccountsScreenProps extends ProviderAccountScreenBaseProps {
   accounts: NeonCliAccount[];
   existingConnectionStrings: string[];
-  cliInstalled: boolean | null;
-  checkingCli: boolean;
-  onRecheckCli: () => void;
   /** Re-authenticates an existing profile in place after its session expired. */
   onReconnectAccount: (profileName: string) => void;
   /** Bumped by the parent after a successful (re)connect to retrigger loading. */
@@ -88,9 +84,6 @@ function NeonAccountContent({
   onAddAccount,
   canAddAccount,
   existingConnectionStrings,
-  cliInstalled,
-  checkingCli,
-  onRecheckCli,
   onBack,
   onConnectDatabase,
   onReconnectAccount,
@@ -261,14 +254,6 @@ function NeonAccountContent({
 
   const accountLabel = (account: NeonCliAccount) => account.label || account.profileName;
 
-  if (cliInstalled === false) {
-    return (
-      <div className="mx-auto max-w-5xl py-6">
-        <NeonInstallPrompt onRecheck={onRecheckCli} checking={checkingCli} />
-      </div>
-    );
-  }
-
   const logo = <NeonLogo className="h-[22px] w-[22px]" />;
 
   const accountChips = buildAccountChips(accounts, accountLabel);
@@ -278,7 +263,7 @@ function NeonAccountContent({
       <ProviderAccountsHeader
         logo={logo}
         title="Neon"
-        description="Browse and connect your Neon projects — via the real Neon CLI."
+        description="Browse and connect your Neon projects — sign in with your Neon account in the browser."
         onBack={onBack}
       />
 
@@ -286,11 +271,9 @@ function NeonAccountContent({
         <ProviderEmptyState
           logo={logo}
           title="No Neon account linked"
-          description="Sign in with your Neon account (via the Neon CLI) to browse your projects and connect them here."
-          actionLabel="Sign in with Neon CLI"
+          description="Sign in with your Neon account to browse your projects and connect them here — no CLI install needed."
+          actionLabel="Sign in to Neon"
           onAction={onAddAccount}
-          actionDisabled={cliInstalled === null}
-          actionLoading={cliInstalled === null}
         />
       ) : (
         <>

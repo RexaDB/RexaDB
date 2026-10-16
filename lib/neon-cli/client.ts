@@ -80,6 +80,7 @@ export interface NeonLoginEvent {
   message?: string;
   url?: string;
   success?: boolean;
+  email?: string | null;
 }
 
 export interface NeonAuthStatus {
@@ -110,13 +111,13 @@ export async function getNeonAuthStatus(profiles: string[]): Promise<NeonAuthSta
 }
 
 /**
- * Streams `neon auth --profile <name>` progress via SSE. Returns an abort
- * function; onEvent fires for each line the real CLI prints (including a
- * detected "open this URL" line, in case it can't auto-open a browser).
+ * Streams Neon OAuth (PKCE, client_id neonctl) progress via SSE. Returns an
+ * abort function; onEvent fires for log lines and the authorize URL.
  */
 export function streamNeonLogin(
   profileName: string,
   onEvent: (event: NeonLoginEvent) => void,
+  opts?: { forceLogin?: boolean },
 ): { abort: () => void } {
   const controller = new AbortController();
 
@@ -125,7 +126,10 @@ export function streamNeonLogin(
       const res = await fetch(`${neonCliBase()}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: profileName }),
+        body: JSON.stringify({
+          profile: profileName,
+          forceLogin: Boolean(opts?.forceLogin),
+        }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {

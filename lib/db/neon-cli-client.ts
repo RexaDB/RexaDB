@@ -1,8 +1,8 @@
 // Server-only. Resolves a `neon-cli://` pointer (saved in the connections
-// table for a CLI-linked Neon database) into a real, live `postgresql://`
-// URI by shelling out to the genuine `neon` CLI, then lets the normal
-// Postgres driver (lib/db/pg-client.ts) take it from there — no parallel
-// SQL-over-HTTP execution path is needed, since neonctl hands back a real DSN.
+// table for a Neon-linked database) into a real, live `postgresql://` URI
+// via the Neon Management API + stored OAuth credentials (lib/neon-oauth),
+// then lets the normal Postgres driver (lib/db/pg-client.ts) take it from
+// there — no parallel SQL-over-HTTP execution path is needed.
 import { neonConnectionString } from "@/lib/neon-cli/cli-runner";
 import {
   isNeonCliConnectionString,
