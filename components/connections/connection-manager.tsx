@@ -11,16 +11,13 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { useToggleHandlers } from "@/hooks/use-selection-utils";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  DataTable,
-  type TableColumn,
-} from "@/components/data-table/components/data-table";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ConnectionsHeader } from "@/components/connections/connections-header";
+import { ConnectionViewToggle } from "@/components/connections/connection-view-toggle";
 import { EnvironmentBadge } from "@/components/connections/environment-badge";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -74,7 +71,6 @@ import {
   GripVertical,
   LogOut,
   ArrowLeft,
-  ArrowRight,
   ArrowRightLeft,
   Eye,
   EyeOff,
@@ -1186,7 +1182,10 @@ export function ConnectionManager({
     useState<JdbcDriverTemplate | null>(null);
   const [installPromptOpen, setInstallPromptOpen] = useState(false);
 
-  const [viewMode, setViewMode] = useState<"card" | "table">("card");
+  const [viewMode, setViewMode] = useLocalStorage<"card" | "list">(
+    "rexa-db-connections-view",
+    "card",
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState<string[]>([]);
   const [folderFilter, setFolderFilter] = useState<string | null>(null);
@@ -4517,238 +4516,125 @@ export function ConnectionManager({
     );
   };
 
-
-  // Rebuilt each render on purpose: always-fresh closures, and the table
-  // keeps sort/selection state regardless of columns identity.
-  const connectionColumns: TableColumn<Connection>[] = [
-      {
-        key: "name",
-        header: "Name",
-        sortable: true,
-        width: "1.4fr",
-        cell: (conn) => {
-          const { provider, providerCard, providerLogo } =
-            getProviderInfo(conn);
-          return (
-            <span className="flex items-center gap-2 min-w-0">
-              {provider === "spacetimedb" ? (
-                <SpacetimeDbLogo className="h-[18px] w-[18px] text-foreground shrink-0" />
-              ) : (
-                <Image
-                  src={providerCard?.logoSrc ?? providerLogo}
-                  alt=""
-                  width={18}
-                  height={18}
-                  className="rounded-lg shrink-0"
-                />
-              )}
-              <button
-                type="button"
-                onClick={(e) =>
-                  void openConnection(conn, {
-                    forceNewWindow:
-                      e.metaKey || e.ctrlKey || e.shiftKey,
-                  })
-                }
-                title={conn.name}
-                className="group/dblink inline-flex min-w-0 max-w-[160px] cursor-pointer items-center gap-1 rounded-full border border-transparent py-0.5 pl-2.5 pr-2 text-primary transition-all duration-200 hover:border-primary/25 hover:bg-primary/10"
-              >
-                <span className="truncate text-sm font-medium">{conn.name}</span>
-                <ArrowRight className="size-3.5 shrink-0 -translate-x-1 opacity-0 transition-all duration-200 group-hover/dblink:translate-x-0 group-hover/dblink:opacity-100" />
-              </button>
-              {(conn as any).isFavorite && (
-                <Star className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" />
-              )}
-            </span>
-          );
-        },
-        sortValue: (conn) => conn.name,
-      },
-      {
-        key: "provider",
-        header: "Provider",
-        sortable: true,
-        width: "0.8fr",
-        cell: (conn) => (
-          <span className="block truncate text-xs text-muted-foreground">
-            {getProviderInfo(conn).providerCard?.label ?? "PostgreSQL"}
-          </span>
-        ),
-        sortValue: (conn) =>
-          getProviderInfo(conn).providerCard?.label ?? "PostgreSQL",
-      },
-      {
-        key: "target",
-        header: "Target",
-        width: "1fr",
-        cell: (conn) => (
-          <span
-            className="block truncate text-xs font-mono text-muted-foreground"
-            title={getConnectionTarget(conn)}
+  const renderConnectionListActions = (conn: Connection) => (
+    <div className="flex items-center justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          asChild
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground"
+            aria-label={`${conn.name} actions`}
           >
-            {getConnectionTarget(conn)}
-          </span>
-        ),
-        sortValue: (conn) => getConnectionTarget(conn),
-      },
-      {
-        key: "environment",
-        header: "Environment",
-        width: "0.7fr",
-        cell: (conn) => {
-          const { env } = getProviderInfo(conn);
-          return env ? (
-            <EnvironmentBadge environment={env} />
-          ) : (
-            <span className="text-xs text-muted-foreground/40">&mdash;</span>
-          );
-        },
-        sortValue: (conn) => getProviderInfo(conn).env ?? "",
-      },
-      {
-        key: "folders",
-        header: "Folders",
-        width: "1fr",
-        cell: (conn) => {
-          const connGroups = (conn as any).groups || [];
-          if (connGroups.length === 0) {
-            return (
-              <span className="text-xs text-muted-foreground/40">&mdash;</span>
-            );
-          }
-          return (
-            <span
-              className="flex items-center gap-1 flex-nowrap overflow-hidden"
-              title={connGroups.join(", ")}
+            <MoreVertical className="w-3.5 h-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="bg-popover border-border text-foreground"
+        >
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              void openConnection(conn);
+            }}
+            className="gap-2 text-xs focus:bg-muted/50"
+          >
+            Open
+          </DropdownMenuItem>
+          {can("connections.update") && (
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEdit(conn);
+              }}
+              className="gap-2 text-xs focus:bg-muted/50"
             >
-              {connGroups.map((g: string) => (
-                <Badge key={g} variant="outline" className="shrink-0">
-                  {g}
-                </Badge>
-              ))}
-            </span>
-          );
-        },
-        sortValue: (conn) => ((conn as any).groups || []).join(", "),
-      },
-      {
-        key: "actions",
-        header: "",
-        align: "right",
-        width: "3rem",
-        cell: (conn) => (
-          <div className="flex items-center justify-end">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                asChild
-                onClick={(e) => e.stopPropagation()}
+              Edit
+            </DropdownMenuItem>
+          )}
+          {can("connections.create") && (
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDuplicate(conn);
+              }}
+              className="gap-2 text-xs focus:bg-muted/50"
+            >
+              Duplicate
+            </DropdownMenuItem>
+          )}
+          {can("connections.update") && (
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                void toggleFavorite(conn);
+              }}
+              className="gap-2 text-xs focus:bg-muted/50"
+            >
+              {(conn as any).isFavorite ? "Unfavorite" : "Favorite"}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              void handleCopyDetails(conn);
+            }}
+            className="gap-2 text-xs focus:bg-muted/50"
+          >
+            Copy URI
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              openTransferForConnection(conn);
+            }}
+            className="gap-2 text-xs focus:bg-muted/50"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            Transfer Project
+          </DropdownMenuItem>
+          {workspaceMode && (
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleViewCredentials(conn);
+              }}
+              className="gap-2 text-xs focus:bg-muted/50"
+            >
+              <Eye className="w-3 h-3" /> View Credentials
+            </DropdownMenuItem>
+          )}
+          {onViewAnalytics && (
+            <DropdownMenuItem
+              onClick={() => onViewAnalytics(conn.id)}
+              className="gap-2 text-xs focus:bg-muted/50"
+            >
+              View Analytics
+            </DropdownMenuItem>
+          )}
+          {can("connections.delete") && (
+            <>
+              <DropdownMenuSeparator className="bg-border/60" />
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingDeleteConnId(conn.id);
+                }}
+                className="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
               >
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground hover:text-foreground"
-                  aria-label={`${conn.name} actions`}
-                >
-                  <MoreVertical className="w-3.5 h-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="bg-popover border-border text-foreground"
-              >
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void openConnection(conn);
-                  }}
-                  className="gap-2 text-xs focus:bg-muted/50"
-                >
-                  Open
-                </DropdownMenuItem>
-                {can("connections.update") && (
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit(conn);
-                    }}
-                    className="gap-2 text-xs focus:bg-muted/50"
-                  >
-                    Edit
-                  </DropdownMenuItem>
-                )}
-                {can("connections.create") && (
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDuplicate(conn);
-                    }}
-                    className="gap-2 text-xs focus:bg-muted/50"
-                  >
-                    Duplicate
-                  </DropdownMenuItem>
-                )}
-                {can("connections.update") && (
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void toggleFavorite(conn);
-                    }}
-                    className="gap-2 text-xs focus:bg-muted/50"
-                  >
-                    {(conn as any).isFavorite ? "Unfavorite" : "Favorite"}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleCopyDetails(conn);
-                  }}
-                  className="gap-2 text-xs focus:bg-muted/50"
-                >
-                  Copy URI
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openTransferForConnection(conn);
-                  }}
-                  className="gap-2 text-xs focus:bg-muted/50"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                  Transfer Project
-                </DropdownMenuItem>
-                {!workspaceMode && renderFolderSubmenu(conn, "3")}
-                {workspaceMode && (
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleViewCredentials(conn);
-                    }}
-                    className="gap-2 text-xs focus:bg-muted/50"
-                  >
-                    <Eye className="w-3 h-3" /> View Credentials
-                  </DropdownMenuItem>
-                )}
-                {can("connections.delete") && (
-                  <>
-                    <DropdownMenuSeparator className="bg-border/60" />
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDeleteConnId(conn.id);
-                      }}
-                      className="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
-                    >
-                      Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ),
-      },
-  ];
+                Delete
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
   return (
     <div
       className={cn(
@@ -5337,7 +5223,7 @@ export function ConnectionManager({
                 </div>
 
                 {/* Second row — search (opens CMD+K) + Providers (dashed) + Sorted by name + New Connection — no select/animate effects */}
-                <div className="flex items-center gap-2 mb-6">
+                <div className="flex flex-wrap items-center gap-2 mb-6">
                   <button
                     type="button"
                     onClick={() => setCommandMenuOpen(true)}
@@ -5448,6 +5334,8 @@ export function ConnectionManager({
                   </DropdownMenu>
 
                   <div className="ml-auto flex items-center gap-2">
+                    <ConnectionViewToggle value={viewMode} onChange={setViewMode} />
+
                     {can("connections.create") && (
                       <button
                         onClick={() => {
@@ -5465,7 +5353,7 @@ export function ConnectionManager({
 
                 {/* Search and Grid Area */}
                 <div className="flex-1 overflow-y-auto scrollbar-hide -mx-6 px-6 pb-20">
-                  {reorderMode && searchQuery.trim().length === 0 && (
+                  {viewMode === "card" && reorderMode && searchQuery.trim().length === 0 && (
                     <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
                       <span className="inline-flex h-2 w-2 rounded-lg bg-emerald-500/80" />
                       Drag cards to reorder.
@@ -5769,11 +5657,70 @@ export function ConnectionManager({
                             })}
                           </div>
                         ) : (
-                          <DataTable<Connection>
-                            data={visibleConnections}
-                            getRowId={(conn) => String(conn.id)}
-                            columns={connectionColumns}
-                          />
+                          <ul aria-label="Connections" className="space-y-3">
+                            {visibleConnections.map((conn, index) => {
+                              const { provider, providerCard, providerLogo, env } = getProviderInfo(conn);
+                              const isOpening = openingConnectionIds.has(conn.id);
+
+                              return (
+                                <li
+                                  key={conn.id}
+                                  data-conn-index={index}
+                                  className="flex items-center gap-3 rounded-lg border border-studio-border/60 bg-card px-4 py-4 hover:border-studio-border hover:bg-studio-row-hover"
+                                >
+                                  <button
+                                    type="button"
+                                    disabled={isOpening}
+                                    onClick={(event) => void openConnection(conn, {
+                                      forceNewWindow: event.metaKey || event.ctrlKey || event.shiftKey,
+                                    })}
+                                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                                  >
+                                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
+                                      {provider === "spacetimedb" ? (
+                                        <SpacetimeDbLogo className="size-6 text-foreground" />
+                                      ) : (
+                                        <Image
+                                          src={providerCard?.logoSrc ?? providerLogo}
+                                          alt=""
+                                          width={24}
+                                          height={24}
+                                          className="rounded object-contain"
+                                        />
+                                      )}
+                                    </span>
+
+                                    <span className="min-w-0 flex-1">
+                                      <span className="flex items-center gap-2">
+                                        <span className="truncate text-sm font-medium text-foreground" title={conn.name}>
+                                          {conn.name}
+                                        </span>
+                                        {(conn as any).isFavorite && (
+                                          <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" aria-label="Favorite" />
+                                        )}
+                                      </span>
+
+                                      <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                                        <span className="shrink-0">{providerCard?.label ?? "PostgreSQL"}</span>
+                                        <span aria-hidden="true" className="size-0.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                                        <span className="truncate font-mono" title={getConnectionTarget(conn)}>
+                                          {getConnectionTarget(conn)}
+                                        </span>
+                                      </span>
+                                    </span>
+                                  </button>
+
+                                  {isOpening && (
+                                    <span role="status" className="shrink-0 text-xs text-muted-foreground">Connecting…</span>
+                                  )}
+
+                                  {env && <EnvironmentBadge environment={env} />}
+
+                                  {renderConnectionListActions(conn)}
+                                </li>
+                              );
+                            })}
+                          </ul>
                         )}
                       </div>
                     </>
@@ -7480,17 +7427,17 @@ export function ConnectionManager({
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
-              setViewMode(viewMode === "card" ? "table" : "card");
+              setViewMode(viewMode === "card" ? "list" : "card");
               setManageMenuOpen(false);
             }}
             className="gap-2 focus:bg-muted/50"
           >
-            {viewMode === "table" ? (
+            {viewMode === "list" ? (
               <Square className="w-4 h-4" />
             ) : (
               <List className="w-4 h-4" />
             )}
-            {viewMode === "table" ? "Card View" : "Table View"}
+            {viewMode === "list" ? "Grid View" : "List View"}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
