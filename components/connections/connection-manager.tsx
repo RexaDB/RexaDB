@@ -7337,14 +7337,15 @@ export function ConnectionManager({
       <NeonLoginDialog
         open={neonLoginOpen}
         reconnectProfile={neonReconnectProfile}
+        forceNewAccount={!neonReconnectProfile && neonAccounts.length > 0}
         onOpenChange={(nextOpen) => {
           setNeonLoginOpen(nextOpen);
           if (!nextOpen) setNeonReconnectProfile(null);
         }}
         onLoginComplete={(account) => {
           setNeonAccounts((prev) => {
-            const exists = prev.some((a) => a.id === account.id);
-            return exists ? prev : [...prev, account];
+            const exists = prev.some((a) => a.id === account.id || a.profileName === account.profileName);
+            return exists ? prev.map((a) => (a.profileName === account.profileName ? account : a)) : [...prev, account];
           });
           setActiveNeonAccountId(account.id);
           setNeonReconnectProfile(null);

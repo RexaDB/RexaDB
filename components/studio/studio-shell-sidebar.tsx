@@ -1383,7 +1383,7 @@ function TablesPanel({ studio }: { studio: any }) {
           <Plus className="size-3.5" />
         </button>
       </div>
-      {/* A-Z / Tags view toggle + new-tag entry — under the schema picker. */}
+      {/* A-Z / Tags view toggle + table count — under the schema picker. */}
       <div className="mb-1 flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
           <button
@@ -1396,27 +1396,39 @@ function TablesPanel({ studio }: { studio: any }) {
           >
             <span className="truncate">A-Z</span>
           </button>
-        <button
-          type="button"
-          onClick={() => studio.setSidebarSortMode?.("tags")}
-          className={cn(
-            "flex h-full items-center justify-center rounded-md px-3 transition-colors",
-            tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <span className="truncate">Tags</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => studio.setSidebarSortMode?.("tags")}
+            className={cn(
+              "flex h-full items-center justify-center rounded-md px-3 transition-colors",
+              tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="truncate">Tags</span>
+          </button>
         </div>
         {tagView && (
-        <button
-          type="button"
-          onClick={() => setTagManagerOpen(true)}
-          className="ml-auto flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Plus className="size-3.5" />
-          <span>New Tag</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setTagManagerOpen(true)}
+            className="flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Plus className="size-3.5" />
+            <span>New Tag</span>
+          </button>
         )}
+        {studio.showTableCount !== false ? (
+          <span
+            className="ml-auto shrink-0 pr-0.5 text-xs tabular-nums text-muted-foreground"
+            title={
+              sidebarQ || filtersActive
+                ? `${filtered.length} of ${allTables.length} ${allTables.length === 1 ? itemNoun : `${itemNoun}s`} shown`
+                : `${allTables.length} ${allTables.length === 1 ? itemNoun : `${itemNoun}s`}`
+            }
+          >
+            {sidebarQ || filtersActive ? `${filtered.length}/${allTables.length}` : allTables.length}
+          </span>
+        ) : null}
       </div>
 
       <Dialog open={tagManagerOpen} onOpenChange={setTagManagerOpen}>

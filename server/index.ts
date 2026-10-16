@@ -459,6 +459,7 @@ app.post("/api/neon-cli/login", async (req, res) => {
     // browser tab can no longer collide with new OAuth state (CSRF
     // mismatch) or a dead callback port.
     killAllNeonLogins();
+    send({ type: "log", message: `Launching neon auth for profile “${profile}”…` });
     const child = neonCliRunner.spawnNeonAuthLogin(profile);
     neonLoginChildren.add(child);
     const forgetChild = () => {

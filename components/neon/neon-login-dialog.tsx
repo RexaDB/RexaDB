@@ -25,6 +25,13 @@ interface NeonLoginDialogProps {
    * losing the account's identity or any connections pointing at it.
    */
   reconnectProfile?: string | null;
+  /**
+   * Add-account flow: skip the "already signed in / Continue" shortcut and
+   * always mint a fresh CLI profile. Without this, adding a second account
+   * finds the first profile still valid and either re-links it (Continue) or
+   * stalls after "Use a different account".
+   */
+  forceNewAccount?: boolean;
 }
 
 function newProfileName(): string {
@@ -35,7 +42,13 @@ function newProfileName(): string {
   return `rexadb-${suffix}`;
 }
 
-export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnectProfile }: NeonLoginDialogProps) {
+export function NeonLoginDialog({
+  open,
+  onOpenChange,
+  onLoginComplete,
+  reconnectProfile,
+  forceNewAccount = false,
+}: NeonLoginDialogProps) {
   const [status, setStatus] = useState<"idle" | "checking" | "signed-in" | "running" | "error">("idle");
   const [lines, setLines] = useState<string[]>([]);
   const [fatalError, setFatalError] = useState<string | null>(null);
@@ -55,11 +68,17 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
     // attempt used to mint a fresh random profile, littering
     // credentials.rexadb-*.json files and defeating single-flight —
     // overlapping flows then raced each other's OAuth state/CSRF.
-    if (!profileRef.current) {
+    // Add-account always needs a new profile even if a prior attempt in
+    // this dialog already set profileRef (e.g. after Try again).
+    if (forceNewAccount && !reconnectProfile) {
+      profileRef.current = newProfileName();
+    } else if (!profileRef.current) {
       profileRef.current = reconnectProfile || newProfileName();
     }
     const profile = profileRef.current;
-    setLines([]);
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLines(["Starting neon auth..."]);
     setFatalError(null);
     setExistingSession(null);
     setLoginUrl(null);
@@ -92,7 +111,7 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
         toast.error(message);
       }
     });
-  }, [onLoginComplete, onOpenChange, reconnectProfile, isReconnect]);
+  }, [onLoginComplete, onOpenChange, reconnectProfile, isReconnect, forceNewAccount]);
 
   const openRef = useRef(open);
   useEffect(() => {
@@ -112,13 +131,31 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
     setFatalError(null);
     setExistingSession(null);
     const alive = () => openRef.current && checkGenRef.current === gen;
+
+    // Adding another linked account must not short-circuit to the first
+    // profile's still-valid session — that made "Add account" a no-op.
+    if (forceNewAccount && !reconnectProfile) {
+      if (alive()) start();
+      return;
+    }
+
     try {
+      const linked = getNeonCliAccounts().map((a) => a.profileName);
       const candidates = reconnectProfile
         ? [reconnectProfile]
-        : [...getNeonCliAccounts().map((a) => a.profileName), "DEFAULT"];
+        : // First link only: reuse a terminal/DEFAULT session. Never offer
+          // Continue for a profile that is already linked in RexaDB.
+          ["DEFAULT", ...linked].filter(
+            (name, index, all) => all.indexOf(name) === index,
+          );
       const statuses = await getNeonAuthStatus(candidates);
       if (!alive()) return;
-      const usable = statuses.find((s) => s.valid);
+      const usable = statuses.find((s) => {
+        if (!s.valid) return false;
+        if (reconnectProfile) return s.profile === reconnectProfile;
+        // Only Continue when this profile is not already a linked account.
+        return !linked.includes(s.profile);
+      });
       if (usable) {
         setExistingSession(usable);
         setStatus("signed-in");
@@ -128,7 +165,7 @@ export function NeonLoginDialog({ open, onOpenChange, onLoginComplete, reconnect
       // status check is best-effort — fall through to a fresh login
     }
     if (alive()) start();
-  }, [reconnectProfile, start]);
+  }, [reconnectProfile, start, forceNewAccount]);
 
   useEffect(() => {
     if (open && status === "idle") void checkExistingSession();

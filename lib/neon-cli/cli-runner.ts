@@ -265,11 +265,15 @@ export function spawnNeonAuthLogin(profileName: string): ChildProcess {
   if (!found) {
     throw new Error("neon CLI is not installed or not on PATH.");
   }
+  // Drop CI entirely — an empty `CI=""` is still "set" for some CLIs and
+  // makes `neon auth` refuse interactive browser login.
+  const env = { ...process.env };
+  delete env.CI;
+  delete env.CONTINUOUS_INTEGRATION;
   const proc = spawn(found.path, ["auth", "--profile", profileName], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, CI: "" },
+    stdio: ["ignore", "pipe", "pipe"],
+    env,
   });
-  proc.stdin?.end();
   proc.on("error", () => {});
   return proc;
 }
