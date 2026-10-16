@@ -1,5 +1,8 @@
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 
+// types
+import type { AiProviderModel } from "./provider-model-types";
+
 /**
  * Provider metadata straight from the installed Pi agent SDK — id, display
  * name, default base URL, and native API format. Read live (not hand-copied)
@@ -11,6 +14,7 @@ export type PiProviderMeta = {
   name: string;
   baseUrl?: string;
   api?: string;
+  models: AiProviderModel[];
 };
 
 let cache: PiProviderMeta[] | null = null;
@@ -24,6 +28,7 @@ function buildCatalog(): PiProviderMeta[] {
         name: provider.name,
         baseUrl: provider.baseUrl || models[0]?.baseUrl || undefined,
         api: models[0]?.api,
+        models: models.map(({ id, name }) => ({ id, name })),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -41,7 +46,7 @@ export function getPiProviderMeta(id: string): PiProviderMeta | undefined {
 
 export async function listAiProviderCatalog() {
   try {
-    const data = listPiProviderCatalog().map(({ id, name, baseUrl }) => ({ id, name, baseUrl }));
+    const data = listPiProviderCatalog().map(({ id, name, baseUrl, models }) => ({ id, name, baseUrl, models }));
     return { success: true, data };
   } catch (error) {
     return {

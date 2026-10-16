@@ -2,11 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { ArrowLeft, Plus, Search, X } from "@/lib/icon-theme/lucide-react";
+import { ArrowLeft, Search } from "@/lib/icon-theme/lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ApiKeyField, BaseUrlField, ModelListEditor } from "@/components/studio/ai/ai-provider-shared";
 import {
   Dialog,
@@ -49,9 +48,9 @@ function ProviderLogo({ provider, label, size = 22 }: { provider: string; label:
 export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
   const { settings, catalog, updateProvider, addProvider, removeProvider, labelFor } =
     useAiProviderSettings();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState<string>("");
   const [openProvider, setOpenProvider] = useState<string | null>(null);
-  const [modelDraft, setModelDraft] = useState("");
+  const [modelDraft, setModelDraft] = useState<string>("");
 
   const providers = useMemo(() => {
     const catalogIds = new Set(catalog.map((c) => c.id));
@@ -59,6 +58,7 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
       id,
       name: PROVIDER_LABELS[id] || id,
       baseUrl: undefined as string | undefined,
+      models: [],
     }));
     return [...catalog, ...pinnedExtras].sort((a, b) => a.name.localeCompare(b.name));
   }, [catalog]);
@@ -72,13 +72,15 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
   if (!settings) return null;
 
   const active = openProvider ? providers.find((p) => p.id === openProvider) : null;
-  const activeConfig = openProvider ? settings.providers[openProvider] : undefined;
+  const activeConfig = openProvider
+    ? settings.providers[openProvider] ?? { apiKey: "", models: [] as string[], baseUrl: "" }
+    : undefined;
   const activePinned = openProvider ? PINNED_PROVIDERS.includes(openProvider) : false;
 
   const openDialog = (id: string) => {
     if (!settings.providers[id]) addProvider(id);
-    setOpenProvider(id);
     setModelDraft("");
+    setOpenProvider(id);
   };
 
   const addModel = () => {
@@ -153,9 +155,14 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
         )}
       </div>
 
-      <Dialog open={!!openProvider} onOpenChange={(open) => !open && setOpenProvider(null)}>
+      <Dialog
+        open={!!openProvider && !!active}
+        onOpenChange={(open) => {
+          if (!open) setOpenProvider(null);
+        }}
+      >
         <DialogContent className="max-w-sm">
-          {active && activeConfig && (
+          {active && activeConfig ? (
             <>
               <DialogHeader>
                 <div className="flex items-center gap-2.5">
@@ -165,7 +172,7 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
                 <DialogDescription>
                   {active.id === "ollama"
                     ? "Point this at a local or remote Ollama server."
-                    : "Add an API key and the model ids you want available."}
+                    : "Add an API key, then choose the models you want available."}
                 </DialogDescription>
               </DialogHeader>
 
@@ -176,6 +183,14 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
                 />
 
                 <ModelListEditor
+                  provider={active.id}
+                  providerLabel={labelFor(active.id)}
+                  apiKey={activeConfig.apiKey}
+                  baseUrl={activeConfig.baseUrl}
+                  catalogModels={active.models || []}
+                  onSelect={(model) => updateProvider(active.id, {
+                    models: Array.from(new Set([...activeConfig.models, model])),
+                  })}
                   models={activeConfig.models}
                   draft={modelDraft}
                   onDraftChange={setModelDraft}
@@ -209,7 +224,7 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
                 )}
               </div>
             </>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
     </section>

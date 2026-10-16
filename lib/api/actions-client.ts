@@ -8,6 +8,7 @@ import type {
 } from "@/lib/billing/entitlement-types";
 import type { QueryExecutionContext } from "@/lib/studio/table-permissions";
 import type { HistoryEntry } from "@/lib/api/history-entry-types";
+import type { AiProviderModel } from "@/lib/ai/provider-model-types";
 import { emitGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 import { API_BASE } from "@/lib/api-base";
 import { isDesktopRuntime } from "@/lib/desktop";
@@ -261,10 +262,27 @@ export function getGlobalAiSettings() {
   return request(buildUrl("/api/ai/settings"));
 }
 
-export type AiProviderCatalogEntry = { id: string; name: string; baseUrl?: string };
+export type AiProviderCatalogEntry = {
+  id: string;
+  name: string;
+  baseUrl?: string;
+  models?: AiProviderModel[];
+};
 
 export function listAiProviderCatalog() {
   return request<AiProviderCatalogEntry[]>(buildUrl("/api/ai/providers"));
+}
+
+export function discoverAiProviderModels(provider: string, apiKey: string, baseUrl?: string) {
+  return request<AiProviderModel[]>(
+    buildUrl("/api/ai/provider-models"),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, apiKey, baseUrl }),
+      signal: AbortSignal.timeout(25_000),
+    },
+  );
 }
 
 export async function getKeybindingsFile() {

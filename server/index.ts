@@ -1440,6 +1440,11 @@ app.get("/api/ai/providers", simpleGetRoute(async () => {
   return listAiProviderCatalog();
 }));
 
+app.post("/api/ai/provider-models", simplePostRoute(async (body) => {
+  const { discoverAiProviderModels } = await import("../lib/ai/discover-provider-models");
+  return discoverAiProviderModels(body);
+}));
+
 app.post("/api/ai/settings", simplePostRoute(body => mod.saveGlobalAiSettings(body.settings)));
 
 app.get("/api/keybindings", simpleGetRoute(async () => {

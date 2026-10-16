@@ -1,9 +1,15 @@
 "use client";
 
 import { Plus, X } from "lucide-react";
+
+// components
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProviderModelDiscovery } from "./provider-model-discovery";
+
+// types
+import type { AiProviderModel } from "@/lib/ai/provider-model-types";
 
 export function ApiKeyField({
   value,
@@ -32,18 +38,42 @@ export function ModelListEditor({
   onDraftChange,
   onAdd,
   onRemove,
+  provider,
+  apiKey,
+  baseUrl,
+  catalogModels,
+  onSelect,
   addLabel = "Add",
+  providerLabel,
 }: {
   models: string[];
   draft: string;
   onDraftChange: (value: string) => void;
   onAdd: () => void;
   onRemove: (model: string) => void;
+  provider: string;
+  apiKey: string;
+  baseUrl?: string;
+  catalogModels: AiProviderModel[];
+  onSelect: (model: string) => void;
   addLabel?: string;
+  providerLabel?: string;
 }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground">Models</Label>
+
+      <ProviderModelDiscovery
+        key={JSON.stringify([provider, apiKey, baseUrl])}
+        provider={provider}
+        apiKey={apiKey}
+        baseUrl={baseUrl}
+        catalogModels={catalogModels}
+        selectedModels={models}
+        onSelect={onSelect}
+        providerLabel={providerLabel}
+      />
+
       <div className="space-y-1.5">
         {models.map((model) => (
           <div
@@ -54,6 +84,7 @@ export function ModelListEditor({
             <Button
               size="icon-xs"
               variant="ghost"
+              aria-label={`Remove ${model}`}
               onClick={() => onRemove(model)}
             >
               <X className="h-3 w-3" />
@@ -61,9 +92,11 @@ export function ModelListEditor({
           </div>
         ))}
       </div>
+
       <div className="flex gap-2">
         <Input
-          placeholder="Add model id"
+          placeholder="Enter a model ID manually"
+          aria-label="Manual model ID"
           className="h-8 text-xs"
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
