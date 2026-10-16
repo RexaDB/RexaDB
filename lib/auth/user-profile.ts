@@ -7,7 +7,7 @@ import {
   getStoredUserProfile,
   upsertUserProfile,
 } from "@/lib/api/actions-client";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendClient } from "@/lib/supabase/backend-client";
 
 export const LOCAL_MODE_STORAGE_KEY = "rexa-db-local-mode";
 export const LOCAL_NAME_STORAGE_KEY = "rexa-db-local-name";
@@ -71,11 +71,12 @@ async function resolveSupabaseUserDisplayName(user: UserLike) {
 
   if (!resolvedName || isSameAsEmail(resolvedName, email)) {
     try {
-      const { data } = await supabase
+      const supabase = await getBackendClient();
+      const { data } = (await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
-        .maybeSingle<{ full_name: string | null }>();
+        .maybeSingle()) as { data: { full_name: string | null } | null };
 
       const cloudName = normalizeText(data?.full_name);
       if (cloudName && !isSameAsEmail(cloudName, email)) {
@@ -145,6 +146,31 @@ export async function syncAuthenticatedUserProfile<T extends UserLike>(user: T) 
     isLocal: false,
     supabaseId: user.id,
   });
+
+  // Best-effort: ensure the cloud profiles row exists so later updates (and
+  // author-name lookups) never hit a missing row. Insert-only: never
+  // overwrite an existing row, otherwise a reload would write the stale
+  // auth-metadata name back over a name the user edited in Profile Settings
+  // (which writes profiles only). Local sync succeeding matters more than
+  // this, so failures (including a lost insert race) are swallowed.
+  try {
+    const client = await getBackendClient();
+    const { data: existing } = await client
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!existing) {
+      await client.from("profiles").insert({
+        id: user.id,
+        email: normalizeText(user.email),
+        full_name: name,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch {
+    // Ignore: profile save UI upserts again on demand.
+  }
 
   return {
     name,

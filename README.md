@@ -53,6 +53,111 @@ npm run dev
 npm run tauri:dev
 ```
 
+## Install with Nix (NixOS / nix)
+
+RexaDB ships a Nix flake (`flake.nix`, `nix/`) with a reproducible dev
+shell, per-component packages, the desktop app, and NixOS / Home Manager
+modules (Linux-first; macOS gets `nix develop` + headless packages).
+
+```bash
+# full toolchain: bun, node, rust, cargo-tauri, JDK 21, WebKitGTK deps
+nix develop
+
+# build pieces
+nix build .#frontend        # Next.js static export
+nix build .#rexadb-server   # compiled sidecar server
+nix build .#rexadb-oracle-bridge
+nix build .#java-bridge     # bridge.jar + minimal JRE
+
+# desktop app (Linux) — run it, or install via the HM module
+nix build .#rexadb
+nix run .                   # launch RexaDB
+nix run .#server            # sidecar only (REXADB_SERVER_PORT=3867)
+
+# optional: install into your profile
+nix profile install .#rexadb
+```
+
+Tagged releases push prebuilt `x86_64-linux` binaries to the
+[rexadb Cachix cache](https://rexadb.cachix.org) (see `nixConfig` in
+`flake.nix`), so `nix run` / `nix profile install` download instead of
+compiling on that platform — no setup needed on your end. Other systems
+(`aarch64-linux`, macOS) still build from source. If you see a trust warning
+about the cache key, update your flake input to the latest release tag.
+
+If Nix prints `ignoring untrusted substituter 'https://rexadb.cachix.org',
+you are not a trusted user` and starts compiling anyway, your daemon runs
+multi-user (default on NixOS / Determinate / macOS installs): it discards
+cache settings that come from flakes. Register the cache in the system
+config instead — this trusts exactly this cache and grants nothing else:
+
+```bash
+# Linux (NixOS: set nix.settings.extra-substituters /
+# nix.settings.extra-trusted-public-keys declaratively instead)
+printf '%s\n' \
+  'extra-substituters = https://rexadb.cachix.org' \
+  'extra-trusted-public-keys = rexadb.cachix.org-1:pVrB+j93ten7xXFzxhAdQ2m/Eco2yiwfBT0Wk5QgYww=' \
+  | sudo tee -a /etc/nix/nix.conf
+sudo systemctl restart nix-daemon
+
+# macOS
+printf '%s\n' \
+  'extra-substituters = https://rexadb.cachix.org' \
+  'extra-trusted-public-keys = rexadb.cachix.org-1:pVrB+j93ten7xXFzxhAdQ2m/Eco2yiwfBT0Wk5QgYww=' \
+  | sudo tee -a /etc/nix/nix.conf
+sudo launchctl kickstart -k system/org.nixos.nix-daemon
+```
+
+Alternative: add yourself to `trusted-users` (`root $USER` in the same
+file). That also fixes every other flake-provided cache at once, but it is
+much broader — a trusted user may configure *any* substituter and use other
+restricted settings — so prefer the scoped lines above unless you know you
+want that. Single-user Nix installs are unaffected (every user is trusted).
+
+NixOS module (flake input `inputs.rexadb.url = "github:RexaDB/RexaDB"`):
+
+```nix
+services.rexadb = {
+  enable = true;
+  package = inputs.rexadb.packages.${pkgs.system}.rexadb-server;
+};
+```
+
+Home Manager:
+
+```nix
+programs.rexadb = {
+  enable = true;
+  package = inputs.rexadb.packages.${pkgs.system}.rexadb;
+};
+```
+
+Notes:
+
+- `flake.lock` is committed for reproducible builds; run `nix flake update`
+  to bump inputs.
+- `.envrc` (`use flake`, for direnv users) is covered by the repo's
+  `.env*` gitignore rule — `git add -f .envrc` to commit it.
+- `packages.rexadb` is Linux-only (`webkitgtk_4_1` / Tauri bundling).
+  `nix flake check --no-build` validates evaluation on all systems.
+- Like the other release builds, the Nix frontend build does not bake in
+  `.env` secrets — provide runtime config the usual way.
+- Supabase config is baked at build time (`NEXT_PUBLIC_*`): the Nix
+  packages build with placeholder values, so all local-first features
+  work but Supabase-backed features (sign-in, teams) are inert. Real
+  secrets must never enter the Nix store; to make a cloud-connected
+  build, substitute your own values for `NEXT_PUBLIC_SUPABASE_URL` /
+  `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `nix/frontend.nix` (and
+  `nix/rexadb.nix` for the desktop app).
+- The Nix desktop build ships with the Tauri auto-updater disabled (it
+  would otherwise require the release signing key, which never enters
+  PR/fork builds — signing stays tag-gated in `build.yml`). Update via
+  `nix flake update` / `nix profile upgrade` instead.
+- Portable `.deb` / AppImage installers come from the normal release
+  workflows (`build.yml`, `arch-appimage.yml`). The Nix build’s internal
+  Tauri `.deb` is only used to lay out store paths; it is not a portable
+  Debian package and is not uploaded to GitHub releases.
+
 ## Links
 
 - Website: https://www.rexadb.app

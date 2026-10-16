@@ -114,6 +114,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "rls-tab-editor", section: "advanced", title: "Open RLS Policies in Tab", description: "Edit Row-Level Security policies in an editor tab instead of a side sheet.", keywords: ["rls", "policies", "security", "tab", "row level"] },
   { id: "app-updates", section: "advanced", title: "App Updates", description: "Check for, download, and install application updates.", keywords: ["updates", "version", "download", "install", "upgrade", "license"] },
   { id: "command-menu", section: "advanced", title: "Command Menu Customization", description: "Reorder or show/hide sections in the command menu (⌘K).", keywords: ["command", "menu", "palette", "cmdk", "reorder", "sections"] },
+  { id: "danger-zone-reset", section: "advanced", title: "Danger Zone — Reset Everything", description: "Reset all settings to factory defaults and clear local caches.", keywords: ["danger", "reset", "wipe", "clear", "defaults", "factory"] },
 
   // ---- Workspace ----
   { id: "workspace-local-server", section: "workspace", title: "Local RexaDB Studio Server", description: "Set up, start, or stop a rexadb-studio server on this computer.", keywords: ["workspace", "server", "local", "start", "setup"] },

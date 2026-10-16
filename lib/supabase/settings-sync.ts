@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase/client";
+import { getBackendClient } from "@/lib/supabase/backend-client";
 import type { SettingsSyncPayloadV1 } from "@/lib/studio/settings-sync-events";
 
 export const SETTINGS_SYNC_META_KEY = "rexa-db-settings-sync-meta";
@@ -176,6 +176,7 @@ export async function fetchUserSettingsSync(): Promise<{
   row: RemoteSettingsSyncRow | null;
   error: string | null;
 }> {
+  const supabase = await getBackendClient();
   const {
     data: { user },
     error: userError,
@@ -218,6 +219,7 @@ export async function saveUserSettingsSync(params: {
   payload: SettingsSyncPayloadV1;
   clientUpdatedAt: number;
 }): Promise<{ result: SaveSettingsSyncResult | null; error: string | null }> {
+  const supabase = await getBackendClient();
   const { data, error } = await supabase.rpc("save_user_settings_sync", {
     p_payload: params.payload,
     p_client_updated_at: new Date(params.clientUpdatedAt).toISOString(),

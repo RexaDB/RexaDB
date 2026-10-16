@@ -120,7 +120,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth, getBackendClient } from "@/lib/supabase/backend-client";
 import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
 import {
   deleteConnectionCredential,
@@ -2068,6 +2068,7 @@ export function ConnectionManager({
   const canUseCloudSync = Boolean(user && plan.cloudEnabled && !localMode);
 
   const listCloudConnections = useCallback(async () => {
+    const supabase = await getBackendClient();
     const { data, error } = await supabase
       .from("cloud_connections")
       .select("id, name, encrypted_connection, iv, salt, sort_order")
@@ -2087,6 +2088,7 @@ export function ConnectionManager({
 
   const pushLocalConnectionsToCloud = useCallback(async () => {
     if (!tryBeginCloudSync()) return;
+    const supabase = await getBackendClient();
     try {
       const localConnections = connectionsRef.current;
       const cloudConnections = await listCloudConnections();
@@ -2367,7 +2369,7 @@ export function ConnectionManager({
 
     const hydrateUser = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await (await getBackendAuth()).getSession();
         if (!mounted) return;
         console.log(
           "[AUTH TRACE] getSession resolved, session:",
@@ -2388,7 +2390,7 @@ export function ConnectionManager({
           );
           await new Promise((resolve) => setTimeout(resolve, 800));
           if (!mounted) return;
-          const { data: retryData } = await supabase.auth.getSession();
+          const { data: retryData } = await (await getBackendAuth()).getSession();
           console.log(
             "[AUTH TRACE] getSession retry resolved, session:",
             !!retryData.session,
@@ -2415,31 +2417,36 @@ export function ConnectionManager({
 
     void hydrateUser();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      console.log(
-        "[AUTH TRACE] onAuthStateChange fired, event:",
-        _event,
-        "hasSession:",
-        !!session,
-        "user:",
-        session?.user?.email || "null",
-      );
-      if (!mounted) return;
-      if (session?.user) {
-        applySessionUser(session.user, session.access_token ?? null);
-      } else {
-        await applyLocalFallback();
-      }
-      if (mounted) {
-        setAuthResolved(true);
-      }
+    let subscription: { unsubscribe: () => void } | null = null;
+    let authCancelled = false;
+    void getBackendAuth().then((auth) => {
+      if (authCancelled) return;
+      const { data } = auth.onAuthStateChange(async (_event: any, session: any) => {
+        console.log(
+          "[AUTH TRACE] onAuthStateChange fired, event:",
+          _event,
+          "hasSession:",
+          !!session,
+          "user:",
+          session?.user?.email || "null",
+        );
+        if (!mounted) return;
+        if (session?.user) {
+          applySessionUser(session.user, session.access_token ?? null);
+        } else {
+          await applyLocalFallback();
+        }
+        if (mounted) {
+          setAuthResolved(true);
+        }
+      });
+      subscription = data.subscription;
     });
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      authCancelled = true;
+      subscription?.unsubscribe();
     };
   }, []);
 
@@ -2544,7 +2551,7 @@ export function ConnectionManager({
   };
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await (await getBackendAuth()).signOut();
     if (error) {
       toast.error(error.message);
       return;

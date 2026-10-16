@@ -191,9 +191,10 @@ async function persistEntitlement(userId: string, envelope: SignedEntitlementEnv
 }
 
 async function fetchSignedEntitlement(accessToken: string) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
-  const response = await fetch(`${supabaseUrl}/functions/v1/entitlement`, {
+  const { getEdgeFunctionUrl } = await import("@/lib/supabase/backend-client");
+  const url = getEdgeFunctionUrl("entitlement");
+  if (!url) throw new Error("Missing NEXT_PUBLIC_NEON_URL or NEXT_PUBLIC_SUPABASE_URL");
+  const response = await fetch(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -295,26 +296,14 @@ async function resolveUserEntitlementInternal({ userId, accessToken, forceRefres
   return buildDefaultResolvedEntitlement(userId);
 }
 
-export async function resolveUserEntitlement(options: ResolveOptions): Promise<ResolvedUserEntitlement> {
-  const { userId, accessToken, forceRefresh = false } = options;
-  if (!userId || userId === "local" || !accessToken) {
-    return buildDefaultResolvedEntitlement(userId);
-  }
-
-  const cachedMemory = entitlementMemory.get(userId);
-  if (cachedMemory && !forceRefresh && !cachedMemory.refreshDue) {
-    return cachedMemory;
-  }
-
-  const inflightKey = `${userId}:${forceRefresh ? "force" : "default"}`;
-  const inflight = entitlementInflight.get(inflightKey);
-  if (inflight) return inflight;
-
-  const task = resolveUserEntitlementInternal(options).finally(() => {
-    entitlementInflight.delete(inflightKey);
-  });
-  entitlementInflight.set(inflightKey, task);
-  return task;
+// App is fully free: entitlements are no longer fetched, persisted, or
+// gated. resolveUserEntitlement is now a synchronous-feeling stub kept for
+// backward compatibility with callers (use-entitlement-state, workspace
+// context, billing pages) that expect a ResolvedUserEntitlement.
+export async function resolveUserEntitlement(
+  options: ResolveOptions,
+): Promise<ResolvedUserEntitlement> {
+  return buildDefaultResolvedEntitlement(options?.userId ?? null);
 }
 
 export function shouldForceRefreshOnFocus() {

@@ -13,6 +13,8 @@ function apiBase(): string {
 }
 
 function refreshFunctionUrl(): string {
+  const neonUrl = (process.env.NEXT_PUBLIC_NEON_URL || "").replace(/\/+$/, "");
+  if (neonUrl) return `${neonUrl}/functions/v1/planetscale-oauth-refresh`;
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
   return `${supabaseUrl}/functions/v1/planetscale-oauth-refresh`;
 }

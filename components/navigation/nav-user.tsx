@@ -20,7 +20,7 @@ import { EditProfileModal } from "@/components/edit-profile-modal";
 import type { ProfileData, PlanTier } from "@/components/edit-profile-modal";
 import FallbackAvatar from "@/components/fallback-avatar";
 import { getStoredUserProfile } from "@/lib/api/actions-client";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 import { useEntitlementState } from "@/hooks/use-entitlement-state";
 import { activateLocalUserProfile, getStoredLocalModeName } from "@/lib/auth/user-profile";
 import { toast } from "sonner";
@@ -90,28 +90,36 @@ export function NavUser({ name, email, avatar, dropdownAlign = "end", dropdownSi
 			}).catch(() => {});
 		};
 
-		supabase.auth.getSession().then(({ data }) => {
-			const u = data.session?.user;
-			if (u) {
-				applySession(u, data.session!.access_token ?? null);
-			} else {
-				applyLocal();
-			}
-		});
+		void getBackendAuth().then((auth) =>
+			auth.getSession().then(({ data }: any) => {
+				if (!mounted) return;
+				const u = data.session?.user;
+				if (u) {
+					applySession(u, data.session!.access_token ?? null);
+				} else {
+					applyLocal();
+				}
+			}),
+		);
 
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			if (session?.user) {
-				applySession(session.user, session.access_token ?? null);
-			} else {
-				applyLocal();
-			}
+		let subscription: { unsubscribe: () => void } | null = null;
+		let cancelled = false;
+		void getBackendAuth().then((auth) => {
+			if (cancelled) return;
+			const { data } = auth.onAuthStateChange((_event: any, session: any) => {
+				if (session?.user) {
+					applySession(session.user, session.access_token ?? null);
+				} else {
+					applyLocal();
+				}
+			});
+			subscription = data.subscription;
 		});
 
 		return () => {
 			mounted = false;
-			subscription.unsubscribe();
+			cancelled = true;
+			subscription?.unsubscribe();
 		};
 	}, []);
 
@@ -146,7 +154,7 @@ export function NavUser({ name, email, avatar, dropdownAlign = "end", dropdownSi
 			try {
 				const [profileRes, sessionRes] = await Promise.all([
 					getStoredUserProfile(),
-					supabase.auth.getSession(),
+					(await getBackendAuth()).getSession(),
 				]);
 
 				const supabaseUser = sessionRes.data.session?.user;
@@ -218,7 +226,7 @@ export function NavUser({ name, email, avatar, dropdownAlign = "end", dropdownSi
 							className="w-full cursor-pointer"
 							variant="destructive"
 							onSelect={async () => {
-								const { error } = await supabase.auth.signOut();
+								const { error } = await (await getBackendAuth()).signOut();
 								if (error) {
 									toast.error(error.message);
 									return;

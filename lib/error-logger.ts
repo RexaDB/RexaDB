@@ -36,7 +36,8 @@ export async function logAppError(payload: ErrorLogPayload): Promise<void> {
   }
 
   try {
-    const { supabase } = await import("@/lib/supabase/client");
+    const { getBackendClient } = await import("@/lib/supabase/backend-client");
+    const supabase = await getBackendClient();
     await supabase.rpc("log_app_error", {
       p_error_type: safe.errorType,
       p_message: safe.message,

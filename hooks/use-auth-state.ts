@@ -9,7 +9,7 @@ import {
   getSupabaseUserDisplayName,
   syncAuthenticatedUserProfile,
 } from "@/lib/auth/user-profile";
-import { supabase } from "@/lib/supabase/client";
+import { getBackendAuth } from "@/lib/supabase/backend-client";
 
 const SESSION_RETRY_DELAYS_MS = [0, 500, 1500];
 
@@ -41,7 +41,7 @@ async function resolveSessionWithRetries() {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
-    const { data } = await supabase.auth.getSession();
+    const { data } = await (await getBackendAuth()).getSession();
     if (data.session?.user) {
       return data.session;
     }
@@ -133,16 +133,21 @@ export function useAuthState() {
 
     void apply(hydrateAuthState);
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      void apply(() => (session?.user ? buildSessionState(session) : buildLocalState()));
+    let subscription: { unsubscribe: () => void } | null = null;
+    let cancelled = false;
+    void getBackendAuth().then((auth) => {
+      if (cancelled) return;
+      const { data } = auth.onAuthStateChange((_event: any, session: any) => {
+        void apply(() => (session?.user ? buildSessionState(session) : buildLocalState()));
+      });
+      subscription = data.subscription;
     });
 
     return () => {
       mounted = false;
+      cancelled = true;
       runIdRef.current += 1;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, [hydrateAuthState]);
 
