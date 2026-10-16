@@ -4604,6 +4604,7 @@ export function ConnectionManager({
             <ArrowRightLeft className="w-3.5 h-3.5" />
             Transfer Project
           </DropdownMenuItem>
+          {!workspaceMode && renderFolderSubmenu(conn, "3")}
           {workspaceMode && (
             <DropdownMenuItem
               onClick={(e) => {
