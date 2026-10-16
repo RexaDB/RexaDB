@@ -72,13 +72,15 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
   if (!settings) return null;
 
   const active = openProvider ? providers.find((p) => p.id === openProvider) : null;
-  const activeConfig = openProvider ? settings.providers[openProvider] : undefined;
+  const activeConfig = openProvider
+    ? settings.providers[openProvider] ?? { apiKey: "", models: [] as string[], baseUrl: "" }
+    : undefined;
   const activePinned = openProvider ? PINNED_PROVIDERS.includes(openProvider) : false;
 
   const openDialog = (id: string) => {
     if (!settings.providers[id]) addProvider(id);
-    setOpenProvider(id);
     setModelDraft("");
+    setOpenProvider(id);
   };
 
   const addModel = () => {
@@ -153,9 +155,14 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
         )}
       </div>
 
-      <Dialog open={!!openProvider} onOpenChange={(open) => !open && setOpenProvider(null)}>
+      <Dialog
+        open={!!openProvider && !!active}
+        onOpenChange={(open) => {
+          if (!open) setOpenProvider(null);
+        }}
+      >
         <DialogContent className="max-w-sm">
-          {active && activeConfig && (
+          {active && activeConfig ? (
             <>
               <DialogHeader>
                 <div className="flex items-center gap-2.5">
@@ -177,6 +184,7 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
 
                 <ModelListEditor
                   provider={active.id}
+                  providerLabel={labelFor(active.id)}
                   apiKey={activeConfig.apiKey}
                   baseUrl={activeConfig.baseUrl}
                   catalogModels={active.models || []}
@@ -216,7 +224,7 @@ export function AiProvidersPage({ onBack }: { onBack?: () => void }) {
                 )}
               </div>
             </>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
     </section>

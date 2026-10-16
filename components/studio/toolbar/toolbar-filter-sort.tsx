@@ -1006,6 +1006,20 @@ export function ToolbarFilterSort({
     setIsFilterMenuOpen(true);
   }, [filterQuery, columns, dbType]);
 
+  const activeFilterCount = React.useMemo(() => {
+    if (!filterQuery.trim()) return 0;
+    const { rules, remainder } = decomposeFilterQuery(filterQuery, columns, dbType);
+    const ruleCount = rules.filter(
+      (rule) =>
+        rule.enabled &&
+        rule.column &&
+        rule.column !== "none" &&
+        rule.operator &&
+        rule.operator !== "none",
+    ).length;
+    return ruleCount + (remainder.trim() ? 1 : 0);
+  }, [filterQuery, columns, dbType]);
+
   const handleApplyFilter = React.useCallback(() => {
     const visualClauses = draftRules
       .map((rule) => buildRuleClause(rule, dbType))
@@ -1055,10 +1069,15 @@ export function ToolbarFilterSort({
               variant="outline"
               size="sm"
               onClick={prepareDialog}
-              className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${filterQuery.trim() ? "rounded-r-none text-blue-500 bg-blue-500/10" : ""}`}
+              className={`font-normal dark:border-white/15 dark:bg-white/[0.02] ${filterQuery.trim() ? "rounded-r-none" : ""}`}
             >
               <Filter className="w-3.5 h-3.5" />
               {filterQuery.trim() ? "Filtered" : "Filter"}
+              {activeFilterCount > 0 ? (
+                <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[10px] font-medium tabular-nums text-blue-600 dark:text-blue-400">
+                  {activeFilterCount}
+                </span>
+              ) : null}
             </Button>
           </PopoverTrigger>
 
@@ -1066,7 +1085,7 @@ export function ToolbarFilterSort({
             <Button
               variant="outline"
               size="icon-sm"
-              className="-ml-px rounded-l-none bg-blue-500/10 text-blue-500 hover:text-blue-500 dark:border-white/15 dark:bg-white/[0.02]"
+              className="-ml-px rounded-l-none border-l-0 font-normal dark:border-white/15 dark:bg-white/[0.02]"
               aria-label="Clear filters"
               title="Clear filters"
               onClick={handleClearFilters}

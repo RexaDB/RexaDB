@@ -265,6 +265,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
 
                   <ModelListEditor
                     provider={provider}
+                    providerLabel={labelFor(provider)}
                     apiKey={config.apiKey}
                     baseUrl={config.baseUrl}
                     catalogModels={catalogById.get(provider)?.models || []}

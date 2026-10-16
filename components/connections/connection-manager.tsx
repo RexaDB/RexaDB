@@ -5665,16 +5665,23 @@ export function ConnectionManager({
                             })}
                           </div>
                         ) : (
-                          <ul aria-label="Connections" className="space-y-3">
+                          <ul
+                            aria-label="Connections"
+                            className="overflow-hidden rounded-lg border border-border bg-card"
+                          >
                             {visibleConnections.map((conn, index) => {
                               const { provider, providerCard, providerLogo, env } = getProviderInfo(conn);
                               const isOpening = openingConnectionIds.has(conn.id);
+                              const isLast = index === visibleConnections.length - 1;
 
                               return (
                                 <li
                                   key={conn.id}
                                   data-conn-index={index}
-                                  className="flex items-center gap-3 rounded-lg border border-studio-border/60 bg-card px-4 py-4 hover:border-studio-border hover:bg-studio-row-hover"
+                                  className={cn(
+                                    "group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40",
+                                    !isLast && "border-b border-border",
+                                  )}
                                 >
                                   <button
                                     type="button"
@@ -5684,22 +5691,20 @@ export function ConnectionManager({
                                     })}
                                     className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                                   >
-                                    <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-                                      {provider === "spacetimedb" ? (
-                                        <SpacetimeDbLogo className="size-6 text-foreground" />
-                                      ) : (
-                                        <Image
-                                          src={providerCard?.logoSrc ?? providerLogo}
-                                          alt=""
-                                          width={24}
-                                          height={24}
-                                          className="rounded object-contain"
-                                        />
-                                      )}
-                                    </span>
+                                    {provider === "spacetimedb" ? (
+                                      <SpacetimeDbLogo className="size-5 shrink-0 text-foreground" />
+                                    ) : (
+                                      <Image
+                                        src={providerCard?.logoSrc ?? providerLogo}
+                                        alt=""
+                                        width={20}
+                                        height={20}
+                                        className="block size-5 shrink-0 rounded-md object-contain"
+                                      />
+                                    )}
 
                                     <span className="min-w-0 flex-1">
-                                      <span className="flex items-center gap-2">
+                                      <span className="flex min-w-0 items-center gap-2">
                                         <span className="truncate text-sm font-medium text-foreground" title={conn.name}>
                                           {conn.name}
                                         </span>
@@ -5708,23 +5713,23 @@ export function ConnectionManager({
                                         )}
                                       </span>
 
-                                      <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                                      <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                                         <span className="shrink-0">{providerCard?.label ?? "PostgreSQL"}</span>
-                                        <span aria-hidden="true" className="size-0.5 shrink-0 rounded-full bg-muted-foreground/60" />
-                                        <span className="truncate font-mono" title={getConnectionTarget(conn)}>
+                                        <span aria-hidden="true" className="text-muted-foreground/50">·</span>
+                                        <span className="truncate" title={getConnectionTarget(conn)}>
                                           {getConnectionTarget(conn)}
                                         </span>
                                       </span>
                                     </span>
                                   </button>
 
-                                  {isOpening && (
-                                    <span role="status" className="shrink-0 text-xs text-muted-foreground">Connecting…</span>
-                                  )}
-
-                                  {env && <EnvironmentBadge environment={env} />}
-
-                                  {renderConnectionListActions(conn)}
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    {isOpening && (
+                                      <span role="status" className="text-xs text-muted-foreground">Connecting…</span>
+                                    )}
+                                    {env && <EnvironmentBadge environment={env} />}
+                                    {renderConnectionListActions(conn)}
+                                  </div>
                                 </li>
                               );
                             })}

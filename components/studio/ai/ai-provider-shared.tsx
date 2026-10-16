@@ -44,6 +44,7 @@ export function ModelListEditor({
   catalogModels,
   onSelect,
   addLabel = "Add",
+  providerLabel,
 }: {
   models: string[];
   draft: string;
@@ -56,6 +57,7 @@ export function ModelListEditor({
   catalogModels: AiProviderModel[];
   onSelect: (model: string) => void;
   addLabel?: string;
+  providerLabel?: string;
 }) {
   return (
     <div className="space-y-1.5">
@@ -69,6 +71,7 @@ export function ModelListEditor({
         catalogModels={catalogModels}
         selectedModels={models}
         onSelect={onSelect}
+        providerLabel={providerLabel}
       />
 
       <div className="space-y-1.5">
