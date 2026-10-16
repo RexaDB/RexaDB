@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Plus, X, ArrowRight } from "@/lib/icon-theme/lucide-react";
+import { ArrowRight } from "@/lib/icon-theme/lucide-react";
 
 import {
   Accordion,
@@ -50,7 +50,7 @@ function ProviderAvatar({ provider, label }: { provider: string; label: string }
 }
 
 export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () => void }) {
-  const { settings, updateSettings, updateProvider, labelFor } = useAiProviderSettings();
+  const { settings, catalogById, updateSettings, updateProvider, labelFor } = useAiProviderSettings();
   const [openItem, setOpenItem] = useState<string>("");
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
 
@@ -264,6 +264,13 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
                   />
 
                   <ModelListEditor
+                    provider={provider}
+                    apiKey={config.apiKey}
+                    baseUrl={config.baseUrl}
+                    catalogModels={catalogById.get(provider)?.models || []}
+                    onSelect={(model) => updateProvider(provider, {
+                      models: Array.from(new Set([...config.models, model])),
+                    })}
                     models={config.models}
                     draft={modelDrafts[provider] || ""}
                     onDraftChange={(value) =>
