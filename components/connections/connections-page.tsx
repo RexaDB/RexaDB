@@ -4,14 +4,12 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
-import { ConnectionAnalytics } from "@/components/connections/connection-analytics";
 import { AppShell as ModernUIShell } from "@/components/app-shell/resolved-shell";
 import type { ModernUIRailItem } from "@/components/app-shell/modern-ui-rail";
 import { AppSettingsView } from "@/components/app-settings-view";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { OnboardingFlow } from "@/components/onboarding/onboarding-flow";
-import { ArrowLeft } from "@/lib/icon-theme/lucide-react";
 import type { AppTab } from "@/components/app-shell/app-shared";
 import { Connection } from "@/lib/db/schema";
 import { getConnectionsResult, getStoredUserProfile } from "@/lib/api/actions-client";
@@ -81,9 +79,6 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  // Used only in standalone (non-embedded) mode to show a connection's
-  // analytics full-page, since there is no tab system / shell around it.
-  const [standaloneAnalytics, setStandaloneAnalytics] = useState<Connection | null>(null);
   const [browserUrls, setBrowserUrls] = useState<Record<string, string>>({});
   const keybindings = useMemo(() => getDefaultKeybindings(), []);
 
@@ -478,7 +473,6 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
             newConnectionTrigger={newConnectionTrigger}
             isAnalyticsEnabled={false}
             onAnalyticsToggle={() => {}}
-            onViewAnalytics={(id) => handleSelectConnection(id)}
             onOpenSupabaseAccounts={() => openTab(SUPABASE_TAB)}
             onOpenSpacetimedbAccounts={() => openTab(SPACETIMEDB_TAB)}
             onOpenNeonAccounts={() => openTab(NEON_TAB)}
@@ -545,36 +539,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
     </>
   );
 
-  const standalone = (() => {
-    if (standaloneAnalytics) {
-      return (
-        <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg text-foreground">
-          <div className="flex shrink-0 items-center gap-2 border-b border-studio-border bg-studio-header-bg/90 px-4 z-20">
-            <div className="flex h-12 items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-1 text-muted-foreground hover:text-foreground"
-                onClick={() => setStandaloneAnalytics(null)}
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
-              <span className="text-sm font-medium truncate">
-                Analytics — {standaloneAnalytics.name}
-              </span>
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1">
-            <ConnectionAnalytics
-              connectionId={standaloneAnalytics.id}
-              connection={standaloneAnalytics}
-            />
-          </div>
-        </div>
-      );
-    }
-    return (
+  const standalone = (
       <div className="flex h-screen min-h-0 w-full flex-col overflow-hidden bg-studio-bg text-foreground">
         {canUseDesktop && (
           <header
@@ -601,16 +566,11 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
               newConnectionTrigger={newConnectionTrigger}
               isAnalyticsEnabled={false}
               onAnalyticsToggle={() => {}}
-              onViewAnalytics={(id) => {
-                const conn = connections.find((c) => c.id === id);
-                if (conn) setStandaloneAnalytics(conn);
-              }}
             />
           </div>
         </div>
       </div>
-    );
-  })();
+  );
 
   return (
     <>

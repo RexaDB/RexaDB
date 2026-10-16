@@ -389,7 +389,6 @@ export function ConnectionManager({
   embedded = false,
   isAnalyticsEnabled,
   onAnalyticsToggle,
-  onViewAnalytics,
   editConnectionId = null,
   newConnectionTrigger = 0,
   initialScreen = "list",
@@ -407,7 +406,6 @@ export function ConnectionManager({
   embedded?: boolean;
   isAnalyticsEnabled?: boolean;
   onAnalyticsToggle?: (enabled: boolean) => void;
-  onViewAnalytics?: (connectionId: number) => void;
   editConnectionId?: number | null;
   newConnectionTrigger?: number;
   initialScreen?: ConnectionScreen;
@@ -4616,14 +4614,6 @@ export function ConnectionManager({
               <Eye className="w-3 h-3" /> View Credentials
             </DropdownMenuItem>
           )}
-          {onViewAnalytics && (
-            <DropdownMenuItem
-              onClick={() => onViewAnalytics(conn.id)}
-              className="gap-2 text-xs focus:bg-muted/50"
-            >
-              View Analytics
-            </DropdownMenuItem>
-          )}
           {can("connections.delete") && (
             <>
               <DropdownMenuSeparator className="bg-border/60" />
@@ -5610,17 +5600,6 @@ export function ConnectionManager({
                                                 View Credentials
                                               </DropdownMenuItem>
                                             </>
-                                          )}
-                                          {onViewAnalytics && (
-                                            <DropdownMenuItem
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                onViewAnalytics(conn.id);
-                                              }}
-                                              className="gap-2 focus:bg-muted/50"
-                                            >
-                                              View Analytics
-                                            </DropdownMenuItem>
                                           )}
                                           {can("connections.delete") && (
                                             <>
