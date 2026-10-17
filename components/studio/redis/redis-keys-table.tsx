@@ -24,16 +24,16 @@ export function RedisKeysTable({
     <div className="px-8 flex-1 overflow-hidden flex flex-col min-h-0">
       <div className="border border-border rounded-lg overflow-hidden flex flex-col flex-1 bg-card/40 shadow-sm min-h-0">
         <div className="grid grid-cols-[1.4fr_120px_120px_120px] bg-muted/30 border-b border-border py-3 px-4">
-          <span className="text-xs font-bold text-foreground/80tracking-widest">
+          <span className="text-xs font-bold text-foreground/80 tracking-widest">
             Key
           </span>
-          <span className="text-xs font-bold text-foreground/80tracking-widest">
+          <span className="text-xs font-bold text-foreground/80 tracking-widest">
             Type
           </span>
-          <span className="text-xs font-bold text-foreground/80tracking-widest">
+          <span className="text-xs font-bold text-foreground/80 tracking-widest">
             TTL
           </span>
-          <span className="text-xs font-bold text-foreground/80tracking-widest">
+          <span className="text-xs font-bold text-foreground/80 tracking-widest">
             Size
           </span>
         </div>
@@ -43,7 +43,7 @@ export function RedisKeysTable({
             <div
               key={entry.key}
               onClick={() => onKeyClick(entry.key)}
-              className="grid grid-cols-[1.4fr_120px_120px_120px] items-center py-4 px-4 hover:bg-muted/20 transition-colors group cursor-pointer"
+              className="grid grid-cols-[1.4fr_120px_120px_120px] items-center py-4 px-4 hover:bg-studio-row-hover transition-colors group cursor-pointer"
             >
               <span className="text-xs font-bold text-foreground tracking-tight truncate">
                 {entry.key}

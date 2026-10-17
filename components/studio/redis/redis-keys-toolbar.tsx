@@ -36,12 +36,12 @@ export function RedisKeysToolbar({
         />
 
         <div className="relative flex-1 max-w-sm group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40 group-focus-within:text-blue-500 transition-colors" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40 group-focus-within:text-primary transition-colors" />
           <Input
             placeholder="Search keys"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9 h-9 bg-background border-border focus-visible:ring-blue-500/50 text-xs placeholder:text-muted-foreground/30 shadow-sm"
+            className="pl-9 h-7 bg-background border-border focus-visible:ring-primary/50 text-xs placeholder:text-muted-foreground/30"
           />
         </div>
       </div>

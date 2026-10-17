@@ -321,12 +321,13 @@ export function RedisKeyDetails({
 
   return (
     <div className="flex-1 flex flex-col bg-studio-bg text-foreground min-h-0">
-      <div className="flex items-center justify-between border-b border-studio-border bg-background px-8 py-2.5">
+      <div className="flex items-center justify-between border-b border-border bg-background px-4 py-2.5">
         <div className="flex items-center gap-2">
           <Button
             onClick={handleSave}
             disabled={isSaving || isLoadingValue}
-            className="h-8 gap-2 bg-blue-600 px-3 text-xs text-white hover:bg-blue-700"
+            size="sm"
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Save className="h-3.5 w-3.5" />
             {isSaving ? "Saving..." : "Save"}
@@ -335,23 +336,23 @@ export function RedisKeyDetails({
             onClick={loadValue}
             disabled={isLoadingValue}
             variant="outline"
-            size="icon"
-            className="h-8 w-8 border-border bg-background text-muted-foreground hover:text-foreground"
+            size="icon-sm"
+            className="border-border bg-background text-muted-foreground hover:text-foreground"
             aria-label="Refresh"
           >
             <RefreshCcw
-              className={`h-4 w-4 ${isLoadingValue ? "animate-spin" : ""}`}
+              className={`h-3.5 w-3.5 ${isLoadingValue ? "animate-spin" : ""}`}
             />
           </Button>
           <Button
             onClick={handleDelete}
             disabled={isDeleting}
             variant="outline"
-            size="icon"
-            className="h-8 w-8 border-border bg-background text-muted-foreground hover:text-foreground"
+            size="icon-sm"
+            className="border-border bg-background text-muted-foreground hover:text-foreground"
             aria-label="Delete"
           >
-            <Trash2 className={`h-4 w-4 ${isDeleting ? "opacity-70" : ""}`} />
+            <Trash2 className={`h-3.5 w-3.5 ${isDeleting ? "opacity-70" : ""}`} />
           </Button>
         </div>
 
@@ -370,7 +371,7 @@ export function RedisKeyDetails({
           >
             <PopoverTrigger asChild>
               <button
-                className="flex h-8 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground"
+                className="flex h-7 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground"
                 type="button"
               >
                 <Clock className="h-3.5 w-3.5" />
@@ -380,9 +381,9 @@ export function RedisKeyDetails({
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              className="w-72 border-studio-border bg-studio-bg p-4 text-foreground"
+              className="w-72 border-border bg-studio-bg p-4 text-foreground"
             >
-              <div className="text-xs font-semiboldtext-muted-foreground">
+              <div className="text-xs font-semibold text-muted-foreground">
                 TTL
               </div>
               <div className="mt-3 flex items-center gap-2">
@@ -391,7 +392,7 @@ export function RedisKeyDetails({
                   onChange={(event) => setTtlDraft(event.target.value)}
                   placeholder="Value"
                   inputMode="numeric"
-                  className="h-8 bg-muted/20 border-studio-border text-sm rounded-lg"
+                  className="h-7 bg-muted/20 border-border text-sm rounded-lg"
                 />
                 <TtlUnitSelect
                   value={ttlUnit}
@@ -411,20 +412,21 @@ export function RedisKeyDetails({
                 <Button
                   onClick={handleApplyTtl}
                   disabled={isTtlSaving}
-                  className="h-8 bg-blue-600 px-4 text-xs text-white hover:bg-blue-700"
+                  size="sm"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   {isTtlSaving ? "Applying..." : "Apply"}
                 </Button>
               </div>
             </PopoverContent>
           </Popover>
-          <span className="inline-flex h-7 items-center rounded-lg border border-blue-500 bg-blue-500/30 px-2.5 text-xs font-semiboldtext-blue-400">
+          <span className="inline-flex h-7 items-center rounded-lg border border-primary bg-primary/30 px-2.5 text-xs font-semibold text-primary">
             {keyType}
           </span>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-studio-border bg-background/60 px-8 py-2 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 border-b border-border bg-background/60 px-4 py-1.5 text-sm text-muted-foreground">
         <span>Key:</span>
         <span className="font-medium text-foreground">{safeKeyInfo.key}</span>
       </div>
@@ -434,7 +436,7 @@ export function RedisKeyDetails({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           placeholder={isLoadingValue ? "Loading value..." : "Value"}
-          className="h-full w-full resize-none rounded-none border-0 bg-transparent px-8 py-4 font-mono text-xs text-foreground shadow-none focus-visible:border-0 focus-visible:ring-0"
+          className="h-full w-full resize-none rounded-none border-0 bg-transparent px-4 py-4 font-mono text-xs text-foreground shadow-none focus-visible:border-0 focus-visible:ring-0"
         />
       </div>
     </div>

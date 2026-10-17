@@ -47,7 +47,7 @@ export function RedisCreateKeyFields({
         <Input
           value={values.key}
           onChange={(e) => onChange({ key: e.target.value })}
-          className="h-9 text-xs"
+          className="h-8 text-xs"
         />
       </div>
 
@@ -95,17 +95,17 @@ export function RedisCreateKeyFields({
           <PopoverTrigger asChild>
             <button
               type="button"
-              className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground"
+              className="flex h-8 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs text-muted-foreground"
             >
-              <Clock className="h-4 w-4" />
+              <Clock className="h-3.5 w-3.5" />
               {values.ttlSeconds ? `${values.ttlSeconds}s` : "Optional"}
-              <ChevronDown className="h-4 w-4" />
+              <ChevronDown className="h-3.5 w-3.5" />
             </button>
           </PopoverTrigger>
           <PopoverContent
             align="start"
             sideOffset={6}
-            className="w-72 p-4 text-foreground bg-studio-bg border border-studio-border rounded-lg"
+            className="w-72 p-4 text-foreground bg-studio-bg border border-border rounded-lg"
           >
             <div className="flex items-center gap-2">
               <Input
@@ -114,15 +114,16 @@ export function RedisCreateKeyFields({
                 placeholder="Value"
                 value={ttlDraft}
                 onChange={(e) => setTtlDraft(e.target.value)}
-                className="h-8 bg-muted/20 border-studio-border text-sm rounded-lg"
+                className="h-7 bg-muted/20 border-border text-sm rounded-lg"
               />
               <TtlUnitSelect value={ttlUnit} onValueChange={setTtlUnit} />
             </div>
             <div className="mt-3 flex justify-end gap-2">
               <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => onChange({ ttlSeconds: "" })}
-                className="text-xs bg-muted/20 text-muted-foreground hover:bg-muted/30"
+                className="text-xs text-muted-foreground hover:bg-muted/30"
               >
                 Remove
               </Button>
@@ -135,7 +136,7 @@ export function RedisCreateKeyFields({
                     TTL_UNITS.find((u) => u.value === ttlUnit)?.multiplier || 1;
                   onChange({ ttlSeconds: String(num * unitMultiplier) });
                 }}
-                className="text-xs bg-blue-600 text-white hover:bg-blue-700"
+                className="text-xs bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 Apply
               </Button>
