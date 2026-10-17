@@ -1,7 +1,7 @@
 // fallow-ignore-file code-duplication
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -64,6 +64,7 @@ import {
   Folder,
   FolderOpen,
 } from "@/lib/icon-theme/solar-icons";
+import { KeyRound } from "@/lib/icon-theme/lucide-react";
 import {
   MoreHorizontal,
   Pencil,
@@ -100,6 +101,7 @@ import { ExtensionManagerSection } from "./extension-manager-section";
 import { parseExtensionsSidebarView } from "@/lib/extensions/sidebar-view";
 import { useExtensions } from "@/lib/extensions/react";
 import { TableContextMenuItems } from "./database/table-utils";
+import { buildRedisKeyTree, EMPTY_SEGMENT_LABEL, type RedisKeyTreeNode } from "@/lib/studio/redis-key-tree";
 import {
   copyItemName,
   getTableDerivedValues,
@@ -587,14 +589,25 @@ function ConnectionSwitcher({
       >
         <Search className="size-3.5" />
       </button>
-      <button
-        type="button"
-        aria-label="New table"
-        onClick={() => studio.openCreateTableTab?.()}
-        className={ACTION_BTN}
-      >
-        <SquarePen className="size-3.5" />
-      </button>
+      {studio.dbType === "redis" ? (
+        <button
+          type="button"
+          aria-label="New key"
+          onClick={() => studio.openCreateKeyTab?.()}
+          className={ACTION_BTN}
+        >
+          <KeyRound className="size-3.5" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label="New table"
+          onClick={() => studio.openCreateTableTab?.()}
+          className={ACTION_BTN}
+        >
+          <SquarePen className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -972,6 +985,8 @@ function SidebarFlatTableRow({
   copyDefinitionLabel,
   handleCopyItemName,
   dropdownMenuClassName = "min-w-[160px]",
+  /** Optional display label (e.g. the last segment in the Redis key tree). Falls back to the table name. */
+  label,
 }: {
   table: string;
   selectedSchema: string;
@@ -984,6 +999,7 @@ function SidebarFlatTableRow({
   copyDefinitionLabel: string;
   handleCopyItemName: (name: string) => void;
   dropdownMenuClassName?: string;
+  label?: string;
 }) {
   const securityInfo = studio.tableSecurity?.[table];
   const rlsEnabled = securityInfo?.rlsEnabled;
@@ -1071,7 +1087,7 @@ function SidebarFlatTableRow({
             )}
           >
             <ItemIcon className="size-4 shrink-0" />
-            <span className="truncate flex-1">{table}</span>
+            <span className="truncate flex-1">{label ?? table}</span>
             {(showDataApi || rlsEnabled === false) && (
               <span className="flex items-center gap-1 shrink-0">
                 {showDataApi && (
@@ -1129,6 +1145,153 @@ function SidebarFlatTableRow({
         )}
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+/** Redis key tree for the sidebar (opt-in: Settings → Database Explorer → "Redis keys tree view").
+ * Keys are split on ":" and rendered like the Tags view: tag-style folder rows,
+ * border-l indent guides, and plain SidebarFlatTableRow rows for real keys —
+ * so this reuses the existing row/chrome rather than bespoke tree styling.
+ * Hybrid nodes stay fully usable as both: clicking the label opens the key's
+ * own value, while the chevron expands it to reach child keys (e.g. "org:id"
+ * AND "org:id:status" under one "id" node). */
+function RedisKeyTree({
+  keys,
+  selectedSchema,
+  studio,
+  emptyLabel,
+  searchActive,
+}: {
+  keys: string[];
+  selectedSchema: string;
+  studio: any;
+  emptyLabel: string;
+  /** A sidebar search is applied to `keys` — expand every folder so matches deep in the tree stay reachable. */
+  searchActive: boolean;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const tree = useMemo(() => buildRedisKeyTree(keys), [keys]);
+  const { itemNoun, copyDefinitionLabel, canExportSql } =
+    getTableDerivedValues(studio.dbType);
+  // Redis has no views; the prop is required by SidebarFlatTableRow.
+  const emptyViewSet = useMemo(() => new Set<string>(), []);
+  const handleCopyItemName = useCallback(
+    (name: string) => copyItemName(name, itemNoun),
+    [itemNoun],
+  );
+
+  const toggleNode = useCallback((fullKey: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(fullKey)) next.delete(fullKey);
+      else next.add(fullKey);
+      return next;
+    });
+  }, []);
+
+  const renderKeyRow = (node: RedisKeyTreeNode) => (
+    <SidebarFlatTableRow
+      table={node.fullKey}
+      label={node.segment || EMPTY_SEGMENT_LABEL}
+      selectedSchema={selectedSchema}
+      studio={studio}
+      viewTableSet={emptyViewSet}
+      itemNoun={itemNoun}
+      openEditorLabel="Open in Redis Editor"
+      isMongo={false}
+      canExportSql={canExportSql}
+      copyDefinitionLabel={copyDefinitionLabel}
+      handleCopyItemName={handleCopyItemName}
+      dropdownMenuClassName="min-w-[160px] border border-border bg-popover shadow-2xl"
+    />
+  );
+
+  const renderChildren = (nodes: RedisKeyTreeNode[], depth: number) => (
+    // Same indent-guide container the Tags view uses for folder children.
+    <div className="relative ml-[15px] space-y-px border-l border-border/50 pl-1">
+      {renderNodes(nodes, depth)}
+    </div>
+  );
+
+  const renderNodes = (
+    nodes: RedisKeyTreeNode[],
+    depth: number,
+  ): React.ReactNode =>
+    nodes.map((node) => {
+      const hasChildren = node.children.length > 0;
+      // While a search filters `keys`, expand every folder so matching
+      // descendants are visible without manually opening each level.
+      const isExpanded = searchActive || expanded.has(node.fullKey);
+
+      if (!node.hasValue) {
+        // Valueless folder (e.g. "org"): identical to a tag folder row, click toggles.
+        const FolderIcon = isExpanded ? FolderOpen : Folder;
+        return (
+          <div key={node.fullKey} className="min-w-0">
+            <button
+              type="button"
+              onClick={() => toggleNode(node.fullKey)}
+              title={node.fullKey}
+              className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted-foreground transition-colors select-none hover:bg-white/5 hover:text-foreground"
+            >
+              <FolderIcon className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-left font-normal">
+                {node.segment || EMPTY_SEGMENT_LABEL}
+              </span>
+            </button>
+            {hasChildren && isExpanded && renderChildren(node.children, depth + 1)}
+          </div>
+        );
+      }
+
+      // Real key (leaf or hybrid): the same row the flat key list renders.
+      // Hybrid keys get a chevron in front to expand their children without
+      // losing access to the row's click-to-open and menu actions.
+      return (
+        <div key={node.fullKey} className="min-w-0">
+          {hasChildren ? (
+            <div className="flex min-w-0 items-center gap-0.5">
+              <button
+                type="button"
+                aria-expanded={isExpanded}
+                aria-label={
+                  isExpanded ? `Collapse ${node.fullKey}` : `Expand ${node.fullKey}`
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleNode(node.fullKey);
+                }}
+                className="ml-1 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-white/10 hover:text-foreground"
+              >
+                <ChevronRight
+                  className={cn(
+                    "size-3 shrink-0 transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              </button>
+              <div className="min-w-0 flex-1">{renderKeyRow(node)}</div>
+            </div>
+          ) : (
+            renderKeyRow(node)
+          )}
+          {hasChildren && isExpanded && renderChildren(node.children, depth + 1)}
+        </div>
+      );
+    });
+
+  if (tree.length === 0) {
+    return (
+      <div className="px-2 py-2 text-xs text-muted-foreground">{emptyLabel}</div>
+    );
+  }
+
+  return (
+    // Scroll container: the sidebar parent clips overflow, so the tree must
+    // scroll its own rows like the virtualized/virtualized-adjacent lists do.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-px overflow-y-auto py-0.5">
+      {renderNodes(tree, 0)}
+    </div>
   );
 }
 
@@ -1226,6 +1389,9 @@ function TablesPanel({ studio }: { studio: any }) {
           ? "Redis Editor"
           : "Editor";
   const openEditorLabel = `Open in ${editorLabel}`;
+  const isRedis = studio.dbType === "redis";
+  // Opt-in (Settings → Database Explorer → "Redis keys tree view").
+  const redisTreeView = isRedis && studio.redisKeyTreeView === true;
   const viewTableSet = new Set<string>(studio.viewTables ?? []);
   // Union base tables + views: Oracle/MSSQL/JDBC backends split them across
   // getTables/getViews, so iterating `tables` alone hides every view.
@@ -1289,7 +1455,13 @@ function TablesPanel({ studio }: { studio: any }) {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={schemaExplorer ? "Search..." : "Search tables..."}
+            placeholder={
+              schemaExplorer
+                ? "Search..."
+                : isRedis
+                  ? "Search keys..."
+                  : "Search tables..."
+            }
             className="h-8 pl-7 pr-8 text-sm"
           />
           <Popover open={filterOpen} onOpenChange={setFilterOpen}>
@@ -1387,18 +1559,33 @@ function TablesPanel({ studio }: { studio: any }) {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <button
-          type="button"
-          aria-label="New table"
-          title="New table"
-          onClick={() => studio.openCreateTableTab?.()}
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-white/[0.04] text-muted-foreground transition-colors",
-            "hover:bg-white/[0.06] hover:text-foreground",
-          )}
-        >
-          <Plus className="size-3.5" />
-        </button>
+        {studio.dbType === "redis" ? (
+          <button
+            type="button"
+            aria-label="New key"
+            title="New key"
+            onClick={() => studio.openCreateKeyTab?.()}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-white/[0.04] text-muted-foreground transition-colors",
+              "hover:bg-white/[0.06] hover:text-foreground",
+            )}
+          >
+            <KeyRound className="size-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="New table"
+            title="New table"
+            onClick={() => studio.openCreateTableTab?.()}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-white/[0.04] text-muted-foreground transition-colors",
+              "hover:bg-white/[0.06] hover:text-foreground",
+            )}
+          >
+            <Plus className="size-3.5" />
+          </button>
+        )}
       </div>
       {/* A-Z / Tags view toggle + table count — under the schema picker.
           Squeezes progressively on narrow sidebars so nothing clips:
@@ -1586,6 +1773,14 @@ function TablesPanel({ studio }: { studio: any }) {
               )}
             />
           </div>
+        ) : redisTreeView ? (
+          <RedisKeyTree
+            keys={filtered}
+            selectedSchema={selectedSchema}
+            studio={studio}
+            emptyLabel={sidebarQ ? "No matches" : "No keys"}
+            searchActive={sidebarQ.length > 0}
+          />
         ) : filtered.length === 0 ? (
           <div className="px-2 py-2 text-xs text-muted-foreground">
             {q ? "No matches" : "No tables"}

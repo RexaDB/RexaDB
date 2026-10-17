@@ -80,6 +80,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   databaseExplorer: boolean;
   showTableCount: boolean;
   tableExpansion: boolean;
+  redisKeyTreeView: boolean;
   hideWindowActions: boolean;
   rlsPolicyTabEditor: boolean;
   autoClosePane: boolean;
@@ -149,6 +150,9 @@ export function useGlobalStudioSettings(persist = false) {
   const [databaseExplorer, setDatabaseExplorer] = useState<boolean>(false);
   const [showTableCount, setShowTableCount] = useState<boolean>(true);
   const [tableExpansion, setTableExpansion] = useState<boolean>(true);
+  // Redis sidebar key tree (Settings → Database Explorer). Default matches the
+  // legacy flat key list so existing users see no behavior change.
+  const [redisKeyTreeView, setRedisKeyTreeView] = useState<boolean>(false);
   const [hideWindowActions, setHideWindowActions] = useState<boolean>(false);
   const [rlsPolicyTabEditor, setRlsPolicyTabEditor] = useState<boolean>(false);
   const [autoClosePane, setAutoClosePane] = useState<boolean>(false);
@@ -256,6 +260,9 @@ export function useGlobalStudioSettings(persist = false) {
     }
     if (d.tableExpansion !== undefined) {
       setTableExpansion(d.tableExpansion);
+    }
+    if (d.redisKeyTreeView !== undefined) {
+      setRedisKeyTreeView(d.redisKeyTreeView);
     }
     if (d.hideWindowActions !== undefined) {
       setHideWindowActions(d.hideWindowActions);
@@ -377,6 +384,7 @@ export function useGlobalStudioSettings(persist = false) {
     databaseExplorer,
     showTableCount,
     tableExpansion,
+    redisKeyTreeView,
     hideWindowActions,
     rlsPolicyTabEditor,
     autoClosePane,
@@ -640,6 +648,7 @@ export function useGlobalStudioSettings(persist = false) {
       databaseExplorer,
       showTableCount,
       tableExpansion,
+      redisKeyTreeView,
       hideWindowActions,
       rlsPolicyTabEditor,
       autoClosePane,
@@ -771,6 +780,7 @@ export function useGlobalStudioSettings(persist = false) {
     databaseExplorer,
     showTableCount,
     tableExpansion,
+    redisKeyTreeView,
     hideWindowActions,
     rlsPolicyTabEditor,
     autoClosePane,
@@ -892,6 +902,8 @@ export function useGlobalStudioSettings(persist = false) {
     setShowTableCount,
     tableExpansion,
     setTableExpansion,
+    redisKeyTreeView,
+    setRedisKeyTreeView,
     hideWindowActions,
     setHideWindowActions,
     rlsPolicyTabEditor,

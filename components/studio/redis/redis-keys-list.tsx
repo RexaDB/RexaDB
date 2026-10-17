@@ -5,6 +5,7 @@ import type { RedisKeyInfo } from "@/types/redis";
 import { RedisKeysHeader } from "./redis-keys-header";
 import { RedisKeysToolbar } from "./redis-keys-toolbar";
 import { RedisKeysTable } from "./redis-keys-table";
+import { DbListPage } from "../database/db-list-layout";
 
 interface RedisKeysListProps {
   keys: RedisKeyInfo[];
@@ -35,7 +36,7 @@ export function RedisKeysList({
   }, [keys, search]);
 
   return (
-    <div className="flex-1 flex flex-col bg-studio-bg overflow-hidden min-h-0">
+    <DbListPage>
       <RedisKeysHeader selectedDatabase={selectedDatabase} />
       <RedisKeysToolbar
         search={search}
@@ -48,6 +49,6 @@ export function RedisKeysList({
         isLoading={isLoading}
       />
       <RedisKeysTable keys={filtered} search={search} onKeyClick={onKeyClick} />
-    </div>
+    </DbListPage>
   );
 }

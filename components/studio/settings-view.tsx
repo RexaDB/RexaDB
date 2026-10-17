@@ -381,6 +381,8 @@ interface StudioSettingsModel {
   setRlsPolicyTabEditor: (value: boolean) => void;
   tableExpansion: boolean;
   setTableExpansion: (value: boolean) => void;
+  redisKeyTreeView: boolean;
+  setRedisKeyTreeView: (value: boolean) => void;
   confirmSheetClose: boolean;
   setConfirmSheetClose: (value: boolean) => void;
   sidebarToggleBeforeConnection: boolean;
@@ -852,6 +854,8 @@ export function SettingsView({
     setShowTableCount,
     tableExpansion,
     setTableExpansion,
+    redisKeyTreeView,
+    setRedisKeyTreeView,
     hideWindowActions,
     setHideWindowActions,
     autoClosePane,
@@ -2654,6 +2658,14 @@ export function SettingsView({
                     description="Show the number of tables on the right of the A-Z / Tags row in the Tables sidebar."
                     value={showTableCount}
                     onChange={setShowTableCount}
+                  />
+
+                  <SwitchSetting
+                    settingId="redis-key-tree-view"
+                    title="Redis keys tree view"
+                    description="For Redis connections, show keys in the sidebar as a nested tree split on ':' (org:id → org › id). Parent keys stay clickable to open their own value, and expandable to reach child keys."
+                    value={redisKeyTreeView}
+                    onChange={setRedisKeyTreeView}
                   />
                 </div>
 

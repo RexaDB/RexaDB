@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { RedisCreateKeyInput } from "@/types/redis";
 import { RedisCreateKeyFields, type RedisCreateKeyFieldValues } from "./redis-create-key-fields";
+import { DbListPage } from "../database/db-list-layout";
 
 const emptyValues: RedisCreateKeyFieldValues = { key: "", type: "string", rawValue: "", ttlSeconds: "" };
 
@@ -22,7 +23,7 @@ export function RedisCreateKeyView({ onCreateKey, onClose }: RedisCreateKeyViewP
     if (ok) onClose();
   };
   return (
-    <div className="flex-1 flex flex-col bg-studio-bg">
+    <DbListPage>
       <div className="p-8 pb-4">
         <h1 className="text-sm font-semibold text-foreground tracking-tight">New Redis Key</h1>
         <p className="text-sm text-muted-foreground mt-1">Create a key with value and optional TTL.</p>
@@ -30,10 +31,10 @@ export function RedisCreateKeyView({ onCreateKey, onClose }: RedisCreateKeyViewP
       <div className="px-8 pb-8 max-w-2xl w-full">
         <RedisCreateKeyFields values={values} onChange={(next) => setValues((prev) => ({ ...prev, ...next }))} />
         <div className="mt-6 flex items-center gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={isSaving}>Cancel</Button>
-          <Button onClick={handleCreate} disabled={isSaving}>{isSaving ? "Creating..." : "Create Key"}</Button>
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isSaving}>Cancel</Button>
+          <Button size="sm" onClick={handleCreate} disabled={isSaving}>{isSaving ? "Creating..." : "Create Key"}</Button>
         </div>
       </div>
-    </div>
+    </DbListPage>
   );
 }

@@ -27,14 +27,14 @@ export function TtlUnitSelect({
 }: TtlUnitSelectProps) {
   return (
     <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger className="h-9 w-[120px] rounded-lg bg-muted/20 border-studio-border text-sm">
+      <SelectTrigger className="h-8 w-[120px] rounded-lg bg-muted/20 border-border text-sm">
         <SelectValue placeholder="Seconds" />
       </SelectTrigger>
       <SelectContent
         position="popper"
         align="start"
         sideOffset={6}
-        className="bg-studio-bg border-studio-border rounded-lg p-1"
+        className="bg-studio-bg border-border rounded-lg p-1"
       >
         {TTL_UNITS.map((unit) => (
           <SelectItem
