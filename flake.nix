@@ -51,7 +51,7 @@
           lib = pkgs.lib;
           # Keep in sync with package.json + src-tauri/tauri.conf.json
           # (release-bump.sh updates this too).
-          version = "1.3.24";
+          version = "1.3.25";
           isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
           frontend = pkgs.callPackage ./nix/frontend.nix { inherit version; src = self; };
