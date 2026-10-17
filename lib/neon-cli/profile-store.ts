@@ -42,7 +42,16 @@ export function getNeonCliAccounts(): NeonCliAccount[] {
 export function addNeonCliAccount(profileName: string, label?: string | null): NeonCliAccount {
   const accounts = getNeonCliAccounts();
   const existing = accounts.find((a) => a.profileName === profileName);
-  if (existing) return existing;
+  if (existing) {
+    if (label && existing.label !== label) {
+      const next = accounts.map((a) =>
+        a.profileName === profileName ? { ...a, label } : a,
+      );
+      write(next);
+      return next.find((a) => a.profileName === profileName)!;
+    }
+    return existing;
+  }
   const account: NeonCliAccount = {
     id: crypto.randomUUID(),
     profileName,

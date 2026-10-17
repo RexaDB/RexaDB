@@ -118,40 +118,40 @@ export function ToolbarGlobalActions({
                 <Button
                   size="sm"
                   disabled={!selectedTable}
-                  className="font-normal border-transparent bg-[#b54444] text-white hover:bg-[#a53c3c] hover:text-white dark:bg-[#b54444] dark:hover:bg-[#a53c3c]"
+                  title="Row Level Security is disabled on this table — click to enable it"
+                  className="font-normal border-destructive/25 bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive dark:border-destructive/30 dark:bg-destructive/20 dark:hover:bg-destructive/30"
                 >
-                  <Lock className="w-3.5 h-3.5 text-white" />
-                  RLS disabled
+                  <Lock className="w-3.5 h-3.5" />
+                  RLS off
                 </Button>
               </PopoverTrigger>
               <PopoverContent
                 align="end"
                 sideOffset={8}
-                className="w-[380px] rounded-2xl border-white/10 bg-[#1c1c1e] p-5 text-white shadow-2xl"
+                className="w-72 rounded-xl p-3 shadow-2xl"
               >
-                <div className="flex items-center gap-2">
-                  <Lock className="w-5 h-5 text-white" />
-                  <p className="text-lg font-medium text-white">
-                    Row Level Security (RLS)
-                  </p>
+                <div className="flex items-start gap-2.5">
+                  <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      Enable Row Level Security
+                    </p>
+                    <p className="mt-1.5 break-words text-xs leading-relaxed text-muted-foreground">
+                      Restricts read and write access to{" "}
+                      {selectedTable ? `"${selectedTable}"` : "this table"} to
+                      the policies you define.
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-3 text-[15px] leading-relaxed text-white/70">
-                  You can restrict and control who can read, write and update
-                  data in this table using Row Level Security.
-                </p>
-                <p className="mt-4 text-[15px] leading-relaxed text-white/70">
-                  With RLS enabled, anonymous users will not be able to
-                  read/write data in the table.
-                </p>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleEnableRls}
                   disabled={enablingRls || !selectedTable || previewOnly}
                   title={previewOnly ? "Disabled while previewing as a role or user" : undefined}
-                  className="mt-5 h-9 rounded-xl border-white/15 bg-white/[0.04] px-4 text-[15px] font-normal text-white hover:bg-white/10 hover:text-white dark:border-white/15 dark:bg-white/[0.04] dark:hover:bg-white/10"
+                  className="mt-3 h-7 w-full rounded-lg px-3 text-xs font-normal"
                 >
-                  {enablingRls ? "Enabling…" : "Enable RLS for this table"}
+                  {enablingRls ? "Enabling…" : "Enable RLS"}
                 </Button>
               </PopoverContent>
             </Popover>

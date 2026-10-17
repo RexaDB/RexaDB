@@ -371,6 +371,8 @@ interface StudioSettingsModel {
   setSchemaExplorer: (value: boolean) => void;
   databaseExplorer: boolean;
   setDatabaseExplorer: (value: boolean) => void;
+  showTableCount: boolean;
+  setShowTableCount: (value: boolean) => void;
   hideWindowActions: boolean;
   setHideWindowActions: (value: boolean) => void;
   autoClosePane: boolean;
@@ -846,6 +848,8 @@ export function SettingsView({
     setSchemaExplorer,
     databaseExplorer,
     setDatabaseExplorer,
+    showTableCount,
+    setShowTableCount,
     tableExpansion,
     setTableExpansion,
     hideWindowActions,
@@ -2642,6 +2646,14 @@ export function SettingsView({
                     description="Show expand/collapse arrows next to table names to view columns inline in the sidebar."
                     value={tableExpansion}
                     onChange={setTableExpansion}
+                  />
+
+                  <SwitchSetting
+                    settingId="show-table-count"
+                    title="Show table count"
+                    description="Show the number of tables on the right of the A-Z / Tags row in the Tables sidebar."
+                    value={showTableCount}
+                    onChange={setShowTableCount}
                   />
                 </div>
 

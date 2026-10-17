@@ -27,6 +27,7 @@
         "@neon/env": "^1.6.2",
         "@neon/functions": "^0.11.0",
         "@neondatabase/neon-js": "^0.8.0-beta",
+        "@neondatabase/serverless": "^1.2.0",
         "@noble/hashes": "^2.3.0",
         "@phosphor-icons/react": "^2.1.10",
         "@radix-ui/react-accordion": "^1.2.8",
@@ -704,6 +705,8 @@
     "@neondatabase/neon-js": ["@neondatabase/neon-js@0.8.0-beta", "", { "dependencies": { "@neondatabase/auth": "0.6.0-beta", "@neondatabase/postgrest-js": "0.2.0-beta", "meow": "14.0.0", "pg": "^8.13.0", "pg-format": "1.0.4", "postgres-array": "3.0.4", "prettier": "3.8.1", "zod": "4.1.12" }, "bin": { "neon-js": "dist/cli/index.mjs" } }, "sha512-P+5KuN46QKqZ1IeeK0mxeeps6E4uVSPMe5us4bGfVZlb5dbnwhlRkWN7MscCvjBYs0UyYJo1eUIpShLM5/uKTQ=="],
 
     "@neondatabase/postgrest-js": ["@neondatabase/postgrest-js@0.2.0-beta", "", { "dependencies": { "@supabase/postgrest-js": "2.79.0" } }, "sha512-Uq+Qzr6g5lD41KG0TFS5lc2Wo7UnQ1PE+HWdYg8Rr4X5f2pfJvJxciaPlXxOqZji6sEeO6WmLquMG40B/0sSGQ=="],
+
+    "@neondatabase/serverless": ["@neondatabase/serverless@1.2.0", "", {}, "sha512-tnaqgixUengZQNd9ZrS3ytQfamJzLKY8QxgqWQTNHHtB+KrFQWk77JTbbpg4RD+J3qE4eO2lVytvGDX5Kj6FdQ=="],
 
     "@next/env": ["@next/env@16.2.6", "", {}, "sha512-gd8HoHN4ufj73WmR3JmVolrpJR47ILK6LouP5xElPglaVxir6e1a7VzvTvDWkOoPXT9rkkTzyCxBu4yeZfZwcw=="],
 

@@ -1,49 +1,69 @@
-// Server-only. Spawns the real `neon` CLI (npm package `neonctl`) as a
-// subprocess — genuine Neon software handling its own OAuth login, never a
-// reimplementation of Neon's auth flow under its identity. Imported only by
-// server/index.ts (the sidecar) and lib/db/neon-cli-client.ts, both of which
-// run in the sidecar's Node/Bun process — never bundled into the browser.
-import { spawn, execSync, type ChildProcess } from "child_process";
-import { NEON_SESSION_EXPIRED_MESSAGE } from "./errors";
+// Server-only. Neon account/API integration for RexaDB.
+//
+// Historically this spawned the real `neonctl` binary. We now run neonctl's
+// public OAuth (client_id "neonctl" + PKCE) and call the Neon Management API
+// in-process — no neonctl install required. Credential files stay in the same
+// ~/.config/neon layout neonctl uses so existing sessions still Continue.
+//
+// Imported only by server/index.ts and lib/db/neon-cli-client.ts.
+import { execSync, type ChildProcess } from "child_process";
+import { startNeonAuthFlow } from "@/lib/neon-oauth/auth-flow";
+import {
+  authStatus,
+  getConnectionUri,
+  getCurrentUser,
+  listBranches,
+  listDatabases,
+  listOrgs,
+  listProjects,
+  listRoles,
+  profileList,
+  profileRemove,
+  updateProfileMeta,
+  writeCredentials,
+  type NeonBranch,
+  type NeonDatabase,
+  type NeonOrg,
+  type NeonProject,
+  type NeonRole,
+} from "@/lib/neon-oauth/api";
+
+export type { NeonBranch, NeonDatabase, NeonOrg, NeonProject, NeonRole };
+
+/** Always "installed" — OAuth runs in-process; neonctl is optional. */
+export function locateNeonCli(): { path: string; name: string } | null {
+  return { path: "builtin-oauth", name: "neon-oauth" };
+}
 
 const CANDIDATE_BINARIES = ["neon", "neonctl"];
-
-let cachedBinary: { path: string; name: string } | null | undefined;
 
 function which(name: string): string | null {
   try {
     const cmd = process.platform === "win32" ? `where ${name}` : `which ${name}`;
-    const result = execSync(cmd, {
-      encoding: "utf-8",
-      timeout: 3000,
-      stdio: ["pipe", "pipe", "pipe"],
-    })
-      .trim()
+    const found = execSync(cmd, { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] })
       .split("\n")[0]
       ?.trim();
-    return result && result.length > 0 ? result : null;
+    return found || null;
   } catch {
     return null;
   }
 }
 
-/** Locates the real `neon` (or legacy `neonctl`) binary on PATH. Cached for the process lifetime. */
-export function locateNeonCli(): { path: string; name: string } | null {
-  if (cachedBinary !== undefined) return cachedBinary;
-  for (const name of CANDIDATE_BINARIES) {
-    const path = which(name);
-    if (path) {
-      cachedBinary = { path, name };
-      return cachedBinary;
-    }
+/**
+ * Real neonctl lookup for features that must SH spawn it (transfer of Neon
+ * Functions, Object Storage CLI flows). Distinct from locateNeonCli(), whose
+ * placeholder would produce a broken spawn arguments-less process.
+ */
+export function locateNeonCliBinary(): { path: string; name: string } | null {
+  for (const candidateName of CANDIDATE_BINARIES) {
+    const path = which(candidateName);
+    if (path) return { path, name: candidateName };
   }
-  cachedBinary = null;
   return null;
 }
 
-/** Clears the cached "is it installed" result — call after prompting the user to install it. */
 export function clearNeonCliCache(): void {
-  cachedBinary = undefined;
+  // no-op: nothing to cache for the builtin OAuth path
 }
 
 export interface NeonCliDetectResult {
@@ -53,146 +73,35 @@ export interface NeonCliDetectResult {
 }
 
 export async function detectNeonCli(): Promise<NeonCliDetectResult> {
-  // Always re-probe PATH here — this is what "check again" after installing
-  // the CLI calls, so a cached "not found" from before the install would
-  // otherwise stick for the sidecar process's entire lifetime.
-  clearNeonCliCache();
-  const found = locateNeonCli();
-  if (!found) return { installed: false };
-  try {
-    const version = execSync(`"${found.path}" --version`, {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return { installed: true, version, path: found.path };
-  } catch {
-    return { installed: true, path: found.path };
-  }
+  return { installed: true, version: "oauth", path: "builtin-oauth" };
 }
 
-function run(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
-  const found = locateNeonCli();
-  if (!found) {
-    return Promise.reject(new Error("neon CLI is not installed or not on PATH."));
-  }
-  return new Promise((resolve, reject) => {
-    const proc = spawn(found.path, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      // CI mode makes the CLI throw instead of silently opening a browser
-      // when a profile's session needs re-auth. Every routine call (list
-      // projects, fetch a connection string...) goes through this function,
-      // and stdin is closed immediately below — without this, an expired
-      // session made the CLI pop an unprompted login browser mid-background-
-      // call. Only the deliberate, user-initiated `neon auth` login
-      // (spawnNeonAuthLogin, below) should ever do that.
-      env: { ...process.env, CI: "true" },
-    });
-    proc.stdin?.end();
-    let stdout = "";
-    let stderr = "";
-    proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
-    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
-    proc.on("error", (err) => reject(err));
-    proc.on("close", (code) => resolve({ stdout, stderr, code: code ?? -1 }));
-  });
-}
-
-/** Rewrites the CI-mode refusal (see `run()`) into something the user can act on. */
-function friendlyNeonError(stderr: string, fallback: string): Error {
-  const trimmed = stderr.trim();
-  if (/cannot run interactive auth in ci/i.test(trimmed)) {
-    return new Error(NEON_SESSION_EXPIRED_MESSAGE);
-  }
-  return new Error(trimmed || fallback);
-}
-
-async function runJson<T>(args: string[]): Promise<T> {
-  const { stdout, stderr, code } = await run([...args, "--output", "json"]);
-  if (code !== 0) {
-    throw friendlyNeonError(stderr, `neon ${args.join(" ")} exited with code ${code}`);
-  }
-  try {
-    return JSON.parse(stdout) as T;
-  } catch {
-    throw new Error(`Could not parse neon CLI output for: ${args.join(" ")}`);
-  }
-}
-
-export interface NeonProject {
-  id: string;
-  name: string;
-  region_id?: string;
-  created_at?: string;
-  org_id?: string;
-}
-
-export interface NeonBranch {
-  id: string;
-  name: string;
-  default?: boolean;
-  current_state?: string;
-  created_at?: string;
-}
-
-export interface NeonDatabase {
-  name: string;
-  owner_name?: string;
-  created_at?: string;
-}
-
-export interface NeonRole {
-  name: string;
-  created_at?: string;
-}
-
-export interface NeonOrg {
-  id: string;
-  name: string;
-}
-
-/**
- * `neon projects list` requires --org-id for any account that belongs to at
- * least one org — omitting it makes the CLI fall back to an interactive
- * `prompts()` picker, which hangs/breaks JSON output since we close stdin
- * immediately. Always resolve and pass --org-id explicitly instead.
- */
 export function neonOrgsList(profile: string): Promise<NeonOrg[]> {
-  return runJson<NeonOrg[]>(["orgs", "list", "--profile", profile]);
+  return listOrgs(profile);
 }
 
 export function neonProjectsList(profile: string, orgId?: string): Promise<NeonProject[]> {
-  const args = ["projects", "list", "--profile", profile];
-  if (orgId) args.push("--org-id", orgId);
-  return runJson<NeonProject[]>(args);
+  return listProjects(profile, orgId);
 }
 
 export function neonBranchesList(profile: string, projectId: string): Promise<NeonBranch[]> {
-  return runJson<NeonBranch[]>(["branches", "list", "--project-id", projectId, "--profile", profile]);
+  return listBranches(profile, projectId);
 }
 
-export function neonDatabasesList(profile: string, projectId: string, branchId: string): Promise<NeonDatabase[]> {
-  return runJson<NeonDatabase[]>([
-    "databases", "list",
-    "--project-id", projectId,
-    "--branch", branchId,
-    "--profile", profile,
-  ]);
+export function neonDatabasesList(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<NeonDatabase[]> {
+  return listDatabases(profile, projectId, branchId);
 }
 
-export function neonRolesList(profile: string, projectId: string, branchId: string): Promise<NeonRole[]> {
-  return runJson<NeonRole[]>([
-    "roles", "list",
-    "--project-id", projectId,
-    "--branch", branchId,
-    "--profile", profile,
-  ]);
-}
-
-export interface NeonConnectionStringResult {
-  connection_string?: string;
-  connectionString?: string;
-  uri?: string;
+export function neonRolesList(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<NeonRole[]> {
+  return listRoles(profile, projectId, branchId);
 }
 
 export async function neonConnectionString(
@@ -202,25 +111,12 @@ export async function neonConnectionString(
   database: string,
   role: string,
 ): Promise<string> {
-  const { stdout, stderr, code } = await run([
-    "connection-string", branchId,
-    "--profile", profile,
-    "--project-id", projectId,
-    "--database-name", database,
-    "--role-name", role,
-    "--pooled",
-  ]);
-  if (code !== 0) {
-    console.error(`[neon-cli] connection-string failed (exit code ${code})`);
-    throw friendlyNeonError(stderr, `Failed to get connection string for ${projectId}/${branchId}/${database}`);
-  }
-  const uri = stdout.trim().split("\n").pop()?.trim() || "";
-  if (!uri.startsWith("postgres")) {
-    throw new Error("neon CLI did not return a valid connection string.");
-  }
+  const uri = await getConnectionUri(profile, projectId, branchId, database, role, true);
   try {
     const logged = new URL(uri);
-    console.log(`[neon-cli] resolved connection string for ${projectId}/${branchId}/${database}: host=${logged.hostname} database=${logged.pathname.replace(/^\//, "")}`);
+    console.log(
+      `[neon-oauth] resolved connection string for ${projectId}/${branchId}/${database}: host=${logged.hostname} database=${logged.pathname.replace(/^\//, "")}`,
+    );
   } catch {
     // ignore parse errors in logging
   }
@@ -234,44 +130,109 @@ export interface NeonProfile {
 }
 
 export async function neonProfileList(): Promise<NeonProfile[]> {
-  try {
-    return await runJson<NeonProfile[]>(["profile", "list"]);
-  } catch {
-    return [];
-  }
+  return profileList().map((p) => ({
+    name: p.name,
+    label: p.label,
+    userId: p.userId,
+  }));
 }
 
 export async function neonProfileRemove(profile: string): Promise<{ success: true }> {
-  const { stderr, code } = await run(["profile", "remove", profile, "--yes"]);
-  if (code !== 0) {
-    throw new Error(stderr.trim() || `Failed to remove profile ${profile}`);
-  }
-  return { success: true };
+  return profileRemove(profile);
 }
 
-export async function neonCurrentUser(profile: string): Promise<{ id?: string; email?: string } | null> {
+export async function neonCurrentUser(
+  profile: string,
+): Promise<{ id?: string; email?: string } | null> {
   try {
-    const profiles = await neonProfileList();
-    const found = profiles.find((p) => p.name === profile);
-    return found ? { id: found.userId, email: found.label } : null;
+    return await getCurrentUser(profile);
   } catch {
     return null;
   }
 }
 
-/** Spawns `neon auth --profile <name>` — the real, interactive browser login. Caller streams stdout/stderr. */
-export function spawnNeonAuthLogin(profileName: string): ChildProcess {
-  const found = locateNeonCli();
-  if (!found) {
-    throw new Error("neon CLI is not installed or not on PATH.");
-  }
-  const proc = spawn(found.path, ["auth", "--profile", profileName], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, CI: "" },
+/**
+ * Compatibility shim: older server code treated login as a ChildProcess with
+ * stdout/stderr. The OAuth flow is event-driven instead — see
+ * `runNeonAuthLogin` and the `/api/neon-cli/login` route.
+ */
+export function spawnNeonAuthLogin(_profileName: string): ChildProcess {
+  throw new Error(
+    "spawnNeonAuthLogin is no longer used — call runNeonAuthLogin via the login route.",
+  );
+}
+
+export interface NeonAuthLoginEvents {
+  onLog: (message: string) => void;
+  onOpenUrl: (url: string) => void;
+  /** Called with account email/id after a successful sign-in (best-effort). */
+  onComplete?: (info: { email?: string; userId?: string }) => void;
+  signal?: AbortSignal;
+  /** Force IdP account picker (add-account). */
+  forceLogin?: boolean;
+}
+
+/**
+ * Runs neonctl-compatible public OAuth for `profile`, streaming progress via
+ * callbacks. Persists credentials under ~/.config/neon.
+ */
+export async function runNeonAuthLogin(
+  profileName: string,
+  events: NeonAuthLoginEvents,
+): Promise<void> {
+  events.onLog(`Starting Neon sign-in for profile “${profileName}”…`);
+  const flow = await startNeonAuthFlow({
+    profile: profileName,
+    forceLogin: events.forceLogin,
   });
-  proc.stdin?.end();
-  proc.on("error", () => {});
-  return proc;
+
+  const onAbort = () => flow.cancel();
+  events.signal?.addEventListener("abort", onAbort, { once: true });
+  // Discovery/setup was awaited above; the caller's abort may have fired
+  // before the listener was attached. Bail out before opening the browser —
+  // critical: flow.cancel() rejects flow.result, and that rejection MUST be
+  // consumed or Bun treats the unhandled rejection as fatal (kills the
+  // sidecar mid-run, taking every in-flight DB operation with it).
+  if (events.signal?.aborted) {
+    void flow.result.catch(() => undefined);
+    try {
+      events.signal.removeEventListener("abort", onAbort);
+    } catch {
+      // ignore
+    }
+    throw new Error("Sign-in cancelled");
+  }
+
+  try {
+    events.onOpenUrl(flow.authUrl);
+    events.onLog("Opening browser for sign-in…");
+    const creds = await flow.result;
+
+    // Enrich profile metadata from /users/me when possible.
+    let email: string | undefined;
+    let userId: string | undefined;
+    try {
+      writeCredentials(profileName, creds);
+      const user = await getCurrentUser(profileName);
+      email = user.email;
+      userId = user.id;
+      updateProfileMeta(profileName, {
+        label: email ?? null,
+        userId: userId ?? null,
+      });
+      if (email) {
+        events.onLog(`Signed in as ${email}`);
+      } else {
+        events.onLog("Signed in to Neon");
+      }
+    } catch (e: any) {
+      // credentials already written by the auth flow; metadata is best-effort
+      events.onLog(e?.message ? `Signed in (${e.message})` : "Signed in to Neon");
+    }
+    events.onComplete?.({ email, userId });
+  } finally {
+    events.signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 export interface NeonAuthStatus {
@@ -282,78 +243,6 @@ export interface NeonAuthStatus {
   error?: string;
 }
 
-/**
- * Non-interactive session check: `neon me --profile <name> -o json`.
- * CI mode is set so an expired session fails fast instead of popping an
- * unprompted login browser mid-check. Never throws — each profile resolves
- * to a status object.
- */
 export async function neonAuthStatus(profiles: string[]): Promise<NeonAuthStatus[]> {
-  const found = locateNeonCli();
-  // Dedupe, but always reserve a slot for DEFAULT: the dialog appends it
-  // after stored accounts (terminal sign-ins live there), and a naive
-  // take-first-10 would silently drop it once ten accounts are stored.
-  const deduped = [...new Set(profiles.map((p) => String(p || "").trim()).filter(Boolean))];
-  const unique = deduped.includes("DEFAULT")
-    ? ["DEFAULT", ...deduped.filter((p) => p !== "DEFAULT").slice(0, 9)]
-    : deduped.slice(0, 10);
-  if (!found) {
-    return unique.map((profile) => ({
-      profile,
-      valid: false,
-      error: "neon CLI is not installed or not on PATH.",
-    }));
-  }
-  const check = (profile: string): Promise<NeonAuthStatus> =>
-    new Promise((resolve) => {
-      let done = false;
-      const finish = (result: NeonAuthStatus) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        resolve(result);
-      };
-      let stdout = "";
-      let stderr = "";
-      const proc = spawn(found.path, ["me", "--profile", profile, "-o", "json"], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, CI: "true" },
-      });
-      const timer = setTimeout(() => {
-        try {
-          proc.kill("SIGTERM");
-        } catch {}
-        finish({ profile, valid: false, error: "timed out" });
-      }, 12000);
-      proc.stdin?.end();
-      proc.stdout?.on("data", (chunk) => {
-        stdout += chunk.toString();
-      });
-      proc.stderr?.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-      proc.on("error", (err) => {
-        finish({ profile, valid: false, error: err.message });
-      });
-      proc.on("close", (code) => {
-        if (code !== 0) {
-          const detail = stderr.trim().split("\n").pop() || `exited with code ${code ?? "?"}`;
-          finish({ profile, valid: false, error: detail.slice(0, 300) });
-          return;
-        }
-        try {
-          const parsed = JSON.parse(stdout) as { email?: unknown; id?: unknown };
-          const email = typeof parsed.email === "string" ? parsed.email : undefined;
-          const userId = typeof parsed.id === "string" ? parsed.id : undefined;
-          if (!email && !userId) {
-            finish({ profile, valid: false, error: "unexpected response" });
-            return;
-          }
-          finish({ profile, valid: true, email, userId });
-        } catch {
-          finish({ profile, valid: false, error: "could not parse response" });
-        }
-      });
-    });
-  return Promise.all(unique.map(check));
+  return authStatus(profiles);
 }

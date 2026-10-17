@@ -46,6 +46,7 @@
     "@neon/env": "^1.6.2",
     "@neon/functions": "^0.11.0",
     "@neondatabase/neon-js": "^0.8.0-beta",
+    "@neondatabase/serverless": "^1.2.0",
     "@noble/hashes": "^2.3.0",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-accordion": "^1.2.8",

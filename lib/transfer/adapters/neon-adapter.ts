@@ -45,8 +45,8 @@ async function runNeonCli(
   const ctx = neonContext(connectionString);
   if (!ctx) return { ok: false, json: null, error: "not a neon-cli:// connection" };
   try {
-    const { locateNeonCli } = await import("@/lib/neon-cli/cli-runner");
-    const found = locateNeonCli();
+    const { locateNeonCliBinary } = await import("@/lib/neon-cli/cli-runner");
+    const found = locateNeonCliBinary();
     if (!found) return { ok: false, json: null, error: "neon CLI not installed" };
     const { spawn } = await import("child_process");
     const wantJson = opts?.jsonOutput !== false;

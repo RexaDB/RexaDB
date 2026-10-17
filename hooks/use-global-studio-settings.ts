@@ -78,6 +78,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   openConnectionsInNewWindow: boolean;
   schemaExplorer: boolean;
   databaseExplorer: boolean;
+  showTableCount: boolean;
   tableExpansion: boolean;
   hideWindowActions: boolean;
   rlsPolicyTabEditor: boolean;
@@ -146,6 +147,7 @@ export function useGlobalStudioSettings(persist = false) {
     useState<boolean>(false);
   const [schemaExplorer, setSchemaExplorer] = useState<boolean>(false);
   const [databaseExplorer, setDatabaseExplorer] = useState<boolean>(false);
+  const [showTableCount, setShowTableCount] = useState<boolean>(true);
   const [tableExpansion, setTableExpansion] = useState<boolean>(true);
   const [hideWindowActions, setHideWindowActions] = useState<boolean>(false);
   const [rlsPolicyTabEditor, setRlsPolicyTabEditor] = useState<boolean>(false);
@@ -248,6 +250,9 @@ export function useGlobalStudioSettings(persist = false) {
     }
     if (d.databaseExplorer !== undefined) {
       setDatabaseExplorer(d.databaseExplorer);
+    }
+    if (d.showTableCount !== undefined) {
+      setShowTableCount(d.showTableCount);
     }
     if (d.tableExpansion !== undefined) {
       setTableExpansion(d.tableExpansion);
@@ -370,6 +375,7 @@ export function useGlobalStudioSettings(persist = false) {
     openConnectionsInNewWindow,
     schemaExplorer,
     databaseExplorer,
+    showTableCount,
     tableExpansion,
     hideWindowActions,
     rlsPolicyTabEditor,
@@ -632,6 +638,7 @@ export function useGlobalStudioSettings(persist = false) {
       openConnectionsInNewWindow,
       schemaExplorer,
       databaseExplorer,
+      showTableCount,
       tableExpansion,
       hideWindowActions,
       rlsPolicyTabEditor,
@@ -762,6 +769,7 @@ export function useGlobalStudioSettings(persist = false) {
     openConnectionsInNewWindow,
     schemaExplorer,
     databaseExplorer,
+    showTableCount,
     tableExpansion,
     hideWindowActions,
     rlsPolicyTabEditor,
@@ -880,6 +888,8 @@ export function useGlobalStudioSettings(persist = false) {
     setSchemaExplorer,
     databaseExplorer,
     setDatabaseExplorer,
+    showTableCount,
+    setShowTableCount,
     tableExpansion,
     setTableExpansion,
     hideWindowActions,

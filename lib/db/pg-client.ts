@@ -23,6 +23,7 @@ import {
 import { getPgTlsConfig as getPgSslConfig } from "./pg-tls";
 import { quotePgIdentifier } from "./quote-identifier";
 import { resolveEffectiveConnectionString } from "./neon-cli-client";
+import { createPgClient, createPgPool } from "./pg-driver";
 type ExecuteQueryOptions = {
   queryId?: string;
   executionContext?: QueryExecutionContext | null;
@@ -164,22 +165,37 @@ async function getPgPoolEntry(rawConnectionString: string) {
     const effectiveConfig = parsePgConfig(effectiveConnectionString);
 
     const makePool = (ssl: ReturnType<typeof getPgSslConfig>) =>
-      new Pool({
-        host: effectiveConfig.host,
-        port: effectiveConfig.port,
-        database: effectiveConfig.database,
-        user: effectiveConfig.username,
-        password: effectiveConfig.password,
-        connectionTimeoutMillis: 15000,
-        idleTimeoutMillis: 30000,
-        max: 6,
-        ssl,
-      });
+      createPgPool(
+        {
+          host: effectiveConfig.host,
+          port: effectiveConfig.port,
+          database: effectiveConfig.database,
+          user: effectiveConfig.username,
+          password: effectiveConfig.password,
+          connectionString: effectiveConnectionString,
+          connectionTimeoutMillis: 15000,
+          idleTimeoutMillis: 30000,
+          max: 6,
+          ssl,
+        },
+        () =>
+          new Pool({
+            host: effectiveConfig.host,
+            port: effectiveConfig.port,
+            database: effectiveConfig.database,
+            user: effectiveConfig.username,
+            password: effectiveConfig.password,
+            connectionTimeoutMillis: 15000,
+            idleTimeoutMillis: 30000,
+            max: 6,
+            ssl,
+          }),
+      );
 
     let pool: PoolType | undefined;
     try {
       let ssl = getPgSslConfig(effectiveConnectionString);
-      pool = makePool(ssl);
+      pool = await makePool(ssl);
       try {
         const probe = await pool.connect();
         probe.release();
@@ -191,7 +207,7 @@ async function getPgPoolEntry(rawConnectionString: string) {
         await pool.end().catch(() => {});
         pool = undefined;
         ssl = false;
-        pool = makePool(ssl);
+        pool = await makePool(ssl);
         const probe = await pool.connect();
         probe.release();
       }
@@ -351,15 +367,17 @@ export async function cancelQueryById(queryId: string): Promise<boolean> {
   const running = runningPgQueries.get(normalizedQueryId);
   if (!running) return false;
 
-  const cancelClient = new Client({
+  const cancelConfig = {
     host: getPgHost(running.effectiveConnectionString),
     port: getPgPort(running.effectiveConnectionString),
     database: getPgDatabase(running.effectiveConnectionString),
     user: getPgUsername(running.effectiveConnectionString),
     password: getPgPassword(running.effectiveConnectionString),
+    connectionString: running.effectiveConnectionString,
     connectionTimeoutMillis: 8000,
     ssl: running.ssl,
-  });
+  };
+  const cancelClient = await createPgClient(cancelConfig, () => new Client(cancelConfig));
 
   try {
     await cancelClient.connect();
@@ -547,14 +565,16 @@ export async function updateRows(
   const tunnel = await startSshTunnelIfNeeded(connectionString, 5432, normalizePgConnectionString);
   const effectiveConnectionString = tunnel.connectionString;
   
-  const client = new Client({
+  const updateConfig = {
     host: getPgHost(effectiveConnectionString),
     port: getPgPort(effectiveConnectionString),
     database: getPgDatabase(effectiveConnectionString),
     user: getPgUsername(effectiveConnectionString),
     password: getPgPassword(effectiveConnectionString),
+    connectionString: effectiveConnectionString,
     ssl: getPgSslConfig(effectiveConnectionString),
-  });
+  };
+  const client = await createPgClient(updateConfig, () => new Client(updateConfig));
 
   try {
     await client.connect();

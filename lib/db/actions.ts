@@ -356,15 +356,18 @@ async function applyPostgresSchemaToTarget(
     const effectiveTargetConnectionString = await resolveEffectiveConnectionString(targetConnectionString);
 
     const { Client } = (globalThis as any).__pg || (await import("pg")).default;
-    const client = new Client({
+    const { createPgClient } = await import("./pg-driver");
+    const clientConfig = {
       host: getPgHost(effectiveTargetConnectionString),
       port: getPgPort(effectiveTargetConnectionString),
       database: getPgDatabase(effectiveTargetConnectionString),
       user: getPgUsername(effectiveTargetConnectionString),
       password: getPgPassword(effectiveTargetConnectionString),
+      connectionString: effectiveTargetConnectionString,
       connectionTimeoutMillis: 15000,
       ssl: getPgSslConfig(effectiveTargetConnectionString),
-    });
+    };
+    const client = await createPgClient(clientConfig, () => new Client(clientConfig));
 
     await client.connect();
     const errors: string[] = [];

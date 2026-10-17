@@ -1,7 +1,7 @@
 // fallow-ignore-file code-duplication
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -1154,6 +1154,23 @@ function TablesPanel({ studio }: { studio: any }) {
   const [newTagColor, setNewTagColor] = useState("#38bdf8");
   const [renameTagName, setRenameTagName] = useState<string | null>(null);
   const [renameTagDraft, setRenameTagDraft] = useState("");
+  // The A-Z/Tags row must fit sidebar widths down to ~150px. Tracked width
+  // decides when the New Tag label and the table count yield their space
+  // instead of being clipped by the sidebar's overflow. Budget at the widest
+  // state ≈ 238px (toggle 114 + gap 8 + "New Tag" 66 + count "100/100" 50).
+  const viewToggleRowRef = useRef<HTMLDivElement>(null);
+  const [viewRowWidth, setViewRowWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const row = viewToggleRowRef.current;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      setViewRowWidth(entries[0]?.contentRect.width ?? null);
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+  const hideTableCount = viewRowWidth !== null && viewRowWidth < 205;
+  const collapseNewLabel = viewRowWidth !== null && viewRowWidth < 240;
   function openRenameTagDialog(name: string) {
     setRenameTagName(name);
     setRenameTagDraft(name);
@@ -1383,8 +1400,11 @@ function TablesPanel({ studio }: { studio: any }) {
           <Plus className="size-3.5" />
         </button>
       </div>
-      {/* A-Z / Tags view toggle + new-tag entry — under the schema picker. */}
-      <div className="mb-1 flex shrink-0 items-center gap-2">
+      {/* A-Z / Tags view toggle + table count — under the schema picker.
+          Squeezes progressively on narrow sidebars so nothing clips:
+          New Tag first loses its label (<240px), then the count
+          hides entirely (<205px) — see the width budget above. */}
+      <div ref={viewToggleRowRef} className="mb-1 flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
           <button
             type="button"
@@ -1396,27 +1416,40 @@ function TablesPanel({ studio }: { studio: any }) {
           >
             <span className="truncate">A-Z</span>
           </button>
-        <button
-          type="button"
-          onClick={() => studio.setSidebarSortMode?.("tags")}
-          className={cn(
-            "flex h-full items-center justify-center rounded-md px-3 transition-colors",
-            tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <span className="truncate">Tags</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => studio.setSidebarSortMode?.("tags")}
+            className={cn(
+              "flex h-full items-center justify-center rounded-md px-3 transition-colors",
+              tagView ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="truncate">Tags</span>
+          </button>
         </div>
         {tagView && (
-        <button
-          type="button"
-          onClick={() => setTagManagerOpen(true)}
-          className="ml-auto flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Plus className="size-3.5" />
-          <span>New Tag</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setTagManagerOpen(true)}
+            title="New tag"
+            className="flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Plus className="size-3.5" />
+            {!collapseNewLabel && <span>New Tag</span>}
+          </button>
         )}
+        {studio.showTableCount !== false && !(tagView && hideTableCount) ? (
+          <span
+            className="ml-auto shrink-0 pr-0.5 text-xs tabular-nums text-muted-foreground"
+            title={
+              sidebarQ || filtersActive
+                ? `${filtered.length} of ${allTables.length} ${allTables.length === 1 ? itemNoun : `${itemNoun}s`} shown`
+                : `${allTables.length} ${allTables.length === 1 ? itemNoun : `${itemNoun}s`}`
+            }
+          >
+            {sidebarQ || filtersActive ? `${filtered.length}/${allTables.length}` : allTables.length}
+          </span>
+        ) : null}
       </div>
 
       <Dialog open={tagManagerOpen} onOpenChange={setTagManagerOpen}>

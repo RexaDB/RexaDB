@@ -119,6 +119,8 @@ export function useAppSettings(planCode = "free") {
     setSchemaExplorer: settings.setSchemaExplorer,
     databaseExplorer: settings.databaseExplorer,
     setDatabaseExplorer: settings.setDatabaseExplorer,
+    showTableCount: settings.showTableCount,
+    setShowTableCount: settings.setShowTableCount,
     tableExpansion: settings.tableExpansion,
     setTableExpansion: settings.setTableExpansion,
     hideWindowActions: settings.hideWindowActions,
