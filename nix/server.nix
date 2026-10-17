@@ -76,7 +76,8 @@ pkgs.stdenv.mkDerivation {
     # root cache, before the server cache export switches
     # npm_config_cache.
     npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
-      lodash marked react-is react-responsive-carousel
+      lodash marked react-is react-responsive-carousel \
+      @modelcontextprotocol/sdk
     cp -r ${npmDepsServer} $TMPDIR/npm-cache-server
     chmod -R u+w $TMPDIR/npm-cache-server
     export npm_config_cache=$TMPDIR/npm-cache-server
