@@ -51,6 +51,11 @@ function base64Url(buf: Buffer): string {
     .replace(/=+$/g, "");
 }
 
+/** Test hook: clears the cached OIDC discovery document. */
+export function clearOidcDiscoveryCache(): void {
+  cachedDiscovery = null;
+}
+
 function randomState(): string {
   return base64Url(randomBytes(16));
 }

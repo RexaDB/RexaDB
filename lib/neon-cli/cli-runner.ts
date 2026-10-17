@@ -189,10 +189,18 @@ export async function runNeonAuthLogin(
   const onAbort = () => flow.cancel();
   events.signal?.addEventListener("abort", onAbort, { once: true });
   // Discovery/setup was awaited above; the caller's abort may have fired
-  // before the listener was attached. Bail out before opening the browser.
+  // before the listener was attached. Bail out before opening the browser —
+  // critical: flow.cancel() rejects flow.result, and that rejection MUST be
+  // consumed or Bun treats the unhandled rejection as fatal (kills the
+  // sidecar mid-run, taking every in-flight DB operation with it).
   if (events.signal?.aborted) {
-    onAbort();
-    return;
+    void flow.result.catch(() => undefined);
+    try {
+      events.signal.removeEventListener("abort", onAbort);
+    } catch {
+      // ignore
+    }
+    throw new Error("Sign-in cancelled");
   }
 
   try {

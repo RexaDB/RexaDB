@@ -1156,7 +1156,8 @@ function TablesPanel({ studio }: { studio: any }) {
   const [renameTagDraft, setRenameTagDraft] = useState("");
   // The A-Z/Tags row must fit sidebar widths down to ~150px. Tracked width
   // decides when the New Tag label and the table count yield their space
-  // instead of being clipped by the sidebar's overflow.
+  // instead of being clipped by the sidebar's overflow. Budget at the widest
+  // state ≈ 238px (toggle 114 + gap 8 + "New Tag" 66 + count "100/100" 50).
   const viewToggleRowRef = useRef<HTMLDivElement>(null);
   const [viewRowWidth, setViewRowWidth] = useState<number | null>(null);
   useEffect(() => {
@@ -1168,8 +1169,8 @@ function TablesPanel({ studio }: { studio: any }) {
     observer.observe(row);
     return () => observer.disconnect();
   }, []);
-  const collapseNewLabel = viewRowWidth !== null && viewRowWidth < 220;
-  const hideTableCount = viewRowWidth !== null && viewRowWidth < 170;
+  const hideTableCount = viewRowWidth !== null && viewRowWidth < 205;
+  const collapseNewLabel = viewRowWidth !== null && viewRowWidth < 240;
   function openRenameTagDialog(name: string) {
     setRenameTagName(name);
     setRenameTagDraft(name);
@@ -1401,7 +1402,8 @@ function TablesPanel({ studio }: { studio: any }) {
       </div>
       {/* A-Z / Tags view toggle + table count — under the schema picker.
           Squeezes progressively on narrow sidebars so nothing clips:
-          New Tag first loses its label, then the count hides entirely. */}
+          New Tag first loses its label (<240px), then the count
+          hides entirely (<205px) — see the width budget above. */}
       <div ref={viewToggleRowRef} className="mb-1 flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
           <button

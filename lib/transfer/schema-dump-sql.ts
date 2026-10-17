@@ -147,6 +147,10 @@ export async function buildSchemaDumpViaSql(
         }
         emit(`CREATE TYPE ${ident(schema)}.${ident(row.name)} AS ENUM (${labels.map((l) => escapeLiteral(l)).join(", ")})`);
       }
+      // Domains: bare CREATE in the types phase. A default expression is
+      // allowed to reference objects that come later in a dump (NEXTVAL over
+      // a serial sequence being the common case), so it is re-applied with
+      // ALTER DOMAIN once everything exists — see the deferred flush.
       const domains = await select(
         query,
         connectionString,
@@ -154,11 +158,7 @@ export async function buildSchemaDumpViaSql(
                 t.typnotnull AS not_null,
                 pg_get_expr(t.typdefaultbin, 0) AS default_expr,
                 CASE WHEN t.typcollation <> 0 AND c.collname <> 'default'
-                     THEN quote_ident(c.collname) END AS collate,
-                COALESCE(
-                  (SELECT string_agg(pg_get_constraintdef(con.oid), E'\n' ORDER BY con.oid)
-                   FROM pg_constraint con WHERE con.contypid = t.oid), ''
-                ) AS checks
+                     THEN quote_ident(c.collname) END AS collate
          FROM pg_type t
          JOIN pg_namespace n ON n.oid = t.typnamespace
          LEFT JOIN pg_collation c ON c.oid = t.typcollation
@@ -168,14 +168,25 @@ export async function buildSchemaDumpViaSql(
         let def = `CREATE DOMAIN ${ident(schema)}.${ident(row.name)} AS ${String(row.base)}`;
         if (row.collate) def += ` COLLATE ${String(row.collate)}`;
         if (row.not_null === true || row.not_null === "t") def += " NOT NULL";
-        if (row.default_expr) def += ` DEFAULT ${String(row.default_expr)}`;
         emit(def);
-        // Domain CHECKs follow pg_dump's ALTER DOMAIN ... ADD shape.
-        for (const check of String(row.checks || "").split("\n")) {
-          const constraint = check.trim();
-          if (!constraint) continue;
-          emit(`ALTER DOMAIN ${ident(schema)}.${ident(row.name)} ADD ${constraint}`);
+        if (row.default_expr) {
+          defer(`ALTER DOMAIN ${ident(schema)}.${ident(row.name)} SET DEFAULT ${String(row.default_expr)}`);
         }
+      }
+      // Domain CHECKs, one statement per row: newline separators would split
+      // a constraint whose text contains a literal newline into fragments.
+      const domainChecks = await select(
+        query,
+        connectionString,
+        `SELECT t.typname AS domain_name, pg_get_constraintdef(con.oid) AS definition
+         FROM pg_constraint con
+         JOIN pg_type t ON t.oid = con.contypid
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+         WHERE n.nspname = ${lit}
+         ORDER BY t.typname, con.oid`,
+      );
+      for (const row of domainChecks) {
+        emit(`ALTER DOMAIN ${ident(schema)}.${ident(row.domain_name)} ADD ${String(row.definition)}`);
       }
       const composites = await select(
         query,
