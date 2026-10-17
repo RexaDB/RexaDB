@@ -6,7 +6,7 @@
 // ~/.config/neon layout neonctl uses so existing sessions still Continue.
 //
 // Imported only by server/index.ts and lib/db/neon-cli-client.ts.
-import type { ChildProcess } from "child_process";
+import { execSync, type ChildProcess } from "child_process";
 import { startNeonAuthFlow } from "@/lib/neon-oauth/auth-flow";
 import {
   authStatus,
@@ -33,6 +33,33 @@ export type { NeonBranch, NeonDatabase, NeonOrg, NeonProject, NeonRole };
 /** Always "installed" — OAuth runs in-process; neonctl is optional. */
 export function locateNeonCli(): { path: string; name: string } | null {
   return { path: "builtin-oauth", name: "neon-oauth" };
+}
+
+const CANDIDATE_BINARIES = ["neon", "neonctl"];
+
+function which(name: string): string | null {
+  try {
+    const cmd = process.platform === "win32" ? `where ${name}` : `which ${name}`;
+    const found = execSync(cmd, { encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] })
+      .split("\n")[0]
+      ?.trim();
+    return found || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Real neonctl lookup for features that must SH spawn it (transfer of Neon
+ * Functions, Object Storage CLI flows). Distinct from locateNeonCli(), whose
+ * placeholder would produce a broken spawn arguments-less process.
+ */
+export function locateNeonCliBinary(): { path: string; name: string } | null {
+  for (const candidateName of CANDIDATE_BINARIES) {
+    const path = which(candidateName);
+    if (path) return { path, name: candidateName };
+  }
+  return null;
 }
 
 export function clearNeonCliCache(): void {
@@ -161,6 +188,12 @@ export async function runNeonAuthLogin(
 
   const onAbort = () => flow.cancel();
   events.signal?.addEventListener("abort", onAbort, { once: true });
+  // Discovery/setup was awaited above; the caller's abort may have fired
+  // before the listener was attached. Bail out before opening the browser.
+  if (events.signal?.aborted) {
+    onAbort();
+    return;
+  }
 
   try {
     events.onOpenUrl(flow.authUrl);

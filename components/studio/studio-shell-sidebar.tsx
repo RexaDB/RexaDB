@@ -1,7 +1,7 @@
 // fallow-ignore-file code-duplication
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -1154,6 +1154,22 @@ function TablesPanel({ studio }: { studio: any }) {
   const [newTagColor, setNewTagColor] = useState("#38bdf8");
   const [renameTagName, setRenameTagName] = useState<string | null>(null);
   const [renameTagDraft, setRenameTagDraft] = useState("");
+  // The A-Z/Tags row must fit sidebar widths down to ~150px. Tracked width
+  // decides when the New Tag label and the table count yield their space
+  // instead of being clipped by the sidebar's overflow.
+  const viewToggleRowRef = useRef<HTMLDivElement>(null);
+  const [viewRowWidth, setViewRowWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const row = viewToggleRowRef.current;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      setViewRowWidth(entries[0]?.contentRect.width ?? null);
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+  const collapseNewLabel = viewRowWidth !== null && viewRowWidth < 220;
+  const hideTableCount = viewRowWidth !== null && viewRowWidth < 170;
   function openRenameTagDialog(name: string) {
     setRenameTagName(name);
     setRenameTagDraft(name);
@@ -1383,8 +1399,10 @@ function TablesPanel({ studio }: { studio: any }) {
           <Plus className="size-3.5" />
         </button>
       </div>
-      {/* A-Z / Tags view toggle + table count — under the schema picker. */}
-      <div className="mb-1 flex shrink-0 items-center gap-2">
+      {/* A-Z / Tags view toggle + table count — under the schema picker.
+          Squeezes progressively on narrow sidebars so nothing clips:
+          New Tag first loses its label, then the count hides entirely. */}
+      <div ref={viewToggleRowRef} className="mb-1 flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-auto shrink-0 items-center rounded-lg border border-border/70 bg-white/[0.04] p-0.5 text-xs">
           <button
             type="button"
@@ -1411,13 +1429,14 @@ function TablesPanel({ studio }: { studio: any }) {
           <button
             type="button"
             onClick={() => setTagManagerOpen(true)}
+            title="New tag"
             className="flex h-7 shrink-0 items-center gap-1 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <Plus className="size-3.5" />
-            <span>New Tag</span>
+            {!collapseNewLabel && <span>New Tag</span>}
           </button>
         )}
-        {studio.showTableCount !== false ? (
+        {studio.showTableCount !== false && !(tagView && hideTableCount) ? (
           <span
             className="ml-auto shrink-0 pr-0.5 text-xs tabular-nums text-muted-foreground"
             title={

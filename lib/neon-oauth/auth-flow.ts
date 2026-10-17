@@ -311,7 +311,11 @@ export async function startNeonAuthFlow(opts: {
       }
 
       const errParam = url.searchParams.get("error");
-      if (errParam) {
+      const returnedState = url.searchParams.get("state");
+      // OAuth error from the IdP itself. Only settle the flow when the state
+      // matches — any same-address request without our state must be ignored,
+      // not act as a kill switch for a pending sign-in.
+      if (errParam && returnedState === state) {
         const desc = url.searchParams.get("error_description") || errParam;
         res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(errorHtml(desc));
         finishErr(new Error(desc));
@@ -319,12 +323,12 @@ export async function startNeonAuthFlow(opts: {
       }
 
       const code = url.searchParams.get("code");
-      const returnedState = url.searchParams.get("state");
-      if (!code || returnedState !== state) {
+      if (!code || !code.trim() || returnedState !== state) {
+        // Unrelated request to the callback port: reject it for the sender but
+        // leave the pending sign-in running.
         res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(
           errorHtml("Invalid OAuth callback (missing code or mismatched state)."),
         );
-        finishErr(new Error("Invalid OAuth callback (missing code or mismatched state)."));
         return;
       }
 
@@ -334,6 +338,13 @@ export async function startNeonAuthFlow(opts: {
         redirectUri: cbUri,
         codeVerifier: verifier,
       });
+      if (settled) {
+        // The login was cancelled/timed out while the code exchange was still
+        // in flight. Never persist credentials for a flow the caller walked
+        // away from — a newer attempt for the same profile may be in progress.
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(successHtml());
+        return;
+      }
       writeCredentials(opts.profile, creds);
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(successHtml());
       finishOk(creds);

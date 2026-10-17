@@ -136,7 +136,7 @@ export function ToolbarGlobalActions({
                     <p className="text-sm font-medium">
                       Enable Row Level Security
                     </p>
-                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    <p className="mt-1.5 break-words text-xs leading-relaxed text-muted-foreground">
                       Restricts read and write access to{" "}
                       {selectedTable ? `"${selectedTable}"` : "this table"} to
                       the policies you define.

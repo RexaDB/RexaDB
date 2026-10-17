@@ -2667,10 +2667,9 @@ export async function testConnection(
         const { createPgClient } = await import("./pg-driver");
         // Neon hosts are reached over HTTPS/WSS (:443) instead of raw Postgres
         // (:5432) so networks that drop the Postgres handshake still connect.
-        const baseConfig = {
-          ...getPgClientConfig(effectiveConnectionString),
-          connectionString: effectiveConnectionString,
-        };
+        // getPgClientConfig() strips ssl params from the URL so `pg` cannot
+        // override the explicit TLS config — keep that cleaned URL everywhere.
+        const baseConfig = getPgClientConfig(effectiveConnectionString);
         let client = await createPgClient(baseConfig, () => new pgMod.Client(baseConfig));
         try {
           try {

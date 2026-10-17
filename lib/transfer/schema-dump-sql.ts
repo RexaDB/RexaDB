@@ -151,16 +151,30 @@ export async function buildSchemaDumpViaSql(
         query,
         connectionString,
         `SELECT t.typname AS name, format_type(t.typbasetype, t.typtypmod) AS base,
-                t.typnotnull AS not_null, t.typdefaultbin IS NOT NULL AS has_default
-         FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+                t.typnotnull AS not_null,
+                pg_get_expr(t.typdefaultbin, 0) AS default_expr,
+                CASE WHEN t.typcollation <> 0 AND c.collname <> 'default'
+                     THEN quote_ident(c.collname) END AS collate,
+                COALESCE(
+                  (SELECT string_agg(pg_get_constraintdef(con.oid), E'\n' ORDER BY con.oid)
+                   FROM pg_constraint con WHERE con.contypid = t.oid), ''
+                ) AS checks
+         FROM pg_type t
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+         LEFT JOIN pg_collation c ON c.oid = t.typcollation
          WHERE n.nspname = ${lit} AND t.typtype = 'd' ORDER BY 1`,
       );
       for (const row of domains) {
         let def = `CREATE DOMAIN ${ident(schema)}.${ident(row.name)} AS ${String(row.base)}`;
+        if (row.collate) def += ` COLLATE ${String(row.collate)}`;
         if (row.not_null === true || row.not_null === "t") def += " NOT NULL";
+        if (row.default_expr) def += ` DEFAULT ${String(row.default_expr)}`;
         emit(def);
-        if (row.has_default === true || row.has_default === "t") {
-          warnings.push(`Domain ${schema}.${String(row.name)} has a default that is not migrated; set it manually if needed.`);
+        // Domain CHECKs follow pg_dump's ALTER DOMAIN ... ADD shape.
+        for (const check of String(row.checks || "").split("\n")) {
+          const constraint = check.trim();
+          if (!constraint) continue;
+          emit(`ALTER DOMAIN ${ident(schema)}.${ident(row.name)} ADD ${constraint}`);
         }
       }
       const composites = await select(

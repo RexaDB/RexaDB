@@ -123,8 +123,16 @@ async function neonFetch<T>(
     signal: init?.signal ?? AbortSignal.timeout(30_000),
   });
 
-  if (res.status === 401 || res.status === 403) {
-    // One refresh retry on auth failure.
+  // 403 = authenticated but not allowed. Re-authenticating cannot grant the
+  // permission, so preserve the API's message instead of claiming the
+  // session expired.
+  if (res.status === 403) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Neon API 403 (not permitted): ${text.slice(0, 300)}`);
+  }
+
+  if (res.status === 401) {
+    // One refresh retry on a rejected token.
     const creds = readCredentials(profile);
     if (creds?.refresh_token) {
       try {
@@ -140,12 +148,17 @@ async function neonFetch<T>(
           },
           signal: init?.signal ?? AbortSignal.timeout(30_000),
         });
-        if (retry.status === 401 || retry.status === 403) {
-          throw new NeonRefreshRejectionError("Neon API still unauthorized after refresh");
-        }
         if (retry.ok) {
           if (retry.status === 204) return undefined as T;
           return (await retry.json()) as T;
+        }
+        if (retry.status === 403) {
+          const retryText = await retry.text().catch(() => retry.statusText);
+          throw new Error(`Neon API 403 (not permitted): ${retryText.slice(0, 300)}`);
+        }
+        if (retry.status === 401) {
+          // Freshly-minted token still rejected → the session is truly gone.
+          throw new NeonRefreshRejectionError("Neon API unauthorized after refresh");
         }
         const text = await retry.text().catch(() => retry.statusText);
         throw new Error(`Neon API ${retry.status}: ${text.slice(0, 300)}`);

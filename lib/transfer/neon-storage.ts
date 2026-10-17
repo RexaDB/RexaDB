@@ -23,8 +23,8 @@ async function runBuckets(
   const pointer = parseNeonCliConnectionString(connectionString);
   if (!pointer) return { ok: false, stdout: "", error: "not a neon-cli:// connection" };
   try {
-    const { locateNeonCli } = await import("@/lib/neon-cli/cli-runner");
-    const found = locateNeonCli();
+    const { locateNeonCliBinary } = await import("@/lib/neon-cli/cli-runner");
+    const found = locateNeonCliBinary();
     if (!found) return { ok: false, stdout: "", error: "neon CLI not installed" };
     const { spawn } = await import("child_process");
     const fullArgs = [
@@ -135,9 +135,9 @@ export async function downloadNeonObject(
     const dest = join(dir, "object");
     const { spawn } = await import("child_process");
     const { parseNeonCliConnectionString } = await import("@/lib/neon-cli/pointer");
-    const { locateNeonCli } = await import("@/lib/neon-cli/cli-runner");
+    const { locateNeonCliBinary } = await import("@/lib/neon-cli/cli-runner");
     const pointer = parseNeonCliConnectionString(connectionString);
-    const found = locateNeonCli();
+    const found = locateNeonCliBinary();
     if (!pointer || !found) return { error: "neon CLI context unavailable" };
     let stderr = "";
     const code: number = await new Promise((resolve) => {
@@ -205,9 +205,9 @@ export async function uploadNeonObject(
     const src = join(dir, "object");
     await writeFile(src, bytes);
     const { parseNeonCliConnectionString } = await import("@/lib/neon-cli/pointer");
-    const { locateNeonCli } = await import("@/lib/neon-cli/cli-runner");
+    const { locateNeonCliBinary } = await import("@/lib/neon-cli/cli-runner");
     const pointer = parseNeonCliConnectionString(connectionString);
-    const found = locateNeonCli();
+    const found = locateNeonCliBinary();
     if (!pointer || !found) return { error: "neon CLI context unavailable" };
     const args = [
       "buckets", "object", "put", `${bucket}/${key}`,
