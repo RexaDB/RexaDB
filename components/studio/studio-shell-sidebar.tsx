@@ -101,7 +101,7 @@ import { ExtensionManagerSection } from "./extension-manager-section";
 import { parseExtensionsSidebarView } from "@/lib/extensions/sidebar-view";
 import { useExtensions } from "@/lib/extensions/react";
 import { TableContextMenuItems } from "./database/table-utils";
-import { buildRedisKeyTree, type RedisKeyTreeNode } from "@/lib/studio/redis-key-tree";
+import { buildRedisKeyTree, EMPTY_SEGMENT_LABEL, type RedisKeyTreeNode } from "@/lib/studio/redis-key-tree";
 import {
   copyItemName,
   getTableDerivedValues,
@@ -1160,11 +1160,14 @@ function RedisKeyTree({
   selectedSchema,
   studio,
   emptyLabel,
+  searchActive,
 }: {
   keys: string[];
   selectedSchema: string;
   studio: any;
   emptyLabel: string;
+  /** A sidebar search is applied to `keys` — expand every folder so matches deep in the tree stay reachable. */
+  searchActive: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const tree = useMemo(() => buildRedisKeyTree(keys), [keys]);
@@ -1189,7 +1192,7 @@ function RedisKeyTree({
   const renderKeyRow = (node: RedisKeyTreeNode) => (
     <SidebarFlatTableRow
       table={node.fullKey}
-      label={node.segment}
+      label={node.segment || EMPTY_SEGMENT_LABEL}
       selectedSchema={selectedSchema}
       studio={studio}
       viewTableSet={emptyViewSet}
@@ -1216,7 +1219,9 @@ function RedisKeyTree({
   ): React.ReactNode =>
     nodes.map((node) => {
       const hasChildren = node.children.length > 0;
-      const isExpanded = expanded.has(node.fullKey);
+      // While a search filters `keys`, expand every folder so matching
+      // descendants are visible without manually opening each level.
+      const isExpanded = searchActive || expanded.has(node.fullKey);
 
       if (!node.hasValue) {
         // Valueless folder (e.g. "org"): identical to a tag folder row, click toggles.
@@ -1231,7 +1236,7 @@ function RedisKeyTree({
             >
               <FolderIcon className="size-4 shrink-0" />
               <span className="min-w-0 flex-1 truncate text-left font-normal">
-                {node.segment}
+                {node.segment || EMPTY_SEGMENT_LABEL}
               </span>
             </button>
             {hasChildren && isExpanded && renderChildren(node.children, depth + 1)}
@@ -1282,7 +1287,9 @@ function RedisKeyTree({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-px py-0.5">
+    // Scroll container: the sidebar parent clips overflow, so the tree must
+    // scroll its own rows like the virtualized/virtualized-adjacent lists do.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-px overflow-y-auto py-0.5">
       {renderNodes(tree, 0)}
     </div>
   );
@@ -1771,7 +1778,8 @@ function TablesPanel({ studio }: { studio: any }) {
             keys={filtered}
             selectedSchema={selectedSchema}
             studio={studio}
-            emptyLabel={q ? "No matches" : "No keys"}
+            emptyLabel={sidebarQ ? "No matches" : "No keys"}
+            searchActive={sidebarQ.length > 0}
           />
         ) : filtered.length === 0 ? (
           <div className="px-2 py-2 text-xs text-muted-foreground">
