@@ -94,14 +94,20 @@ export function NeonLoginDialog({
           return;
         }
         if (event.type === "done") {
-          const account = addNeonCliAccount(
-            profileRef.current,
-            event.email ?? null,
-          );
-          toast.success(isReconnect ? "Reconnected to Neon." : "Signed in to Neon.");
-          onLoginComplete(account);
-          onOpenChange(false);
-          setStatus("idle");
+          try {
+            const account = addNeonCliAccount(
+              profileRef.current,
+              event.email ?? null,
+            );
+            toast.success(isReconnect ? "Reconnected to Neon." : "Signed in to Neon.");
+            onLoginComplete(account);
+          } catch (e: any) {
+            console.error('addNeonCliAccount failed', e);
+            toast.error(e?.message || 'Failed to add account');
+          } finally {
+            onOpenChange(false);
+            setStatus("idle");
+          }
           // Reset for next open
           setTimeout(() => {
             if (openRef.current) return;
