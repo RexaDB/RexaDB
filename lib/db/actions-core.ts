@@ -2664,7 +2664,14 @@ export async function testConnection(
         const { resolveEffectiveConnectionString } = await import("./neon-cli-client");
         const effectiveConnectionString = await resolveEffectiveConnectionString(connectionString);
         const pgMod = (globalThis as any).__pg || (await import("pg")).default;
-        let client = new pgMod.Client(getPgClientConfig(effectiveConnectionString));
+        const { createPgClient } = await import("./pg-driver");
+        // Neon hosts are reached over HTTPS/WSS (:443) instead of raw Postgres
+        // (:5432) so networks that drop the Postgres handshake still connect.
+        const baseConfig = {
+          ...getPgClientConfig(effectiveConnectionString),
+          connectionString: effectiveConnectionString,
+        };
+        let client = await createPgClient(baseConfig, () => new pgMod.Client(baseConfig));
         try {
           try {
             await client.connect();
@@ -2676,9 +2683,10 @@ export async function testConnection(
               throw error;
             }
             await client.end().catch(() => {});
-            client = new pgMod.Client({
+            const plainConfig = {
               connectionString: disablePgSsl(effectiveConnectionString),
-            });
+            };
+            client = await createPgClient(plainConfig, () => new pgMod.Client(plainConfig));
             await client.connect();
           }
           await client.query("SELECT 1");

@@ -463,9 +463,11 @@ app.post("/api/neon-cli/login", async (req, res) => {
     abort.abort();
   });
 
+  // Declared outside the try so the catch block can tell a user-initiated
+  // abort from a real failure (see below).
+  let completedEmail: string | undefined;
+  let completed = false;
   try {
-    let completedEmail: string | undefined;
-    let completed = false;
     await neonCliRunner.runNeonAuthLogin(profile, {
       forceLogin,
       signal: abort.signal,

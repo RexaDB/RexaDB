@@ -193,12 +193,16 @@ export async function runPgDumpSchemaOnly(
   }
 
   // Non-dialable connections (supabase-mgmt://, ...): pg_dump cannot
-  // connect, so build equivalent DDL straight out of pg_catalog.
-  if (!isDirectDialablePostgres(connectionString)) {
+  // connect, so build equivalent DDL straight out of pg_catalog. Neon hosts
+  // take the same path: queries there run through Neon's HTTPS/WSS driver
+  // (lib/db/pg-driver.ts), and pg_dump dials raw Postgres (:5432), which
+  // networks that drop the Postgres handshake cannot reach either.
+  const { isNeonServerlessHost, connectionStringHost } = await import("./pg-driver");
+  if (!isDirectDialablePostgres(connectionString) || isNeonServerlessHost(connectionStringHost(connectionString))) {
     const { buildSchemaDumpViaSql } = await import("@/lib/transfer/schema-dump-sql");
     const { sql, warnings } = await buildSchemaDumpViaSql(runQuery, connectionString, schemas);
     const header = [
-      `-- Schema dump generated via SQL introspection (pg_dump cannot dial this connection type).`,
+      `-- Schema dump generated via SQL introspection (pg_dump is not used for this connection type).`,
       ...warnings.map((w) => `-- NOTE: ${w}`),
     ].join("\n");
     if (!sql.trim()) {
@@ -334,15 +338,18 @@ export async function resetAndApplySql(
 
   const { Client } = (globalThis as any).__pg || (await import("pg")).default;
 
-  const client = new Client({
+  const { createPgClient } = await import("./pg-driver");
+  const clientConfig = {
     host: getPgHost(connectionString),
     port: getPgPort(connectionString),
     database: getPgDatabase(connectionString),
     user: getPgUsername(connectionString),
     password: getPgPassword(connectionString),
+    connectionString,
     connectionTimeoutMillis: 15000,
     ssl: getPgSslConfig(connectionString),
-  });
+  };
+  const client = await createPgClient(clientConfig, () => new Client(clientConfig));
 
   await client.connect();
   try {
