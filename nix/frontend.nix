@@ -49,7 +49,13 @@ pkgs.stdenv.mkDerivation {
     cp -r ${npmDeps} $TMPDIR/npm-cache
     chmod -R u+w $TMPDIR/npm-cache
     export npm_config_cache=$TMPDIR/npm-cache
-    npm ci --offline --no-audit --no-fund
+    # --legacy-peer-deps: the trimmed packuments from prefetch-npm-deps
+    # prefetch-npm-deps (fetcher v2) only contain lockfile versions, so a
+    # strict peer re-resolution (driven by `overrides`) can demand
+    # neighbouring versions that don't exist in the cache and then
+    # ping-pong on ERESOLVE forever offline. With a complete lockfile the
+    # resulting tree is identical; this only skips peer re-resolution.
+    npm ci --offline --no-audit --no-fund --legacy-peer-deps
     # Placeholder Supabase config: the static export inlines
     # NEXT_PUBLIC_* at build time and lib/supabase/client.ts throws
     # without them. Real secrets must never enter the store; local-first

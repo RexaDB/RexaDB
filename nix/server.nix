@@ -67,11 +67,16 @@ pkgs.stdenv.mkDerivation {
     cp -r ${npmDepsRoot} $TMPDIR/npm-cache-root
     chmod -R u+w $TMPDIR/npm-cache-root
     export npm_config_cache=$TMPDIR/npm-cache-root
-    npm ci --offline --no-audit --no-fund
+    # --legacy-peer-deps: see nix/frontend.nix — offline packs from the
+    # prefetcher contain only lockfile versions, so strict peer
+    # re-resolution can loop forever; with a complete lockfile the tree
+    # is identical without it.
+    npm ci --offline --no-audit --no-fund --legacy-peer-deps
     cp -r ${npmDepsServer} $TMPDIR/npm-cache-server
     chmod -R u+w $TMPDIR/npm-cache-server
     export npm_config_cache=$TMPDIR/npm-cache-server
-    (cd server && npm ci --offline --no-audit --no-fund)
+    # --legacy-peer-deps: same rationale as the root install above.
+    (cd server && npm ci --offline --no-audit --no-fund --legacy-peer-deps)
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
     bun build --compile --target="${bunTarget}" server/index.ts --outfile=rexadb-server
