@@ -455,12 +455,17 @@ app.post("/api/neon-cli/login", async (req, res) => {
   const abort = new AbortController();
   neonLoginAbort = abort;
 
-  req.on("close", () => {
+  // NOTE: use `res` ("close" on the response) rather than `req`. With a fully
+  // buffered JSON body, `req` can emit "close" once the body is consumed, which
+  // would abort the flow (and skip the final `done` event) even though OAuth
+  // succeeded.
+  res.on("close", () => {
     abort.abort();
   });
 
   try {
     let completedEmail: string | undefined;
+    let completed = false;
     await neonCliRunner.runNeonAuthLogin(profile, {
       forceLogin,
       signal: abort.signal,
@@ -468,14 +473,17 @@ app.post("/api/neon-cli/login", async (req, res) => {
       onOpenUrl: (url) => send({ type: "open-url", url, message: url }),
       onComplete: (info) => {
         completedEmail = info.email;
+        completed = true;
       },
     });
-    if (!abort.signal.aborted) {
+    // Always report completion: OAuth may finish after the request "close"
+    // heuristic fires, and the client needs the terminal `done` frame.
+    if (completed || !abort.signal.aborted) {
       send({ type: "done", success: true, email: completedEmail ?? null });
     }
     finish();
   } catch (e: any) {
-    if (abort.signal.aborted) {
+    if (abort.signal.aborted && !completed) {
       finish();
       return;
     }

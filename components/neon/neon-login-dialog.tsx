@@ -132,10 +132,6 @@ export function NeonLoginDialog({
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
-    if (open) {
-      // If reopening, ensure we don't leave a stuck state
-      if (status === "idle") void checkExistingSession();
-    }
   }, [open]);
 
   const checkGenRef = useRef(0);

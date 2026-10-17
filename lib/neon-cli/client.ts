@@ -139,21 +139,27 @@ export function streamNeonLogin(
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      const emit = (frame: string) => {
+        const line = frame.split("\n").find((part) => part.startsWith("data:"));
+        if (!line) return;
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()) as NeonLoginEvent);
+        } catch {
+          // ignore malformed frame
+        }
+      };
       while (true) {
         const chunk = await reader.read();
-        if (chunk.done) break;
+        if (chunk.done) {
+          // Process any trailing frame that arrived without the final blank line.
+          buffer += decoder.decode();
+          for (const frame of buffer.split("\n\n")) emit(frame);
+          break;
+        }
         buffer += decoder.decode(chunk.value, { stream: true });
         const frames = buffer.split("\n\n");
         buffer = frames.pop() || "";
-        for (const frame of frames) {
-          const line = frame.split("\n").find((part) => part.startsWith("data:"));
-          if (!line) continue;
-          try {
-            onEvent(JSON.parse(line.slice(5).trim()) as NeonLoginEvent);
-          } catch {
-            // ignore malformed frame
-          }
-        }
+        for (const frame of frames) emit(frame);
       }
     } catch (err) {
       if (controller.signal.aborted) return;
