@@ -56,6 +56,14 @@ pkgs.stdenv.mkDerivation {
     # ping-pong on ERESOLVE forever offline. With a complete lockfile the
     # resulting tree is identical; this only skips peer re-resolution.
     npm ci --offline --no-audit --no-fund --legacy-peer-deps
+    # glide-data-grid imports lodash/marked/react-responsive-carousel but
+    # declares them as peerDependencies (bun auto-installs peers, npm
+    # --legacy-peer-deps does not), so top them up from the same offline
+    # cache. Same flag as above: these are cache-backed lockfile
+    # versions; strict re-resolution would hit the trimmed-packument
+    # ERESOLVE ping-pong again.
+    npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
+      lodash marked react-is react-responsive-carousel
     # Placeholder Supabase config: the static export inlines
     # NEXT_PUBLIC_* at build time and lib/supabase/client.ts throws
     # without them. Real secrets must never enter the store; local-first

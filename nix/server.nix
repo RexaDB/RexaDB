@@ -72,7 +72,11 @@ pkgs.stdenv.mkDerivation {
     # re-resolution can loop forever; with a complete lockfile the tree
     # is identical without it.
     npm ci --offline --no-audit --no-fund --legacy-peer-deps
-    cp -r ${npmDepsServer} $TMPDIR/npm-cache-server
+    # Top-up peer-only packages (see nix/frontend.nix) from the same
+    # root cache, before the server cache export switches
+    # npm_config_cache.
+    npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
+      lodash marked react-is react-responsive-carousel
     chmod -R u+w $TMPDIR/npm-cache-server
     export npm_config_cache=$TMPDIR/npm-cache-server
     # --legacy-peer-deps: same rationale as the root install above.
