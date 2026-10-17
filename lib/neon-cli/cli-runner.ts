@@ -181,9 +181,12 @@ export async function runNeonAuthLogin(
       });
       if (email) {
         events.onLog(`Signed in as ${email}`);
+      } else {
+        events.onLog("Signed in to Neon");
       }
-    } catch {
+    } catch (e: any) {
       // credentials already written by the auth flow; metadata is best-effort
+      events.onLog(e?.message ? `Signed in (${e.message})` : "Signed in to Neon");
     }
     events.onComplete?.({ email, userId });
   } finally {
