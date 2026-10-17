@@ -1,7 +1,10 @@
 // Server-only. Neon Management API client backed by OAuth credentials stored
 // under ~/.config/neon — same shape neonctl uses, without spawning neonctl.
 import { NEON_API_HOST } from "./constants";
-import { NEON_SESSION_EXPIRED_MESSAGE } from "@/lib/neon-cli/errors";
+import {
+  NEON_AUTH_UNAVAILABLE_MESSAGE,
+  NEON_SESSION_EXPIRED_MESSAGE,
+} from "@/lib/neon-cli/errors";
 import {
   deleteCredentials,
   listProfiles,
@@ -11,7 +14,11 @@ import {
   type NeonOAuthCredentials,
   type NeonProfileMeta,
 } from "./credentials";
-import { refreshAccessToken } from "./auth-flow";
+import {
+  refreshAccessToken,
+  NeonRefreshRejectionError,
+  NeonRefreshUnavailableError,
+} from "./auth-flow";
 
 const REFRESH_SKEW_MS = 60_000;
 
@@ -63,17 +70,35 @@ async function ensureAccessToken(profile: string): Promise<string> {
     if (!creds.refresh_token) {
       throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
     }
-    try {
-      const refreshed = await refreshAccessToken(creds.refresh_token);
-      const next: NeonOAuthCredentials = {
-        ...creds,
-        ...refreshed,
-        user_id: refreshed.user_id ?? creds.user_id,
-      };
-      writeCredentials(profile, next);
-      creds = next;
-    } catch {
-      throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
+    const refreshToken: string = creds.refresh_token;
+    // One retry so a single blip (VPN reconnecting, flaky Wi-Fi) does not
+    // surface an error to the user.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const refreshed = await refreshAccessToken(refreshToken);
+        const next: NeonOAuthCredentials = {
+          ...creds,
+          ...refreshed,
+          user_id: refreshed.user_id ?? creds.user_id,
+        };
+        writeCredentials(profile, next);
+        creds = next;
+        break;
+      } catch (err) {
+        if (err instanceof NeonRefreshRejectionError) {
+          // The IdP refused the refresh token — the session is truly gone.
+          throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
+        }
+        const isLast = attempt === 1;
+        if (isLast) {
+          if (err instanceof NeonRefreshUnavailableError) {
+            // Network-level problem; the stored session is untouched.
+            throw new Error(NEON_AUTH_UNAVAILABLE_MESSAGE);
+          }
+          // Unexpected — fail loudly without mislabeling it as expired.
+          throw err instanceof Error ? err : new Error(String(err));
+        }
+      }
     }
   }
 
@@ -115,18 +140,23 @@ async function neonFetch<T>(
           },
           signal: init?.signal ?? AbortSignal.timeout(30_000),
         });
+        if (retry.status === 401 || retry.status === 403) {
+          throw new NeonRefreshRejectionError("Neon API still unauthorized after refresh");
+        }
         if (retry.ok) {
           if (retry.status === 204) return undefined as T;
           return (await retry.json()) as T;
         }
-        if (retry.status === 401 || retry.status === 403) {
-          throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
-        }
         const text = await retry.text().catch(() => retry.statusText);
         throw new Error(`Neon API ${retry.status}: ${text.slice(0, 300)}`);
       } catch (err) {
-        if (err instanceof Error && err.message === NEON_SESSION_EXPIRED_MESSAGE) throw err;
-        throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
+        if (err instanceof NeonRefreshRejectionError) {
+          throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
+        }
+        if (err instanceof NeonRefreshUnavailableError) {
+          throw new Error(NEON_AUTH_UNAVAILABLE_MESSAGE);
+        }
+        throw err instanceof Error ? err : new Error(String(err));
       }
     }
     throw new Error(NEON_SESSION_EXPIRED_MESSAGE);

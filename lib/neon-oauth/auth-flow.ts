@@ -30,6 +30,19 @@ export interface NeonAuthFlowHandle {
   cancel: () => void;
 }
 
+/**
+ * The IdP definitively rejected the refresh token (revoked, rotated away,
+ * expired grant) — the stored session is dead and the user must re-authenticate.
+ */
+export class NeonRefreshRejectionError extends Error {}
+
+/**
+ * The refresh request itself failed for a transient reason (no network, VPN
+ * drop, timeout, 5xx). The stored refresh token is untouched and still valid;
+ * callers must NOT treat this as an expired session.
+ */
+export class NeonRefreshUnavailableError extends Error {}
+
 function base64Url(buf: Buffer): string {
   return buf
     .toString("base64")
@@ -156,25 +169,51 @@ export async function refreshAccessToken(
   refreshToken: string,
   oauthHost = NEON_OAUTH_HOST,
 ): Promise<NeonOAuthCredentials> {
-  const discovery = await discoverOidc(oauthHost);
+  let discovery: NeonOidcDiscovery;
+  try {
+    discovery = await discoverOidc(oauthHost);
+  } catch (err) {
+    throw new NeonRefreshUnavailableError(
+      `OIDC discovery failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
     client_id: NEON_OAUTH_CLIENT_ID,
   });
-  const res = await fetch(discovery.token_endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body,
-    signal: AbortSignal.timeout(15_000),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`Token refresh failed (${res.status}): ${text.slice(0, 300)}`);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(discovery.token_endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body,
+      signal: AbortSignal.timeout(15_000),
+    });
+    text = await res.text();
+  } catch (err) {
+    throw new NeonRefreshUnavailableError(
+      `Token endpoint unreachable: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-  const json = JSON.parse(text) as Record<string, unknown>;
+  if (!res.ok) {
+    const message = `Token refresh failed (${res.status}): ${text.slice(0, 300)}`;
+    // 400 invalid_grant / 401 / 403 mean the token itself is rejected forever;
+    // anything else (5xx, throttling) is worth retrying later.
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      throw new NeonRefreshRejectionError(message);
+    }
+    throw new NeonRefreshUnavailableError(message);
+  }
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new NeonRefreshUnavailableError("Token refresh returned non-JSON");
+  }
   const access = typeof json.access_token === "string" ? json.access_token : "";
-  if (!access) throw new Error("Token refresh missing access_token");
+  if (!access) throw new NeonRefreshUnavailableError("Token refresh missing access_token");
   const expiresIn = typeof json.expires_in === "number" ? json.expires_in : 3600;
   return {
     access_token: access,
