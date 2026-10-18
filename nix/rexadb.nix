@@ -38,7 +38,7 @@ let
     src = src;
     # v2 also caches packuments (see nix/frontend.nix).
     fetcherVersion = 2;
-    hash = "sha256-lHYZBkYk5tvnHLmImTXOnwfUdo2kaaNT707Gs3+2WAc=";
+    hash = "sha256-HZu3aGzQ4Y8+VoxE5InCF1SyCT/mj+azcb4boZgfnz0=";
   };
 in
 pkgs.rustPlatform.buildRustPackage {
@@ -135,7 +135,13 @@ pkgs.rustPlatform.buildRustPackage {
     cp -r ${npmDeps} $TMPDIR/npm-cache
     chmod -R u+w $TMPDIR/npm-cache
     export npm_config_cache=$TMPDIR/npm-cache
-    npm ci --offline --no-audit --no-fund
+    # --legacy-peer-deps + peer top-up: same rationale as in
+    # nix/frontend.nix (trimmed offline packuments ping-pong on strict
+    # peer re-resolution; glide-data-grid's direct imports are declared
+    # as peers, which bun auto-installs but npm legacy skips).
+    npm ci --offline --no-audit --no-fund --legacy-peer-deps
+    npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
+      lodash marked react-is react-responsive-carousel
     # Placeholder Supabase config for the tauri `beforeBuildCommand`
     # (`next build`, same rationale as in nix/frontend.nix).
     export NEXT_PUBLIC_SUPABASE_URL="https://nix-placeholder.supabase.co"

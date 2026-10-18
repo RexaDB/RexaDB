@@ -20,7 +20,7 @@ let
     # re-resolves peer/override edges and needs packuments even with a
     # complete lockfile (else ENOTCACHED under --offline).
     fetcherVersion = 2;
-    hash = "sha256-lHYZBkYk5tvnHLmImTXOnwfUdo2kaaNT707Gs3+2WAc=";
+    hash = "sha256-HZu3aGzQ4Y8+VoxE5InCF1SyCT/mj+azcb4boZgfnz0=";
   };
 in
 pkgs.stdenv.mkDerivation {
@@ -49,7 +49,21 @@ pkgs.stdenv.mkDerivation {
     cp -r ${npmDeps} $TMPDIR/npm-cache
     chmod -R u+w $TMPDIR/npm-cache
     export npm_config_cache=$TMPDIR/npm-cache
-    npm ci --offline --no-audit --no-fund
+    # --legacy-peer-deps: the trimmed packuments from prefetch-npm-deps
+    # prefetch-npm-deps (fetcher v2) only contain lockfile versions, so a
+    # strict peer re-resolution (driven by `overrides`) can demand
+    # neighbouring versions that don't exist in the cache and then
+    # ping-pong on ERESOLVE forever offline. With a complete lockfile the
+    # resulting tree is identical; this only skips peer re-resolution.
+    npm ci --offline --no-audit --no-fund --legacy-peer-deps
+    # glide-data-grid imports lodash/marked/react-responsive-carousel but
+    # declares them as peerDependencies (bun auto-installs peers, npm
+    # --legacy-peer-deps does not), so top them up from the same offline
+    # cache. Same flag as above: these are cache-backed lockfile
+    # versions; strict re-resolution would hit the trimmed-packument
+    # ERESOLVE ping-pong again.
+    npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
+      lodash marked react-is react-responsive-carousel
     # Placeholder Supabase config: the static export inlines
     # NEXT_PUBLIC_* at build time and lib/supabase/client.ts throws
     # without them. Real secrets must never enter the store; local-first

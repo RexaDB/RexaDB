@@ -20,7 +20,7 @@ let
     src = src;
     # v2 also caches packuments (see nix/frontend.nix).
     fetcherVersion = 2;
-    hash = "sha256-lHYZBkYk5tvnHLmImTXOnwfUdo2kaaNT707Gs3+2WAc=";
+    hash = "sha256-HZu3aGzQ4Y8+VoxE5InCF1SyCT/mj+azcb4boZgfnz0=";
   };
   npmDepsServer = pkgs.fetchNpmDeps {
     name = "rexadb-server-npm-deps-${version}";
@@ -67,11 +67,22 @@ pkgs.stdenv.mkDerivation {
     cp -r ${npmDepsRoot} $TMPDIR/npm-cache-root
     chmod -R u+w $TMPDIR/npm-cache-root
     export npm_config_cache=$TMPDIR/npm-cache-root
-    npm ci --offline --no-audit --no-fund
+    # --legacy-peer-deps: see nix/frontend.nix — offline packs from the
+    # prefetcher contain only lockfile versions, so strict peer
+    # re-resolution can loop forever; with a complete lockfile the tree
+    # is identical without it.
+    npm ci --offline --no-audit --no-fund --legacy-peer-deps
+    # Top-up peer-only packages (see nix/frontend.nix) from the same
+    # root cache, before the server cache export switches
+    # npm_config_cache.
+    npm install --offline --no-save --no-audit --no-fund --legacy-peer-deps \
+      lodash marked react-is react-responsive-carousel \
+      @modelcontextprotocol/sdk
     cp -r ${npmDepsServer} $TMPDIR/npm-cache-server
     chmod -R u+w $TMPDIR/npm-cache-server
     export npm_config_cache=$TMPDIR/npm-cache-server
-    (cd server && npm ci --offline --no-audit --no-fund)
+    # --legacy-peer-deps: same rationale as the root install above.
+    (cd server && npm ci --offline --no-audit --no-fund --legacy-peer-deps)
     (cd node_modules/better-drizzle && patch -p1 --batch < ../../patches/better-drizzle@0.1.1.patch)
     (cd node_modules/@glideapps/glide-data-grid && patch -p1 --batch < ../../../patches/@glideapps%2Fglide-data-grid@6.0.4-alpha24.patch)
     bun build --compile --target="${bunTarget}" server/index.ts --outfile=rexadb-server
