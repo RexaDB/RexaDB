@@ -52,6 +52,12 @@ export function ModernPaneTabs({
             <div
               key={tab.id}
               onClick={() => switchTab(tab.id)}
+              onMouseDown={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  closeTab(e, tab.id);
+                }
+              }}
               className={cn(
                 "group flex h-7 min-w-24 max-w-52 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs transition-colors shrink-0 select-none",
                 active

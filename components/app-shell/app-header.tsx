@@ -228,6 +228,12 @@ export function AppHeader({
 											<SortableItemHandle asChild cursor={false}>
 												<div
 													onClick={() => onActivateTab?.(tab.id)}
+													onMouseDown={(e) => {
+														if (e.button === 1) {
+															e.preventDefault();
+															onCloseTab?.(tab.id);
+														}
+													}}
 													className={cn(
 														"group flex h-7 min-w-24 max-w-52 cursor-pointer items-center gap-1.5 rounded-md px-2 text-xs transition-colors select-none",
 														active
