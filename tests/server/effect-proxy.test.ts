@@ -78,6 +78,41 @@ describe("effectProxyHandler", () => {
     expect(mocked.json).toEqual({ id: 1 });
   });
 
+  test("writes binary proxy results with exact bytes and Content-Type", async () => {
+    const binaryData = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
+    const route = effectProxyHandler(() =>
+      Effect.succeed({
+        kind: "binary" as const,
+        status: 200,
+        body: binaryData,
+        contentType: "image/png",
+      }),
+    );
+    const mocked = mockRes();
+    await route({} as any, mocked.res as any, (() => undefined) as any);
+    expect(mocked.statusCode).toBe(200);
+    expect(mocked.headers["Content-Type"]).toBe("image/png");
+    expect(Buffer.isBuffer(mocked.sent)).toBe(true);
+    expect(mocked.sent).toEqual(binaryData);
+  });
+
+  test("writes binary with fallback Content-Type when empty", async () => {
+    const binaryData = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const route = effectProxyHandler(() =>
+      Effect.succeed({
+        kind: "binary" as const,
+        status: 200,
+        body: binaryData,
+        contentType: "",
+      }),
+    );
+    const mocked = mockRes();
+    await route({} as any, mocked.res as any, (() => undefined) as any);
+    expect(mocked.statusCode).toBe(200);
+    expect(mocked.headers["Content-Type"]).toBe("application/octet-stream");
+    expect(mocked.sent).toEqual(binaryData);
+  });
+
   test("maps UpstreamError to 502 { success: false, error }", async () => {
     const route = effectProxyHandler(() =>
       Effect.fail(

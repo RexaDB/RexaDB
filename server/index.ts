@@ -2653,7 +2653,17 @@ app.all(/^\/api\/studio-proxy(?:\/|$)/, (req, res, next) => {
         );
         const upstreamContentType = upstream.headers.get("content-type") || "";
         if (!upstreamContentType.includes("application/json")) {
-          const buffer = yield* readUpstreamBufferEffect(upstream);
+          const buffer = yield* readUpstreamBufferEffect(upstream).pipe(
+            Effect.mapError((error) => {
+              logToFile(
+                `[${studioRequestId}] studio proxy read binary error: ${error.message}`,
+              );
+              return new UpstreamError({
+                message: `Cannot read binary response from workspace server at "${studioUrl}". ${error.message}`,
+                status: 502,
+              });
+            }),
+          );
           logToFile(
             `[${studioRequestId}] studio proxy binary response status=${upstream.status} contentType=${upstreamContentType || "unknown"} bytes=${buffer.length}`,
           );
@@ -2664,7 +2674,17 @@ app.all(/^\/api\/studio-proxy(?:\/|$)/, (req, res, next) => {
             contentType: upstreamContentType || "application/octet-stream",
           };
         }
-        const text = yield* readUpstreamTextEffect(upstream);
+        const text = yield* readUpstreamTextEffect(upstream).pipe(
+          Effect.mapError((error) => {
+            logToFile(
+              `[${studioRequestId}] studio proxy read text error: ${error.message}`,
+            );
+            return new UpstreamError({
+              message: `Cannot read response from workspace server at "${studioUrl}". ${error.message}`,
+              status: 502,
+            });
+          }),
+        );
         let json: unknown;
         try {
           json = JSON.parse(text);
