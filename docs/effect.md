@@ -158,3 +158,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### Studio persistence from actions-core (Wave 9)
 
 `server/studio-storage-api.ts` exposes Effect programs for Studio folders, snippets, query history, tags, tabs, settings, dashboards, and notes. The sidecar routes use those programs and map rejected storage operations to `DbError`; the Promise APIs in `lib/db/actions-core.ts` remain available to UI and other existing callers.
+
+### App settings and migration (Wave 10)
+
+`server/app-settings-api.ts` exposes typed Effect programs for global app font/theme/editor/Studio settings and legacy settings migration. The existing actions-core Promise functions remain the compatibility facade; sidecar settings routes preserve their current JSON response shapes.
