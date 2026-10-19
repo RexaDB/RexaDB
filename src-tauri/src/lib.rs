@@ -954,25 +954,18 @@ fn extract_port(line: &str) -> Option<u16> {
 
 fn spawn_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
-    use std::net::TcpListener;
 
     let data_dir = get_app_data_dir(app);
     let jdbc_drivers_dir = get_jdbc_drivers_dir(app);
     let resource_dir = app.path().resource_dir().ok();
-    // tauri:dev also runs a source sidecar for local development. Select an
-    // available port up front so readiness checks and API discovery never
-    // mistake that process (and its different SQLite file) for this sidecar.
-    let sidecar_port = (3867..=3900)
-        .find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
-        .unwrap_or(3867);
     {
         let state = app.state::<SidecarState>();
-        *state.port.lock().unwrap() = sidecar_port;
+        *state.port.lock().unwrap() = 3867;
         *state.ready.lock().unwrap() = false;
     }
     let mut sidecar_command = app.shell().sidecar("rexadb-server")
         .expect("failed to create sidecar command")
-        .env("REXADB_SERVER_PORT", sidecar_port.to_string())
+        .env("REXADB_SERVER_PORT", "3867")
         .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref())
         .env("REXADB_JDBC_DRIVERS_DIR", jdbc_drivers_dir.to_string_lossy().as_ref());
     if let Some(rd) = &resource_dir {
@@ -991,7 +984,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
         let mut buf = String::new();
         loop {
             match rx.recv().await {
-                Some(CommandEvent::Stderr(data)) => {
+                Some(CommandEvent::Stderr(data)) | Some(CommandEvent::Stdout(data)) => {
                     let text = String::from_utf8_lossy(&data);
                     buf.push_str(&text);
                     app_handle.state::<SidecarState>().log.lock().unwrap().push_str(&text);
@@ -1004,6 +997,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     }
                 }
                 Some(CommandEvent::Terminated(status)) => {
+                    rust_log(&format!("sidecar terminated: code={:?} signal={:?}", status.code, status.signal));
                     let state = app_handle.state::<SidecarState>();
                     *state.ready.lock().unwrap() = false;
                     *state.last_exit_code.lock().unwrap() = status.code;
@@ -1016,6 +1010,15 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                         spawn_sidecar(&app_handle);
                     });
                     break;
+                }
+                Some(CommandEvent::Error(error)) => {
+                    rust_log(&format!("sidecar process error: {error}"));
+                    app_handle
+                        .state::<SidecarState>()
+                        .log
+                        .lock()
+                        .unwrap()
+                        .push_str(&format!("\n[sidecar] Process error: {error}\n"));
                 }
                 _ => {}
             }

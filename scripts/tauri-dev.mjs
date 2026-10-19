@@ -29,11 +29,6 @@ const tauriConfigPath = join(process.cwd(), 'src-tauri', 'tauri.conf.json');
 const originalConfig = readFileSync(tauriConfigPath, 'utf-8');
 const config = JSON.parse(originalConfig);
 
-// Start server dev server
-const serverProcess = spawn('bun', ['run', 'server:dev'], {
-  stdio: 'inherit'
-});
-
 // Start Next.js dev server
 const nextProcess = spawn('bun', ['run', 'dev'], {
   stdio: ['inherit', 'pipe', 'inherit']
@@ -66,7 +61,6 @@ const tauriProcess = spawn('tauri', ['dev'], {
 // Handle cleanup
 const cleanup = () => {
   nextProcess.kill();
-  serverProcess.kill();
   tauriProcess.kill();
   // Restore original config
   writeFileSync(tauriConfigPath, originalConfig);
@@ -78,6 +72,5 @@ tauriProcess.on('close', (code) => {
   // Restore original config
   writeFileSync(tauriConfigPath, originalConfig);
   nextProcess.kill();
-  serverProcess.kill();
   process.exit(code);
 });
