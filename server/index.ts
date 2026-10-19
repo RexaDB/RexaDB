@@ -47,6 +47,7 @@ import {
   listAgentProviderModelsEffect,
 } from "./agents-api";
 import { createStudioStorageEffects } from "./studio-storage-api";
+import { createAppSettingsEffects } from "./app-settings-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -656,6 +657,7 @@ app.post(
 const actionsCore = require("../lib/db/actions-core");
 const mod = actionsCore;
 const studioStorage = createStudioStorageEffects(mod);
+const appSettings = createAppSettingsEffects(mod);
 
 // --- API Routes ---
 
@@ -1189,27 +1191,27 @@ app.post(
 );
 
 // Settings
-app.get("/api/app-font", simpleGetRoute(mod.getAppFontFamily));
+app.get("/api/app-font", simpleGetRoute(appSettings.getFontFamily));
 
-app.post("/api/app-font", simplePostRoute(body => mod.saveAppFontFamily(body.fontFamily)));
+app.post("/api/app-font", simplePostRoute(body => appSettings.saveFontFamily(body.fontFamily)));
 
-app.get("/api/app-theme", simpleGetRoute(mod.getGlobalAppThemeSettings));
+app.get("/api/app-theme", simpleGetRoute(appSettings.getAppTheme));
 
-app.post("/api/app-theme", simplePostRoute(mod.saveGlobalAppThemeSettings));
+app.post("/api/app-theme", simplePostRoute(appSettings.saveAppTheme));
 
-app.get("/api/editor-theme", simpleGetRoute(mod.getGlobalEditorThemeSettings));
+app.get("/api/editor-theme", simpleGetRoute(appSettings.getEditorTheme));
 
-app.post("/api/editor-theme", simplePostRoute(mod.saveGlobalEditorThemeSettings));
+app.post("/api/editor-theme", simplePostRoute(appSettings.saveEditorTheme));
 
-app.get("/api/studio-settings", simpleGetRoute(mod.getGlobalStudioSettings));
+app.get("/api/studio-settings", simpleGetRoute(appSettings.getStudioSettings));
 
-app.post("/api/studio-settings", simplePostRoute(mod.saveGlobalStudioSettings));
+app.post("/api/studio-settings", simplePostRoute(appSettings.saveStudioSettings));
 
 // Settings migration
 app.get(
   "/api/settings/migration-status",
   effectJsonHandler(() =>
-    fromPromise(() => mod.isMigrationNeeded()).pipe(
+    appSettings.isMigrationNeeded().pipe(
       Effect.map((migrationNeeded) => ({ migrationNeeded })),
     ),
   ),
@@ -1218,7 +1220,7 @@ app.get(
 app.post(
   "/api/settings/migrate",
   effectHandler(() =>
-    fromPromise(() => mod.migrateSettingsFromSqlite()).pipe(
+    appSettings.migrateSettings().pipe(
       Effect.map((result) => ({
         success: result.done,
         data: result,
@@ -1231,7 +1233,7 @@ app.post(
 app.post(
   "/api/settings/clear-migrated",
   effectHandler(() =>
-    fromPromise(() => mod.clearMigratedSqliteSettings()).pipe(
+    appSettings.clearMigratedSettings().pipe(
       Effect.map(() => ({ success: true as const })),
     ),
   ),
