@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
+import { Effect } from "effect";
 import { TransferService } from "@/lib/transfer/transfer-service";
+import { TransferAdapterError } from "@/lib/transfer/errors";
 import type { ProviderAdapter, ProviderType, TransferSource, TransferDestination, TransferOptions } from "@/lib/transfer/transfer-types";
 
 function stubAdapter(type: ProviderType): ProviderAdapter {
@@ -63,6 +65,49 @@ describe("TransferService", () => {
     const result = await transferService.transferProject(source, destination, options);
     expect(result.success).toBe(false);
     expect(result.error).toContain("No adapter found for source provider");
+  });
+
+  it("transferProjectEffect returns the same envelope for invalid source", async () => {
+    const result = await Effect.runPromise(
+      transferService.transferProjectEffect(
+        { provider: "invalid" as any, connectionString: "test" },
+        { provider: "postgres", connectionString: "test" },
+        {
+          includeDatabase: true,
+          includeStorage: false,
+          includeAuth: false,
+          includeSettings: false,
+        },
+      ),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No adapter found for source provider");
+  });
+
+  it("exportPackageEffect fails with TransferAdapterError for unknown provider", async () => {
+    const exit = await Effect.runPromiseExit(
+      transferService.exportPackageEffect(
+        { provider: "invalid" as any, connectionString: "test" },
+        {
+          includeDatabase: true,
+          includeStorage: false,
+          includeAuth: false,
+          includeSettings: false,
+        },
+      ),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const { Cause, Option } = await import("effect");
+      const err = Cause.findErrorOption(exit.cause);
+      expect(Option.isSome(err)).toBe(true);
+      if (Option.isSome(err)) {
+        expect(err.value).toBeInstanceOf(TransferAdapterError);
+        expect((err.value as TransferAdapterError).message).toContain(
+          "No adapter found",
+        );
+      }
+    }
   });
 
   it("should handle invalid destination provider", async () => {

@@ -8,7 +8,10 @@
  */
 
 import { Effect } from "effect";
-import { createTransferService } from "@/lib/transfer/transfer-service";
+import {
+  createTransferServiceEffect,
+  TransferService,
+} from "@/lib/transfer/transfer-service";
 // Side-effect import: registers the server query implementation for
 // dual-use modules (storage-utils, auth/fetch). Server-only file — safe.
 import "@/lib/transfer/transfer-server-query";
@@ -18,8 +21,11 @@ import type {
   TransferJobStatus,
 } from "@/lib/transfer/transfer-client";
 import type { TransferProgress } from "@/lib/transfer/transfer-types";
-import { fromPromise } from "./effect/http";
-import { DbError } from "./effect/errors";
+import { messageForError } from "./effect/errors";
+
+type TransferServiceFactory = () => Effect.Effect<TransferService, never>;
+
+let transferServiceFactory: TransferServiceFactory = createTransferServiceEffect;
 
 type TransferJob = {
   progress: TransferProgress;
@@ -29,7 +35,12 @@ type TransferJob = {
     stats?: Record<string, number>;
     warnings?: string[];
     error?: string;
-    functionDiffs?: Array<{ slug: string; targetProvider: string; diff: string; notes: string[] }>;
+    functionDiffs?: Array<{
+      slug: string;
+      targetProvider: string;
+      diff: string;
+      notes: string[];
+    }>;
   };
   updatedAt: number;
 };
@@ -44,7 +55,25 @@ const jobs = new Map<string, TransferJob>();
  */
 const activeByDestination = new Map<string, string>();
 
-export function getActiveTransferIdForDestination(destinationConnectionString: string): string | undefined {
+/**
+ * Test-only: inject a TransferService factory (e.g. stub adapters) so job
+ * lifecycle tests do not hit real databases. Pass `null` to restore default.
+ */
+export function setTransferServiceFactoryForTests(
+  factory: TransferServiceFactory | null,
+): void {
+  transferServiceFactory = factory ?? createTransferServiceEffect;
+}
+
+/** Test-only: clear in-memory jobs and destination locks between cases. */
+export function resetTransferJobsForTests(): void {
+  jobs.clear();
+  activeByDestination.clear();
+}
+
+export function getActiveTransferIdForDestination(
+  destinationConnectionString: string,
+): string | undefined {
   const id = activeByDestination.get(destinationConnectionString);
   return id && !jobs.get(id)?.done ? id : undefined;
 }
@@ -78,7 +107,9 @@ export const handleTransferStartEffect = (
 ): Effect.Effect<TransferApiResponse, never> =>
   Effect.sync(() => {
     pruneJobs();
-    const clash = getActiveTransferIdForDestination(request.destinationConnectionString);
+    const clash = getActiveTransferIdForDestination(
+      request.destinationConnectionString,
+    );
     if (clash) {
       return {
         success: false,
@@ -102,14 +133,15 @@ export const handleTransferStartEffect = (
       jobs.set(transferId, job);
       activeByDestination.set(request.destinationConnectionString, transferId);
 
-      // Run in the background; the client polls /progress/:transferId.
-      void executeTransfer(transferId, request);
+      // Background fiber; the client polls /progress/:transferId.
+      Effect.runFork(executeTransferEffect(transferId, request));
 
       return { success: true, transferId } satisfies TransferApiResponse;
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Transfer failed to start",
+        error:
+          error instanceof Error ? error.message : "Transfer failed to start",
       } satisfies TransferApiResponse;
     }
   });
@@ -120,68 +152,101 @@ export async function handleTransferStart(
   return Effect.runPromise(handleTransferStartEffect(request));
 }
 
-async function executeTransfer(transferId: string, request: TransferApiRequest): Promise<void> {
-  const job = jobs.get(transferId);
-  if (!job) return;
-  try {
-    const service = await createTransferService();
-    const result = await service.transferProject(
-      {
-        provider: request.sourceProvider as "supabase" | "neon" | "postgres" | "generic",
-        connectionString: request.sourceConnectionString,
-      },
-      {
-        provider: request.destinationProvider as "supabase" | "neon" | "postgres" | "generic",
-        connectionString: request.destinationConnectionString,
-      },
-      {
-        ...request.options,
-        onProgress: (progress) => {
-          job.progress = progress;
-          touch(job);
+const executeTransferEffect = (
+  transferId: string,
+  request: TransferApiRequest,
+): Effect.Effect<void, never> =>
+  Effect.gen(function* () {
+    const job = jobs.get(transferId);
+    if (!job) return;
+
+    yield* Effect.gen(function* () {
+      const service = yield* transferServiceFactory();
+      const result = yield* service.transferProjectEffect(
+        {
+          provider: request.sourceProvider as
+            | "supabase"
+            | "neon"
+            | "postgres"
+            | "generic",
+          connectionString: request.sourceConnectionString,
         },
-      },
-    );
-    job.result = {
-      success: result.success,
-      stats: result.stats as Record<string, number> | undefined,
-      warnings: result.warnings,
-      error: result.error,
-      // Compat diffs for the UI (truncated per diff so polling stays light).
-      functionDiffs: result.package?.functions?.functions.flatMap((fn) =>
-        fn.diffs.map((d) => ({
-          slug: fn.slug,
-          targetProvider: d.targetProvider,
-          diff: d.diff.length > 6000 ? `${d.diff.slice(0, 6000)}\n… (truncated — full diff in exported package)` : d.diff,
-          notes: d.notes,
-        })),
-      ),
-    };
-    if (result.success) {
-      job.progress = {
-        currentStep: "complete",
-        totalSteps: job.progress.totalSteps,
-        currentStepIndex: job.progress.totalSteps - 1,
-        percentage: 100,
-        message: "Transfer completed successfully",
-        details: result.stats as Record<string, unknown> | undefined,
+        {
+          provider: request.destinationProvider as
+            | "supabase"
+            | "neon"
+            | "postgres"
+            | "generic",
+          connectionString: request.destinationConnectionString,
+        },
+        {
+          ...request.options,
+          onProgress: (progress) => {
+            job.progress = progress;
+            touch(job);
+          },
+        },
+      );
+
+      job.result = {
+        success: result.success,
+        stats: result.stats as Record<string, number> | undefined,
+        warnings: result.warnings,
+        error: result.error,
+        // Compat diffs for the UI (truncated per diff so polling stays light).
+        functionDiffs: result.package?.functions?.functions.flatMap((fn) =>
+          fn.diffs.map((d) => ({
+            slug: fn.slug,
+            targetProvider: d.targetProvider,
+            diff:
+              d.diff.length > 6000
+                ? `${d.diff.slice(0, 6000)}\n… (truncated — full diff in exported package)`
+                : d.diff,
+            notes: d.notes,
+          })),
+        ),
       };
-    } else if (!job.progress.error) {
-      job.progress = { ...job.progress, error: result.error ?? "Transfer failed" };
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Transfer ${transferId} failed:`, error);
-    job.result = { success: false, error: message };
-    job.progress = { ...job.progress, error: message };
-  } finally {
-    job.done = true;
-    touch(job);
-    if (activeByDestination.get(request.destinationConnectionString) === transferId) {
-      activeByDestination.delete(request.destinationConnectionString);
-    }
-  }
-}
+      if (result.success) {
+        job.progress = {
+          currentStep: "complete",
+          totalSteps: job.progress.totalSteps,
+          currentStepIndex: job.progress.totalSteps - 1,
+          percentage: 100,
+          message: "Transfer completed successfully",
+          details: result.stats as Record<string, unknown> | undefined,
+        };
+      } else if (!job.progress.error) {
+        job.progress = {
+          ...job.progress,
+          error: result.error ?? "Transfer failed",
+        };
+      }
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          const message = messageForError(error);
+          console.error(`Transfer ${transferId} failed:`, error);
+          job.result = { success: false, error: message };
+          job.progress = { ...job.progress, error: message };
+        }),
+      ),
+    );
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        const job = jobs.get(transferId);
+        if (!job) return;
+        job.done = true;
+        touch(job);
+        if (
+          activeByDestination.get(request.destinationConnectionString) ===
+          transferId
+        ) {
+          activeByDestination.delete(request.destinationConnectionString);
+        }
+      }),
+    ),
+  );
 
 export const handleTransferProgressEffect = (
   transferId: string,
@@ -197,7 +262,10 @@ export const handleTransferProgressEffect = (
         message: "Unknown transfer",
         error: `No transfer found for id ${transferId}`,
         done: true,
-        result: { success: false, error: `No transfer found for id ${transferId}` },
+        result: {
+          success: false,
+          error: `No transfer found for id ${transferId}`,
+        },
       } satisfies TransferJobStatus;
     }
     return { ...job.progress, done: job.done, result: job.result };
@@ -213,43 +281,27 @@ export const handleTransferExportEffect = (
   request: TransferApiRequest,
 ): Effect.Effect<
   { success: boolean; packageJson?: string; error?: string },
-  DbError
+  never
 > =>
   Effect.gen(function* () {
-    const service = yield* fromPromise(
-      () => createTransferService(),
-      (cause) =>
-        new DbError({
-          message:
-            cause instanceof Error ? cause.message : "Failed to create transfer service",
-        }),
+    const service = yield* transferServiceFactory();
+    const packageJson = yield* service.exportPackageEffect(
+      {
+        provider: request.sourceProvider as
+          | "supabase"
+          | "neon"
+          | "postgres"
+          | "generic",
+        connectionString: request.sourceConnectionString,
+      },
+      request.options,
     );
-    const packageJson = yield* fromPromise(
-      () =>
-        service.exportPackage(
-          {
-            provider: request.sourceProvider as
-              | "supabase"
-              | "neon"
-              | "postgres"
-              | "generic",
-            connectionString: request.sourceConnectionString,
-          },
-          request.options,
-        ),
-      (cause) =>
-        new DbError({
-          message: cause instanceof Error ? cause.message : "Export failed",
-        }),
-    );
-    return { success: true, packageJson };
+    return { success: true as const, packageJson };
   }).pipe(
     Effect.catch((error) =>
       Effect.succeed({
         success: false as const,
-        error: error instanceof Error || (error && typeof error === "object" && "message" in error)
-          ? String((error as { message: unknown }).message)
-          : "Export failed",
+        error: messageForError(error),
       }),
     ),
   );
