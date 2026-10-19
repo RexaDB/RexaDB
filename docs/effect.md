@@ -107,3 +107,13 @@ Promise facades (`transferProject`, `createTransferService`, …) remain for tes
 | Browser `lib/neon-cli/client.ts` | Stays Promise/HTTP — do not import Effect there |
 
 SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLoginEffect` via `Effect.runPromise` and maps tagged errors with `.message`.
+
+### Credentials / vault domain (Wave 4)
+
+| API | Notes |
+|-----|--------|
+| `lib/credentials/effect-errors.ts` | `CredentialValidationError`, `VaultConfigError`, `CredentialCacheError`, `KeychainError` |
+| `lib/credentials/connection-credential-cache.ts` | Effect-first in-memory cache; sync facades via `Effect.runSync` |
+| `lib/credentials/credential-cache-effects.ts` | Validated `putCredentialCacheEntryEffect` / `lockCredentialCacheEffect` |
+| `lib/credentials/vault-config-effects.ts` | `fromVaultConfigPromise` / `fromVaultMigrationPromise` |
+| UI modules (`local-vault`, `connection-credentials`) | Stay Promise/browser-safe — do not import Effect there |
