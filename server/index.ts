@@ -3403,10 +3403,6 @@ function startServer(port: number, maxPort: number = 3900) {
   const server = app.listen(port, "127.0.0.1", () => {
     log(`[rexadb-server] listening on port ${port}`);
     logToFile(`listening on port ${port}`);
-    // Warm provider cache in background so first /api/agents/detect is instant (t3 pattern)
-    setTimeout(() => {
-      void refreshProvidersCacheInBackground().catch(() => {});
-    }, 500);
     // Write port file for frontend discovery
     const dataDir = process.env.REXADB_USER_DATA_DIR || "/tmp";
     try {
