@@ -3,7 +3,7 @@ import cors from "cors";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import "pg";
 import "redis";
 import "drizzle-orm";
@@ -31,6 +31,17 @@ import {
   createStripeWebhookEndpointEffect,
 } from "./stripe";
 import {
+  getMcpConfigSummaryEffect,
+  updateMcpConfigEffect,
+  regenerateMcpTokenEffect,
+  getMcpTokenEffect,
+  listMcpAuditLogEffect,
+  createMcpModeEffect,
+  updateMcpModeEffect,
+  deleteMcpModeEffect,
+  handleMcpHttpRequestEffect,
+} from "./effect";
+import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
   handleTransferExportEffect,
@@ -46,6 +57,7 @@ import {
   proxyBodyRoute,
   readUpstreamBufferEffect,
   readUpstreamTextEffect,
+  runServerPromiseExit,
   setDefectLogger,
   simpleGetRoute,
   simplePostRoute,
@@ -856,195 +868,51 @@ app.post("/api/connections/reorder", simplePostRoute(body => mod.reorderConnecti
 // Config + allow-list management for the user-facing MCP server, plus the
 // Streamable-HTTP endpoint itself. Secrets (connection strings, MCP bearer
 // token) are never returned here except once on regenerate.
-app.get("/api/mcp/config", async (_req, res) => {
-  try {
-    const { loadMcpExternalConfig, toMcpConfigSummary, listMcpModes } = await import("../lib/agents/mcp/external-config");
-    const { listAllConnectionDeps, toPublicConnectionList } = await import("../lib/agents/mcp/registry");
-    const config = await loadMcpExternalConfig();
-    const all = await listAllConnectionDeps();
-    // Verbatim stdio descriptor so harnesses spawn the server against THIS
-    // sidecar's data dir no matter what cwd they launch from (without
-    // REXADB_USER_DATA_DIR a foreign-cwd spawn would open ~/.rexadb/sqlite.db
-    // and see a disabled server).
-    let stdio: { command: string; args: string[]; env: Record<string, string>; available: boolean } | null = null;
-    try {
-      const entry = path.join(process.cwd(), "lib/agents/mcp/external-stdio.ts");
-      const bunBin = process.execPath.includes("bun") ? process.execPath : "bun";
-      stdio = {
-        command: bunBin,
-        args: ["run", entry],
-        env: { REXADB_USER_DATA_DIR: process.env.REXADB_USER_DATA_DIR || process.cwd() },
-        available: fs.existsSync(entry),
-      };
-    } catch {
-      stdio = null;
-    }
-    res.json({
-      success: true,
-      data: {
-        config: toMcpConfigSummary(config),
-        modes: listMcpModes(config.customModes),
-        connections: toPublicConnectionList(all, config.exposedConnectionIds),
-        // NOTE: the MCP HTTP endpoint lives on THIS sidecar (same port),
-        // not a separate port — clients use `${sidecar-origin}/mcp`.
-        httpPath: "/mcp",
-        stdio,
-      },
-    });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/mcp/config", effectHandler(() => getMcpConfigSummaryEffect, { fallbackStatus: 500 }));
 
-app.put("/api/mcp/config", async (req, res) => {
-  try {
-    const { loadMcpExternalConfig, saveMcpExternalConfig, sanitizeMcpExternalConfig, toMcpConfigSummary, listMcpModes } = await import("../lib/agents/mcp/external-config");
-    const current = await loadMcpExternalConfig();
-    // Preserve the existing token unless the client explicitly rotates it —
-    // the GET summary never includes the secret, so echo-back would wipe it.
-    const merged = sanitizeMcpExternalConfig({ ...req.body, authToken: current.authToken });
-    if (req.body?.authToken && typeof req.body.authToken === "string" && req.body.authToken.length > 0) {
-      merged.authToken = String(req.body.authToken).slice(0, 200);
-    }
-    const hadToken = current.authToken.length > 0;
-    const saved = await saveMcpExternalConfig(merged);
-    // If enabling minted a brand-new token, return it once so the UI can show it.
-    const mintedToken = !hadToken && saved.authToken ? saved.authToken : undefined;
-    res.json({ success: true, data: { config: toMcpConfigSummary(saved), modes: listMcpModes(saved.customModes), mintedToken } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.put("/api/mcp/config", effectJsonHandler((req) => updateMcpConfigEffect(req.body), { fallbackStatus: 500 }));
 
-app.post("/api/mcp/config/regenerate-token", async (_req, res) => {
-  try {
-    const { loadMcpExternalConfig, saveMcpExternalConfig, generateMcpAuthToken } = await import("../lib/agents/mcp/external-config");
-    const current = await loadMcpExternalConfig();
-    current.authToken = generateMcpAuthToken();
-    await saveMcpExternalConfig(current);
-    res.json({ success: true, data: { authToken: current.authToken } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post("/api/mcp/config/regenerate-token", effectJsonHandler(() => regenerateMcpTokenEffect, { fallbackStatus: 500 }));
 
 // Reveal the current token (localhost sidecar only — same trust level as the
 // other /api routes, which freely return connection details in dev).
-app.get("/api/mcp/config/token", async (_req, res) => {
-  try {
-    const { loadMcpExternalConfig } = await import("../lib/agents/mcp/external-config");
-    const current = await loadMcpExternalConfig();
-    if (!current.authToken) {
-      res.json({ success: false, error: "No token set yet. Enable the MCP server first." });
-      return;
-    }
-    res.json({ success: true, data: { authToken: current.authToken } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/mcp/config/token", effectJsonHandler(() => getMcpTokenEffect, { fallbackStatus: 500 }));
 
 // Server-side MCP audit log (writes + query cost). Same localhost trust level
 // as the other /api/mcp routes. Query params: limit (1-500), writesOnly=1,
 // tool=<name>, connectionId=<id>.
-app.get("/api/mcp/audit-log", async (req, res) => {
-  try {
-    const { listMcpAuditLog } = await import("../lib/agents/mcp/audit-log");
-    const q = req.query as Record<string, string | undefined>;
-    const connectionId = q.connectionId !== undefined ? Number(q.connectionId) : undefined;
-    const entries = await listMcpAuditLog({
-      limit: q.limit !== undefined ? Number(q.limit) : 100,
-      writesOnly: q.writesOnly === "1" || q.writesOnly === "true",
-      tool: q.tool || undefined,
-      connectionId: connectionId !== undefined && Number.isInteger(connectionId) ? connectionId : undefined,
-    });
-    res.json({ success: true, data: { entries } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/mcp/audit-log", effectJsonHandler((req) => {
+  const q = req.query as Record<string, string | undefined>;
+  const connectionId = q.connectionId !== undefined ? Number(q.connectionId) : undefined;
+  return listMcpAuditLogEffect({
+    limit: q.limit !== undefined ? Number(q.limit) : 100,
+    writesOnly: q.writesOnly === "1" || q.writesOnly === "true",
+    tool: q.tool || undefined,
+    connectionId: connectionId !== undefined && Number.isInteger(connectionId) ? connectionId : undefined,
+  });
+}, { fallbackStatus: 500 }));
 
-app.post("/api/mcp/modes", async (req, res) => {
-  try {
-    const { loadMcpExternalConfig, saveMcpExternalConfig, sanitizeMcpExternalConfig } = await import("../lib/agents/mcp/external-config");
-    const config = await loadMcpExternalConfig();
-    const raw = req.body || {};
-    const id = `custom:${Date.now().toString(36)}`;
-    const mode = {
-      id,
-      label: String(raw.label || "Custom").slice(0, 80),
-      kind: "custom" as const,
-      description: typeof raw.description === "string" ? raw.description.slice(0, 500) : undefined,
-      allowSqlRead: raw.allowSqlRead !== false,
-      allowSqlWrite: raw.allowSqlWrite === true,
-      promptRules: typeof raw.promptRules === "string" ? raw.promptRules.slice(0, 8000) : "",
-    };
-    config.customModes = [...(config.customModes || []), mode].slice(0, 50);
-    const saved = await saveMcpExternalConfig(sanitizeMcpExternalConfig(config));
-    res.json({ success: true, data: { mode, modes: [...(await import("../lib/agents/mcp/external-config")).listMcpModes(saved.customModes)] } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post("/api/mcp/modes", effectJsonHandler((req) => createMcpModeEffect(req.body), { fallbackStatus: 500 }));
 
-app.put("/api/mcp/modes/:id", async (req, res) => {
-  try {
-    const { loadMcpExternalConfig, saveMcpExternalConfig, sanitizeMcpExternalConfig, listMcpModes } = await import("../lib/agents/mcp/external-config");
-    const config = await loadMcpExternalConfig();
-    const id = String(req.params.id);
-    const body = req.body || {};
-    config.customModes = (config.customModes || []).map((m: any) =>
-      m.id === id
-        ? {
-            ...m,
-            label: typeof body.label === "string" ? body.label.slice(0, 80) : m.label,
-            description: typeof body.description === "string" ? body.description.slice(0, 500) : m.description,
-            allowSqlRead: body.allowSqlRead !== undefined ? body.allowSqlRead !== false : m.allowSqlRead,
-            allowSqlWrite: body.allowSqlWrite !== undefined ? body.allowSqlWrite === true : m.allowSqlWrite,
-            promptRules: typeof body.promptRules === "string" ? body.promptRules.slice(0, 8000) : m.promptRules,
-          }
-        : m,
-    );
-    const saved = await saveMcpExternalConfig(sanitizeMcpExternalConfig(config));
-    res.json({ success: true, data: { modes: listMcpModes(saved.customModes) } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.put("/api/mcp/modes/:id", effectJsonHandler((req) => updateMcpModeEffect(req.params.id, req.body), { fallbackStatus: 500 }));
 
-app.delete("/api/mcp/modes/:id", async (req, res) => {
-  try {
-    const { loadMcpExternalConfig, saveMcpExternalConfig, sanitizeMcpExternalConfig, listMcpModes } = await import("../lib/agents/mcp/external-config");
-    const { REXADB_PLAN_MODE } = await import("../lib/agents/app-modes");
-    const config = await loadMcpExternalConfig();
-    const id = String(req.params.id);
-    config.customModes = (config.customModes || []).filter((m: any) => m.id !== id);
-    if (config.modeId === id) config.modeId = REXADB_PLAN_MODE.id;
-    const saved = await saveMcpExternalConfig(sanitizeMcpExternalConfig(config));
-    res.json({ success: true, data: { modes: listMcpModes(saved.customModes), modeId: saved.modeId } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.delete("/api/mcp/modes/:id", effectJsonHandler((req) => deleteMcpModeEffect(req.params.id), { fallbackStatus: 500 }));
 
 // Streamable-HTTP MCP endpoint (stateless). Bearer-authenticated with the MCP
 // token from Settings → MCP Server; independent from REXADB_API_KEY.
+// NOTE: Streaming endpoint — runs Effect for validation but delegates to handleMcpHttpRequest
+// which writes to res directly.
 app.all("/mcp", async (req, res) => {
-  try {
-    const { loadMcpExternalConfig } = await import("../lib/agents/mcp/external-config");
-    const { handleMcpHttpRequest, isMcpBearerAuthorized } = await import("../lib/agents/mcp/http");
-    const config = await loadMcpExternalConfig();
-    if (!config.enabled || (config.transports !== "http" && config.transports !== "both")) {
-      res.status(503).json({ success: false, error: "MCP HTTP transport is disabled. Enable it in Settings → MCP Server." });
-      return;
+  const exit = await Effect.runPromiseExit(handleMcpHttpRequestEffect(req, res));
+  if (Exit.isFailure(exit)) {
+    if (!res.headersSent) {
+      const err = exit.cause;
+      const message = err._tag === "McpDisabledError" || err._tag === "McpRequestError"
+        ? err.message
+        : "MCP request failed";
+      const status = err.status || 500;
+      res.status(status).json({ success: false, error: message });
     }
-    if (!isMcpBearerAuthorized(req, config.authToken)) {
-      res.status(401).json({ success: false, error: "Unauthorized. Provide Authorization: Bearer <mcp-token>." });
-      return;
-    }
-    await handleMcpHttpRequest(req, res);
-  } catch (e: any) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: e.message });
   }
 });
 
