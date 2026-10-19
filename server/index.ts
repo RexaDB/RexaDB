@@ -48,6 +48,7 @@ import {
 } from "./agents-api";
 import { createStudioStorageEffects } from "./studio-storage-api";
 import { createAppSettingsEffects } from "./app-settings-api";
+import { createUserDataEffects } from "./user-data-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -658,6 +659,7 @@ const actionsCore = require("../lib/db/actions-core");
 const mod = actionsCore;
 const studioStorage = createStudioStorageEffects(mod);
 const appSettings = createAppSettingsEffects(mod);
+const userData = createUserDataEffects(mod);
 
 // --- API Routes ---
 
@@ -1129,14 +1131,14 @@ app.get(
       const id = req.query.id as string | undefined;
       const getAll = req.query.getAll as string | undefined;
       if (getAll === "true") {
-        return yield* fromPromise(() => mod.getAllUsers());
+        return yield* userData.getAllProfiles();
       }
-      return yield* fromPromise(() => mod.getStoredUserProfile(id || null));
+      return yield* userData.getProfile(id || null);
     }),
   ),
 );
 
-app.post("/api/user/profile", simplePostRoute(mod.upsertUserProfile));
+app.post("/api/user/profile", simplePostRoute(userData.upsertProfile));
 
 app.delete(
   "/api/user/profile",
@@ -1144,9 +1146,9 @@ app.delete(
     Effect.gen(function* () {
       const { id, all } = req.body || {};
       if (all) {
-        return yield* fromPromise(() => mod.clearAllUsers());
+        return yield* userData.clearProfiles();
       }
-      return yield* fromPromise(() => mod.deleteUserProfile(id));
+      return yield* userData.deleteProfile(id);
     }),
   ),
 );
@@ -1174,8 +1176,7 @@ app.post(
       logToFile(
         `[error-logger] type=${errorType} msg=${message?.slice(0, 200)} url=${url}`,
       );
-      return yield* fromPromise(() =>
-        mod.logAppError({
+      return yield* userData.logAppError({
           errorType: errorType || "unknown",
           message: message || null,
           stack: stack || null,
@@ -1184,8 +1185,7 @@ app.post(
           metadata: metadata || {},
           appVersion: appVersion || null,
           os: os || null,
-        }),
-      );
+        });
     }),
   ),
 );
@@ -2120,29 +2120,16 @@ app.post("/api/notifications/mark-read", (req, res) => {
 });
 
 // Analytics
-app.get("/api/user/analytics", async (req, res) => {
-  try {
-    const result = await mod.getUserAnalytics();
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/user/analytics", effectHandler(() => userData.getUserAnalytics()));
 
-app.get("/api/connections/:id/analytics", async (req, res) => {
-  try {
-    const connectionId = parseInt(req.params.id, 10);
-    if (isNaN(connectionId)) {
-      res.json({ success: false, error: "Invalid connection ID" });
-      return;
-    }
-    const range = req.query.range as string | undefined;
-    const result = await mod.getConnectionAnalytics(connectionId, range);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
+app.get("/api/connections/:id/analytics", effectHandler((req) => {
+  const connectionId = parseInt(req.params.id as string, 10);
+  if (Number.isNaN(connectionId)) {
+    return Effect.succeed({ success: false as const, error: "Invalid connection ID" });
   }
-});
+  const range = req.query.range as string | undefined;
+  return userData.getConnectionAnalytics(connectionId, range);
+}));
 
 // Agents
 app.get("/api/agents", (_req, res) => {
