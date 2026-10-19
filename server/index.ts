@@ -49,6 +49,7 @@ import {
 import { createStudioStorageEffects } from "./studio-storage-api";
 import { createAppSettingsEffects } from "./app-settings-api";
 import { createUserDataEffects } from "./user-data-api";
+import { createAiStorageEffects } from "./ai-storage-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -660,6 +661,7 @@ const mod = actionsCore;
 const studioStorage = createStudioStorageEffects(mod);
 const appSettings = createAppSettingsEffects(mod);
 const userData = createUserDataEffects(mod);
+const aiStorage = createAiStorageEffects(mod);
 
 // --- API Routes ---
 
@@ -1389,17 +1391,11 @@ app.get("/studio/:connectionId/bootstrap", async (req, res) => {
 });
 
 // AI routes (basic - list chats, get messages)
-app.get("/api/ai/chats", async (req, res) => {
-  try {
-    const connectionId = Number(req.query.connectionId);
-    const result = await mod.listAiChats(connectionId);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/ai/chats", effectHandler((req) =>
+  aiStorage.listChats(Number(req.query.connectionId)),
+));
 
-app.get("/api/ai/settings", simpleGetRoute(mod.getGlobalAiSettings));
+app.get("/api/ai/settings", simpleGetRoute(aiStorage.getSettings));
 
 app.get("/api/ai/providers", simpleGetRoute(async () => {
   const { listAiProviderCatalog } = await import("../lib/ai/pi-provider-catalog");
@@ -1411,7 +1407,7 @@ app.post("/api/ai/provider-models", simplePostRoute(async (body) => {
   return discoverAiProviderModels(body);
 }));
 
-app.post("/api/ai/settings", simplePostRoute(body => mod.saveGlobalAiSettings(body.settings)));
+app.post("/api/ai/settings", simplePostRoute(body => aiStorage.saveSettings(body.settings)));
 
 app.get("/api/keybindings", simpleGetRoute(async () => {
   const { getKeybindings } = await import("../lib/db/keybindings-store");
@@ -2122,7 +2118,7 @@ app.post("/api/notifications/mark-read", (req, res) => {
 // Analytics
 app.get("/api/user/analytics", effectHandler(() => userData.getUserAnalytics()));
 
-app.get("/api/connections/:id/analytics", effectHandler((req) => {
+app.get("/api/connections/:id/analytics", effectHandler((req): Effect.Effect<any, any> => {
   const connectionId = parseInt(req.params.id as string, 10);
   if (Number.isNaN(connectionId)) {
     return Effect.succeed({ success: false as const, error: "Invalid connection ID" });
@@ -2137,47 +2133,35 @@ app.get("/api/agents", (_req, res) => {
 });
 
 // AI chat messages
-app.get("/api/ai/chats/:chatId/messages", async (req, res) => {
-  try {
-    const result = await mod.getAiChatMessages(req.params.chatId);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get("/api/ai/chats/:chatId/messages", effectHandler((req) =>
+  aiStorage.getChatMessages(req.params.chatId as string),
+));
 
-app.post("/api/ai/chats/:chatId/messages", async (req, res) => {
-  log("[rexadb:chat] POST messages chatId=%s action=%s", req.params.chatId, req.body?.action);
-  try {
-    const { action, ...payload } = req.body;
+app.post("/api/ai/chats/:chatId/messages", effectHandler((req) =>
+  Effect.gen(function* () {
+    log("[rexadb:chat] POST messages chatId=%s action=%s", req.params.chatId, req.body?.action);
+    const { action, ...payload } = req.body || {};
     switch (action) {
       case "append": {
-        const result = await mod.appendAiChatMessage({ ...payload, chatId: req.params.chatId });
-        return res.json(result);
+        return yield* aiStorage.appendMessage({ ...payload, chatId: req.params.chatId as string });
       }
       case "update_content": {
-        const result = await mod.updateAiChatMessageContent({ ...payload, chatId: req.params.chatId });
-        return res.json(result);
+        return yield* aiStorage.updateMessageContent({ ...payload, chatId: req.params.chatId as string });
       }
       case "update_meta": {
-        const result = await mod.updateAiChatMessageMeta({ ...payload, chatId: req.params.chatId });
-        return res.json(result);
+        return yield* aiStorage.updateMessageMeta({ ...payload, chatId: req.params.chatId as string });
       }
       case "delete_after": {
-        const result = await mod.deleteAiChatMessagesAfter({ ...payload, chatId: req.params.chatId });
-        return res.json(result);
+        return yield* aiStorage.deleteMessagesAfter({ ...payload, chatId: req.params.chatId as string });
       }
       case "ensure": {
-        const result = await mod.ensureAiChat(payload);
-        return res.json(result);
+        return yield* aiStorage.ensureChat(payload);
       }
       default:
-        return res.json({ success: false, error: `Unknown action: ${action}` });
+        return { success: false as const, error: `Unknown action: ${action}` };
     }
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+  }),
+));
 
 async function resolveAiReq(req: any, res: any) {
   const {
