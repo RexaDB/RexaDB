@@ -23,7 +23,7 @@ describe("remaining actions-core Effects", () => {
       },
     }));
     const result = await Effect.runPromise(api.compareSnapshots("17", "old", "new"));
-    expect(result.data).toEqual({ added: [] });
+    expect((result as any).data).toEqual({ added: [] });
     expect(received).toEqual(["17", "old", "new"]);
   });
 

@@ -1267,11 +1267,18 @@ app.post("/api/snapshots/create-stream", async (req, res) => {
 
 app.post("/api/snapshots/create", effectHandler((req): Effect.Effect<any, any> => {
   const body = req.body || {};
+  if (typeof body.connectionId !== "string" && typeof body.connectionId !== "number") {
+    return Effect.fail(new ValidationError({ message: "connectionId is required." }));
+  }
+  const connectionId = String(body.connectionId).trim();
+  if (!connectionId) {
+    return Effect.fail(new ValidationError({ message: "connectionId is required." }));
+  }
   return remainingActions.createSnapshot(
     body.connectionString,
     body.name,
     body.description,
-    String(body.connectionId),
+    connectionId,
   );
 }));
 

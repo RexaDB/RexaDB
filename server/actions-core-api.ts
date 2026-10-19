@@ -21,7 +21,7 @@ export function createActionsCoreEffects(actions: RemainingActions) {
   const wrap = <Name extends RemainingActionNames>(name: Name) =>
     (...args: Parameters<RemainingActions[Name]>) => fromActionsCore(
       `Failed to ${name.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)}`,
-      () => (actions[name] as unknown as (...values: any[]) => Promise<any>)(...args),
+      () => (actions[name] as unknown as (...values: Parameters<RemainingActions[Name]>) => Promise<Awaited<ReturnType<RemainingActions[Name]>>>)(...args),
     );
   return {
     updateUserPlan: wrap("updateUserPlan"),
