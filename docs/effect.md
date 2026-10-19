@@ -140,14 +140,13 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 | Billing routes | All PayKit and Stripe routes wired through `effectJsonHandler` to wrap bare data in `{ success, data }` |
 | Promise facades | Original Promise functions kept for any direct callers |
 
-
 ### MCP server (Wave 7)
 
-|| API | Notes |
-||-----|--------|
-|| `server/effect/mcp-errors.ts` | Tagged `McpDisabledError`, `McpConfigError`, `McpRequestError` |
-|| `server/effect/mcp-config.ts` | Effect APIs for config load/save, token management, audit log, custom mode CRUD |
-|| `server/effect/mcp-http.ts` | `handleMcpHttpRequestEffect` for MCP HTTP endpoint validation and auth |
-|| MCP routes | Config GET/PUT, token regenerate/reveal, audit-log, modes CRUD, HTTP endpoint all wired through Effect |
-|| Streaming `/mcp` | Uses Effect for validation but delegates to `handleMcpHttpRequest` for response writing |
-|| Promise facades | Original `loadMcpExternalConfig`, `saveMcpExternalConfig` kept for direct callers |
+| API | Notes |
+|-----|--------|
+| `server/effect/mcp-errors.ts` | Tagged `McpDisabledError`, `McpConfigError`, `McpRequestError` |
+| `server/effect/mcp-config.ts` | Effect APIs for config load/save, token management, audit log, custom mode CRUD |
+| `server/effect/mcp-http.ts` | `handleMcpHttpRequestEffect` for MCP HTTP endpoint validation and auth |
+| MCP routes | Config GET/PUT, token regenerate/reveal, audit-log, modes CRUD, HTTP endpoint all wired through Effect |
+| Streaming `/mcp` | Uses Effect for validation but delegates to `handleMcpHttpRequest` for response writing |
+| Promise facades | Original `loadMcpExternalConfig`, `saveMcpExternalConfig` kept for direct callers |

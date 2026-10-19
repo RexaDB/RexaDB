@@ -84,7 +84,9 @@ export const updateMcpConfigEffect = (updates: Partial<McpExternalConfig>) =>
     const merged = sanitizeMcpExternalConfig({
       ...current,
       ...updates,
-      authToken: updates.authToken !== undefined ? updates.authToken : current.authToken,
+      authToken: typeof updates.authToken === "string" && updates.authToken.length > 0
+        ? updates.authToken
+        : current.authToken,
     });
     const saved = yield* saveMcpConfigEffect(merged);
     const hadToken = current.authToken.length > 0;
@@ -138,15 +140,16 @@ export const listMcpAuditLogEffect = (params: {
 export const createMcpModeEffect = (raw: any) =>
   Effect.gen(function* () {
     const config = yield* loadMcpConfigEffect;
+    const body = raw || {};
     const id = `custom:${Date.now().toString(36)}`;
     const mode = {
       id,
-      label: String(raw.label || "Custom").slice(0, 80),
+      label: String(body.label || "Custom").slice(0, 80),
       kind: "custom" as const,
-      description: typeof raw.description === "string" ? raw.description.slice(0, 500) : undefined,
-      allowSqlRead: raw.allowSqlRead !== false,
-      allowSqlWrite: raw.allowSqlWrite === true,
-      promptRules: typeof raw.promptRules === "string" ? raw.promptRules.slice(0, 8000) : "",
+      description: typeof body.description === "string" ? body.description.slice(0, 500) : undefined,
+      allowSqlRead: body.allowSqlRead !== false,
+      allowSqlWrite: body.allowSqlWrite === true,
+      promptRules: typeof body.promptRules === "string" ? body.promptRules.slice(0, 8000) : "",
     };
     config.customModes = [...(config.customModes || []), mode].slice(0, 50);
     const saved = yield* saveMcpConfigEffect(sanitizeMcpExternalConfig(config));
@@ -160,15 +163,16 @@ export const createMcpModeEffect = (raw: any) =>
 export const updateMcpModeEffect = (id: string, updates: any) =>
   Effect.gen(function* () {
     const config = yield* loadMcpConfigEffect;
+    const body = updates || {};
     config.customModes = (config.customModes || []).map((m: any) =>
       m.id === id
         ? {
             ...m,
-            label: typeof updates.label === "string" ? updates.label.slice(0, 80) : m.label,
-            description: typeof updates.description === "string" ? updates.description.slice(0, 500) : m.description,
-            allowSqlRead: updates.allowSqlRead !== undefined ? updates.allowSqlRead !== false : m.allowSqlRead,
-            allowSqlWrite: updates.allowSqlWrite !== undefined ? updates.allowSqlWrite === true : m.allowSqlWrite,
-            promptRules: typeof updates.promptRules === "string" ? updates.promptRules.slice(0, 8000) : m.promptRules,
+            label: typeof body.label === "string" ? body.label.slice(0, 80) : m.label,
+            description: typeof body.description === "string" ? body.description.slice(0, 500) : m.description,
+            allowSqlRead: body.allowSqlRead !== undefined ? body.allowSqlRead !== false : m.allowSqlRead,
+            allowSqlWrite: body.allowSqlWrite !== undefined ? body.allowSqlWrite === true : m.allowSqlWrite,
+            promptRules: typeof body.promptRules === "string" ? body.promptRules.slice(0, 8000) : m.promptRules,
           }
         : m,
     );

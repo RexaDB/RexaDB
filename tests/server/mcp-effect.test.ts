@@ -1,6 +1,8 @@
 import { describe, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import assert from "assert";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   loadMcpConfigEffect,
   updateMcpConfigEffect,

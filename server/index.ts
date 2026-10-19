@@ -868,7 +868,7 @@ app.post("/api/connections/reorder", simplePostRoute(body => mod.reorderConnecti
 // Config + allow-list management for the user-facing MCP server, plus the
 // Streamable-HTTP endpoint itself. Secrets (connection strings, MCP bearer
 // token) are never returned here except once on regenerate.
-app.get("/api/mcp/config", effectHandler(() => getMcpConfigSummaryEffect, { fallbackStatus: 500 }));
+app.get("/api/mcp/config", effectJsonHandler(() => getMcpConfigSummaryEffect, { fallbackStatus: 500 }));
 
 app.put("/api/mcp/config", effectJsonHandler((req) => updateMcpConfigEffect(req.body), { fallbackStatus: 500 }));
 
@@ -889,7 +889,7 @@ app.get("/api/mcp/audit-log", effectJsonHandler((req) => {
     writesOnly: q.writesOnly === "1" || q.writesOnly === "true",
     tool: q.tool || undefined,
     connectionId: connectionId !== undefined && Number.isInteger(connectionId) ? connectionId : undefined,
-  });
+  }).pipe(Effect.map((entries) => ({ entries })));
 }, { fallbackStatus: 500 }));
 
 app.post("/api/mcp/modes", effectJsonHandler((req) => createMcpModeEffect(req.body), { fallbackStatus: 500 }));
@@ -906,7 +906,7 @@ app.all("/mcp", async (req, res) => {
   const exit = await Effect.runPromiseExit(handleMcpHttpRequestEffect(req, res));
   if (Exit.isFailure(exit)) {
     if (!res.headersSent) {
-      const err = exit.cause;
+      const err = failureFromExit(exit);
       const message = err._tag === "McpDisabledError" || err._tag === "McpRequestError"
         ? err.message
         : "MCP request failed";
