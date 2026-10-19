@@ -483,6 +483,8 @@ app.post("/api/neon-cli/login", async (req, res) => {
     if (completed || !abort.signal.aborted) {
       send({ type: "done", success: true, email: completedEmail ?? null });
     }
+    // Flush the done event before closing
+    await new Promise(resolve => setTimeout(resolve, 100));
     finish();
   } catch (e: any) {
     if (abort.signal.aborted && !completed) {
@@ -490,6 +492,8 @@ app.post("/api/neon-cli/login", async (req, res) => {
       return;
     }
     send({ type: "error", message: friendlyNeonAuthError(e?.message || String(e)) });
+    // Flush error before closing
+    await new Promise(resolve => setTimeout(resolve, 100));
     finish();
   } finally {
     if (neonLoginAbort === abort) neonLoginAbort = null;
