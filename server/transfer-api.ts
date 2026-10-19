@@ -10,6 +10,7 @@
 import { Effect } from "effect";
 import {
   createTransferServiceEffect,
+  TransferService,
 } from "@/lib/transfer/transfer-service";
 // Side-effect import: registers the server query implementation for
 // dual-use modules (storage-utils, auth/fetch). Server-only file — safe.
@@ -21,6 +22,10 @@ import type {
 } from "@/lib/transfer/transfer-client";
 import type { TransferProgress } from "@/lib/transfer/transfer-types";
 import { messageForError } from "./effect/errors";
+
+type TransferServiceFactory = () => Effect.Effect<TransferService, never>;
+
+let transferServiceFactory: TransferServiceFactory = createTransferServiceEffect;
 
 type TransferJob = {
   progress: TransferProgress;
@@ -49,6 +54,22 @@ const jobs = new Map<string, TransferJob>();
  * gets a clear rejection instead of a corrupted destination.
  */
 const activeByDestination = new Map<string, string>();
+
+/**
+ * Test-only: inject a TransferService factory (e.g. stub adapters) so job
+ * lifecycle tests do not hit real databases. Pass `null` to restore default.
+ */
+export function setTransferServiceFactoryForTests(
+  factory: TransferServiceFactory | null,
+): void {
+  transferServiceFactory = factory ?? createTransferServiceEffect;
+}
+
+/** Test-only: clear in-memory jobs and destination locks between cases. */
+export function resetTransferJobsForTests(): void {
+  jobs.clear();
+  activeByDestination.clear();
+}
 
 export function getActiveTransferIdForDestination(
   destinationConnectionString: string,
@@ -140,7 +161,7 @@ const executeTransferEffect = (
     if (!job) return;
 
     yield* Effect.gen(function* () {
-      const service = yield* createTransferServiceEffect();
+      const service = yield* transferServiceFactory();
       const result = yield* service.transferProjectEffect(
         {
           provider: request.sourceProvider as
@@ -263,7 +284,7 @@ export const handleTransferExportEffect = (
   never
 > =>
   Effect.gen(function* () {
-    const service = yield* createTransferServiceEffect();
+    const service = yield* transferServiceFactory();
     const packageJson = yield* service.exportPackageEffect(
       {
         provider: request.sourceProvider as
