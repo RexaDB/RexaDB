@@ -123,6 +123,14 @@ export function effectJsonHandler<A, E = ServerError>(
   });
 }
 
+function liftCallbackResult(
+  result: Effect.Effect<any, any> | PromiseLike<any> | any,
+): Effect.Effect<any, any> {
+  if (Effect.isEffect(result)) return result;
+  if (isPromiseLike(result)) return fromPromise(() => result);
+  return Effect.succeed(result);
+}
+
 /**
  * Drop-in replacement for simplePostRoute: accepts either an Effect or a Promise.
  * Prefer returning Effect from new code.
@@ -135,12 +143,35 @@ export function simplePostRoute(
     body: any,
   ) => Effect.Effect<any, any> | PromiseLike<any> | any,
 ): RequestHandler {
-  return effectHandler((req) => {
-    const result = fn(req.body);
-    if (Effect.isEffect(result)) return result;
-    if (isPromiseLike(result)) return fromPromise(() => result);
-    return Effect.succeed(result);
-  });
+  return effectHandler((req) => liftCallbackResult(fn(req.body)));
+}
+
+/** GET (or any method) with a zero-arg Promise/Effect callback. */
+export function simpleGetRoute(
+  fn: () => Effect.Effect<any, any> | PromiseLike<any> | any,
+): RequestHandler {
+  return effectHandler(() => liftCallbackResult(fn()));
+}
+
+/** Route that passes `Number(req.params.connectionId)` into a Promise/Effect fn. */
+export function studioGetRoute(
+  fn: (id: number) => Effect.Effect<any, any> | PromiseLike<any> | any,
+): RequestHandler {
+  return effectHandler((req) =>
+    liftCallbackResult(fn(Number(req.params.connectionId))),
+  );
+}
+
+/** Route that passes connectionId + body into a Promise/Effect fn. */
+export function studioPostRoute(
+  fn: (
+    id: number,
+    body: any,
+  ) => Effect.Effect<any, any> | PromiseLike<any> | any,
+): RequestHandler {
+  return effectHandler((req) =>
+    liftCallbackResult(fn(Number(req.params.connectionId), req.body)),
+  );
 }
 
 /**
@@ -171,9 +202,33 @@ export function dynamicPostRoute(
           cause instanceof Error ? cause : new Error(String(cause)),
         );
       }
-      if (Effect.isEffect(result)) return yield* result;
-      if (isPromiseLike(result)) return yield* fromPromise(() => result);
-      return result;
+      return yield* liftCallbackResult(result);
     }),
   );
+}
+
+/**
+ * Build a POST handler that optionally short-circuits through a workspace DB
+ * proxy (`tryProxy`), then runs `fn` as an Effect/Promise.
+ *
+ * `tryProxy` should write the response and return true when it handled the
+ * request (same contract as `tryProxyDbOp` in server/index.ts).
+ */
+export function proxyBodyRoute(
+  tryProxy: (req: Request, res: Response) => Promise<boolean>,
+  fn: (req: Request) => Effect.Effect<any, any> | PromiseLike<any> | any,
+): RequestHandler {
+  const run = effectHandler((req) => liftCallbackResult(fn(req)));
+  return async (req, res, next) => {
+    try {
+      if (await tryProxy(req, res)) return;
+    } catch (cause) {
+      res.json({
+        success: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+      return;
+    }
+    return run(req, res, next);
+  };
 }
