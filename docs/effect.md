@@ -170,3 +170,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### AI settings and chat persistence (Wave 12)
 
 `server/ai-storage-api.ts` exposes typed Effect programs for global AI settings, chat listing/message reads, and persisted message actions. The server routes preserve the existing action names and response values, while the Promise APIs remain available to other callers.
+
+### SQL execution and schema browsing (Wave 13)
+
+`server/database-actions-api.ts` exposes typed Effect programs for query execution/cancellation, schema and table browsing, database listing, referenced records, and table row mutations. Routes keep workspace connection interception in `proxyBodyRoute`; non-workspace actions run through the Effect facade.
