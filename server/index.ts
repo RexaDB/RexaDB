@@ -12,14 +12,24 @@ import "nearley";
 import { extractIndexColumns } from "../lib/db/pg-utils";
 import {
   deployPaykitFunctions,
+  deployPaykitFunctionsEffect,
   exposePaykitSchema,
+  exposePaykitSchemaEffect,
   getPaykitStatus,
+  getPaykitStatusEffect,
   pushPaykitSchema,
+  pushPaykitSchemaEffect,
   repairPaykitProject,
+  repairPaykitProjectEffect,
   setPaykitSecrets,
+  setPaykitSecretsEffect,
   syncPaykitProducts,
+  syncPaykitProductsEffect,
 } from "./supabase-paykit";
-import { createStripeWebhookEndpoint } from "./stripe";
+import {
+  createStripeWebhookEndpoint,
+  createStripeWebhookEndpointEffect,
+} from "./stripe";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -268,18 +278,18 @@ app.all(
 // NOTE: static imports (not dynamicPostRoute) — `bun build --compile` cannot
 // resolve variable dynamic import() at runtime, so dynamically-imported
 // modules are missing from the packaged binary (bunfs).
-app.post("/api/supabase-paykit/status", simplePostRoute((body) => getPaykitStatus(body)));
-app.post("/api/supabase-paykit/push-schema", simplePostRoute((body) => pushPaykitSchema(body)));
-app.post("/api/supabase-paykit/expose", simplePostRoute((body) => exposePaykitSchema(body)));
-app.post("/api/supabase-paykit/repair", simplePostRoute((body) => repairPaykitProject(body)));
-app.post("/api/supabase-paykit/sync-products", simplePostRoute((body) => syncPaykitProducts(body)));
-app.post("/api/supabase-paykit/deploy", simplePostRoute((body) => deployPaykitFunctions(body)));
-app.post("/api/supabase-paykit/secrets", simplePostRoute((body) => setPaykitSecrets(body)));
+app.post("/api/supabase-paykit/status", simplePostRoute((body) => getPaykitStatusEffect(body)));
+app.post("/api/supabase-paykit/push-schema", simplePostRoute((body) => pushPaykitSchemaEffect(body)));
+app.post("/api/supabase-paykit/expose", simplePostRoute((body) => exposePaykitSchemaEffect(body)));
+app.post("/api/supabase-paykit/repair", simplePostRoute((body) => repairPaykitProjectEffect(body)));
+app.post("/api/supabase-paykit/sync-products", simplePostRoute((body) => syncPaykitProductsEffect(body)));
+app.post("/api/supabase-paykit/deploy", simplePostRoute((body) => deployPaykitFunctionsEffect(body)));
+app.post("/api/supabase-paykit/secrets", simplePostRoute((body) => setPaykitSecretsEffect(body)));
 
 // Stripe API proxy (avoids CORS in the browser). Creates a webhook endpoint
 // with URL + events pre-set; the secret key travels in the request body and
 // is never logged or stored.
-app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => createStripeWebhookEndpoint(body)));
+app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => createStripeWebhookEndpointEffect(body)));
 
 // Transfer API endpoints for project migration between providers
 app.post(

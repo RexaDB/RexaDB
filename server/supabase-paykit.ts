@@ -3,6 +3,12 @@
 //   POST /api/supabase-paykit/{status,push-schema,deploy,secrets}
 // The mgmt token arrives in the request body (never logged, never stored).
 
+import { Effect } from "effect";
+import {
+  ValidationError,
+  UpstreamError,
+  PaykitError,
+} from "./effect/billing-errors";
 import {
   PAYKIT_SCHEMA,
   PAYKIT_TABLE_NAMES,
@@ -832,3 +838,167 @@ export async function setPaykitSecrets(body: any) {
   }
   return ok({ requested: entries.map((e) => e.name) });
 }
+
+// ─── Effect variants (Wave 6) ───────────────────────────────────────────────
+// Pragmatic approach: wrap existing Promise functions with Effect.tryPromise.
+// Full Effect conversion can happen in a later wave if needed.
+
+export const getPaykitStatusEffect = (body: any): Effect.Effect<
+  PaykitProjectStatus,
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => getPaykitStatus(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const pushPaykitSchemaEffect = (body: any): Effect.Effect<
+  { applied: number; total: number; phase: PaykitSchemaPhase },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => pushPaykitSchema(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const repairPaykitProjectEffect = (body: any): Effect.Effect<
+  {
+    applied: string[];
+    warnings: string[];
+    alreadyOk: boolean;
+    status: PaykitProjectStatus;
+  },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => repairPaykitProject(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const exposePaykitSchemaEffect = (body: any): Effect.Effect<
+  { exposed: boolean; via: "auto" | "already" },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => exposePaykitSchema(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const syncPaykitProductsEffect = (body: any): Effect.Effect<
+  { products: any[] },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => syncPaykitProducts(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const deployPaykitFunctionsEffect = (body: any): Effect.Effect<
+  {
+    results: Array<{
+      slug: string;
+      deployed: boolean;
+      verifyJwt: boolean | null;
+      error?: string;
+    }>;
+  },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => deployPaykitFunctions(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+
+export const setPaykitSecretsEffect = (body: any): Effect.Effect<
+  { requested: string[] },
+  ValidationError | PaykitError
+> =>
+  Effect.tryPromise({
+    try: () => setPaykitSecrets(body),
+    catch: (cause) => {
+      const message =
+        cause instanceof Error ? cause.message : String(cause);
+      return new PaykitError({ message, status: 500 });
+    },
+  }).pipe(
+    Effect.flatMap((result) =>
+      result.success
+        ? Effect.succeed(result.data)
+        : Effect.fail(
+            new ValidationError({ message: result.error, status: 400 }),
+          ),
+    ),
+  );
+

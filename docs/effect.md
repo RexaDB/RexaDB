@@ -14,6 +14,7 @@ RexaDB’s local Express server and the `lib/` modules it reaches are migrating 
 | `server/effect/errors.ts` | Shared `Data.TaggedError` types |
 | `server/effect/http.ts` | Express adapters (`effectHandler`, `simplePostRoute`, …) |
 | `server/effect/proxy.ts` | Upstream HTTP proxy helpers (`effectProxyHandler`, `fetchUpstreamEffect`, …) |
+| `server/effect/billing-errors.ts` | Tagged errors for PayKit + Stripe (`ValidationError`, `UpstreamError`, `StripeError`, `PaykitError`) |
 | `server/effect/runtime.ts` | `runPromise` / `runPromiseExit` + defect logging |
 | `docs/effect.md` | This guide |
 
@@ -128,3 +129,13 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 | Proxy routes | Supabase mgmt, PlanetScale, SpacetimeDB, Studio proxy wired through `effectProxyHandler` |
 | Binary support | Buffers forwarded with correct `Content-Type` header |
 | JSON fallback | `proxiedPayloadResult` parses JSON when possible, falls back to text (matches historical behavior) |
+
+### PayKit + Stripe billing (Wave 6)
+
+| API | Notes |
+|-----|--------|
+| `server/effect/billing-errors.ts` | Tagged `ValidationError`, `UpstreamError`, `StripeError`, `PaykitError` |
+| `server/stripe.ts` | `createStripeWebhookEndpointEffect` with full validation, Promise facade kept |
+| `server/supabase-paykit.ts` | Effect variants for all PayKit operations (`getPaykitStatusEffect`, `pushPaykitSchemaEffect`, `repairPaykitProjectEffect`, `exposePaykitSchemaEffect`, `syncPaykitProductsEffect`, `deployPaykitFunctionsEffect`, `setPaykitSecretsEffect`) — pragmatic wrappers around existing Promise functions |
+| Billing routes | All PayKit and Stripe routes wired through `simplePostRoute` with Effect variants |
+| Promise facades | Original Promise functions kept for any direct callers |

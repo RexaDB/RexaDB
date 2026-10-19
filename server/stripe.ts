@@ -5,6 +5,12 @@
 // stored). Browser -> api.stripe.com is blocked by CORS, so the sidecar
 // (localhost) proxies the call, same as the PlanetScale proxy below.
 
+import { Effect } from "effect";
+import {
+  ValidationError,
+  StripeError,
+} from "./effect/billing-errors";
+
 function err(message: string) {
   return { success: false as const, error: message };
 }
@@ -81,3 +87,108 @@ export async function createStripeWebhookEndpoint(
     status: json.status as string,
   });
 }
+
+// Effect variant
+export const createStripeWebhookEndpointEffect = (
+  body: CreateWebhookEndpointInput,
+): Effect.Effect<
+  {
+    id: string;
+    url: string;
+    secret: string;
+    livemode: boolean;
+    status: string;
+  },
+  ValidationError | StripeError
+> =>
+  Effect.gen(function* () {
+    const secretKey =
+      typeof body.secretKey === "string" ? body.secretKey.trim() : "";
+    if (!/^sk_(test|live)_[A-Za-z0-9]+$/.test(secretKey)) {
+      yield* Effect.fail(
+        new ValidationError({
+          message: "Invalid Stripe secret key (expected sk_test_… or sk_live_…).",
+          status: 400,
+        }),
+      );
+    }
+    const url = typeof body.url === "string" ? body.url.trim() : "";
+    if (!/^https:\/\/\S+$/.test(url)) {
+      yield* Effect.fail(
+        new ValidationError({
+          message: "Endpoint URL must be a valid https:// URL.",
+          status: 400,
+        }),
+      );
+    }
+    const events = Array.isArray(body.events)
+      ? body.events.filter(
+          (e): e is string => typeof e === "string" && e.length > 0,
+        )
+      : [];
+    if (events.length === 0) {
+      yield* Effect.fail(
+        new ValidationError({ message: "No events provided.", status: 400 }),
+      );
+    }
+    if (events.length > 100) {
+      yield* Effect.fail(
+        new ValidationError({
+          message: "Too many events requested.",
+          status: 400,
+        }),
+      );
+    }
+    const description =
+      typeof body.description === "string" && body.description.trim()
+        ? body.description.trim().slice(0, 200)
+        : "RexaDB PayKit";
+
+    const params = new URLSearchParams();
+    params.set("url", url);
+    params.set("description", description);
+    for (const event of events) params.append("enabled_events[]", event);
+
+    const res = yield* Effect.tryPromise({
+      try: () =>
+        fetch("https://api.stripe.com/v1/webhook_endpoints", {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${secretKey}:`).toString("base64")}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params.toString(),
+        }),
+      catch: (cause) =>
+        new StripeError({
+          message:
+            cause instanceof Error
+              ? `Could not reach Stripe: ${cause.message}`
+              : "Could not reach Stripe.",
+          status: 502,
+        }),
+    });
+
+    const json = yield* Effect.tryPromise({
+      try: () => res.json(),
+      catch: () => null,
+    });
+
+    if (!res.ok) {
+      const message =
+        (json as any)?.error?.message ||
+        `Stripe rejected the request (HTTP ${res.status}).`;
+      yield* Effect.fail(
+        new StripeError({ message, status: res.status }),
+      );
+    }
+
+    return {
+      id: (json as any).id as string,
+      url: (json as any).url as string,
+      secret: (json as any).secret as string,
+      livemode: Boolean((json as any).livemode),
+      status: (json as any).status as string,
+    };
+  });
+
