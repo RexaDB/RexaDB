@@ -84,3 +84,15 @@ Use the shared set in `server/effect/errors.ts` (`ValidationError`, `HttpError`,
 ## Migration waves
 
 See the Effect migration plan. Foundation + route adapters land first; domain `lib/` conversion follows transfer → neon-cli → credentials → proxies → agents → the rest of `actions-core`.
+
+### Transfer domain (Wave 2)
+
+| API | Notes |
+|-----|--------|
+| `lib/transfer/errors.ts` | `TransferAdapterError`, `TransferValidationError`, `TransferFailedError` |
+| `TransferService.transferProjectEffect` | Expected failures stay in `TransferResult` (`success: false`) |
+| `TransferService.exportPackageEffect` / `importPackageEffect` | Missing adapter → tagged error |
+| `createTransferServiceEffect` | Adapter load failures logged and skipped |
+| `server/transfer-api.ts` | Background job via `Effect.runFork(executeTransferEffect…)` |
+
+Promise facades (`transferProject`, `createTransferService`, …) remain for tests and any dual-use callers.

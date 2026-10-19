@@ -2,8 +2,12 @@
  * Main transfer service for migrating projects between database providers
  * Handles orchestration of database, storage, auth, and settings transfers
  * Server-side only due to Node.js dependencies
+ *
+ * Effect APIs (`*Effect`) are preferred for the sidecar. Promise methods
+ * remain as facades for dual-use callers and existing tests.
  */
 
+import { Effect } from "effect";
 import type {
   TransferSource,
   TransferDestination,
@@ -15,8 +19,16 @@ import type {
   ProviderAdapter,
   TransferStep,
 } from "./transfer-types";
+import { TransferAdapterError, TransferFailedError } from "./errors";
 
 const TRANSFER_VERSION = "1.0.0";
+
+function toTransferFailed(cause: unknown, fallback: string): TransferFailedError {
+  return new TransferFailedError({
+    message: cause instanceof Error ? cause.message : fallback,
+    cause,
+  });
+}
 
 export class TransferService {
   private adapters: Map<string, ProviderAdapter> = new Map();
@@ -34,90 +46,187 @@ export class TransferService {
   }
   
   /**
-   * Transfer a complete project from source to destination
+   * Transfer a complete project from source to destination (Effect).
+   * Expected failures (missing adapter, validation) stay in TransferResult
+   * (`success: false`) to match the existing HTTP/UI contract.
+   */
+  transferProjectEffect(
+    source: TransferSource,
+    destination: TransferDestination,
+    options: TransferOptions,
+  ): Effect.Effect<TransferResult, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      const sourceAdapter = self.getAdapter(source.provider);
+      const destAdapter = self.getAdapter(destination.provider);
+
+      if (!sourceAdapter) {
+        return {
+          success: false,
+          error: `No adapter found for source provider: ${source.provider}`,
+        } satisfies TransferResult;
+      }
+
+      if (!destAdapter) {
+        return {
+          success: false,
+          error: `No adapter found for destination provider: ${destination.provider}`,
+        } satisfies TransferResult;
+      }
+
+      const steps = self.buildTransferSteps(options);
+      const totalSteps = steps.length;
+
+      return yield* Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () =>
+            self.updateProgress(options, {
+              currentStep: "validating",
+              totalSteps,
+              currentStepIndex: 0,
+              percentage: 0,
+              message: "Validating source connection...",
+            }),
+          catch: (cause) => toTransferFailed(cause, "Progress update failed"),
+        });
+
+        const sourceValid = yield* Effect.tryPromise({
+          try: () => sourceAdapter.validateConnection(source.connectionString),
+          catch: (cause) =>
+            toTransferFailed(cause, "Source connection validation failed"),
+        });
+        if (!sourceValid) {
+          return {
+            success: false,
+            error: "Source connection validation failed",
+          } satisfies TransferResult;
+        }
+
+        yield* Effect.tryPromise({
+          try: () =>
+            self.updateProgress(options, {
+              currentStep: "validating",
+              totalSteps,
+              currentStepIndex: 0,
+              percentage: 5,
+              message: "Validating destination connection...",
+            }),
+          catch: (cause) => toTransferFailed(cause, "Progress update failed"),
+        });
+
+        const destValid = yield* Effect.tryPromise({
+          try: () =>
+            destAdapter.validateConnection(destination.connectionString),
+          catch: (cause) =>
+            toTransferFailed(cause, "Destination connection validation failed"),
+        });
+        if (!destValid) {
+          return {
+            success: false,
+            error: "Destination connection validation failed",
+          } satisfies TransferResult;
+        }
+
+        const package_ = yield* Effect.tryPromise({
+          try: () =>
+            self.exportFromSource(
+              sourceAdapter,
+              source,
+              options,
+              steps,
+              totalSteps,
+            ),
+          catch: (cause) => toTransferFailed(cause, "Export from source failed"),
+        });
+
+        const { warnings: importWarnings, stats: importStats } =
+          yield* Effect.tryPromise({
+            try: () =>
+              self.importToDestination(
+                destAdapter,
+                destination,
+                package_,
+                options,
+                steps,
+                totalSteps,
+              ),
+            catch: (cause) =>
+              toTransferFailed(cause, "Import to destination failed"),
+          });
+
+        // Completion counts reflect IMPORT outcomes, not exports: import
+        // stats override the export-based numbers so skipped/failed items
+        // are never displayed as transferred.
+        const stats = { ...self.calculateStats(package_), ...importStats };
+        const warnings = TransferService.collapseWarnings([
+          ...self.collectWarnings(package_),
+          ...importWarnings,
+        ]);
+
+        yield* Effect.tryPromise({
+          try: () =>
+            self.updateProgress(options, {
+              currentStep: "complete",
+              totalSteps,
+              currentStepIndex: totalSteps - 1,
+              percentage: 100,
+              message: "Transfer completed successfully",
+              details: stats,
+            }),
+          catch: (cause) => toTransferFailed(cause, "Progress update failed"),
+        });
+
+        return {
+          success: true,
+          package: package_,
+          stats,
+          warnings: warnings.length > 0 ? warnings : undefined,
+        } satisfies TransferResult;
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            const errorMessage =
+              error &&
+              typeof error === "object" &&
+              "message" in error &&
+              typeof (error as { message: unknown }).message === "string"
+                ? (error as { message: string }).message
+                : String(error);
+            yield* Effect.promise(async () => {
+              try {
+                await self.updateProgress(options, {
+                  currentStep: steps[steps.length - 1],
+                  totalSteps,
+                  currentStepIndex: steps.length - 1,
+                  percentage: 0,
+                  message: "Transfer failed",
+                  error: errorMessage,
+                });
+              } catch {
+                // Ignore progress callback failures on the error path.
+              }
+            });
+            return {
+              success: false,
+              error: errorMessage,
+            } satisfies TransferResult;
+          }),
+        ),
+      );
+    });
+  }
+
+  /**
+   * Transfer a complete project from source to destination (Promise facade).
    */
   async transferProject(
     source: TransferSource,
     destination: TransferDestination,
-    options: TransferOptions
+    options: TransferOptions,
   ): Promise<TransferResult> {
-    const sourceAdapter = this.getAdapter(source.provider);
-    const destAdapter = this.getAdapter(destination.provider);
-    
-    if (!sourceAdapter) {
-      return { success: false, error: `No adapter found for source provider: ${source.provider}` };
-    }
-    
-    if (!destAdapter) {
-      return { success: false, error: `No adapter found for destination provider: ${destination.provider}` };
-    }
-    
-    const steps = this.buildTransferSteps(options);
-    const totalSteps = steps.length;
-    
-    try {
-      // Validate connections
-      await this.updateProgress(options, {
-        currentStep: "validating",
-        totalSteps,
-        currentStepIndex: 0,
-        percentage: 0,
-        message: "Validating source connection...",
-      });
-      
-      const sourceValid = await sourceAdapter.validateConnection(source.connectionString);
-      if (!sourceValid) {
-        return { success: false, error: "Source connection validation failed" };
-      }
-      
-      await this.updateProgress(options, {
-        currentStep: "validating",
-        totalSteps,
-        currentStepIndex: 0,
-        percentage: 5,
-        message: "Validating destination connection...",
-      });
-      
-      const destValid = await destAdapter.validateConnection(destination.connectionString);
-      if (!destValid) {
-        return { success: false, error: "Destination connection validation failed" };
-      }
-      
-      // Export from source
-      const package_ = await this.exportFromSource(sourceAdapter, source, options, steps, totalSteps);
-      
-      // Import to destination
-      const { warnings: importWarnings, stats: importStats } = await this.importToDestination(destAdapter, destination, package_, options, steps, totalSteps);
-
-      // Completion counts reflect IMPORT outcomes, not exports: import
-      // stats override the export-based numbers so skipped/failed items
-      // are never displayed as transferred.
-      const stats = { ...this.calculateStats(package_), ...importStats };
-      const warnings = TransferService.collapseWarnings([...this.collectWarnings(package_), ...importWarnings]);
-      
-      await this.updateProgress(options, {
-        currentStep: "complete",
-        totalSteps,
-        currentStepIndex: totalSteps - 1,
-        percentage: 100,
-        message: "Transfer completed successfully",
-        details: stats,
-      });
-
-      return { success: true, package: package_, stats, warnings: warnings.length > 0 ? warnings : undefined };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      await this.updateProgress(options, {
-        currentStep: steps[steps.length - 1],
-        totalSteps,
-        currentStepIndex: steps.length - 1,
-        percentage: 0,
-        message: "Transfer failed",
-        error: errorMessage,
-      });
-      
-      return { success: false, error: errorMessage };
-    }
+    return Effect.runPromise(
+      this.transferProjectEffect(source, destination, options),
+    );
   }
   
   /**
@@ -509,72 +618,155 @@ export class TransferService {
   }
   
   /**
-   * Export a transfer package to JSON for manual transfer
+   * Export a transfer package to JSON for manual transfer (Effect).
    */
-  async exportPackage(source: TransferSource, options: TransferOptions): Promise<string> {
-    const adapter = this.getAdapter(source.provider);
-    if (!adapter) {
-      throw new Error(`No adapter found for provider: ${source.provider}`);
-    }
-    
-    const steps = this.buildTransferSteps(options);
-    const package_ = await this.exportFromSource(adapter, source, options, steps, steps.length);
-    
-    return JSON.stringify(package_, null, 2);
+  exportPackageEffect(
+    source: TransferSource,
+    options: TransferOptions,
+  ): Effect.Effect<string, TransferAdapterError | TransferFailedError> {
+    const self = this;
+    return Effect.gen(function* () {
+      const adapter = self.getAdapter(source.provider);
+      if (!adapter) {
+        return yield* Effect.fail(
+          new TransferAdapterError({
+            message: `No adapter found for provider: ${source.provider}`,
+            provider: source.provider,
+          }),
+        );
+      }
+
+      const steps = self.buildTransferSteps(options);
+      const package_ = yield* Effect.tryPromise({
+        try: () =>
+          self.exportFromSource(adapter, source, options, steps, steps.length),
+        catch: (cause) => toTransferFailed(cause, "Export package failed"),
+      });
+
+      return JSON.stringify(package_, null, 2);
+    });
   }
-  
+
   /**
-   * Import a transfer package from JSON
+   * Export a transfer package to JSON for manual transfer (Promise facade).
+   */
+  async exportPackage(
+    source: TransferSource,
+    options: TransferOptions,
+  ): Promise<string> {
+    return Effect.runPromise(this.exportPackageEffect(source, options));
+  }
+
+  /**
+   * Import a transfer package from JSON (Effect).
+   */
+  importPackageEffect(
+    destination: TransferDestination,
+    packageJson: string,
+    options: TransferOptions,
+  ): Effect.Effect<void, TransferAdapterError | TransferFailedError> {
+    const self = this;
+    return Effect.gen(function* () {
+      const adapter = self.getAdapter(destination.provider);
+      if (!adapter) {
+        return yield* Effect.fail(
+          new TransferAdapterError({
+            message: `No adapter found for provider: ${destination.provider}`,
+            provider: destination.provider,
+          }),
+        );
+      }
+
+      const package_ = yield* Effect.try({
+        try: () => JSON.parse(packageJson) as TransferPackage,
+        catch: (cause) =>
+          toTransferFailed(cause, "Invalid transfer package JSON"),
+      });
+
+      if (package_.version !== TRANSFER_VERSION) {
+        console.warn(
+          `Package version ${package_.version} differs from expected ${TRANSFER_VERSION}`,
+        );
+      }
+
+      const steps = self.buildTransferSteps(options);
+      yield* Effect.tryPromise({
+        try: () =>
+          self.importToDestination(
+            adapter,
+            destination,
+            package_,
+            options,
+            steps,
+            steps.length,
+          ),
+        catch: (cause) => toTransferFailed(cause, "Import package failed"),
+      });
+    });
+  }
+
+  /**
+   * Import a transfer package from JSON (Promise facade).
    */
   async importPackage(
     destination: TransferDestination,
     packageJson: string,
-    options: TransferOptions
+    options: TransferOptions,
   ): Promise<void> {
-    const adapter = this.getAdapter(destination.provider);
-    if (!adapter) {
-      throw new Error(`No adapter found for provider: ${destination.provider}`);
-    }
-    
-    const package_: TransferPackage = JSON.parse(packageJson);
-    
-    // Validate package version
-    if (package_.version !== TRANSFER_VERSION) {
-      console.warn(`Package version ${package_.version} differs from expected ${TRANSFER_VERSION}`);
-    }
-    
-    const steps = this.buildTransferSteps(options);
-    await this.importToDestination(adapter, destination, package_, options, steps, steps.length);
+    return Effect.runPromise(
+      this.importPackageEffect(destination, packageJson, options),
+    );
   }
 }
 
-// Factory function to create service with adapters (server-side only)
-export async function createTransferService(): Promise<TransferService> {
-  const service = new TransferService();
-  
-  // Dynamically import adapters only on server side
-  if (typeof process !== 'undefined' && process.versions?.node) {
-    try {
-      const { SupabaseAdapter } = await import("./adapters/supabase-adapter");
-      service.registerAdapter(new SupabaseAdapter());
-    } catch (error) {
-      console.warn("Failed to load Supabase adapter:", error);
-    }
-    
-    try {
-      const { NeonAdapter } = await import("./adapters/neon-adapter");
-      service.registerAdapter(new NeonAdapter());
-    } catch (error) {
-      console.warn("Failed to load Neon adapter:", error);
-    }
-    
-    try {
-      const { PostgresAdapter } = await import("./adapters/postgres-adapter");
-      service.registerAdapter(new PostgresAdapter());
-    } catch (error) {
-      console.warn("Failed to load Postgres adapter:", error);
-    }
+async function tryRegisterAdapter(
+  service: TransferService,
+  label: string,
+  load: () => Promise<ProviderAdapter>,
+): Promise<void> {
+  try {
+    service.registerAdapter(await load());
+  } catch (error) {
+    console.warn(`Failed to load ${label} adapter:`, error);
   }
-  
-  return service;
+}
+
+/**
+ * Create a TransferService with provider adapters registered (Effect).
+ * Adapter load failures are logged and skipped (same as the Promise factory).
+ */
+export const createTransferServiceEffect = (): Effect.Effect<
+  TransferService,
+  never
+> =>
+  Effect.gen(function* () {
+    const service = new TransferService();
+
+    if (typeof process !== "undefined" && process.versions?.node) {
+      yield* Effect.promise(() =>
+        tryRegisterAdapter(service, "Supabase", async () => {
+          const { SupabaseAdapter } = await import("./adapters/supabase-adapter");
+          return new SupabaseAdapter();
+        }),
+      );
+      yield* Effect.promise(() =>
+        tryRegisterAdapter(service, "Neon", async () => {
+          const { NeonAdapter } = await import("./adapters/neon-adapter");
+          return new NeonAdapter();
+        }),
+      );
+      yield* Effect.promise(() =>
+        tryRegisterAdapter(service, "Postgres", async () => {
+          const { PostgresAdapter } = await import("./adapters/postgres-adapter");
+          return new PostgresAdapter();
+        }),
+      );
+    }
+
+    return service;
+  });
+
+/** Promise facade for createTransferServiceEffect. */
+export async function createTransferService(): Promise<TransferService> {
+  return Effect.runPromise(createTransferServiceEffect());
 }
