@@ -1,17 +1,8 @@
 /**
  * Tagged errors for PayKit and Stripe billing operations (Wave 6).
+ * Reuses ValidationError and UpstreamError from server/effect/errors.ts.
  */
 import { Data } from "effect";
-
-export class ValidationError extends Data.TaggedError("ValidationError")<{
-  message: string;
-  status?: number;
-}> {}
-
-export class UpstreamError extends Data.TaggedError("UpstreamError")<{
-  message: string;
-  status?: number;
-}> {}
 
 export class StripeError extends Data.TaggedError("StripeError")<{
   message: string;

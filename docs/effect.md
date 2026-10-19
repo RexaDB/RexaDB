@@ -134,8 +134,8 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 
 | API | Notes |
 |-----|--------|
-| `server/effect/billing-errors.ts` | Tagged `ValidationError`, `UpstreamError`, `StripeError`, `PaykitError` |
-| `server/stripe.ts` | `createStripeWebhookEndpointEffect` with full validation, Promise facade kept |
-| `server/supabase-paykit.ts` | Effect variants for all PayKit operations (`getPaykitStatusEffect`, `pushPaykitSchemaEffect`, `repairPaykitProjectEffect`, `exposePaykitSchemaEffect`, `syncPaykitProductsEffect`, `deployPaykitFunctionsEffect`, `setPaykitSecretsEffect`) — pragmatic wrappers around existing Promise functions |
-| Billing routes | All PayKit and Stripe routes wired through `simplePostRoute` with Effect variants |
+| `server/effect/billing-errors.ts` | Tagged `StripeError`, `PaykitError` (reuses `ValidationError` and `UpstreamError` from `errors.ts`) |
+| `server/stripe.ts` | `createStripeWebhookEndpointEffect` with full validation, network failures → `UpstreamError`, JSON parse failures → `StripeError`, Promise facade kept |
+| `server/supabase-paykit.ts` | Effect variants for all PayKit operations — pragmatic wrappers with `mapPaykitResult` that distinguishes input validation (`ValidationError`) from provider failures (`PaykitError`) |
+| Billing routes | All PayKit and Stripe routes wired through `effectJsonHandler` to wrap bare data in `{ success, data }` |
 | Promise facades | Original Promise functions kept for any direct callers |

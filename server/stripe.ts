@@ -8,8 +8,9 @@
 import { Effect } from "effect";
 import {
   ValidationError,
-  StripeError,
-} from "./effect/billing-errors";
+  UpstreamError,
+} from "./effect/errors";
+import { StripeError } from "./effect/billing-errors";
 
 function err(message: string) {
   return { success: false as const, error: message };
@@ -160,7 +161,7 @@ export const createStripeWebhookEndpointEffect = (
           body: params.toString(),
         }),
       catch: (cause) =>
-        new StripeError({
+        new UpstreamError({
           message:
             cause instanceof Error
               ? `Could not reach Stripe: ${cause.message}`
@@ -170,8 +171,12 @@ export const createStripeWebhookEndpointEffect = (
     });
 
     const json = yield* Effect.tryPromise({
-      try: () => res.json(),
-      catch: () => null,
+      try: () => res.json().catch(() => null),
+      catch: () =>
+        new StripeError({
+          message: "Could not read Stripe response.",
+          status: 502,
+        }),
     });
 
     if (!res.ok) {

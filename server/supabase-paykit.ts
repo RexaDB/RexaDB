@@ -7,8 +7,8 @@ import { Effect } from "effect";
 import {
   ValidationError,
   UpstreamError,
-  PaykitError,
-} from "./effect/billing-errors";
+} from "./effect/errors";
+import { PaykitError } from "./effect/billing-errors";
 import {
   PAYKIT_SCHEMA,
   PAYKIT_TABLE_NAMES,
@@ -843,6 +843,18 @@ export async function setPaykitSecrets(body: any) {
 // Pragmatic approach: wrap existing Promise functions with Effect.tryPromise.
 // Full Effect conversion can happen in a later wave if needed.
 
+function mapPaykitResult<A>(result: { success: true; data: A } | { success: false; error: string }): Effect.Effect<A, ValidationError | PaykitError> {
+  if (result.success) {
+    return Effect.succeed(result.data);
+  }
+  // Distinguish input validation from provider failures by error message
+  const error = result.error;
+  if (error.includes("Missing") || error.includes("Invalid") || error.includes("No ")) {
+    return Effect.fail(new ValidationError({ message: error, status: 400 }));
+  }
+  return Effect.fail(new PaykitError({ message: error, status: 500 }));
+}
+
 export const getPaykitStatusEffect = (body: any): Effect.Effect<
   PaykitProjectStatus,
   ValidationError | PaykitError
@@ -854,15 +866,7 @@ export const getPaykitStatusEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const pushPaykitSchemaEffect = (body: any): Effect.Effect<
   { applied: number; total: number; phase: PaykitSchemaPhase },
@@ -875,15 +879,7 @@ export const pushPaykitSchemaEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const repairPaykitProjectEffect = (body: any): Effect.Effect<
   {
@@ -901,15 +897,7 @@ export const repairPaykitProjectEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const exposePaykitSchemaEffect = (body: any): Effect.Effect<
   { exposed: boolean; via: "auto" | "already" },
@@ -922,15 +910,7 @@ export const exposePaykitSchemaEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const syncPaykitProductsEffect = (body: any): Effect.Effect<
   { products: any[] },
@@ -943,15 +923,7 @@ export const syncPaykitProductsEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const deployPaykitFunctionsEffect = (body: any): Effect.Effect<
   {
@@ -971,15 +943,7 @@ export const deployPaykitFunctionsEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const setPaykitSecretsEffect = (body: any): Effect.Effect<
   { requested: string[] },
@@ -992,13 +956,5 @@ export const setPaykitSecretsEffect = (body: any): Effect.Effect<
         cause instanceof Error ? cause.message : String(cause);
       return new PaykitError({ message, status: 500 });
     },
-  }).pipe(
-    Effect.flatMap((result) =>
-      result.success
-        ? Effect.succeed(result.data)
-        : Effect.fail(
-            new ValidationError({ message: result.error, status: 400 }),
-          ),
-    ),
-  );
+  }).pipe(Effect.flatMap(mapPaykitResult));
 
