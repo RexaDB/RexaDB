@@ -100,7 +100,7 @@ export const createStripeWebhookEndpointEffect = (
     livemode: boolean;
     status: string;
   },
-  ValidationError | StripeError
+  ValidationError | UpstreamError | StripeError
 > =>
   Effect.gen(function* () {
     const secretKey =

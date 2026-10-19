@@ -278,18 +278,18 @@ app.all(
 // NOTE: static imports (not dynamicPostRoute) — `bun build --compile` cannot
 // resolve variable dynamic import() at runtime, so dynamically-imported
 // modules are missing from the packaged binary (bunfs).
-app.post("/api/supabase-paykit/status", effectJsonHandler((body) => getPaykitStatusEffect(body)));
-app.post("/api/supabase-paykit/push-schema", effectJsonHandler((body) => pushPaykitSchemaEffect(body)));
-app.post("/api/supabase-paykit/expose", effectJsonHandler((body) => exposePaykitSchemaEffect(body)));
-app.post("/api/supabase-paykit/repair", effectJsonHandler((body) => repairPaykitProjectEffect(body)));
-app.post("/api/supabase-paykit/sync-products", effectJsonHandler((body) => syncPaykitProductsEffect(body)));
-app.post("/api/supabase-paykit/deploy", effectJsonHandler((body) => deployPaykitFunctionsEffect(body)));
-app.post("/api/supabase-paykit/secrets", effectJsonHandler((body) => setPaykitSecretsEffect(body)));
+app.post("/api/supabase-paykit/status", effectJsonHandler((req) => getPaykitStatusEffect(req.body)));
+app.post("/api/supabase-paykit/push-schema", effectJsonHandler((req) => pushPaykitSchemaEffect(req.body)));
+app.post("/api/supabase-paykit/expose", effectJsonHandler((req) => exposePaykitSchemaEffect(req.body)));
+app.post("/api/supabase-paykit/repair", effectJsonHandler((req) => repairPaykitProjectEffect(req.body)));
+app.post("/api/supabase-paykit/sync-products", effectJsonHandler((req) => syncPaykitProductsEffect(req.body)));
+app.post("/api/supabase-paykit/deploy", effectJsonHandler((req) => deployPaykitFunctionsEffect(req.body)));
+app.post("/api/supabase-paykit/secrets", effectJsonHandler((req) => setPaykitSecretsEffect(req.body)));
 
 // Stripe API proxy (avoids CORS in the browser). Creates a webhook endpoint
 // with URL + events pre-set; the secret key travels in the request body and
 // is never logged or stored.
-app.post("/api/stripe/create-webhook-endpoint", effectJsonHandler((body) => createStripeWebhookEndpointEffect(body)));
+app.post("/api/stripe/create-webhook-endpoint", effectJsonHandler((req) => createStripeWebhookEndpointEffect(req.body)));
 
 // Transfer API endpoints for project migration between providers
 app.post(
