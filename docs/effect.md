@@ -166,3 +166,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### User data and analytics (Wave 11)
 
 `server/user-data-api.ts` exposes typed Effect programs for user profile operations, application error logging, and user/connection analytics. Sidecar routes retain the `actions-core` Promise facade for non-server callers; rejected storage operations enter the Effect error channel as `DbError`.
+
+### AI settings and chat persistence (Wave 12)
+
+`server/ai-storage-api.ts` exposes typed Effect programs for global AI settings, chat listing/message reads, and persisted message actions. The server routes preserve the existing action names and response values, while the Promise APIs remain available to other callers.
