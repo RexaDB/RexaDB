@@ -50,6 +50,7 @@ import { createStudioStorageEffects } from "./studio-storage-api";
 import { createAppSettingsEffects } from "./app-settings-api";
 import { createUserDataEffects } from "./user-data-api";
 import { createAiStorageEffects } from "./ai-storage-api";
+import { createDatabaseActionEffects } from "./database-actions-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -662,6 +663,7 @@ const studioStorage = createStudioStorageEffects(mod);
 const appSettings = createAppSettingsEffects(mod);
 const userData = createUserDataEffects(mod);
 const aiStorage = createAiStorageEffects(mod);
+const databaseActions = createDatabaseActionEffects(mod);
 
 // --- API Routes ---
 
@@ -939,7 +941,7 @@ app.post(
   "/api/sql/run",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, query, params, options } = req.body;
-    return mod.runQuery(
+    return databaseActions.runQuery(
       connectionString,
       query,
       params || [],
@@ -952,7 +954,7 @@ app.post(
   "/api/sql/cancel",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, queryId } = req.body;
-    return mod.cancelRunningQuery(connectionString, queryId);
+    return databaseActions.cancelQuery(connectionString, queryId);
   }),
 );
 
@@ -961,7 +963,7 @@ app.post(
   "/api/schema",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    return mod.fetchSchemas(connectionString, options);
+    return databaseActions.fetchSchemas(connectionString, options);
   }),
 );
 
@@ -969,7 +971,7 @@ app.post(
   "/api/tables",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, options } = req.body;
-    return mod.fetchTables(connectionString, schema, options);
+    return databaseActions.fetchTables(connectionString, schema, options);
   }),
 );
 
@@ -977,7 +979,7 @@ app.post(
   "/api/tables-with-columns",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    return mod.fetchAllTablesWithColumns(connectionString, options);
+    return databaseActions.fetchAllTablesWithColumns(connectionString, options);
   }),
 );
 
@@ -1002,15 +1004,21 @@ app.post("/api/search-index/clear", dynamicPostRoute(() => import("../lib/db/sea
 
 app.post("/api/search-index/status", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.getSearchIndexStatus(body.connectionString)));
 
-app.post("/api/table-structure", proxyThreeArgRoute(mod.fetchTableStructure));
+app.post("/api/table-structure", proxyBodyRoute(tryProxyDbOp, (req) => {
+  const { connectionString, schema, table } = req.body;
+  return databaseActions.fetchTableStructure(connectionString, schema, table);
+}));
 
-app.post("/api/table-foreign-keys", proxyThreeArgRoute(mod.fetchTableForeignKeys));
+app.post("/api/table-foreign-keys", proxyBodyRoute(tryProxyDbOp, (req) => {
+  const { connectionString, schema, table } = req.body;
+  return databaseActions.fetchTableForeignKeys(connectionString, schema, table);
+}));
 
 app.post(
   "/api/referenced-record",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, keyValues } = req.body;
-    return mod.fetchReferencedRecord(
+    return databaseActions.fetchReferencedRecord(
       connectionString,
       schema,
       table,
@@ -1024,8 +1032,8 @@ app.post("/api/functions", proxyTwoArgRoute(mod.fetchFunctions));
 app.post(
   "/api/databases",
   proxyBodyRoute(tryProxyDbOp, (req) => {
-    const { connectionString, connectionType } = req.body;
-    return mod.fetchDatabases(connectionString, connectionType);
+    const { connectionString } = req.body;
+    return databaseActions.fetchDatabases(connectionString);
   }),
 );
 
@@ -1034,7 +1042,7 @@ app.post(
   "/api/table/update-rows",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, rows } = req.body;
-    return mod.updateTableRows(connectionString, schema, table, rows);
+    return databaseActions.updateTableRows(connectionString, schema, table, rows);
   }),
 );
 
@@ -1042,7 +1050,7 @@ app.post(
   "/api/table/delete-rows",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, pkValues } = req.body;
-    return mod.deleteTableRows(connectionString, schema, table, pkValues);
+    return databaseActions.deleteTableRows(connectionString, schema, table, pkValues);
   }),
 );
 
@@ -1858,15 +1866,6 @@ function proxyOneArgRoute(fn: (cs: string) => Promise<any>) {
 function proxyTwoArgRoute(fn: (cs: string, schema: string) => Promise<any>) {
   return proxyBodyRoute(tryProxyDbOp, (req) =>
     fn(req.body.connectionString, req.body.schema),
-  );
-}
-
-/** POST /api/X — tryProxyDbOp + extract connectionString, schema, table */
-function proxyThreeArgRoute(
-  fn: (cs: string, schema: string, table: string) => Promise<any>,
-) {
-  return proxyBodyRoute(tryProxyDbOp, (req) =>
-    fn(req.body.connectionString, req.body.schema, req.body.table),
   );
 }
 
