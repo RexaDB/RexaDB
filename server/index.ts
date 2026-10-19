@@ -43,6 +43,10 @@ import {
 } from "./effect";
 import { failureFromExit } from "./effect/runtime";
 import {
+  detectAgentProvidersEffect,
+  listAgentProviderModelsEffect,
+} from "./agents-api";
+import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
   handleTransferExportEffect,
@@ -2887,139 +2891,14 @@ app.get("/api/workflows/:id/runs/:runId", async (req, res) => {
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Agent Harness Endpoints — cached like t3code's providerStatusCache
+// Agent Harness Endpoints — Effect-backed provider/model discovery
 // ─────────────────────────────────────────────────────────────────────────────
-let providersRefreshPromise: Promise<any> | null = null;
+app.get("/api/agents/detect", effectHandler(() => detectAgentProvidersEffect));
 
-async function refreshProvidersCacheInBackground() {
-  if (providersRefreshPromise) return providersRefreshPromise;
-  providersRefreshPromise = (async () => {
-    try {
-      const { detectProviders } = await import("../lib/agents/detect-providers");
-      const { listProviderModels } = await import("../lib/agents/list-provider-models");
-      const { listProviderModes } = await import("../lib/agents/list-provider-modes");
-      const { readServerProviderCache, writeServerProviderCache } = await import(
-        "../lib/agents/provider-cache-server"
-      );
-      const { mergeCachedProviders } = await import("../lib/agents/provider-cache");
-      const previous = readServerProviderCache();
-      const providers = await detectProviders();
-      const providersWithModels = await Promise.all(
-        providers.map(async (p) => {
-          const [models, modes] = await Promise.all([
-            listProviderModels(p.id, p.binaryPath),
-            listProviderModes(p.id, p.binaryPath),
-          ]);
-          return { ...p, models, modes };
-        }),
-      );
-      const merged = mergeCachedProviders(providersWithModels, previous?.providers ?? null);
-      writeServerProviderCache(merged);
-      return merged;
-    } catch (err: any) {
-      log("[agents/detect] background refresh error:", err.message);
-      return null;
-    } finally {
-      providersRefreshPromise = null;
-    }
-  })();
-  return providersRefreshPromise;
-}
-
-app.get("/api/agents/detect", async (_req, res) => {
-  try {
-    const { readServerProviderCache, writeServerProviderCache } = await import(
-      "../lib/agents/provider-cache-server"
-    );
-    const cached = readServerProviderCache();
-    const now = Date.now();
-    const freshMs = 30_000; // 30s fresh, like t3's quick revalidate
-    const staleMs = 5 * 60_000; // 5 min stale-while-revalidate
-    const isFresh = cached && now - cached.cachedAt < freshMs;
-    const isStaleUsable = cached && now - cached.cachedAt < staleMs;
-
-    // Instant path: serve from disk cache (hydrated) — mirrors t3's hydrateCachedProvider
-    if (isFresh && cached) {
-      res.json({ providers: cached.providers, cached: true });
-      return;
-    }
-    if (isStaleUsable && cached) {
-      res.json({ providers: cached.providers, cached: true, stale: true });
-      // Revalidate in background without blocking
-      void refreshProvidersCacheInBackground();
-      return;
-    }
-
-    // No usable cache — try to serve stale anyway while we probe, else probe blocking
-    if (cached && cached.providers.length > 0) {
-      res.json({ providers: cached.providers, cached: true, stale: true });
-      void refreshProvidersCacheInBackground();
-      return;
-    }
-
-    // Cold start: no cache file yet — probe and populate (first run still ~2-3s, then instant)
-    const fresh = await refreshProvidersCacheInBackground();
-    if (fresh && fresh.length > 0) {
-      res.json({ providers: fresh });
-      return;
-    }
-    // Fallback to live probe if background failed
-    const { detectProviders } = await import("../lib/agents/detect-providers");
-    const { listProviderModels } = await import("../lib/agents/list-provider-models");
-    const { listProviderModes } = await import("../lib/agents/list-provider-modes");
-    const providers = await detectProviders();
-    const providersWithModels = await Promise.all(
-      providers.map(async (p) => {
-        const [models, modes] = await Promise.all([
-          listProviderModels(p.id, p.binaryPath),
-          listProviderModes(p.id, p.binaryPath),
-        ]);
-        return { ...p, models, modes };
-      }),
-    );
-    try {
-      writeServerProviderCache(providersWithModels);
-    } catch {}
-    res.json({ providers: providersWithModels });
-  } catch (err: any) {
-    log("[agents/detect] error:", err.message);
-    // Last resort: try to return stale cache even on error
-    try {
-      const { readServerProviderCache } = await import("../lib/agents/provider-cache-server");
-      const cached = readServerProviderCache();
-      if (cached) {
-        res.json({ providers: cached.providers, cached: true, stale: true, error: err.message });
-        return;
-      }
-    } catch {}
-    res.json({ providers: [], error: err.message });
-  }
-});
-
-app.get("/api/agents/models/:providerId", async (req, res) => {
-  try {
-    const providerId = req.params.providerId as any;
-    // Instant path via server cache (like t3's ProviderRegistry.getProviders)
-    try {
-      const { readServerProviderCache } = await import("../lib/agents/provider-cache-server");
-      const cached = readServerProviderCache();
-      const hit = cached?.providers.find((p) => p.id === providerId);
-      if (hit?.models && hit.models.length > 0) {
-        res.json({ models: hit.models, cached: true });
-        return;
-      }
-    } catch {}
-    const { detectProviders } = await import("../lib/agents/detect-providers");
-    const { listProviderModels } = await import("../lib/agents/list-provider-models");
-    const providers = await detectProviders();
-    const provider = providers.find((p) => p.id === providerId);
-    const models = await listProviderModels(providerId, provider?.binaryPath);
-    res.json({ models });
-  } catch (err: any) {
-    log("[agents/models] error:", err.message);
-    res.json({ models: [], error: err.message });
-  }
-});
+app.get(
+  "/api/agents/models/:providerId",
+  effectHandler((req) => listAgentProviderModelsEffect(req.params.providerId as string)),
+);
 
 app.post("/api/agents/chat/stream", async (req, res) => {
   try {
