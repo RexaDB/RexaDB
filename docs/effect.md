@@ -96,3 +96,14 @@ See the Effect migration plan. Foundation + route adapters land first; domain `l
 | `server/transfer-api.ts` | Background job via `Effect.runFork(executeTransferEffect…)` |
 
 Promise facades (`transferProject`, `createTransferService`, …) remain for tests and any dual-use callers.
+
+### Neon CLI domain (Wave 3)
+
+| API | Notes |
+|-----|--------|
+| `lib/neon-cli/errors.ts` | Browser-safe message constants only (no Effect import) |
+| `lib/neon-cli/effect-errors.ts` | Tagged `NeonSessionExpiredError`, `NeonAuthUnavailableError`, `NeonAuthCancelledError`, `NeonApiError` + `toNeonCliError` |
+| `lib/neon-cli/cli-runner.ts` | `*Effect` variants for detect, lists, auth-status, profile remove, connection string, login |
+| Browser `lib/neon-cli/client.ts` | Stays Promise/HTTP — do not import Effect there |
+
+SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLoginEffect` via `Effect.runPromise` and maps tagged errors with `.message`.

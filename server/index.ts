@@ -405,15 +405,8 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
 app.post(
   "/api/neon-cli/detect",
   effectHandler(() =>
-    fromPromise(() => neonCliRunner.detectNeonCli()).pipe(
+    neonCliRunner.detectNeonCliEffect().pipe(
       Effect.map((data) => ({ success: true as const, ...data })),
-      Effect.catch((e) =>
-        Effect.succeed({
-          success: false as const,
-          installed: false as const,
-          error: e instanceof Error ? e.message : String(e),
-        }),
-      ),
     ),
   ),
 );
@@ -496,16 +489,18 @@ app.post("/api/neon-cli/login", async (req, res) => {
   let completedEmail: string | undefined;
   let completed = false;
   try {
-    await neonCliRunner.runNeonAuthLogin(profile, {
-      forceLogin,
-      signal: abort.signal,
-      onLog: (message) => send({ type: "log", message }),
-      onOpenUrl: (url) => send({ type: "open-url", url, message: url }),
-      onComplete: (info) => {
-        completedEmail = info.email;
-        completed = true;
-      },
-    });
+    await Effect.runPromise(
+      neonCliRunner.runNeonAuthLoginEffect(profile, {
+        forceLogin,
+        signal: abort.signal,
+        onLog: (message) => send({ type: "log", message }),
+        onOpenUrl: (url) => send({ type: "open-url", url, message: url }),
+        onComplete: (info) => {
+          completedEmail = info.email;
+          completed = true;
+        },
+      }),
+    );
     // Always report completion: OAuth may finish after the request "close"
     // heuristic fires, and the client needs the terminal `done` frame.
     if (completed || !abort.signal.aborted) {
@@ -517,7 +512,10 @@ app.post("/api/neon-cli/login", async (req, res) => {
       finish();
       return;
     }
-    send({ type: "error", message: friendlyNeonAuthError(e?.message || String(e)) });
+    send({
+      type: "error",
+      message: friendlyNeonAuthError(e?.message || String(e)),
+    });
     finish();
   } finally {
     if (neonLoginAbort === abort) neonLoginAbort = null;
@@ -546,9 +544,7 @@ app.post(
             );
           }
         }
-        const data = yield* fromPromise(() =>
-          neonCliRunner.neonAuthStatus(profiles),
-        );
+        const data = yield* neonCliRunner.neonAuthStatusEffect(profiles);
         return { success: true as const, data };
       }),
     { fallbackStatus: 500 },
@@ -558,46 +554,41 @@ app.post(
 app.post(
   "/api/neon-cli/orgs",
   effectJsonHandler((req) =>
-    fromPromise(() => neonCliRunner.neonOrgsList(req.body.profile)),
+    neonCliRunner.neonOrgsListEffect(req.body.profile),
   ),
 );
 app.post(
   "/api/neon-cli/projects",
   effectJsonHandler((req) =>
-    fromPromise(() =>
-      neonCliRunner.neonProjectsList(req.body.profile, req.body.orgId),
-    ),
+    neonCliRunner.neonProjectsListEffect(req.body.profile, req.body.orgId),
   ),
 );
 app.post(
   "/api/neon-cli/branches",
   effectJsonHandler((req) =>
-    fromPromise(() =>
-      neonCliRunner.neonBranchesList(req.body.profile, req.body.projectId),
+    neonCliRunner.neonBranchesListEffect(
+      req.body.profile,
+      req.body.projectId,
     ),
   ),
 );
 app.post(
   "/api/neon-cli/databases",
   effectJsonHandler((req) =>
-    fromPromise(() =>
-      neonCliRunner.neonDatabasesList(
-        req.body.profile,
-        req.body.projectId,
-        req.body.branchId,
-      ),
+    neonCliRunner.neonDatabasesListEffect(
+      req.body.profile,
+      req.body.projectId,
+      req.body.branchId,
     ),
   ),
 );
 app.post(
   "/api/neon-cli/roles",
   effectJsonHandler((req) =>
-    fromPromise(() =>
-      neonCliRunner.neonRolesList(
-        req.body.profile,
-        req.body.projectId,
-        req.body.branchId,
-      ),
+    neonCliRunner.neonRolesListEffect(
+      req.body.profile,
+      req.body.projectId,
+      req.body.branchId,
     ),
   ),
 );
@@ -606,7 +597,7 @@ app.post(
   // neonProfileRemove already returns `{ success: true }`. effectJsonHandler
   // would pass that through and drop the outer `data` field — wrap explicitly.
   effectHandler((req) =>
-    fromPromise(() => neonCliRunner.neonProfileRemove(req.body.profile)).pipe(
+    neonCliRunner.neonProfileRemoveEffect(req.body.profile).pipe(
       Effect.map((data) => ({ success: true as const, data })),
     ),
   ),
