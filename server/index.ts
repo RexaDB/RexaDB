@@ -28,9 +28,15 @@ import {
 import {
   dynamicPostRoute,
   effectHandler,
+  effectJsonHandler,
   fromPromise,
+  proxyBodyRoute,
   setDefectLogger,
+  simpleGetRoute,
   simplePostRoute,
+  studioGetRoute,
+  studioPostRoute,
+  ValidationError,
 } from "./effect";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
@@ -396,13 +402,21 @@ app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
 // Neon OAuth — public-client PKCE (same client_id "neonctl" as the official
 // CLI) run in-process. No neonctl install required. Credentials land in
 // ~/.config/neon so existing CLI sessions still Continue. See lib/neon-oauth/.
-app.post("/api/neon-cli/detect", async (_req, res) => {
-  try {
-    res.json({ success: true, ...(await neonCliRunner.detectNeonCli()) });
-  } catch (e: any) {
-    res.json({ success: false, installed: false, error: e.message });
-  }
-});
+app.post(
+  "/api/neon-cli/detect",
+  effectHandler(() =>
+    fromPromise(() => neonCliRunner.detectNeonCli()).pipe(
+      Effect.map((data) => ({ success: true as const, ...data })),
+      Effect.catch((e) =>
+        Effect.succeed({
+          success: false as const,
+          installed: false as const,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      ),
+    ),
+  ),
+);
 
 const NEON_PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -513,52 +527,86 @@ app.post("/api/neon-cli/login", async (req, res) => {
 // Non-interactive session check: reports which CLI profiles (if any)
 // already hold a valid session, so the dialog can offer Continue instead
 // of forcing another OAuth dance.
-app.post("/api/neon-cli/auth-status", async (req, res) => {
-  try {
-    const raw = req.body?.profiles;
-    const profiles = (Array.isArray(raw) ? raw : []).map((p) => String(p || "").trim()).filter(Boolean);
-    for (const profile of profiles) {
-      if (!NEON_PROFILE_NAME_RE.test(profile)) {
-        res.status(400).json({ success: false, error: "Invalid profile name" });
-        return;
-      }
-    }
-    res.json({ success: true, data: await neonCliRunner.neonAuthStatus(profiles) });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/neon-cli/auth-status",
+  effectHandler(
+    (req) =>
+      Effect.gen(function* () {
+        const raw = req.body?.profiles;
+        const profiles = (Array.isArray(raw) ? raw : [])
+          .map((p) => String(p || "").trim())
+          .filter(Boolean);
+        for (const profile of profiles) {
+          if (!NEON_PROFILE_NAME_RE.test(profile)) {
+            return yield* Effect.fail(
+              new ValidationError({
+                message: "Invalid profile name",
+                status: 400,
+              }),
+            );
+          }
+        }
+        const data = yield* fromPromise(() =>
+          neonCliRunner.neonAuthStatus(profiles),
+        );
+        return { success: true as const, data };
+      }),
+    { fallbackStatus: 500 },
+  ),
+);
 
-app.post("/api/neon-cli/orgs", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonOrgsList(req.body.profile) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
-app.post("/api/neon-cli/projects", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonProjectsList(req.body.profile, req.body.orgId) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
-app.post("/api/neon-cli/branches", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonBranchesList(req.body.profile, req.body.projectId) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
-app.post("/api/neon-cli/databases", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonDatabasesList(req.body.profile, req.body.projectId, req.body.branchId) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
-app.post("/api/neon-cli/roles", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonRolesList(req.body.profile, req.body.projectId, req.body.branchId) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
-app.post("/api/neon-cli/remove-profile", async (req, res) => {
-  try {
-    res.json({ success: true, data: await neonCliRunner.neonProfileRemove(req.body.profile) });
-  } catch (e: any) { res.json({ success: false, error: e.message }); }
-});
+app.post(
+  "/api/neon-cli/orgs",
+  effectJsonHandler((req) =>
+    fromPromise(() => neonCliRunner.neonOrgsList(req.body.profile)),
+  ),
+);
+app.post(
+  "/api/neon-cli/projects",
+  effectJsonHandler((req) =>
+    fromPromise(() =>
+      neonCliRunner.neonProjectsList(req.body.profile, req.body.orgId),
+    ),
+  ),
+);
+app.post(
+  "/api/neon-cli/branches",
+  effectJsonHandler((req) =>
+    fromPromise(() =>
+      neonCliRunner.neonBranchesList(req.body.profile, req.body.projectId),
+    ),
+  ),
+);
+app.post(
+  "/api/neon-cli/databases",
+  effectJsonHandler((req) =>
+    fromPromise(() =>
+      neonCliRunner.neonDatabasesList(
+        req.body.profile,
+        req.body.projectId,
+        req.body.branchId,
+      ),
+    ),
+  ),
+);
+app.post(
+  "/api/neon-cli/roles",
+  effectJsonHandler((req) =>
+    fromPromise(() =>
+      neonCliRunner.neonRolesList(
+        req.body.profile,
+        req.body.projectId,
+        req.body.branchId,
+      ),
+    ),
+  ),
+);
+app.post(
+  "/api/neon-cli/remove-profile",
+  effectJsonHandler((req) =>
+    fromPromise(() => neonCliRunner.neonProfileRemove(req.body.profile)),
+  ),
+);
 
 // Load actions-core at module init — forces Bun to bundle it and all static deps
 const actionsCore = require("../lib/db/actions-core");
@@ -567,60 +615,108 @@ const mod = actionsCore;
 // --- API Routes ---
 
 // Connections
-app.get("/api/connections", async (req, res) => {
-  try {
-    const workspaceUrl = req.query.workspace as string | undefined;
-    const result = await mod.getConnections(workspaceUrl || undefined);
-    res.json({ success: true, data: result.map((connection: any) => connection.credentialRef ? {
-      ...connection,
-      connectionString: stripConnectionSecrets(connection.connectionString || ""),
-      password: null,
-      authToken: null,
-    } : connection) });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/api/connections",
+  effectHandler((req) =>
+    fromPromise(() => {
+      const workspaceUrl = req.query.workspace as string | undefined;
+      return mod.getConnections(workspaceUrl || undefined);
+    }).pipe(
+      Effect.map((result) => ({
+        success: true as const,
+        data: result.map((connection: any) =>
+          connection.credentialRef
+            ? {
+                ...connection,
+                connectionString: stripConnectionSecrets(
+                  connection.connectionString || "",
+                ),
+                password: null,
+                authToken: null,
+              }
+            : connection,
+        ),
+      })),
+    ),
+  ),
+);
 
-app.get("/api/connections/vault/config", async (_req, res) => {
-  const result = await mod.getCredentialVaultConfig();
-  res.status(result.success ? 200 : 500).json(result);
-});
+app.get(
+  "/api/connections/vault/config",
+  effectHandler(() => fromPromise(() => mod.getCredentialVaultConfig()), {
+    onSuccess: (result, _req, res) => {
+      res.status(result.success ? 200 : 500).json(result);
+    },
+  }),
+);
 
-app.post("/api/connections/vault/config", async (req, res) => {
-  const { salt, verifier } = req.body || {};
-  const result = await mod.createCredentialVaultConfig(salt, verifier);
-  res.status(result.success ? 201 : 409).json(result);
-});
+app.post(
+  "/api/connections/vault/config",
+  effectHandler(
+    (req) => {
+      const { salt, verifier } = req.body || {};
+      return fromPromise(() => mod.createCredentialVaultConfig(salt, verifier));
+    },
+    {
+      onSuccess: (result, _req, res) => {
+        res.status(result.success ? 201 : 409).json(result);
+      },
+    },
+  ),
+);
 
-app.post("/api/connections/secure-migration/complete", async (_req, res) => {
-  try {
-    res.json(await mod.completeConnectionSecretMigration());
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/connections/secure-migration/complete",
+  effectHandler(() => fromPromise(() => mod.completeConnectionSecretMigration()), {
+    fallbackStatus: 500,
+  }),
+);
 
-app.post("/api/connections/credential-cache", (req, res) => {
-  const { reference, secret } = req.body || {};
-  const allowedFields = ["connectionString", "password", "authToken"];
-  const fields = secret && typeof secret === "object" ? Object.keys(secret) : [];
-  const validSecret = Boolean(secret) && typeof secret === "object" && !Array.isArray(secret) &&
-    fields.every((field) => allowedFields.includes(field)) &&
-    fields.every((field) => secret[field] === null || typeof secret[field] === "string") &&
-    Buffer.byteLength(JSON.stringify(secret || {})) <= 256_000;
-  if (typeof reference !== "string" || !/^(?:[A-Za-z0-9-]{1,80}|vault:[A-Za-z0-9-]{1,80})$/.test(reference) || !validSecret) {
-    res.status(400).json({ success: false, error: "Invalid credential cache entry." });
-    return;
-  }
-  cacheConnectionCredential(reference, secret);
-  res.json({ success: true });
-});
+app.post(
+  "/api/connections/credential-cache",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const { reference, secret } = req.body || {};
+      const allowedFields = ["connectionString", "password", "authToken"];
+      const fields =
+        secret && typeof secret === "object" ? Object.keys(secret) : [];
+      const validSecret =
+        Boolean(secret) &&
+        typeof secret === "object" &&
+        !Array.isArray(secret) &&
+        fields.every((field) => allowedFields.includes(field)) &&
+        fields.every(
+          (field) =>
+            secret[field] === null || typeof secret[field] === "string",
+        ) &&
+        Buffer.byteLength(JSON.stringify(secret || {})) <= 256_000;
+      if (
+        typeof reference !== "string" ||
+        !/^(?:[A-Za-z0-9-]{1,80}|vault:[A-Za-z0-9-]{1,80})$/.test(reference) ||
+        !validSecret
+      ) {
+        return yield* Effect.fail(
+          new ValidationError({
+            message: "Invalid credential cache entry.",
+            status: 400,
+          }),
+        );
+      }
+      cacheConnectionCredential(reference, secret);
+      return { success: true as const };
+    }),
+  ),
+);
 
-app.post("/api/connections/credential-cache/lock", (_req, res) => {
-  clearCachedConnectionCredentials();
-  res.json({ success: true });
-});
+app.post(
+  "/api/connections/credential-cache/lock",
+  effectHandler(() =>
+    Effect.sync(() => {
+      clearCachedConnectionCredentials();
+      return { success: true as const };
+    }),
+  ),
+);
 
 // Connection groups (MUST be before /:id routes to avoid param capture)
 app.get(
@@ -645,76 +741,118 @@ app.post("/api/connections/groups/rename", simplePostRoute(body => mod.renameCon
 
 app.post("/api/connections/groups/delete", simplePostRoute(body => mod.deleteConnectionGroup(body.folderName)));
 
-app.get("/api/connections/:id", async (req, res) => {
-  try {
-    const result = await mod.getConnection(Number(req.params.id));
-    const safe = result?.credentialRef ? {
-      ...result,
-      connectionString: stripConnectionSecrets(result.connectionString || ""),
-      password: null,
-      authToken: null,
-    } : result;
-    res.json({ success: true, data: safe || null });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/api/connections/:id",
+  effectHandler((req) =>
+    fromPromise(() => mod.getConnection(Number(req.params.id))).pipe(
+      Effect.map((result) => {
+        const safe = result?.credentialRef
+          ? {
+              ...result,
+              connectionString: stripConnectionSecrets(
+                result.connectionString || "",
+              ),
+              password: null,
+              authToken: null,
+            }
+          : result;
+        return { success: true as const, data: safe || null };
+      }),
+    ),
+  ),
+);
 
-app.post("/api/connections", async (req, res) => {
-  try {
-    const { name, connectionString, connectionType, environment, color, groups, group, isFavorite, host, port, database, username, password, sslMode, authToken, credentialRef, credentialSecret, credentialStorageMode } = req.body;
-    const resolvedGroups = Array.isArray(groups) ? groups : (group ? [group] : []);
-    const result = await mod.addConnection(name, connectionString, connectionType, {
-      environment, color, groups: resolvedGroups, group: resolvedGroups[0] || null, isFavorite,
-      host, port, database, username, password, sslMode, authToken, credentialRef, credentialSecret, credentialStorageMode
+app.post(
+  "/api/connections",
+  simplePostRoute((body) => {
+    const {
+      name,
+      connectionString,
+      connectionType,
+      environment,
+      color,
+      groups,
+      group,
+      isFavorite,
+      host,
+      port,
+      database,
+      username,
+      password,
+      sslMode,
+      authToken,
+      credentialRef,
+      credentialSecret,
+      credentialStorageMode,
+    } = body;
+    const resolvedGroups = Array.isArray(groups)
+      ? groups
+      : group
+        ? [group]
+        : [];
+    return mod.addConnection(name, connectionString, connectionType, {
+      environment,
+      color,
+      groups: resolvedGroups,
+      group: resolvedGroups[0] || null,
+      isFavorite,
+      host,
+      port,
+      database,
+      username,
+      password,
+      sslMode,
+      authToken,
+      credentialRef,
+      credentialSecret,
+      credentialStorageMode,
     });
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+  }),
+);
 
-app.put("/api/connections/:id", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const result = await mod.updateConnection(id, req.body);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.put(
+  "/api/connections/:id",
+  effectHandler((req) =>
+    fromPromise(() => mod.updateConnection(Number(req.params.id), req.body)),
+  ),
+);
 
-app.delete("/api/connections/workspace", async (_req, res) => {
-  try {
-    const result = await mod.deleteConnectionsByPrefix("workspace:");
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.delete(
+  "/api/connections/workspace",
+  effectHandler(() =>
+    fromPromise(() => mod.deleteConnectionsByPrefix("workspace:")),
+  ),
+);
 
-app.delete("/api/connections/:id", async (req, res) => {
-  try {
-    const result = await mod.deleteConnection(Number(req.params.id));
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.delete(
+  "/api/connections/:id",
+  effectHandler((req) =>
+    fromPromise(() => mod.deleteConnection(Number(req.params.id))),
+  ),
+);
 
-app.post("/api/connections/test", async (req, res) => {
-  try {
-    const { connectionString, connectionType } = req.body;
-    logToFile("POST /api/connections/test body keys:", Object.keys(req.body).join(","));
-    logToFile("POST /api/connections/test connectionType:", connectionType);
-    const result = await mod.testConnection(connectionString, connectionType);
-    logToFile("POST /api/connections/test result success:", result.success);
-    res.json(result);
-  } catch (e: any) {
-    logToFile("testConnection failed");
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/connections/test",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const { connectionString, connectionType } = req.body;
+      logToFile(
+        "POST /api/connections/test body keys:",
+        Object.keys(req.body).join(","),
+      );
+      logToFile("POST /api/connections/test connectionType:", connectionType);
+      const result = yield* fromPromise(
+        () => mod.testConnection(connectionString, connectionType),
+        (cause) => {
+          logToFile("testConnection failed");
+          return cause instanceof Error ? cause : new Error(String(cause));
+        },
+      );
+      logToFile("POST /api/connections/test result success:", result.success);
+      return result;
+    }),
+  ),
+);
 
 app.post("/api/connections/reorder", simplePostRoute(body => mod.reorderConnections(body.orderedIds)));
 
@@ -915,73 +1053,63 @@ app.all("/mcp", async (req, res) => {
 });
 
 // SQL query execution
-app.post("/api/sql/run", async (req, res) => {
-  try {
+app.post(
+  "/api/sql/run",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, query, params, options } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.runQuery(connectionString, query, params || [], options || {});
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.runQuery(
+      connectionString,
+      query,
+      params || [],
+      options || {},
+    );
+  }),
+);
 
-app.post("/api/sql/cancel", async (req, res) => {
-  try {
+app.post(
+  "/api/sql/cancel",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, queryId } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.cancelRunningQuery(connectionString, queryId);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.cancelRunningQuery(connectionString, queryId);
+  }),
+);
 
 // Schema & tables
-app.post("/api/schema", async (req, res) => {
-  try {
+app.post(
+  "/api/schema",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchSchemas(connectionString, options);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchSchemas(connectionString, options);
+  }),
+);
 
-app.post("/api/tables", async (req, res) => {
-  try {
+app.post(
+  "/api/tables",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, options } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchTables(connectionString, schema, options);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchTables(connectionString, schema, options);
+  }),
+);
 
-app.post("/api/tables-with-columns", async (req, res) => {
-  try {
+app.post(
+  "/api/tables-with-columns",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchAllTablesWithColumns(connectionString, options);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchAllTablesWithColumns(connectionString, options);
+  }),
+);
 
-app.post("/api/tables/search-all", async (req, res) => {
-  try {
+app.post(
+  "/api/tables/search-all",
+  proxyBodyRoute(tryProxyDbOp, async (req) => {
     const { searchAllTables } = await import("../lib/db/actions");
     const { connectionString, searchTerm, schema, connectionType } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await searchAllTables(connectionString, searchTerm, { schema, connectionType });
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return searchAllTables(connectionString, searchTerm, {
+      schema,
+      connectionType,
+    });
+  }),
+);
 
 // Search index routes (local SQLite cache for universal search)
 app.post("/api/search-index/query", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.searchLocalIndex(body.connectionString, body.term)));
@@ -996,52 +1124,45 @@ app.post("/api/table-structure", proxyThreeArgRoute(mod.fetchTableStructure));
 
 app.post("/api/table-foreign-keys", proxyThreeArgRoute(mod.fetchTableForeignKeys));
 
-app.post("/api/referenced-record", async (req, res) => {
-  try {
+app.post(
+  "/api/referenced-record",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, keyValues } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchReferencedRecord(connectionString, schema, table, keyValues);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchReferencedRecord(
+      connectionString,
+      schema,
+      table,
+      keyValues,
+    );
+  }),
+);
 
 app.post("/api/functions", proxyTwoArgRoute(mod.fetchFunctions));
 
-app.post("/api/databases", async (req, res) => {
-  try {
+app.post(
+  "/api/databases",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, connectionType } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchDatabases(connectionString, connectionType);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchDatabases(connectionString, connectionType);
+  }),
+);
 
 // Table row operations
-app.post("/api/table/update-rows", async (req, res) => {
-  try {
+app.post(
+  "/api/table/update-rows",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, rows } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.updateTableRows(connectionString, schema, table, rows);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.updateTableRows(connectionString, schema, table, rows);
+  }),
+);
 
-app.post("/api/table/delete-rows", async (req, res) => {
-  try {
+app.post(
+  "/api/table/delete-rows",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table, pkValues } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.deleteTableRows(connectionString, schema, table, pkValues);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.deleteTableRows(connectionString, schema, table, pkValues);
+  }),
+);
 
 // Extensions, triggers, indexes, enums, etc.
 app.post("/api/extensions", proxyOneArgRoute(mod.fetchExtensions));
@@ -1064,31 +1185,29 @@ app.post("/api/materialized-views", proxyTwoArgRoute(mod.fetchMaterializedViews)
 
 app.post("/api/views", proxyTwoArgRoute(mod.fetchViews));
 
-app.post("/api/rls-policies", async (req, res) => {
-  try {
+app.post(
+  "/api/rls-policies",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchRlsPolicies(connectionString, schema ?? null, table ?? null);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchRlsPolicies(
+      connectionString,
+      schema ?? null,
+      table ?? null,
+    );
+  }),
+);
 
 app.post("/api/postgres-roles", proxyOneArgRoute(mod.fetchPostgresRoles));
 
 app.post("/api/table-security-info", proxyTwoArgRoute(mod.fetchTableSecurityInfo));
 
-app.post("/api/supabase-auth-users", async (req, res) => {
-  try {
-    if (await tryProxyDbOp(req, res)) return;
+app.post(
+  "/api/supabase-auth-users",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString } = req.body || {};
-    const result = await mod.fetchSupabaseAuthUsers(connectionString);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchSupabaseAuthUsers(connectionString);
+  }),
+);
 
 app.post("/api/sessions", proxyOneArgRoute(mod.fetchSessions));
 
@@ -1098,96 +1217,100 @@ app.post("/api/sessions/cancel-query", proxyTwoArgRoute(mod.cancelSessionQuery))
 
 app.post("/api/locks", proxyOneArgRoute(mod.fetchLocks));
 
-app.post("/api/db-advisor", async (req, res) => {
-  try {
+app.post(
+  "/api/db-advisor",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.runAdvisorChecks(connectionString);
-    res.json({ success: true, data: result });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return fromPromise(() => mod.runAdvisorChecks(connectionString)).pipe(
+      Effect.map((result) => ({ success: true as const, data: result })),
+    );
+  }),
+);
 
-app.post("/api/explain-plan", async (req, res) => {
-  try {
+app.post(
+  "/api/explain-plan",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, query } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.fetchExplainPlan(connectionString, query);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.fetchExplainPlan(connectionString, query);
+  }),
+);
 
-app.post("/api/backup/run", async (req, res) => {
-  try {
+app.post(
+  "/api/backup/run",
+  proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    if (await tryProxyDbOp(req, res)) return;
-    const result = await mod.runDbBackup(connectionString, options);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+    return mod.runDbBackup(connectionString, options);
+  }),
+);
 
 // User profile
-app.get("/api/user/profile", async (req, res) => {
-  try {
-    const id = req.query.id as string | undefined;
-    const getAll = req.query.getAll as string | undefined;
-    if (getAll === "true") {
-      const result = await mod.getAllUsers();
-      return res.json(result);
-    }
-    const result = await mod.getStoredUserProfile(id || null);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/api/user/profile",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const id = req.query.id as string | undefined;
+      const getAll = req.query.getAll as string | undefined;
+      if (getAll === "true") {
+        return yield* fromPromise(() => mod.getAllUsers());
+      }
+      return yield* fromPromise(() => mod.getStoredUserProfile(id || null));
+    }),
+  ),
+);
 
 app.post("/api/user/profile", simplePostRoute(mod.upsertUserProfile));
 
-app.delete("/api/user/profile", async (req, res) => {
-  try {
-    const { id, all } = req.body || {};
-    if (all) {
-      const result = await mod.clearAllUsers();
-      return res.json(result);
-    }
-    const result = await mod.deleteUserProfile(id);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.delete(
+  "/api/user/profile",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const { id, all } = req.body || {};
+      if (all) {
+        return yield* fromPromise(() => mod.clearAllUsers());
+      }
+      return yield* fromPromise(() => mod.deleteUserProfile(id));
+    }),
+  ),
+);
 
 // Error logging
-app.post("/api/errors/log", async (req, res) => {
-  try {
-    const { errorType, message, stack, url, componentStack, metadata, appVersion, os } = req.body || {};
-    const bodySize = JSON.stringify(req.body).length;
-    if (bodySize > 51200) {
-      logToFile("[error-logger] payload too large:", bodySize, "bytes");
-      return res.json({ success: false, error: "Payload too large" });
-    }
-    logToFile(`[error-logger] type=${errorType} msg=${message?.slice(0, 200)} url=${url}`);
-    const result = await mod.logAppError({
-      errorType: errorType || "unknown",
-      message: message || null,
-      stack: stack || null,
-      url: url || null,
-      componentStack: componentStack || null,
-      metadata: metadata || {},
-      appVersion: appVersion || null,
-      os: os || null,
-    });
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/errors/log",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const {
+        errorType,
+        message,
+        stack,
+        url,
+        componentStack,
+        metadata,
+        appVersion,
+        os,
+      } = req.body || {};
+      const bodySize = JSON.stringify(req.body).length;
+      if (bodySize > 51200) {
+        logToFile("[error-logger] payload too large:", bodySize, "bytes");
+        return { success: false as const, error: "Payload too large" };
+      }
+      logToFile(
+        `[error-logger] type=${errorType} msg=${message?.slice(0, 200)} url=${url}`,
+      );
+      return yield* fromPromise(() =>
+        mod.logAppError({
+          errorType: errorType || "unknown",
+          message: message || null,
+          stack: stack || null,
+          url: url || null,
+          componentStack: componentStack || null,
+          metadata: metadata || {},
+          appVersion: appVersion || null,
+          os: os || null,
+        }),
+      );
+    }),
+  ),
+);
 
 // Settings
 app.get("/api/app-font", simpleGetRoute(mod.getAppFontFamily));
@@ -1207,32 +1330,36 @@ app.get("/api/studio-settings", simpleGetRoute(mod.getGlobalStudioSettings));
 app.post("/api/studio-settings", simplePostRoute(mod.saveGlobalStudioSettings));
 
 // Settings migration
-app.get("/api/settings/migration-status", async (_req, res) => {
-  try {
-    const result = await mod.isMigrationNeeded();
-    res.json({ success: true, data: { migrationNeeded: result } });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/api/settings/migration-status",
+  effectJsonHandler(() =>
+    fromPromise(() => mod.isMigrationNeeded()).pipe(
+      Effect.map((migrationNeeded) => ({ migrationNeeded })),
+    ),
+  ),
+);
 
-app.post("/api/settings/migrate", async (_req, res) => {
-  try {
-    const result = await mod.migrateSettingsFromSqlite();
-    res.json({ success: result.done, data: result, error: result.error });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/settings/migrate",
+  effectHandler(() =>
+    fromPromise(() => mod.migrateSettingsFromSqlite()).pipe(
+      Effect.map((result) => ({
+        success: result.done,
+        data: result,
+        error: result.error,
+      })),
+    ),
+  ),
+);
 
-app.post("/api/settings/clear-migrated", async (_req, res) => {
-  try {
-    await mod.clearMigratedSqliteSettings();
-    res.json({ success: true });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/settings/clear-migrated",
+  effectHandler(() =>
+    fromPromise(() => mod.clearMigratedSqliteSettings()).pipe(
+      Effect.map(() => ({ success: true as const })),
+    ),
+  ),
+);
 
 // Snapshot create stream (SSE)
 app.post("/api/snapshots/create-stream", async (req, res) => {
@@ -1241,82 +1368,84 @@ app.post("/api/snapshots/create-stream", async (req, res) => {
 });
 
 // Generic actions dispatch (for all the misc actions)
-app.post("/api/actions/:action", async (req, res) => {
-  try {
-    const { action } = req.params;
-    const { args } = req.body || {};
-
-    const func = (mod as any)[action];
-    if (typeof func !== "function") {
-      return res.json({ success: false, error: `Unknown action: ${action}` });
-    }
-
-    const result = await func(...(Array.isArray(args) ? args : []));
-    res.json(result || { success: true });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/actions/:action",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const { action } = req.params;
+      const { args } = req.body || {};
+      const func = (mod as any)[action];
+      if (typeof func !== "function") {
+        return { success: false as const, error: `Unknown action: ${action}` };
+      }
+      const result = yield* fromPromise(() =>
+        func(...(Array.isArray(args) ? args : [])),
+      );
+      return result || { success: true };
+    }),
+  ),
+);
 
 // Studio routes
 app.get("/studio/:connectionId/folders", studioGetRoute(mod.getStudioFolders));
 app.post("/studio/:connectionId/folders", studioPostRoute(mod.saveStudioFolders));
 
-app.get("/studio/:connectionId/snippets", async (req, res) => {
-  try {
-    const connectionId = Number(req.params.connectionId);
-    const result = await mod.getStudioSnippets(connectionId);
-    log("[rexadb:snapshot] Server getStudioSnippets for", connectionId, {
-      success: result?.success,
-      count: result?.data?.length ?? 0,
-      ids: (result?.data ?? []).map((s: any) => s.id),
-      names: (result?.data ?? []).map((s: any) => s.name),
-    });
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/studio/:connectionId/snippets",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const connectionId = Number(req.params.connectionId);
+      const result = yield* fromPromise(() =>
+        mod.getStudioSnippets(connectionId),
+      );
+      log("[rexadb:snapshot] Server getStudioSnippets for", connectionId, {
+        success: result?.success,
+        count: result?.data?.length ?? 0,
+        ids: (result?.data ?? []).map((s: any) => s.id),
+        names: (result?.data ?? []).map((s: any) => s.name),
+      });
+      return result;
+    }),
+  ),
+);
 
-app.post("/studio/:connectionId/snippets", async (req, res) => {
-  try {
-    const connectionId = Number(req.params.connectionId);
-    const body = req.body;
-    log("[rexadb:snapshot] Server saveStudioSnippets received", {
-      connectionId,
-      snippetCount: Array.isArray(body) ? body.length : typeof body,
-      snippetIds: Array.isArray(body) ? body.map((s: any) => s?.id) : [],
-      snippetNames: Array.isArray(body) ? body.map((s: any) => s?.name) : [],
-    });
-    const result = await mod.saveStudioSnippets(connectionId, body);
-    log("[rexadb:snapshot] Server saveStudioSnippets result", result);
-    res.json(result);
-  } catch (e: any) {
-    console.error("[rexadb:snapshot] Server saveStudioSnippets error", e);
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/studio/:connectionId/snippets",
+  effectHandler((req) =>
+    Effect.gen(function* () {
+      const connectionId = Number(req.params.connectionId);
+      const body = req.body;
+      log("[rexadb:snapshot] Server saveStudioSnippets received", {
+        connectionId,
+        snippetCount: Array.isArray(body) ? body.length : typeof body,
+        snippetIds: Array.isArray(body) ? body.map((s: any) => s?.id) : [],
+        snippetNames: Array.isArray(body) ? body.map((s: any) => s?.name) : [],
+      });
+      const result = yield* fromPromise(
+        () => mod.saveStudioSnippets(connectionId, body),
+        (cause) => {
+          console.error("[rexadb:snapshot] Server saveStudioSnippets error", cause);
+          return cause instanceof Error ? cause : new Error(String(cause));
+        },
+      );
+      log("[rexadb:snapshot] Server saveStudioSnippets result", result);
+      return result;
+    }),
+  ),
+);
 
 app.get("/studio/:connectionId/history", studioGetRoute(mod.getStudioHistory));
 app.post("/studio/:connectionId/history", studioPostRoute(mod.saveStudioHistory));
 
-app.post("/studio/:connectionId/history/entry", async (req, res) => {
-  try {
-    const result = await mod.insertHistoryEntry(Number(req.params.connectionId), req.body);
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/studio/:connectionId/history/entry",
+  studioPostRoute(mod.insertHistoryEntry),
+);
 
-app.delete("/studio/:connectionId/history", async (req, res) => {
-  try {
-    const result = await mod.clearStudioHistory(Number(req.params.connectionId));
-    res.json(result);
-  } catch (e: any) {
-    res.json({ success: false, error: e.message });
-  }
-});
+app.delete(
+  "/studio/:connectionId/history",
+  studioGetRoute(mod.clearStudioHistory),
+);
 
 app.get("/studio/:connectionId/tags", studioGetRoute(mod.getStudioTags));
 app.post("/studio/:connectionId/tags", studioPostRoute(mod.saveStudioTags));
@@ -1850,69 +1979,30 @@ async function tryProxyDbOp(req: any, res: any): Promise<boolean> {
   return false;
 }
 
-// ─── Route-handler factories (eliminate try/catch/tryProxy boilerplate) ──────
-type Handler = (req: any, res: any) => Promise<void>;
-
-/** GET /studio/:connectionId/X — extract connectionId, call mod.fn(id) */
-function studioGetRoute(fn: (id: number) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      res.json(await fn(Number(req.params.connectionId)));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
-}
-
-/** POST /studio/:connectionId/X — extract connectionId + body, call mod.fn(id, body) */
-function studioPostRoute(fn: (id: number, body: any) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      res.json(await fn(Number(req.params.connectionId), req.body));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
-}
-
-/** GET /api/X — zero-arg mod.fn() */
-function simpleGetRoute(fn: () => Promise<any>): Handler {
-  return async (_req, res) => {
-    try {
-      res.json(await fn());
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
-}
+// ─── Route-handler factories (Effect adapters + workspace DB proxy) ──────────
+// studioGetRoute / studioPostRoute / simpleGetRoute / simplePostRoute /
+// dynamicPostRoute: imported from ./effect
 
 /** POST /api/X — tryProxyDbOp + extract connectionString, call mod.fn(cs) */
-function proxyOneArgRoute(fn: (cs: string) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      if (await tryProxyDbOp(req, res)) return;
-      res.json(await fn(req.body.connectionString));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
+function proxyOneArgRoute(fn: (cs: string) => Promise<any>) {
+  return proxyBodyRoute(tryProxyDbOp, (req) => fn(req.body.connectionString));
 }
 
 /** POST /api/X — tryProxyDbOp + extract connectionString, schema */
-// fallow-ignore-next-line code-duplication
-function proxyTwoArgRoute(fn: (cs: string, schema: string) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      if (await tryProxyDbOp(req, res)) return;
-      res.json(await fn(req.body.connectionString, req.body.schema));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
+function proxyTwoArgRoute(fn: (cs: string, schema: string) => Promise<any>) {
+  return proxyBodyRoute(tryProxyDbOp, (req) =>
+    fn(req.body.connectionString, req.body.schema),
+  );
 }
 
 /** POST /api/X — tryProxyDbOp + extract connectionString, schema, table */
-// fallow-ignore-next-line code-duplication
-function proxyThreeArgRoute(fn: (cs: string, schema: string, table: string) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      if (await tryProxyDbOp(req, res)) return;
-      res.json(await fn(req.body.connectionString, req.body.schema, req.body.table));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
+function proxyThreeArgRoute(
+  fn: (cs: string, schema: string, table: string) => Promise<any>,
+) {
+  return proxyBodyRoute(tryProxyDbOp, (req) =>
+    fn(req.body.connectionString, req.body.schema, req.body.table),
+  );
 }
-
-// simplePostRoute / dynamicPostRoute: imported from ./effect (Promise + Effect bridge)
 
 /** Dynamic-import the workflow dependencies (better-drizzle client, ensureCoreTables) */
 async function getWorkflowDeps() {

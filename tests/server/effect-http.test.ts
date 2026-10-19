@@ -157,4 +157,57 @@ describe("server/effect http bridge", () => {
     expect(mocked.statusCode).toBe(200);
     expect(mocked.json).toEqual({ success: true, echo: 3 });
   });
+
+  test("simpleGetRoute and studioGetRoute bridge Promises", async () => {
+    const { simpleGetRoute, studioGetRoute } = await import(
+      "../../server/effect/http"
+    );
+    const getRoute = simpleGetRoute(async () => ({ ok: true }));
+    const getMock = mockRes();
+    await getRoute({} as any, getMock.res as any, (() => undefined) as any);
+    expect(getMock.json).toEqual({ ok: true });
+
+    const studioRoute = studioGetRoute(async (id) => ({ id }));
+    const studioMock = mockRes();
+    await studioRoute(
+      { params: { connectionId: "42" } } as any,
+      studioMock.res as any,
+      (() => undefined) as any,
+    );
+    expect(studioMock.json).toEqual({ id: 42 });
+  });
+
+  test("proxyBodyRoute short-circuits when tryProxy handles the request", async () => {
+    const { proxyBodyRoute } = await import("../../server/effect/http");
+    let ranFn = false;
+    const route = proxyBodyRoute(
+      async (_req, res) => {
+        res.json({ proxied: true });
+        return true;
+      },
+      async () => {
+        ranFn = true;
+        return { ran: true };
+      },
+    );
+    const mocked = mockRes();
+    await route({ body: {} } as any, mocked.res as any, (() => undefined) as any);
+    expect(ranFn).toBe(false);
+    expect(mocked.json).toEqual({ proxied: true });
+  });
+
+  test("proxyBodyRoute runs fn when tryProxy declines", async () => {
+    const { proxyBodyRoute } = await import("../../server/effect/http");
+    const route = proxyBodyRoute(
+      async () => false,
+      async (req) => ({ echo: req.body.x }),
+    );
+    const mocked = mockRes();
+    await route(
+      { body: { x: 9 } } as any,
+      mocked.res as any,
+      (() => undefined) as any,
+    );
+    expect(mocked.json).toEqual({ echo: 9 });
+  });
 });

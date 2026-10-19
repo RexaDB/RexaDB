@@ -36,9 +36,17 @@ RexaDB’s local Express server and the `lib/` modules it reaches are migrating 
 
 ## Adapters
 
+Wave 1 moved the common Express factories onto Effect:
+
+- `simpleGetRoute` / `simplePostRoute` / `studioGetRoute` / `studioPostRoute`
+- `dynamicPostRoute(loadModule, fn)` — import callback at the call site
+- `proxyBodyRoute(tryProxyDbOp, fn)` — workspace DB proxy short-circuit, then Effect
+
+Thin JSON routes (connections, neon-cli list APIs, SQL/schema via proxy helpers, settings) should use these. Leave SSE/streaming and upstream HTTP proxies for later waves.
+
 ```ts
 import { Effect } from "effect"
-import { effectHandler, simplePostRoute, fromPromise } from "./effect"
+import { effectHandler, simplePostRoute, fromPromise, proxyBodyRoute } from "./effect"
 
 app.get("/health", effectHandler(() => Effect.succeed({ status: "ok", port })))
 
