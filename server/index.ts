@@ -46,6 +46,7 @@ import {
   detectAgentProvidersEffect,
   listAgentProviderModelsEffect,
 } from "./agents-api";
+import { createStudioStorageEffects } from "./studio-storage-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -654,6 +655,7 @@ app.post(
 // Load actions-core at module init — forces Bun to bundle it and all static deps
 const actionsCore = require("../lib/db/actions-core");
 const mod = actionsCore;
+const studioStorage = createStudioStorageEffects(mod);
 
 // --- API Routes ---
 
@@ -1261,17 +1263,15 @@ app.post(
 );
 
 // Studio routes
-app.get("/studio/:connectionId/folders", studioGetRoute(mod.getStudioFolders));
-app.post("/studio/:connectionId/folders", studioPostRoute(mod.saveStudioFolders));
+app.get("/studio/:connectionId/folders", studioGetRoute(studioStorage.getFolders));
+app.post("/studio/:connectionId/folders", studioPostRoute(studioStorage.saveFolders));
 
 app.get(
   "/studio/:connectionId/snippets",
   effectHandler((req) =>
     Effect.gen(function* () {
       const connectionId = Number(req.params.connectionId);
-      const result = yield* fromPromise(() =>
-        mod.getStudioSnippets(connectionId),
-      );
+      const result = yield* studioStorage.getSnippets(connectionId);
       log("[rexadb:snapshot] Server getStudioSnippets for", connectionId, {
         success: result?.success,
         count: result?.data?.length ?? 0,
@@ -1295,49 +1295,43 @@ app.post(
         snippetIds: Array.isArray(body) ? body.map((s: any) => s?.id) : [],
         snippetNames: Array.isArray(body) ? body.map((s: any) => s?.name) : [],
       });
-      const result = yield* fromPromise(
-        () => mod.saveStudioSnippets(connectionId, body),
-        (cause) => {
-          console.error("[rexadb:snapshot] Server saveStudioSnippets error", cause);
-          return cause instanceof Error ? cause : new Error(String(cause));
-        },
-      );
+      const result = yield* studioStorage.saveSnippets(connectionId, body);
       log("[rexadb:snapshot] Server saveStudioSnippets result", result);
       return result;
     }),
   ),
 );
 
-app.get("/studio/:connectionId/history", studioGetRoute(mod.getStudioHistory));
-app.post("/studio/:connectionId/history", studioPostRoute(mod.saveStudioHistory));
+app.get("/studio/:connectionId/history", studioGetRoute(studioStorage.getHistory));
+app.post("/studio/:connectionId/history", studioPostRoute(studioStorage.saveHistory));
 
 app.post(
   "/studio/:connectionId/history/entry",
-  studioPostRoute(mod.insertHistoryEntry),
+  studioPostRoute(studioStorage.insertHistoryEntry),
 );
 
 app.delete(
   "/studio/:connectionId/history",
-  studioGetRoute(mod.clearStudioHistory),
+  studioGetRoute(studioStorage.clearHistory),
 );
 
-app.get("/studio/:connectionId/tags", studioGetRoute(mod.getStudioTags));
-app.post("/studio/:connectionId/tags", studioPostRoute(mod.saveStudioTags));
+app.get("/studio/:connectionId/tags", studioGetRoute(studioStorage.getTags));
+app.post("/studio/:connectionId/tags", studioPostRoute(studioStorage.saveTags));
 
-app.get("/studio/:connectionId/table-tags", studioGetRoute(mod.getStudioTableTags));
-app.post("/studio/:connectionId/table-tags", studioPostRoute(mod.saveStudioTableTags));
+app.get("/studio/:connectionId/table-tags", studioGetRoute(studioStorage.getTableTags));
+app.post("/studio/:connectionId/table-tags", studioPostRoute(studioStorage.saveTableTags));
 
-app.get("/studio/:connectionId/tabs", studioGetRoute(mod.getStudioTabs));
-app.post("/studio/:connectionId/tabs", studioPostRoute(mod.saveStudioTabs));
+app.get("/studio/:connectionId/tabs", studioGetRoute(studioStorage.getTabs));
+app.post("/studio/:connectionId/tabs", studioPostRoute(studioStorage.saveTabs));
 
-app.get("/studio/:connectionId/settings", studioGetRoute(mod.getStudioSettings));
-app.post("/studio/:connectionId/settings", studioPostRoute(mod.saveStudioSettings));
+app.get("/studio/:connectionId/settings", studioGetRoute(studioStorage.getSettings));
+app.post("/studio/:connectionId/settings", studioPostRoute(studioStorage.saveSettings));
 
-app.get("/studio/:connectionId/dashboards", studioGetRoute(mod.getStudioDashboards));
-app.post("/studio/:connectionId/dashboards", studioPostRoute(mod.saveStudioDashboards));
+app.get("/studio/:connectionId/dashboards", studioGetRoute(studioStorage.getDashboards));
+app.post("/studio/:connectionId/dashboards", studioPostRoute(studioStorage.saveDashboards));
 
-app.get("/studio/:connectionId/notes", studioGetRoute(mod.getStudioNotes));
-app.post("/studio/:connectionId/notes", studioPostRoute(mod.saveStudioNotes));
+app.get("/studio/:connectionId/notes", studioGetRoute(studioStorage.getNotes));
+app.post("/studio/:connectionId/notes", studioPostRoute(studioStorage.saveNotes));
 
 app.get("/studio/:connectionId/bootstrap", async (req, res) => {
   try {

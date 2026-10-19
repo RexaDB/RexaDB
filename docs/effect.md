@@ -154,3 +154,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### Agent provider discovery (Wave 8)
 
 `server/agents-api.ts` runs provider detection and model-list routes as Effects while preserving the existing stale-while-revalidate cache behavior and response shapes. The provider cache, local CLI probes, and UI-facing Promise APIs remain behind the adapter boundary. Streaming agent routes stay at the Express edge because they own SSE and subprocess lifecycles.
+
+### Studio persistence from actions-core (Wave 9)
+
+`server/studio-storage-api.ts` exposes Effect programs for Studio folders, snippets, query history, tags, tabs, settings, dashboards, and notes. The sidecar routes use those programs and map rejected storage operations to `DbError`; the Promise APIs in `lib/db/actions-core.ts` remain available to UI and other existing callers.
