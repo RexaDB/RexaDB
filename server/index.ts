@@ -43,9 +43,13 @@ import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
 import * as neonCliRunner from "../lib/neon-cli/cli-runner";
 import {
-  cacheConnectionCredential,
-  clearCachedConnectionCredentials,
-} from "../lib/credentials/connection-credential-cache";
+  lockCredentialCacheEffect,
+  putCredentialCacheEntryEffect,
+} from "../lib/credentials/credential-cache-effects";
+import {
+  fromVaultConfigPromise,
+  fromVaultMigrationPromise,
+} from "../lib/credentials/vault-config-effects";
 import { stripConnectionSecrets } from "../lib/credentials/connection-secret-utils";
 
 // Packaged/prod desktop builds are launched by the OS, not a terminal, so
@@ -638,7 +642,7 @@ app.get(
 
 app.get(
   "/api/connections/vault/config",
-  effectHandler(() => fromPromise(() => mod.getCredentialVaultConfig()), {
+  effectHandler(() => fromVaultConfigPromise(() => mod.getCredentialVaultConfig()), {
     onSuccess: (result, _req, res) => {
       res.status(result.success ? 200 : 500).json(result);
     },
@@ -650,7 +654,9 @@ app.post(
   effectHandler(
     (req) => {
       const { salt, verifier } = req.body || {};
-      return fromPromise(() => mod.createCredentialVaultConfig(salt, verifier));
+      return fromVaultConfigPromise(() =>
+        mod.createCredentialVaultConfig(salt, verifier),
+      );
     },
     {
       onSuccess: (result, _req, res) => {
@@ -662,55 +668,23 @@ app.post(
 
 app.post(
   "/api/connections/secure-migration/complete",
-  effectHandler(() => fromPromise(() => mod.completeConnectionSecretMigration()), {
-    fallbackStatus: 500,
-  }),
+  effectHandler(
+    () => fromVaultMigrationPromise(() => mod.completeConnectionSecretMigration()),
+    { fallbackStatus: 500 },
+  ),
 );
 
 app.post(
   "/api/connections/credential-cache",
-  effectHandler((req) =>
-    Effect.gen(function* () {
-      const { reference, secret } = req.body || {};
-      const allowedFields = ["connectionString", "password", "authToken"];
-      const fields =
-        secret && typeof secret === "object" ? Object.keys(secret) : [];
-      const validSecret =
-        Boolean(secret) &&
-        typeof secret === "object" &&
-        !Array.isArray(secret) &&
-        fields.every((field) => allowedFields.includes(field)) &&
-        fields.every(
-          (field) =>
-            secret[field] === null || typeof secret[field] === "string",
-        ) &&
-        Buffer.byteLength(JSON.stringify(secret || {})) <= 256_000;
-      if (
-        typeof reference !== "string" ||
-        !/^(?:[A-Za-z0-9-]{1,80}|vault:[A-Za-z0-9-]{1,80})$/.test(reference) ||
-        !validSecret
-      ) {
-        return yield* Effect.fail(
-          new ValidationError({
-            message: "Invalid credential cache entry.",
-            status: 400,
-          }),
-        );
-      }
-      cacheConnectionCredential(reference, secret);
-      return { success: true as const };
-    }),
-  ),
+  effectHandler((req) => {
+    const { reference, secret } = req.body || {};
+    return putCredentialCacheEntryEffect(reference, secret);
+  }),
 );
 
 app.post(
   "/api/connections/credential-cache/lock",
-  effectHandler(() =>
-    Effect.sync(() => {
-      clearCachedConnectionCredentials();
-      return { success: true as const };
-    }),
-  ),
+  effectHandler(() => lockCredentialCacheEffect()),
 );
 
 // Connection groups (MUST be before /:id routes to avoid param capture)
