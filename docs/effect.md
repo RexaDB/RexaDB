@@ -13,6 +13,7 @@ RexaDB’s local Express server and the `lib/` modules it reaches are migrating 
 |------|------|
 | `server/effect/errors.ts` | Shared `Data.TaggedError` types |
 | `server/effect/http.ts` | Express adapters (`effectHandler`, `simplePostRoute`, …) |
+| `server/effect/proxy.ts` | Upstream HTTP proxy helpers (`effectProxyHandler`, `fetchUpstreamEffect`, …) |
 | `server/effect/runtime.ts` | `runPromise` / `runPromiseExit` + defect logging |
 | `docs/effect.md` | This guide |
 
@@ -117,3 +118,13 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 | `lib/credentials/credential-cache-effects.ts` | Validated `putCredentialCacheEntryEffect` / `lockCredentialCacheEffect` |
 | `lib/credentials/vault-config-effects.ts` | `fromVaultConfigPromise` / `fromVaultMigrationPromise` |
 | UI modules (`local-vault`, `connection-credentials`) | Stay Promise/browser-safe — do not import Effect there |
+
+### Upstream HTTP proxies (Wave 5)
+
+| API | Notes |
+|-----|--------|
+| `server/effect/proxy.ts` | `effectProxyHandler`, `fetchUpstreamEffect`, `readUpstreamTextEffect`, `readUpstreamBufferEffect`, `proxiedPayloadResult` |
+| `UpstreamError` | Tagged error for network/upstream failures (502) |
+| Proxy routes | Supabase mgmt, PlanetScale, SpacetimeDB, Studio proxy wired through `effectProxyHandler` |
+| Binary support | Buffers forwarded with correct `Content-Type` header |
+| JSON fallback | `proxiedPayloadResult` parses JSON when possible, falls back to text (matches historical behavior) |
