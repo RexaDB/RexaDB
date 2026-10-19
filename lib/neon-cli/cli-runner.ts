@@ -232,7 +232,11 @@ export async function neonProfileList(): Promise<NeonProfile[]> {
 export const neonProfileRemoveEffect = (
   profile: string,
 ): Effect.Effect<{ success: true }, NeonCliError> =>
-  fromNeonPromise(() => profileRemove(profile));
+  // profileRemove is synchronous — use Effect.try, not fromNeonPromise.
+  Effect.try({
+    try: () => profileRemove(profile),
+    catch: (cause) => toNeonCliError(cause),
+  });
 
 export async function neonProfileRemove(
   profile: string,

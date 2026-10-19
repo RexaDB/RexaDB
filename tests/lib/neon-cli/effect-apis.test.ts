@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   detectNeonCliEffect,
   neonOrgsListEffect,
+  neonProfileRemoveEffect,
 } from "@/lib/neon-cli/cli-runner";
 import {
   NeonApiError,
@@ -15,6 +16,7 @@ import {
   NEON_AUTH_UNAVAILABLE_MESSAGE,
   NEON_SESSION_EXPIRED_MESSAGE,
 } from "@/lib/neon-cli/errors";
+import * as neonOauthApi from "@/lib/neon-oauth/api";
 
 describe("neon-cli toNeonCliError", () => {
   test("maps session expired and auth unavailable messages", () => {
@@ -37,6 +39,11 @@ describe("neon-cli toNeonCliError", () => {
 });
 
 describe("neon-cli Effect APIs", () => {
+  const spies: Array<{ mockRestore: () => void }> = [];
+  afterEach(() => {
+    while (spies.length) spies.pop()?.mockRestore();
+  });
+
   test("detectNeonCliEffect always reports builtin oauth", async () => {
     const result = await Effect.runPromise(detectNeonCliEffect());
     expect(result).toEqual({
@@ -46,23 +53,38 @@ describe("neon-cli Effect APIs", () => {
     });
   });
 
-  test("neonOrgsListEffect remaps thrown session-expired into tagged failure", async () => {
-    const exit = await Effect.runPromiseExit(
-      Effect.tryPromise({
-        try: async () => {
-          throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
-        },
-        catch: (cause) => toNeonCliError(cause),
-      }),
+  test("neonOrgsListEffect remaps listOrgs session-expired into tagged failure", async () => {
+    const listOrgsSpy = spyOn(neonOauthApi, "listOrgs").mockImplementation(
+      async () => {
+        throw new Error(NEON_SESSION_EXPIRED_MESSAGE);
+      },
     );
+    spies.push(listOrgsSpy);
+
+    const exit = await Effect.runPromiseExit(neonOrgsListEffect("default"));
     expect(Exit.isFailure(exit)).toBe(true);
+    expect(listOrgsSpy).toHaveBeenCalledWith("default");
     if (Exit.isFailure(exit)) {
       const err = Cause.findErrorOption(exit.cause);
       expect(Option.isSome(err)).toBe(true);
       if (Option.isSome(err)) {
         expect(err.value).toBeInstanceOf(NeonSessionExpiredError);
+        expect(err.value.message).toBe(NEON_SESSION_EXPIRED_MESSAGE);
       }
     }
+  });
+
+  test("neonProfileRemoveEffect succeeds for a sync profileRemove", async () => {
+    const removeSpy = spyOn(neonOauthApi, "profileRemove").mockReturnValue({
+      success: true as const,
+    });
+    spies.push(removeSpy);
+
+    const result = await Effect.runPromise(
+      neonProfileRemoveEffect("wave3-test-profile"),
+    );
+    expect(result).toEqual({ success: true });
+    expect(removeSpy).toHaveBeenCalledWith("wave3-test-profile");
   });
 
   test("neonOrgsListEffect is an Effect (callable shape)", () => {
