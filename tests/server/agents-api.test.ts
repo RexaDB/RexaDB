@@ -48,12 +48,67 @@ describe("agent provider discovery Effects", () => {
     expect(api.cache()?.providers[0].models?.[0].id).toBe("model-1");
   });
 
-  test("serves stale cache immediately and returns fallback when probing fails", async () => {
+  test("serves overlapping stale requests before one pending refresh updates cache", async () => {
     const stale = { providers: [provider], cachedAt: 0 };
     let cache: ProvidersCachePayload | null = stale;
+    let probeCount = 0;
+    let releaseProbe!: (providers: AgentProvider[]) => void;
+    let markProbeStarted!: () => void;
+    let markCacheUpdated!: () => void;
+    const probeStarted = new Promise<void>((resolve) => { markProbeStarted = resolve; });
+    const cacheUpdated = new Promise<void>((resolve) => { markCacheUpdated = resolve; });
+    const probeGate = new Promise<AgentProvider[]>((resolve) => { releaseProbe = resolve; });
     const api = createProviderDiscoveryEffects({
       readCache: () => cache,
-      writeCache: (providers) => { cache = { providers, cachedAt: 0 }; },
+      writeCache: (providers) => {
+        cache = { providers, cachedAt: 1_000_000 };
+        markCacheUpdated();
+      },
+      detect: async () => {
+        probeCount++;
+        markProbeStarted();
+        return probeGate;
+      },
+      models: async () => [{ id: "refreshed-model", label: "Refreshed" }],
+      modes: async () => [{ id: "build", label: "Build" }],
+      merge: (live) => live,
+      now: () => 1_000_000,
+      log: () => undefined,
+    });
+
+    try {
+      const firstRequest = Effect.runPromise(api.detectEffect);
+      const secondRequest = Effect.runPromise(api.detectEffect);
+      await probeStarted;
+
+      // A blocked discovery must not block either stale response. The timeout
+      // keeps the regression test bounded; the probe is always released below.
+      const responses = await Promise.race([
+        Promise.all([firstRequest, secondRequest]),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("stale responses waited for discovery")), 250)),
+      ]);
+      expect(responses).toEqual([
+        { providers: [provider], cached: true, stale: true },
+        { providers: [provider], cached: true, stale: true },
+      ]);
+      expect(probeCount).toBe(1);
+
+      releaseProbe([{ ...provider, name: "Refreshed provider" }]);
+      await cacheUpdated;
+      expect(cache?.providers[0]).toMatchObject({
+        name: "Refreshed provider",
+        models: [{ id: "refreshed-model" }],
+        modes: [{ id: "build" }],
+      });
+    } finally {
+      releaseProbe([provider]);
+    }
+  }, 2_000);
+
+  test("returns the legacy model fallback when provider detection fails", async () => {
+    const api = createProviderDiscoveryEffects({
+      readCache: () => null,
+      writeCache: () => undefined,
       detect: async () => { throw new Error("CLI unavailable"); },
       models: async () => [],
       modes: async () => [],
@@ -61,10 +116,6 @@ describe("agent provider discovery Effects", () => {
       now: () => 1_000_000,
       log: () => undefined,
     });
-    const result = await Effect.runPromise(api.detectEffect);
-    expect(result).toEqual({ providers: [provider], cached: true, stale: true });
-
-    cache = null;
     const modelResult = await Effect.runPromise(api.modelsEffect("rexadb"));
     expect(modelResult).toEqual({ models: [], error: "CLI unavailable" });
   });
