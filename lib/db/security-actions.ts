@@ -2,6 +2,7 @@ import { extractIndexColumns } from "./pg-utils";
 import { isPostgresConnection } from "./pg-connection";
 import { quotePgIdentifier } from "./quote-identifier";
 import { detectConnectionDbType } from "./connection-type";
+import { assertUsableDatabaseConnectionString } from "./connection-string-guard";
 
 function isPgLike(connectionString: string): boolean {
   const dt = detectConnectionDbType(connectionString);
@@ -381,6 +382,7 @@ function mapSupabaseAuthUserOption(row: any) {
 }
 
 export async function fetchSupabaseAuthUsers(connectionString: string) {
+  assertUsableDatabaseConnectionString(connectionString);
   return withPgClientRead(connectionString, "supabase auth users", async (executeQuery) => {
     const dbType = detectConnectionDbType(connectionString);
 

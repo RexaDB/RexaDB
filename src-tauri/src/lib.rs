@@ -1,4 +1,5 @@
 mod dictionary;
+mod app_database;
 mod rexadb_studio;
 mod spacetimedb;
 mod cli_shim;
@@ -953,12 +954,25 @@ fn extract_port(line: &str) -> Option<u16> {
 
 fn spawn_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
+    use std::net::TcpListener;
 
     let data_dir = get_app_data_dir(app);
     let jdbc_drivers_dir = get_jdbc_drivers_dir(app);
     let resource_dir = app.path().resource_dir().ok();
+    // tauri:dev also runs a source sidecar for local development. Select an
+    // available port up front so readiness checks and API discovery never
+    // mistake that process (and its different SQLite file) for this sidecar.
+    let sidecar_port = (3867..=3900)
+        .find(|port| TcpListener::bind(("127.0.0.1", *port)).is_ok())
+        .unwrap_or(3867);
+    {
+        let state = app.state::<SidecarState>();
+        *state.port.lock().unwrap() = sidecar_port;
+        *state.ready.lock().unwrap() = false;
+    }
     let mut sidecar_command = app.shell().sidecar("rexadb-server")
         .expect("failed to create sidecar command")
+        .env("REXADB_SERVER_PORT", sidecar_port.to_string())
         .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref())
         .env("REXADB_JDBC_DRIVERS_DIR", jdbc_drivers_dir.to_string_lossy().as_ref());
     if let Some(rd) = &resource_dir {
@@ -1166,6 +1180,7 @@ pub fn run() {
             dictionary::dictionary_set_column,
             dictionary::dictionary_set_decorator,
             dictionary::dictionary_delete_scope,
+            app_database::app_database_list_connections,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

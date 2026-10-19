@@ -1,7 +1,9 @@
 import { detectConnectionDbType } from "../connection-type";
+import { assertUsableDatabaseConnectionString } from "../connection-string-guard";
 import { getTrinoConnectionInfo } from "./trino-connection";
 
 export async function getDbTableStructure(connectionString: string, schema: string, table: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedTableStructure(connectionString, schema, table);
   if (dbType === "clickhouse") return (await import("../clickhouse-client")).getClickhouseTableStructure(connectionString, schema, table);
@@ -55,6 +57,7 @@ export async function getDbTableStructure(connectionString: string, schema: stri
 }
 
 export async function getDbAllTablesWithColumns(connectionString: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedAllTablesWithColumns(connectionString);
   if (dbType === "clickhouse") return (await import("../clickhouse-client")).getClickhouseAllTablesWithColumns(connectionString);

@@ -116,6 +116,7 @@ import {
   clearMigratedSqliteSettings as _clearMigratedSqliteSettings,
 } from "./settings-migration";
 import { ensureCoreTables, ensureConnectionExists } from "./ensure-core-tables";
+import { assertUsableDatabaseConnectionString } from "./connection-string-guard";
 import {
   getStudioHistory as _getStudioHistory,
   insertHistoryEntry as _insertHistoryEntry,
@@ -1607,6 +1608,7 @@ export async function runQuery(
   } = {},
 ): Promise<SqlEditorRunQueryResult> {
   try {
+    assertUsableDatabaseConnectionString(connectionString);
     const { executeDbQuery } = await import("./db-engine");
     const start = Date.now();
     const result = await executeDbQuery(
@@ -1689,6 +1691,7 @@ export async function fetchTableStructure(
   schema: string,
   table: string,
 ) {
+  assertUsableDatabaseConnectionString(connectionString);
   return _fetchTableStructure(connectionString, schema, table);
 }
 
@@ -1697,6 +1700,7 @@ export async function fetchTableForeignKeys(
   schema: string,
   table: string,
 ) {
+  assertUsableDatabaseConnectionString(connectionString);
   return _fetchTableForeignKeys(connectionString, schema, table);
 }
 
@@ -1748,6 +1752,11 @@ export async function fetchTables(
   schema: string,
   options?: { forceRefresh?: boolean; cacheMaxAgeMs?: number },
 ) {
+  try {
+    assertUsableDatabaseConnectionString(connectionString);
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
   const dbType = detectConnectionDbType(connectionString);
   const {
     forceRefresh = false,
@@ -1830,6 +1839,11 @@ export async function fetchSchemas(
     connectionType?: string;
   },
 ) {
+  try {
+    assertUsableDatabaseConnectionString(connectionString);
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
   const dbType = detectConnectionDbType(
     connectionString,
     options?.connectionType,
@@ -1898,6 +1912,11 @@ export async function fetchSchemas(
 }
 
 export async function fetchDatabases(connectionString: string) {
+  try {
+    assertUsableDatabaseConnectionString(connectionString);
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "redis") {
     const { getRedisDatabases } = await import("./redis-client");
@@ -1924,6 +1943,11 @@ export async function fetchAllTablesWithColumns(
   connectionString: string,
   options?: { forceRefresh?: boolean; cacheMaxAgeMs?: number; schema?: string },
 ) {
+  try {
+    assertUsableDatabaseConnectionString(connectionString);
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
   const dbType = detectConnectionDbType(connectionString);
   const {
     forceRefresh = false,

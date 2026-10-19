@@ -1,7 +1,9 @@
 import { detectConnectionDbType } from "../connection-type";
+import { assertUsableDatabaseConnectionString } from "../connection-string-guard";
 import { getTrinoConnectionInfo } from "./trino-connection";
 
 export async function getDbSchemas(connectionString: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedSchemas(connectionString);
   if (dbType === "mongodb") return [];
@@ -25,6 +27,7 @@ export async function getDbSchemas(connectionString: string): Promise<any> {
 }
 
 export async function getDbDatabases(connectionString: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedDatabases(connectionString);
   if (dbType === "mongodb") return (await import("../mongo-client")).getMongoDatabases(connectionString);
@@ -41,6 +44,7 @@ export async function getDbDatabases(connectionString: string): Promise<any> {
 }
 
 export async function getDbTables(connectionString: string, schema: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedTables(connectionString, schema);
   if (dbType === "clickhouse") return (await import("../clickhouse-client")).getClickhouseTables(connectionString, schema);
@@ -66,6 +70,7 @@ export async function getDbTables(connectionString: string, schema: string): Pro
 }
 
 export async function getDbFunctions(connectionString: string, schema: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "mssql")
     return (await import("../mssql-client")).getRoutines(connectionString, schema);
@@ -75,6 +80,7 @@ export async function getDbFunctions(connectionString: string, schema: string): 
 }
 
 export async function getDbViews(connectionString: string, schema: string): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") return (await import("../federated")).getFederatedViews(connectionString, schema);
   if (dbType === "clickhouse") return (await import("../clickhouse-client")).getClickhouseViews(connectionString, schema);

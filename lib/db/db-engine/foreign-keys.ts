@@ -1,4 +1,5 @@
 import { detectConnectionDbType } from "../connection-type";
+import { assertUsableDatabaseConnectionString } from "../connection-string-guard";
 import { normalizeStudioForeignKeys } from "../foreign-key-utils";
 
 export async function getDbTableForeignKeys(
@@ -6,6 +7,7 @@ export async function getDbTableForeignKeys(
   schema: string,
   table: string,
 ): Promise<any[]> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "federated") {
     return (await import("../federated")).getFederatedTableForeignKeys(

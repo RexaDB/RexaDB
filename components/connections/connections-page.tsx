@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { ConnectionManager } from "@/components/connections/connection-manager";
 import { ConnectionAnalyticsShell } from "@/components/connections/connection-analytics-shell";
@@ -73,6 +73,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
   const [displayName, setDisplayName] = useState("User");
   const [email, setEmail] = useState("");
   const [connections, setConnections] = useState<Connection[]>([]);
+  const connectionsLoadedRef = useRef(false);
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null);
   const [newConnectionTrigger, setNewConnectionTrigger] = useState(0);
   const { appThemeId, setAppThemeId } = useAppSettings();
@@ -148,6 +149,7 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       const res = await getConnectionsResult();
       if (res.ok) {
         setConnections(res.data || []);
+        connectionsLoadedRef.current = true;
         setConnsError(null);
       } else {
         setConnsError(res.error || "Could not reach the local sidecar.");
@@ -200,24 +202,27 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       setSelectedConnection(null);
       return;
     }
+    // The app shell can retain an analytics tab across restarts. If its
+    // connection was removed, don't keep issuing requests for that stale ID.
+    if (connsError) return;
     const found = connections.find((c) => c.id === selectedConnectionId) || null;
     if (found) {
       setSelectedConnection(found);
       return;
     }
-    let active = true;
-    (async () => {
-      try {
-        const res = await getConnectionsResult({ retries: 0 });
-        if (active && res.ok) {
-          setSelectedConnection(res.data?.find((c) => c.id === selectedConnectionId) || null);
-        }
-      } catch {}
-    })();
-    return () => {
-      active = false;
-    };
-  }, [selectedConnectionId, connections]);
+    if (!connectionsLoadedRef.current) return;
+    setSelectedConnection(null);
+    setNav((prev) => {
+      const connectionsIndex = prev.stack.lastIndexOf(CONNECTIONS_TAB.id);
+      if (connectionsIndex >= 0) {
+        return { stack: prev.stack.slice(0, connectionsIndex + 1), index: connectionsIndex };
+      }
+      return { stack: [CONNECTIONS_TAB.id], index: 0 };
+    });
+    setTabs((prev) => prev.filter((tab) => tab.kind !== "analytics" || tab.connectionId !== selectedConnectionId));
+    return;
+
+  }, [selectedConnectionId, connections, connsError]);
 
   const activate = useCallback((id: string) => {
     setNav((prev) => {
