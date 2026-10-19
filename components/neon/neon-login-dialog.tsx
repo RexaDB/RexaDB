@@ -94,6 +94,7 @@ export function NeonLoginDialog({
           return;
         }
         if (event.type === "done") {
+          console.log('[NeonLoginDialog] Received done event:', event);
           try {
             const account = addNeonCliAccount(
               profileRef.current,

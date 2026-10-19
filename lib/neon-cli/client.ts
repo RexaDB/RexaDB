@@ -143,7 +143,9 @@ export function streamNeonLogin(
         const line = frame.split("\n").find((part) => part.startsWith("data:"));
         if (!line) return;
         try {
-          onEvent(JSON.parse(line.slice(5).trim()) as NeonLoginEvent);
+          const event = JSON.parse(line.slice(5).trim()) as NeonLoginEvent;
+          console.log('[NeonClient] SSE event:', event);
+          onEvent(event);
         } catch {
           // ignore malformed frame
         }
