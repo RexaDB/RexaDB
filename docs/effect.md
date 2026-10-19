@@ -162,3 +162,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### App settings and migration (Wave 10)
 
 `server/app-settings-api.ts` exposes typed Effect programs for global app font/theme/editor/Studio settings and legacy settings migration. The existing actions-core Promise functions remain the compatibility facade; sidecar settings routes preserve their current JSON response shapes.
+
+### User data and analytics (Wave 11)
+
+`server/user-data-api.ts` exposes typed Effect programs for user profile operations, application error logging, and user/connection analytics. Sidecar routes retain the `actions-core` Promise facade for non-server callers; rejected storage operations enter the Effect error channel as `DbError`.
