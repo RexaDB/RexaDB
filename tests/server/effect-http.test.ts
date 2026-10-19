@@ -9,6 +9,7 @@ import {
 import {
   dynamicPostRoute,
   effectHandler,
+  effectJsonHandler,
   fromPromise,
   simplePostRoute,
 } from "../../server/effect/http";
@@ -209,5 +210,30 @@ describe("server/effect http bridge", () => {
       (() => undefined) as any,
     );
     expect(mocked.json).toEqual({ echo: 9 });
+  });
+
+  test("effectJsonHandler passes through values that already have success", async () => {
+    const route = effectJsonHandler(() =>
+      Effect.succeed({ success: true as const }),
+    );
+    const mocked = mockRes();
+    await route({} as any, mocked.res as any, (() => undefined) as any);
+    expect(mocked.json).toEqual({ success: true });
+  });
+
+  test("remove-profile style responses keep { success, data } when wrapped explicitly", async () => {
+    // Mirrors /api/neon-cli/remove-profile: neonProfileRemove returns
+    // `{ success: true }`, which effectJsonHandler would send unchanged.
+    const route = effectHandler(() =>
+      Effect.succeed({ success: true as const }).pipe(
+        Effect.map((data) => ({ success: true as const, data })),
+      ),
+    );
+    const mocked = mockRes();
+    await route({} as any, mocked.res as any, (() => undefined) as any);
+    expect(mocked.json).toEqual({
+      success: true,
+      data: { success: true },
+    });
   });
 });

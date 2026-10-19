@@ -603,8 +603,12 @@ app.post(
 );
 app.post(
   "/api/neon-cli/remove-profile",
-  effectJsonHandler((req) =>
-    fromPromise(() => neonCliRunner.neonProfileRemove(req.body.profile)),
+  // neonProfileRemove already returns `{ success: true }`. effectJsonHandler
+  // would pass that through and drop the outer `data` field — wrap explicitly.
+  effectHandler((req) =>
+    fromPromise(() => neonCliRunner.neonProfileRemove(req.body.profile)).pipe(
+      Effect.map((data) => ({ success: true as const, data })),
+    ),
   ),
 );
 
