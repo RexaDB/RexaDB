@@ -150,3 +150,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 | MCP routes | Config GET/PUT, token regenerate/reveal, audit-log, modes CRUD, HTTP endpoint all wired through Effect |
 | Streaming `/mcp` | Uses Effect for validation but delegates to `handleMcpHttpRequest` for response writing |
 | Promise facades | Original `loadMcpExternalConfig`, `saveMcpExternalConfig` kept for direct callers |
+
+### Agent provider discovery (Wave 8)
+
+`server/agents-api.ts` runs provider detection and model-list routes as Effects while preserving the existing stale-while-revalidate cache behavior and response shapes. The provider cache, local CLI probes, and UI-facing Promise APIs remain behind the adapter boundary. Streaming agent routes stay at the Express edge because they own SSE and subprocess lifecycles.
