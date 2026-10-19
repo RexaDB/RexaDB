@@ -40,7 +40,7 @@ export const saveMcpConfigEffect = (config: McpExternalConfig) =>
 
 /** Load full MCP config summary (config + modes + connections + stdio info). */
 export const getMcpConfigSummaryEffect = Effect.gen(function* () {
-  const config = yield* loadMcpConfigEffect();
+  const config = yield* loadMcpConfigEffect;
   const all = yield* Effect.tryPromise({
     try: () => listAllConnectionDeps(),
     catch: (cause) =>
@@ -80,12 +80,13 @@ export const getMcpConfigSummaryEffect = Effect.gen(function* () {
 /** Update MCP config (preserves token unless explicitly rotated). */
 export const updateMcpConfigEffect = (updates: Partial<McpExternalConfig>) =>
   Effect.gen(function* () {
+    const body = updates || {};
     const current = yield* loadMcpConfigEffect;
     const merged = sanitizeMcpExternalConfig({
       ...current,
-      ...updates,
-      authToken: typeof updates.authToken === "string" && updates.authToken.length > 0
-        ? updates.authToken
+      ...body,
+      authToken: typeof body.authToken === "string" && body.authToken.length > 0
+        ? body.authToken
         : current.authToken,
     });
     const saved = yield* saveMcpConfigEffect(merged);
@@ -140,6 +141,7 @@ export const listMcpAuditLogEffect = (params: {
 export const createMcpModeEffect = (raw: any) =>
   Effect.gen(function* () {
     const config = yield* loadMcpConfigEffect;
+    raw = raw || {};
     const body = raw || {};
     const id = `custom:${Date.now().toString(36)}`;
     const mode = {
@@ -163,6 +165,7 @@ export const createMcpModeEffect = (raw: any) =>
 export const updateMcpModeEffect = (id: string, updates: any) =>
   Effect.gen(function* () {
     const config = yield* loadMcpConfigEffect;
+    updates = updates || {};
     const body = updates || {};
     config.customModes = (config.customModes || []).map((m: any) =>
       m.id === id

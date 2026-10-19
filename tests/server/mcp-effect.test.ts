@@ -1,88 +1,67 @@
 import { describe, test } from "bun:test";
-import { Effect, Exit } from "effect";
-import assert from "assert";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  loadMcpConfigEffect,
-  updateMcpConfigEffect,
-  regenerateMcpTokenEffect,
-  getMcpTokenEffect,
-  listMcpAuditLogEffect,
-  createMcpModeEffect,
-  updateMcpModeEffect,
-  deleteMcpModeEffect,
-} from "../../server/effect";
-import { ValidationError } from "../../server/effect/errors";
+import { spawnSync } from "node:child_process";
 
 describe("MCP Effect APIs", () => {
-  test("loadMcpConfigEffect returns config", async () => {
-    const result = await Effect.runPromise(loadMcpConfigEffect);
-    assert.ok(typeof result.enabled === "boolean");
-    assert.ok(typeof result.transports === "string");
-    assert.ok(typeof result.modeId === "string");
-    assert.ok(Array.isArray(result.exposedConnectionIds));
-    assert.ok(Array.isArray(result.customModes));
-  });
+  test("MCP Effect APIs use isolated storage", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "rexadb-mcp-effect-test-"));
+    try {
+      const script = `
+        import { Effect } from "effect";
+        import assert from "node:assert/strict";
+        import {
+          loadMcpConfigEffect,
+          updateMcpConfigEffect,
+          regenerateMcpTokenEffect,
+          getMcpTokenEffect,
+          createMcpModeEffect,
+          updateMcpModeEffect,
+          deleteMcpModeEffect,
+        } from "./server/effect";
 
-  test("updateMcpConfigEffect preserves token by default", async () => {
-    const result = await Effect.runPromise(
-      updateMcpConfigEffect({ enabled: true }),
-    );
-    assert.ok(result.config.enabled === true);
-    assert.ok(Array.isArray(result.modes));
-  });
+        const loaded = await Effect.runPromise(loadMcpConfigEffect);
+        assert.equal(typeof loaded.enabled, "boolean");
+        assert.equal(typeof loaded.transports, "string");
+        assert.equal(typeof loaded.modeId, "string");
+        assert.ok(Array.isArray(loaded.exposedConnectionIds));
+        assert.ok(Array.isArray(loaded.customModes));
 
-  test("regenerateMcpTokenEffect returns new token", async () => {
-    const result = await Effect.runPromise(regenerateMcpTokenEffect);
-    assert.ok(typeof result.authToken === "string");
-    assert.ok(result.authToken.startsWith("rexadb-mcp_"));
-  });
+        const updatedConfig = await Effect.runPromise(updateMcpConfigEffect({ enabled: true }));
+        assert.equal(updatedConfig.config.enabled, true);
+        assert.ok(Array.isArray(updatedConfig.modes));
 
-  test("getMcpTokenEffect returns token when set", async () => {
-    // Ensure a token exists
-    await Effect.runPromise(regenerateMcpTokenEffect);
-    const result = await Effect.runPromise(getMcpTokenEffect);
-    assert.ok(typeof result.authToken === "string");
-    assert.ok(result.authToken.startsWith("rexadb-mcp_"));
-  });
+        const regenerated = await Effect.runPromise(regenerateMcpTokenEffect);
+        assert.ok(regenerated.authToken.startsWith("rexadb-mcp_"));
+        const token = await Effect.runPromise(getMcpTokenEffect);
+        assert.ok(token.authToken.startsWith("rexadb-mcp_"));
 
-  test("createMcpModeEffect adds custom mode", async () => {
-    const result = await Effect.runPromise(
-      createMcpModeEffect({
-        label: "Test Mode",
-        description: "A test custom mode",
-        allowSqlRead: true,
-        allowSqlWrite: false,
-        promptRules: "test rules",
-      }),
-    );
-    assert.ok(result.mode);
-    assert.ok(result.mode.id.startsWith("custom:"));
-    assert.ok(result.mode.label === "Test Mode");
-    assert.ok(Array.isArray(result.modes));
-    assert.ok(result.modes.some((m: any) => m.id === result.mode.id));
-  });
+        const created = await Effect.runPromise(createMcpModeEffect({
+          label: "Test Mode", description: "A test custom mode",
+          allowSqlRead: true, allowSqlWrite: false, promptRules: "test rules",
+        }));
+        assert.ok(created.mode.id.startsWith("custom:"));
+        assert.equal(created.mode.label, "Test Mode");
+        assert.ok(created.modes.some((mode) => mode.id === created.mode.id));
 
-  test("updateMcpModeEffect updates existing mode", async () => {
-    const created = await Effect.runPromise(
-      createMcpModeEffect({ label: "Update Test" }),
-    );
-    const updated = await Effect.runPromise(
-      updateMcpModeEffect(created.mode.id, { label: "Updated Label" }),
-    );
-    assert.ok(
-      updated.modes.some((m: any) => m.id === created.mode.id && m.label === "Updated Label"),
-    );
-  });
+        const updated = await Effect.runPromise(updateMcpModeEffect(created.mode.id, { label: "Updated Label" }));
+        assert.ok(updated.modes.some((mode) => mode.id === created.mode.id && mode.label === "Updated Label"));
 
-  test("deleteMcpModeEffect removes mode and resets modeId if active", async () => {
-    const created = await Effect.runPromise(
-      createMcpModeEffect({ label: "Delete Test" }),
-    );
-    const deleted = await Effect.runPromise(deleteMcpModeEffect(created.mode.id));
-    assert.ok(
-      !deleted.modes.some((m: any) => m.id === created.mode.id),
-    );
+        const second = await Effect.runPromise(createMcpModeEffect({ label: "Delete Test" }));
+        const deleted = await Effect.runPromise(deleteMcpModeEffect(second.mode.id));
+        assert.ok(!deleted.modes.some((mode) => mode.id === second.mode.id));
+      `;
+      const result = spawnSync(process.execPath, ["-e", script], {
+        cwd: process.cwd(),
+        env: { ...process.env, REXADB_USER_DATA_DIR: dataDirectory },
+        encoding: "utf8",
+      });
+      if (result.status !== 0) {
+        throw new Error(`MCP Effect API subprocess failed:\n${result.stderr || result.stdout}`);
+      }
+    } finally {
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
   });
 });
