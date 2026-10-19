@@ -51,6 +51,9 @@ import { createAppSettingsEffects } from "./app-settings-api";
 import { createUserDataEffects } from "./user-data-api";
 import { createAiStorageEffects } from "./ai-storage-api";
 import { createDatabaseActionEffects } from "./database-actions-api";
+import { createDatabaseMetadataEffects } from "./database-metadata-api";
+import { createConnectionActionEffects } from "./connection-actions-api";
+import { createActionsCoreEffects } from "./actions-core-api";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -664,6 +667,9 @@ const appSettings = createAppSettingsEffects(mod);
 const userData = createUserDataEffects(mod);
 const aiStorage = createAiStorageEffects(mod);
 const databaseActions = createDatabaseActionEffects(mod);
+const databaseMetadata = createDatabaseMetadataEffects(mod);
+const connectionActions = createConnectionActionEffects(mod);
+const remainingActions = createActionsCoreEffects(mod);
 
 // --- API Routes ---
 
@@ -671,10 +677,7 @@ const databaseActions = createDatabaseActionEffects(mod);
 app.get(
   "/api/connections",
   effectHandler((req) =>
-    fromPromise(() => {
-      const workspaceUrl = req.query.workspace as string | undefined;
-      return mod.getConnections(workspaceUrl || undefined);
-    }).pipe(
+    connectionActions.getConnections((req.query.workspace as string | undefined) || undefined).pipe(
       Effect.map((result) => ({
         success: true as const,
         data: result.map((connection: any) =>
@@ -745,7 +748,7 @@ app.post(
 app.get(
   "/api/connections/groups",
   effectHandler(() =>
-    fromPromise(() => mod.listConnectionGroups()).pipe(
+    connectionActions.listConnectionGroups().pipe(
       Effect.map((groups) => ({ success: true as const, groups })),
       Effect.catch((e) =>
         Effect.succeed({
@@ -758,16 +761,16 @@ app.get(
   ),
 );
 
-app.post("/api/connections/groups/add", simplePostRoute(body => mod.addConnectionGroup(body.folderName)));
+app.post("/api/connections/groups/add", simplePostRoute(body => connectionActions.addConnectionGroup(body.folderName)));
 
-app.post("/api/connections/groups/rename", simplePostRoute(body => mod.renameConnectionGroup(body.oldName, body.newName)));
+app.post("/api/connections/groups/rename", simplePostRoute(body => connectionActions.renameConnectionGroup(body.oldName, body.newName)));
 
-app.post("/api/connections/groups/delete", simplePostRoute(body => mod.deleteConnectionGroup(body.folderName)));
+app.post("/api/connections/groups/delete", simplePostRoute(body => connectionActions.deleteConnectionGroup(body.folderName)));
 
 app.get(
   "/api/connections/:id",
   effectHandler((req) =>
-    fromPromise(() => mod.getConnection(Number(req.params.id))).pipe(
+    connectionActions.getConnection(Number(req.params.id)).pipe(
       Effect.map((result) => {
         const safe = result?.credentialRef
           ? {
@@ -813,7 +816,7 @@ app.post(
       : group
         ? [group]
         : [];
-    return mod.addConnection(name, connectionString, connectionType, {
+    return connectionActions.addConnection(name, connectionString, connectionType, {
       environment,
       color,
       groups: resolvedGroups,
@@ -836,21 +839,21 @@ app.post(
 app.put(
   "/api/connections/:id",
   effectHandler((req) =>
-    fromPromise(() => mod.updateConnection(Number(req.params.id), req.body)),
+    connectionActions.updateConnection(Number(req.params.id), req.body),
   ),
 );
 
 app.delete(
   "/api/connections/workspace",
   effectHandler(() =>
-    fromPromise(() => mod.deleteConnectionsByPrefix("workspace:")),
+    connectionActions.deleteConnectionsByPrefix("workspace:"),
   ),
 );
 
 app.delete(
   "/api/connections/:id",
   effectHandler((req) =>
-    fromPromise(() => mod.deleteConnection(Number(req.params.id))),
+    connectionActions.deleteConnection(Number(req.params.id)),
   ),
 );
 
@@ -864,12 +867,11 @@ app.post(
         Object.keys(req.body).join(","),
       );
       logToFile("POST /api/connections/test connectionType:", connectionType);
-      const result = yield* fromPromise(
-        () => mod.testConnection(connectionString, connectionType),
-        (cause) => {
+      const result = yield* connectionActions.testConnection(connectionString, connectionType).pipe(
+        Effect.catch((cause) => {
           logToFile("testConnection failed");
-          return cause instanceof Error ? cause : new Error(String(cause));
-        },
+          return Effect.fail(cause);
+        }),
       );
       logToFile("POST /api/connections/test result success:", result.success);
       return result;
@@ -877,7 +879,7 @@ app.post(
   ),
 );
 
-app.post("/api/connections/reorder", simplePostRoute(body => mod.reorderConnections(body.orderedIds)));
+app.post("/api/connections/reorder", simplePostRoute(body => connectionActions.reorderConnections(body.orderedIds)));
 
 // ─── External MCP server (Settings → MCP Server) ────────────────────────────
 // Config + allow-list management for the user-facing MCP server, plus the
@@ -1027,7 +1029,7 @@ app.post(
   }),
 );
 
-app.post("/api/functions", proxyTwoArgRoute(mod.fetchFunctions));
+app.post("/api/functions", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchFunctions(req.body.connectionString, req.body.schema)));
 
 app.post(
   "/api/databases",
@@ -1055,31 +1057,31 @@ app.post(
 );
 
 // Extensions, triggers, indexes, enums, etc.
-app.post("/api/extensions", proxyOneArgRoute(mod.fetchExtensions));
+app.post("/api/extensions", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchExtensions(req.body.connectionString)));
 
-app.post("/api/triggers", proxyTwoArgRoute(mod.fetchTriggers));
+app.post("/api/triggers", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchTriggers(req.body.connectionString, req.body.schema)));
 
-app.post("/api/enums", proxyOneArgRoute(mod.fetchEnums));
+app.post("/api/enums", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchEnums(req.body.connectionString)));
 
-app.post("/api/indexes", proxyTwoArgRoute(mod.fetchIndexes));
+app.post("/api/indexes", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchIndexes(req.body.connectionString, req.body.schema)));
 
-app.post("/api/packages", proxyTwoArgRoute(mod.fetchPackages));
+app.post("/api/packages", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchPackages(req.body.connectionString, req.body.schema)));
 
-app.post("/api/sequences", proxyTwoArgRoute(mod.fetchSequences));
+app.post("/api/sequences", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchSequences(req.body.connectionString, req.body.schema)));
 
-app.post("/api/synonyms", proxyTwoArgRoute(mod.fetchSynonyms));
+app.post("/api/synonyms", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchSynonyms(req.body.connectionString, req.body.schema)));
 
-app.post("/api/db-links", proxyOneArgRoute(mod.fetchDbLinks));
+app.post("/api/db-links", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchDbLinks(req.body.connectionString)));
 
-app.post("/api/materialized-views", proxyTwoArgRoute(mod.fetchMaterializedViews));
+app.post("/api/materialized-views", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchMaterializedViews(req.body.connectionString, req.body.schema)));
 
-app.post("/api/views", proxyTwoArgRoute(mod.fetchViews));
+app.post("/api/views", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchViews(req.body.connectionString, req.body.schema)));
 
 app.post(
   "/api/rls-policies",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, schema, table } = req.body;
-    return mod.fetchRlsPolicies(
+    return databaseMetadata.fetchRlsPolicies(
       connectionString,
       schema ?? null,
       table ?? null,
@@ -1087,31 +1089,31 @@ app.post(
   }),
 );
 
-app.post("/api/postgres-roles", proxyOneArgRoute(mod.fetchPostgresRoles));
+app.post("/api/postgres-roles", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchPostgresRoles(req.body.connectionString)));
 
-app.post("/api/table-security-info", proxyTwoArgRoute(mod.fetchTableSecurityInfo));
+app.post("/api/table-security-info", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchTableSecurityInfo(req.body.connectionString, req.body.schema)));
 
 app.post(
   "/api/supabase-auth-users",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString } = req.body || {};
-    return mod.fetchSupabaseAuthUsers(connectionString);
+    return databaseMetadata.fetchSupabaseAuthUsers(connectionString);
   }),
 );
 
-app.post("/api/sessions", proxyOneArgRoute(mod.fetchSessions));
+app.post("/api/sessions", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchSessions(req.body.connectionString)));
 
-app.post("/api/sessions/kill", proxyTwoArgRoute(mod.killSession));
+app.post("/api/sessions/kill", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.killSession(req.body.connectionString, req.body.pid)));
 
-app.post("/api/sessions/cancel-query", proxyTwoArgRoute(mod.cancelSessionQuery));
+app.post("/api/sessions/cancel-query", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.cancelSessionQuery(req.body.connectionString, req.body.pid)));
 
-app.post("/api/locks", proxyOneArgRoute(mod.fetchLocks));
+app.post("/api/locks", proxyBodyRoute(tryProxyDbOp, (req) => databaseMetadata.fetchLocks(req.body.connectionString)));
 
 app.post(
   "/api/db-advisor",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString } = req.body;
-    return fromPromise(() => mod.runAdvisorChecks(connectionString)).pipe(
+    return databaseMetadata.runAdvisorChecks(connectionString).pipe(
       Effect.map((result) => ({ success: true as const, data: result })),
     );
   }),
@@ -1121,7 +1123,7 @@ app.post(
   "/api/explain-plan",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, query } = req.body;
-    return mod.fetchExplainPlan(connectionString, query);
+    return databaseMetadata.fetchExplainPlan(connectionString, query);
   }),
 );
 
@@ -1129,7 +1131,7 @@ app.post(
   "/api/backup/run",
   proxyBodyRoute(tryProxyDbOp, (req) => {
     const { connectionString, options } = req.body;
-    return mod.runDbBackup(connectionString, options);
+    return databaseMetadata.runDbBackup(connectionString, options);
   }),
 );
 
@@ -1162,6 +1164,14 @@ app.delete(
     }),
   ),
 );
+
+app.get("/api/user/entitlement", effectHandler((req) =>
+  remainingActions.getStoredUserEntitlement((req.query.id as string | undefined) || null),
+));
+
+app.post("/api/user/entitlement", simplePostRoute(remainingActions.upsertUserEntitlement));
+
+app.post("/api/user/plan", simplePostRoute(remainingActions.updateUserPlan));
 
 // Error logging
 app.post(
@@ -1255,20 +1265,65 @@ app.post("/api/snapshots/create-stream", async (req, res) => {
   await handleSnapshotCreateStream(req, res);
 });
 
+app.post("/api/snapshots/create", effectHandler((req): Effect.Effect<any, any> => {
+  const body = req.body || {};
+  if (typeof body.connectionId !== "string" && typeof body.connectionId !== "number") {
+    return Effect.fail(new ValidationError({ message: "connectionId is required." }));
+  }
+  const connectionId = String(body.connectionId).trim();
+  if (!connectionId) {
+    return Effect.fail(new ValidationError({ message: "connectionId is required." }));
+  }
+  return remainingActions.createSnapshot(
+    body.connectionString,
+    body.name,
+    body.description,
+    connectionId,
+  );
+}));
+
+app.get("/api/snapshots", effectHandler((req) =>
+  remainingActions.listSnapshots(String(req.query.connectionId || "")),
+));
+
+app.get("/api/snapshots/:snapshotId", effectHandler((req) =>
+  remainingActions.getSnapshot(String(req.query.connectionId || ""), String(req.params.snapshotId)),
+));
+
+app.get("/api/snapshots/:snapshotId/full", effectHandler((req) =>
+  remainingActions.getSnapshotFull(String(req.query.connectionId || ""), String(req.params.snapshotId)),
+));
+
+app.delete("/api/snapshots/:snapshotId", effectHandler((req) =>
+  remainingActions.deleteSnapshot(String(req.query.connectionId || ""), String(req.params.snapshotId)),
+));
+
+app.post("/api/snapshots/compare", effectHandler((req): Effect.Effect<any, any> => {
+  const body = req.body || {};
+  return remainingActions.compareSnapshots(
+    String(body.connectionId || ""),
+    body.olderId,
+    body.newerId,
+  );
+}));
+
 // Generic actions dispatch (for all the misc actions)
 app.post(
   "/api/actions/:action",
   effectHandler((req) =>
     Effect.gen(function* () {
-      const { action } = req.params;
+      const action = String(req.params.action);
       const { args } = req.body || {};
+      const remainingAction = (remainingActions as Record<string, (...args: any[]) => Effect.Effect<any, any>>)[action];
+      if (typeof remainingAction === "function") {
+        const result = yield* remainingAction(...(Array.isArray(args) ? args : []));
+        return result || { success: true };
+      }
       const func = (mod as any)[action];
       if (typeof func !== "function") {
         return { success: false as const, error: `Unknown action: ${action}` };
       }
-      const result = yield* fromPromise(() =>
-        func(...(Array.isArray(args) ? args : [])),
-      );
+      const result = yield* fromPromise(() => func(...(Array.isArray(args) ? args : [])));
       return result || { success: true };
     }),
   ),
@@ -1314,6 +1369,34 @@ app.post(
   ),
 );
 
+app.get(
+  "/studio/:connectionId/snippets/:snippetId/versions",
+  effectHandler((req) => remainingActions.getSnippetVersions(
+    Number(req.params.connectionId),
+    String(req.params.snippetId),
+  )),
+);
+
+app.post(
+  "/studio/:connectionId/snippets/:snippetId/versions",
+  effectHandler((req) => {
+    const body = req.body || {};
+    if (body.action === "restore") {
+      return remainingActions.restoreSnippetVersion(
+        Number(req.params.connectionId),
+        String(req.params.snippetId),
+        body.versionId,
+      );
+    }
+    return remainingActions.createSnippetVersion(
+      Number(req.params.connectionId),
+      String(req.params.snippetId),
+      body.name,
+      body.query,
+    );
+  }),
+);
+
 app.get("/studio/:connectionId/history", studioGetRoute(studioStorage.getHistory));
 app.post("/studio/:connectionId/history", studioPostRoute(studioStorage.saveHistory));
 
@@ -1350,7 +1433,13 @@ app.get("/studio/:connectionId/bootstrap", async (req, res) => {
     const rawId = req.params.connectionId;
     const numericId = Number(rawId);
     const requestedSchema = req.query.s as string | undefined;
-    const result = await mod.getStudioBootstrap(numericId, requestedSchema || null);
+    const exit = await runServerPromiseExit(remainingActions.getStudioBootstrap(numericId, requestedSchema || null));
+    if (Exit.isFailure(exit)) {
+      const error = failureFromExit(exit);
+      res.status(500).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    const result = exit.value;
 
     // If bootstrap found a connection locally, return it as-is
     if (result?.success && result.data?.connection) {
@@ -1416,6 +1505,10 @@ app.post("/api/ai/provider-models", simplePostRoute(async (body) => {
 }));
 
 app.post("/api/ai/settings", simplePostRoute(body => aiStorage.saveSettings(body.settings)));
+
+app.delete("/api/ai/chats/:chatId", effectHandler((req) =>
+  aiStorage.deleteChat(req.params.chatId as string),
+));
 
 app.get("/api/keybindings", simpleGetRoute(async () => {
   const { getKeybindings } = await import("../lib/db/keybindings-store");

@@ -174,3 +174,7 @@ SSE `/api/neon-cli/login` still owns the event-stream; it runs `runNeonAuthLogin
 ### SQL execution and schema browsing (Wave 13)
 
 `server/database-actions-api.ts` exposes typed Effect programs for query execution/cancellation, schema and table browsing, database listing, referenced records, and table row mutations. Routes keep workspace connection interception in `proxyBodyRoute`; non-workspace actions run through the Effect facade.
+
+### Remaining actions-core and server routes (Wave 14)
+
+`server/database-metadata-api.ts` wraps database metadata, sessions, advisor, explain-plan, backup, and Redis-key actions. `server/connection-actions-api.ts` wraps connection CRUD, groups, ordering, workspace IDs, and connection testing. `server/actions-core-api.ts` wraps entitlement persistence, AI chat deletion, snippet versions, Studio bootstrap, and snapshot operations. Routes use these Effects while retaining their established response envelopes and generic action names. The streamed snapshot and agent/workflow execution routes remain at the Express edge because they own streams or long-lived execution.

@@ -10,7 +10,8 @@ type AiStorageActionNames =
   | "appendAiChatMessage"
   | "updateAiChatMessageContent"
   | "updateAiChatMessageMeta"
-  | "deleteAiChatMessagesAfter";
+  | "deleteAiChatMessagesAfter"
+  | "deleteAiChat";
 
 type AiStorageActions = Pick<typeof import("../lib/db/actions-core"), AiStorageActionNames>;
 
@@ -62,6 +63,10 @@ export function createAiStorageEffects(actions: AiStorageActions) {
     deleteMessagesAfter: (...args: Parameters<AiStorageActions["deleteAiChatMessagesAfter"]>) => fromAiStorage(
       "Failed to delete AI chat messages",
       () => actions.deleteAiChatMessagesAfter(...args),
+    ),
+    deleteChat: (...args: Parameters<AiStorageActions["deleteAiChat"]>) => fromAiStorage(
+      "Failed to delete AI chat",
+      () => actions.deleteAiChat(...args),
     ),
   };
 }
