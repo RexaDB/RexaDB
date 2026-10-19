@@ -54,7 +54,11 @@ describe("MCP Effect APIs", () => {
       `;
       const result = spawnSync(process.execPath, ["-e", script], {
         cwd: process.cwd(),
-        env: { ...process.env, REXADB_USER_DATA_DIR: dataDirectory },
+        env: {
+          ...process.env,
+          REXADB_USER_DATA_DIR: dataDirectory,
+          REXADB_MCP_CONFIG_PATH: join(dataDirectory, "rexadb-mcp.json"),
+        },
         encoding: "utf8",
       });
       if (result.status !== 0) {

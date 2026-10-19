@@ -41,6 +41,7 @@ import {
   deleteMcpModeEffect,
   handleMcpHttpRequestEffect,
 } from "./effect";
+import { failureFromExit } from "./effect/runtime";
 import {
   handleTransferStartEffect,
   handleTransferProgressEffect,
@@ -906,11 +907,16 @@ app.all("/mcp", async (req, res) => {
   const exit = await Effect.runPromiseExit(handleMcpHttpRequestEffect(req, res));
   if (Exit.isFailure(exit)) {
     if (!res.headersSent) {
-      const err = failureFromExit(exit);
-      const message = err._tag === "McpDisabledError" || err._tag === "McpRequestError"
-        ? err.message
+      const failure = failureFromExit(exit);
+      const err = failure && typeof failure === "object" ? failure as {
+        _tag?: string;
+        message?: string;
+        status?: number;
+      } : undefined;
+      const message = err?._tag === "McpDisabledError" || err?._tag === "McpRequestError"
+        ? err.message || "MCP request failed"
         : "MCP request failed";
-      const status = err.status || 500;
+      const status = err?.status || 500;
       res.status(status).json({ success: false, error: message });
     }
   }
