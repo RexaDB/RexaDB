@@ -29,13 +29,19 @@ import {
   dynamicPostRoute,
   effectHandler,
   effectJsonHandler,
+  effectProxyHandler,
+  fetchUpstreamEffect,
   fromPromise,
+  proxiedPayloadResult,
   proxyBodyRoute,
+  readUpstreamBufferEffect,
+  readUpstreamTextEffect,
   setDefectLogger,
   simpleGetRoute,
   simplePostRoute,
   studioGetRoute,
   studioPostRoute,
+  UpstreamError,
   ValidationError,
 } from "./effect";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
@@ -208,19 +214,6 @@ function buildProxyQueryString(query: Record<string, unknown>): string {
   );
 }
 
-async function forwardProxiedResponse(
-  res: express.Response,
-  upstream: Response,
-) {
-  const text = await upstream.text();
-  res.status(upstream.status);
-  try {
-    res.json(JSON.parse(text));
-  } catch {
-    res.send(text);
-  }
-}
-
 function copyAuthHeaders(
   req: express.Request,
   headers: Record<string, string>,
@@ -230,38 +223,45 @@ function copyAuthHeaders(
 }
 
 // Supabase Management API proxy (avoids CORS in the browser)
-app.all("/api/supabase-mgmt/proxy/*", async (req, res) => {
-  try {
-    const targetPath = (req.params as any)[0];
-    const qs = buildProxyQueryString(req.query as Record<string, unknown>);
-    const targetUrl = `https://api.supabase.com/${targetPath}${qs}`;
-    const headers: Record<string, string> = {
-      "User-Agent": "supabase-cli",
-    };
-    copyAuthHeaders(req, headers);
-    const fetchInit: RequestInit = {
-      method: req.method,
-      headers,
-    };
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      if (Buffer.isBuffer(req.body)) {
-        // Multipart deploy payload (FormData) — forward bytes as-is with the
-        // original boundary. JSON.stringify here would corrupt it.
-        headers["Content-Type"] = req.headers["content-type"] || "application/octet-stream";
-        fetchInit.body = req.body as any;
-      } else {
-        headers["Content-Type"] = req.headers["content-type"] || "application/json";
-        if (req.body) {
-          fetchInit.body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+app.all(
+  "/api/supabase-mgmt/proxy/*",
+  effectProxyHandler((req) =>
+    Effect.gen(function* () {
+      const targetPath = (req.params as any)[0];
+      const qs = buildProxyQueryString(req.query as Record<string, unknown>);
+      const targetUrl = `https://api.supabase.com/${targetPath}${qs}`;
+      const headers: Record<string, string> = {
+        "User-Agent": "supabase-cli",
+      };
+      copyAuthHeaders(req, headers);
+      const fetchInit: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        if (Buffer.isBuffer(req.body)) {
+          // Multipart deploy payload (FormData) — forward bytes as-is with the
+          // original boundary. JSON.stringify here would corrupt it.
+          headers["Content-Type"] =
+            req.headers["content-type"] || "application/octet-stream";
+          fetchInit.body = req.body as any;
+        } else {
+          headers["Content-Type"] =
+            req.headers["content-type"] || "application/json";
+          if (req.body) {
+            fetchInit.body =
+              typeof req.body === "string"
+                ? req.body
+                : JSON.stringify(req.body);
+          }
         }
       }
-    }
-    const upstream = await fetch(targetUrl, fetchInit);
-    await forwardProxiedResponse(res, upstream);
-  } catch (e: any) {
-    res.status(502).json({ success: false, error: e.message });
-  }
-});
+      const upstream = yield* fetchUpstreamEffect(targetUrl, fetchInit);
+      const text = yield* readUpstreamTextEffect(upstream);
+      return proxiedPayloadResult(upstream.status, text);
+    }),
+  ),
+);
 
 // PayKit billing scaffolding for the USER's Supabase projects (smgt).
 // Fully automatic via the Management API; manual CLI fallback lives in the UI.
@@ -307,101 +307,114 @@ app.post(
 // PlanetScale API proxy (avoids CORS in the browser). Used for browsing
 // orgs/databases/branches and minting branch passwords — never for query
 // execution, which talks to the resulting mysql/postgres connection directly.
-app.all("/api/planetscale/proxy/*", async (req, res) => {
-  try {
-    const targetPath = (req.params as any)[0];
-    const qs = buildProxyQueryString(req.query as Record<string, unknown>);
-    const targetUrl = `https://api.planetscale.com/${targetPath}${qs}`;
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-    };
-    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      headers["Content-Type"] = req.headers["content-type"] || "application/json";
-    }
-    const fetchInit: RequestInit = {
-      method: req.method,
-      headers,
-    };
-    if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
-      fetchInit.body = JSON.stringify(req.body);
-    }
-    const authHeader = headers.Authorization || "";
-    log("[planetscale/proxy] ->", req.method, targetUrl, "auth:", authHeader ? `${authHeader.slice(0, 13)}...${authHeader.slice(-4)}(${authHeader.length})` : "(none)");
-    const upstream = await fetch(targetUrl, fetchInit);
-    const text = await upstream.text();
-    log("[planetscale/proxy] <-", upstream.status, text.slice(0, 500));
-    res.status(upstream.status);
-    try {
-      res.json(JSON.parse(text));
-    } catch {
-      res.send(text);
-    }
-  } catch (e: any) {
-    res.status(502).json({ success: false, error: e.message });
-  }
-});
+app.all(
+  "/api/planetscale/proxy/*",
+  effectProxyHandler((req) =>
+    Effect.gen(function* () {
+      const targetPath = (req.params as any)[0];
+      const qs = buildProxyQueryString(req.query as Record<string, unknown>);
+      const targetUrl = `https://api.planetscale.com/${targetPath}${qs}`;
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+      };
+      if (req.headers.authorization) {
+        headers.Authorization = req.headers.authorization;
+      }
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        headers["Content-Type"] =
+          req.headers["content-type"] || "application/json";
+      }
+      const fetchInit: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
+        fetchInit.body = JSON.stringify(req.body);
+      }
+      const authHeader = headers.Authorization || "";
+      log(
+        "[planetscale/proxy] ->",
+        req.method,
+        targetUrl,
+        "auth:",
+        authHeader
+          ? `${authHeader.slice(0, 13)}...${authHeader.slice(-4)}(${authHeader.length})`
+          : "(none)",
+      );
+      const upstream = yield* fetchUpstreamEffect(targetUrl, fetchInit);
+      const text = yield* readUpstreamTextEffect(upstream);
+      log("[planetscale/proxy] <-", upstream.status, text.slice(0, 500));
+      return proxiedPayloadResult(upstream.status, text);
+    }),
+  ),
+);
 
 // SpacetimeDB management/auth API proxy (avoids CORS in the browser).
 // The SpacetimeDB CLI talks to these endpoints directly with reqwest; the
 // webview can't because of CORS. The target host comes from ?host= — the
 // login flow targets spacetimedb.com, while database listing targets the
 // cloud host (customizable like `spacetime server add` in the CLI).
-app.all("/api/spacetimedb-mgmt/proxy/*", async (req, res) => {
-  try {
-    const targetPath = (req.params as any)[0];
-    const host = String(req.query.host || "spacetimedb.com");
-    // Cloud/maincloud hosts speak TLS; loopback/self-hosted servers usually
-    // speak plain HTTP. Let an explicit http:// prefix win, then sniff.
-    const explicitProto = /^https?:\/\//i.test(host);
-    const cleanHost = host.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-    if (!cleanHost || /[/?#@]/.test(cleanHost)) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Invalid proxy host" });
-    }
-    const isLoopback =
-      /^localhost([:\/]|$)/i.test(cleanHost) ||
-      /^127\.0\.0\.1([:\/]|$)/.test(cleanHost) ||
-      /^\[?::1\]([:\/]|$)/.test(cleanHost);
-    const protocol = explicitProto
-      ? host.match(/^https:\/\//i)
-        ? "https"
-        : "http"
-      : isLoopback
-        ? "http"
-        : "https";
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(req.query)) {
-      if (k === "host") continue;
-      if (typeof v === "string") params.set(k, v);
-    }
-    const qs = params.toString() ? `?${params.toString()}` : "";
-    const targetUrl = `${protocol}://${cleanHost}/${targetPath}${qs}`;
-    const headers: Record<string, string> = {
-      "User-Agent": "spacetime-cli",
-    };
-    copyAuthHeaders(req, headers);
-    const hasBody =
-      req.body &&
-      typeof req.body === "object" &&
-      Object.keys(req.body).length > 0;
-    if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
-      headers["Content-Type"] = req.headers["content-type"] || "application/json";
-    }
-    const fetchInit: RequestInit = {
-      method: req.method,
-      headers,
-    };
-    if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
-      fetchInit.body = JSON.stringify(req.body);
-    }
-    const upstream = await fetch(targetUrl, fetchInit);
-    await forwardProxiedResponse(res, upstream);
-  } catch (e: any) {
-    res.status(502).json({ success: false, error: e.message });
-  }
-});
+app.all(
+  "/api/spacetimedb-mgmt/proxy/*",
+  effectProxyHandler((req) =>
+    Effect.gen(function* () {
+      const targetPath = (req.params as any)[0];
+      const host = String(req.query.host || "spacetimedb.com");
+      // Cloud/maincloud hosts speak TLS; loopback/self-hosted servers usually
+      // speak plain HTTP. Let an explicit http:// prefix win, then sniff.
+      const explicitProto = /^https?:\/\//i.test(host);
+      const cleanHost = host.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+      if (!cleanHost || /[/?#@]/.test(cleanHost)) {
+        return yield* Effect.fail(
+          new ValidationError({
+            message: "Invalid proxy host",
+            status: 400,
+          }),
+        );
+      }
+      const isLoopback =
+        /^localhost([:\/]|$)/i.test(cleanHost) ||
+        /^127\.0\.0\.1([:\/]|$)/.test(cleanHost) ||
+        /^\[?::1\]([:\/]|$)/.test(cleanHost);
+      const protocol = explicitProto
+        ? host.match(/^https:\/\//i)
+          ? "https"
+          : "http"
+        : isLoopback
+          ? "http"
+          : "https";
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(req.query)) {
+        if (k === "host") continue;
+        if (typeof v === "string") params.set(k, v);
+      }
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const targetUrl = `${protocol}://${cleanHost}/${targetPath}${qs}`;
+      const headers: Record<string, string> = {
+        "User-Agent": "spacetime-cli",
+      };
+      copyAuthHeaders(req, headers);
+      const hasBody =
+        req.body &&
+        typeof req.body === "object" &&
+        Object.keys(req.body).length > 0;
+      if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
+        headers["Content-Type"] =
+          req.headers["content-type"] || "application/json";
+      }
+      const fetchInit: RequestInit = {
+        method: req.method,
+        headers,
+      };
+      if (req.method !== "GET" && req.method !== "HEAD" && hasBody) {
+        fetchInit.body = JSON.stringify(req.body);
+      }
+      const upstream = yield* fetchUpstreamEffect(targetUrl, fetchInit);
+      const text = yield* readUpstreamTextEffect(upstream);
+      return proxiedPayloadResult(upstream.status, text);
+    }),
+  ),
+);
 
 // Neon OAuth — public-client PKCE (same client_id "neonctl" as the official
 // CLI) run in-process. No neonctl install required. Credentials land in
@@ -510,6 +523,8 @@ app.post("/api/neon-cli/login", async (req, res) => {
     if (completed || !abort.signal.aborted) {
       send({ type: "done", success: true, email: completedEmail ?? null });
     }
+    // Flush the done event before closing
+    await new Promise(resolve => setTimeout(resolve, 100));
     finish();
   } catch (e: any) {
     if (abort.signal.aborted && !completed) {
@@ -520,6 +535,8 @@ app.post("/api/neon-cli/login", async (req, res) => {
       type: "error",
       message: friendlyNeonAuthError(e?.message || String(e)),
     });
+    // Flush error before closing
+    await new Promise(resolve => setTimeout(resolve, 100));
     finish();
   } finally {
     if (neonLoginAbort === abort) neonLoginAbort = null;
@@ -2563,69 +2580,142 @@ app.get("/api/updates/check", async (_req, res) => {
 // Studio API proxy — forwards requests to the configured studio backend
 // Bun v1.3.14+ ships with path-to-regexp v8+ which rejects wildcard strings;
 // use a regex to bypass path-to-regexp entirely
-app.all(/^\/api\/studio-proxy(?:\/|$)/, async (req, res) => {
+app.all(/^\/api\/studio-proxy(?:\/|$)/, (req, res, next) => {
   const requestId = `studio-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   res.setHeader("X-Studio-Request-Id", requestId);
-  const studioUrl = (req.headers["x-studio-url"] as string || "").replace(/\/+$/, "");
-  const targetPath = req.path.replace(/^\/api\/studio-proxy\//, "");
-  const cleanPath = targetPath.replace(/^api\//, "");
-  const targetUrl = studioUrl ? `${studioUrl}/studio-api/api/${cleanPath}` : "";
-  const isBinaryBody = Buffer.isBuffer(req.body);
-  const bodyKeys = isBinaryBody ? [] : (req.body && typeof req.body === "object" ? Object.keys(req.body) : []);
-  logToFile(`[${requestId}] studio proxy request method=${req.method} path=${req.path} target=${targetUrl || "<missing X-Studio-Url>"} authorization=${Boolean(req.headers.authorization)} bodyKeys=${bodyKeys.join(",")}${isBinaryBody ? ` binaryBytes=${req.body.length}` : ""}`);
-  if (!studioUrl) {
-    logToFile(`[${requestId}] studio proxy rejected: missing X-Studio-Url header`);
-    res.status(400).json({ error: "Missing X-Studio-Url header", requestId });
-    return;
-  }
+  (req as express.Request & { studioRequestId?: string }).studioRequestId =
+    requestId;
+  return effectProxyHandler(
+    (req) =>
+      Effect.gen(function* () {
+        const studioRequestId =
+          (req as express.Request & { studioRequestId?: string })
+            .studioRequestId || requestId;
+        const studioUrl = (
+          (req.headers["x-studio-url"] as string) || ""
+        ).replace(/\/+$/, "");
+        const targetPath = req.path.replace(/^\/api\/studio-proxy\//, "");
+        const cleanPath = targetPath.replace(/^api\//, "");
+        const targetUrl = studioUrl
+          ? `${studioUrl}/studio-api/api/${cleanPath}`
+          : "";
+        const isBinaryBody = Buffer.isBuffer(req.body);
+        const bodyKeys = isBinaryBody
+          ? []
+          : req.body && typeof req.body === "object"
+            ? Object.keys(req.body)
+            : [];
+        logToFile(
+          `[${studioRequestId}] studio proxy request method=${req.method} path=${req.path} target=${targetUrl || "<missing X-Studio-Url>"} authorization=${Boolean(req.headers.authorization)} bodyKeys=${bodyKeys.join(",")}${isBinaryBody ? ` binaryBytes=${req.body.length}` : ""}`,
+        );
+        if (!studioUrl) {
+          logToFile(
+            `[${studioRequestId}] studio proxy rejected: missing X-Studio-Url header`,
+          );
+          return yield* Effect.fail(
+            new ValidationError({
+              message: "Missing X-Studio-Url header",
+              status: 400,
+            }),
+          );
+        }
 
-  const headers: Record<string, string> = {
-    "Content-Type": req.headers["content-type"] as string || "application/json",
-  };
-  const auth = req.headers["authorization"] as string | undefined;
-  if (auth) headers["Authorization"] = auth;
+        const headers: Record<string, string> = {
+          "Content-Type":
+            (req.headers["content-type"] as string) || "application/json",
+        };
+        const auth = req.headers["authorization"] as string | undefined;
+        if (auth) headers["Authorization"] = auth;
 
-  try {
-    const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    const isRead = ["GET", "HEAD"].includes(req.method);
-    const body = isRead ? undefined : (isBinaryBody ? req.body : JSON.stringify(req.body));
-    const res_ = await fetch(targetUrl + query, {
-      method: req.method,
-      headers,
-      body,
-    });
-    const upstreamContentType = res_.headers.get("content-type") || "";
-    if (!upstreamContentType.includes("application/json")) {
-      // Binary responses (e.g. GET /api/avatars/:name) are forwarded as-is
-      // instead of going through the JSON error path below.
-      const buffer = Buffer.from(await res_.arrayBuffer());
-      logToFile(`[${requestId}] studio proxy binary response status=${res_.status} contentType=${upstreamContentType || "unknown"} bytes=${buffer.length}`);
-      res.status(res_.status).set("Content-Type", upstreamContentType || "application/octet-stream").send(buffer);
-      return;
-    }
-    const text = await res_.text();
-    let json: unknown;
-    try { json = JSON.parse(text); } catch {
-      logToFile(`[${requestId}] studio proxy received non-JSON response status=${res_.status} contentType=${res_.headers.get("content-type") || "unknown"}`);
-      res.status(502).json({
-        error: `Workspace server returned non-JSON response (status ${res_.status}). Check that "${studioUrl}" is the correct workspace backend URL.`,
-        requestId,
-      });
-      return;
-    }
-    const responseObject = json && typeof json === "object" ? json as Record<string, unknown> : {};
-    const responseData = responseObject.data && typeof responseObject.data === "object" ? Object.keys(responseObject.data as object) : [];
-    const safeError = typeof responseObject.error === "string" ? responseObject.error : "";
-    logToFile(`[${requestId}] studio proxy response status=${res_.status} dataKeys=${responseData.join(",")} error=${safeError.slice(0, 300) || "<none>"}`);
-    res.status(res_.status).json(json);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Proxy request failed";
-    logToFile(`[${requestId}] studio proxy fetch error: ${message}`);
-    res.status(502).json({
-      error: `Cannot reach workspace server at "${studioUrl}". ${message}`,
-      requestId,
-    });
-  }
+        const query = req.url.includes("?")
+          ? req.url.slice(req.url.indexOf("?"))
+          : "";
+        const isRead = ["GET", "HEAD"].includes(req.method);
+        const body = isRead
+          ? undefined
+          : isBinaryBody
+            ? req.body
+            : JSON.stringify(req.body);
+        const upstream = yield* fetchUpstreamEffect(targetUrl + query, {
+          method: req.method,
+          headers,
+          body,
+        }).pipe(
+          Effect.mapError((error) => {
+            logToFile(
+              `[${studioRequestId}] studio proxy fetch error: ${error.message}`,
+            );
+            return new UpstreamError({
+              message: `Cannot reach workspace server at "${studioUrl}". ${error.message}`,
+              status: 502,
+            });
+          }),
+        );
+        const upstreamContentType = upstream.headers.get("content-type") || "";
+        if (!upstreamContentType.includes("application/json")) {
+          const buffer = yield* readUpstreamBufferEffect(upstream);
+          logToFile(
+            `[${studioRequestId}] studio proxy binary response status=${upstream.status} contentType=${upstreamContentType || "unknown"} bytes=${buffer.length}`,
+          );
+          return {
+            kind: "binary" as const,
+            status: upstream.status,
+            body: buffer,
+            contentType: upstreamContentType || "application/octet-stream",
+          };
+        }
+        const text = yield* readUpstreamTextEffect(upstream);
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          logToFile(
+            `[${studioRequestId}] studio proxy received non-JSON response status=${upstream.status} contentType=${upstreamContentType || "unknown"}`,
+          );
+          return {
+            kind: "json" as const,
+            status: 502,
+            body: {
+              error: `Workspace server returned non-JSON response (status ${upstream.status}). Check that "${studioUrl}" is the correct workspace backend URL.`,
+              requestId: studioRequestId,
+            },
+          };
+        }
+        const responseObject =
+          json && typeof json === "object"
+            ? (json as Record<string, unknown>)
+            : {};
+        const responseData =
+          responseObject.data && typeof responseObject.data === "object"
+            ? Object.keys(responseObject.data as object)
+            : [];
+        const safeError =
+          typeof responseObject.error === "string" ? responseObject.error : "";
+        logToFile(
+          `[${studioRequestId}] studio proxy response status=${upstream.status} dataKeys=${responseData.join(",")} error=${safeError.slice(0, 300) || "<none>"}`,
+        );
+        return {
+          kind: "json" as const,
+          status: upstream.status,
+          body: json,
+        };
+      }),
+    {
+      errorBody: (error, req) => ({
+        error:
+          error instanceof Error ||
+          (error &&
+            typeof error === "object" &&
+            "message" in error &&
+            typeof (error as { message: unknown }).message === "string")
+            ? String((error as { message: string }).message)
+            : "Proxy request failed",
+        requestId:
+          (req as express.Request & { studioRequestId?: string })
+            .studioRequestId,
+      }),
+    },
+  )(req, res, next);
 });
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
