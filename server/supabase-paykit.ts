@@ -857,27 +857,27 @@ function mapPaykitResult<A>(result: { success: true; data: A } | { success: fals
 
 export const getPaykitStatusEffect = (body: any): Effect.Effect<
   PaykitProjectStatus,
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => getPaykitStatus(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const pushPaykitSchemaEffect = (body: any): Effect.Effect<
   { applied: number; total: number; phase: PaykitSchemaPhase },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => pushPaykitSchema(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
@@ -888,40 +888,40 @@ export const repairPaykitProjectEffect = (body: any): Effect.Effect<
     alreadyOk: boolean;
     status: PaykitProjectStatus;
   },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => repairPaykitProject(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const exposePaykitSchemaEffect = (body: any): Effect.Effect<
   { exposed: boolean; via: "auto" | "already" },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => exposePaykitSchema(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const syncPaykitProductsEffect = (body: any): Effect.Effect<
   { products: any[] },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => syncPaykitProducts(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
@@ -934,27 +934,27 @@ export const deployPaykitFunctionsEffect = (body: any): Effect.Effect<
       error?: string;
     }>;
   },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => deployPaykitFunctions(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
 export const setPaykitSecretsEffect = (body: any): Effect.Effect<
   { requested: string[] },
-  ValidationError | PaykitError
+  ValidationError | UpstreamError | PaykitError
 > =>
   Effect.tryPromise({
     try: () => setPaykitSecrets(body),
     catch: (cause) => {
       const message =
         cause instanceof Error ? cause.message : String(cause);
-      return new PaykitError({ message, status: 500 });
+      return new UpstreamError({ message, status: 502 });
     },
   }).pipe(Effect.flatMap(mapPaykitResult));
 
