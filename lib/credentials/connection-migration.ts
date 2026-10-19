@@ -131,3 +131,16 @@ export async function migrateAndHydrateConnections(rows: SavedConnection[]): Pro
   }
   return secured;
 }
+
+/** Hydrate desktop connections without persisting migration or cleanup work. */
+export async function hydrateConnectionsReadOnly(rows: Record<string, any>[]): Promise<Record<string, any>[]> {
+  const secured: Record<string, any>[] = [];
+  for (const row of rows) {
+    try {
+      secured.push(await hydrateConnection(row as SavedConnection));
+    } catch {
+      secured.push(flagCredentialError(row as SavedConnection));
+    }
+  }
+  return secured;
+}

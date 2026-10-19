@@ -1,12 +1,22 @@
 import { isDesktopRuntime } from "@/lib/desktop";
 
-/** Read the app-owned connection records through Tauri's Rust backend. */
-export async function rustListAppConnections(): Promise<Record<string, any>[] | undefined> {
-  if (!isDesktopRuntime()) return undefined;
+export type RustAppConnectionRead =
+  | { available: false }
+  | { available: true; success: true; connections: Record<string, any>[] }
+  | { available: true; success: false; error: string };
+
+/** Read app-owned connection rows through Tauri and preserve backend errors. */
+export async function rustListAppConnections(): Promise<RustAppConnectionRead> {
+  if (!isDesktopRuntime()) return { available: false };
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<Record<string, any>[]>("app_database_list_connections");
-  } catch {
-    return undefined;
+    const connections = await invoke<Record<string, any>[]>("app_database_list_connections");
+    return { available: true, success: true, connections };
+  } catch (cause) {
+    return {
+      available: true,
+      success: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
   }
 }
