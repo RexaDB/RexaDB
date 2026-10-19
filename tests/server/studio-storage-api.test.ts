@@ -15,12 +15,16 @@ function fakeActions(overrides: Record<string, unknown> = {}) {
 
 describe("Studio storage Effects", () => {
   test("preserves Promise facade result values and arguments", async () => {
-    const api = createStudioStorageEffects(fakeActions());
+    let received: unknown[] = [];
+    const api = createStudioStorageEffects(fakeActions({
+      saveStudioFolders: async (...args: unknown[]) => {
+        received = args;
+        return { success: true };
+      },
+    }));
     const result = await Effect.runPromise(api.saveFolders(42, [{ id: "folder-1" }]));
-    expect(result).toEqual({
-      action: "saveStudioFolders",
-      args: [42, [{ id: "folder-1" }]],
-    });
+    expect(result).toEqual({ success: true });
+    expect(received).toEqual([42, [{ id: "folder-1" }]]);
   });
 
   test("maps rejected actions-core calls to DbError", async () => {

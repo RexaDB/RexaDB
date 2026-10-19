@@ -1,28 +1,32 @@
 import { Effect } from "effect";
 import { DbError } from "./effect/errors";
 
-type StudioStorageActions = {
-  getStudioFolders: (...args: any[]) => Promise<unknown>;
-  saveStudioFolders: (...args: any[]) => Promise<unknown>;
-  getStudioSnippets: (...args: any[]) => Promise<unknown>;
-  saveStudioSnippets: (...args: any[]) => Promise<unknown>;
-  getStudioHistory: (...args: any[]) => Promise<unknown>;
-  saveStudioHistory: (...args: any[]) => Promise<unknown>;
-  insertHistoryEntry: (...args: any[]) => Promise<unknown>;
-  clearStudioHistory: (...args: any[]) => Promise<unknown>;
-  getStudioTags: (...args: any[]) => Promise<unknown>;
-  saveStudioTags: (...args: any[]) => Promise<unknown>;
-  getStudioTableTags: (...args: any[]) => Promise<unknown>;
-  saveStudioTableTags: (...args: any[]) => Promise<unknown>;
-  getStudioTabs: (...args: any[]) => Promise<unknown>;
-  saveStudioTabs: (...args: any[]) => Promise<unknown>;
-  getStudioSettings: (...args: any[]) => Promise<unknown>;
-  saveStudioSettings: (...args: any[]) => Promise<unknown>;
-  getStudioDashboards: (...args: any[]) => Promise<unknown>;
-  saveStudioDashboards: (...args: any[]) => Promise<unknown>;
-  getStudioNotes: (...args: any[]) => Promise<unknown>;
-  saveStudioNotes: (...args: any[]) => Promise<unknown>;
-};
+type StudioStorageActionNames =
+  | "getStudioFolders"
+  | "saveStudioFolders"
+  | "getStudioSnippets"
+  | "saveStudioSnippets"
+  | "getStudioHistory"
+  | "saveStudioHistory"
+  | "insertHistoryEntry"
+  | "clearStudioHistory"
+  | "getStudioTags"
+  | "saveStudioTags"
+  | "getStudioTableTags"
+  | "saveStudioTableTags"
+  | "getStudioTabs"
+  | "saveStudioTabs"
+  | "getStudioSettings"
+  | "saveStudioSettings"
+  | "getStudioDashboards"
+  | "saveStudioDashboards"
+  | "getStudioNotes"
+  | "saveStudioNotes";
+
+type StudioStorageActions = Pick<
+  typeof import("../lib/db/actions-core"),
+  StudioStorageActionNames
+>;
 
 function fromStudioStorage<A>(operation: string, evaluate: () => Promise<A>) {
   return Effect.tryPromise({
@@ -37,85 +41,85 @@ function fromStudioStorage<A>(operation: string, evaluate: () => Promise<A>) {
 /** Server-side Effect facade for actions-core Studio persistence operations. */
 export function createStudioStorageEffects(actions: StudioStorageActions) {
   return {
-    getFolders: (connectionId: number) => fromStudioStorage(
+    getFolders: (...args: Parameters<StudioStorageActions["getStudioFolders"]>) => fromStudioStorage(
       "Failed to fetch Studio folders",
-      () => actions.getStudioFolders(connectionId),
+      () => actions.getStudioFolders(...args),
     ),
-    saveFolders: (connectionId: number, folders: unknown[]) => fromStudioStorage(
+    saveFolders: (...args: Parameters<StudioStorageActions["saveStudioFolders"]>) => fromStudioStorage(
       "Failed to save Studio folders",
-      () => actions.saveStudioFolders(connectionId, folders),
+      () => actions.saveStudioFolders(...args),
     ),
-    getSnippets: (connectionId: number) => fromStudioStorage(
+    getSnippets: (...args: Parameters<StudioStorageActions["getStudioSnippets"]>) => fromStudioStorage(
       "Failed to fetch Studio snippets",
-      () => actions.getStudioSnippets(connectionId),
+      () => actions.getStudioSnippets(...args),
     ),
-    saveSnippets: (connectionId: number, snippets: unknown[]) => fromStudioStorage(
+    saveSnippets: (...args: Parameters<StudioStorageActions["saveStudioSnippets"]>) => fromStudioStorage(
       "Failed to save Studio snippets",
-      () => actions.saveStudioSnippets(connectionId, snippets),
+      () => actions.saveStudioSnippets(...args),
     ),
-    getHistory: (connectionId: number) => fromStudioStorage(
+    getHistory: (...args: Parameters<StudioStorageActions["getStudioHistory"]>) => fromStudioStorage(
       "Failed to fetch Studio history",
-      () => actions.getStudioHistory(connectionId),
+      () => actions.getStudioHistory(...args),
     ),
-    saveHistory: (connectionId: number, history: unknown[]) => fromStudioStorage(
+    saveHistory: (...args: Parameters<StudioStorageActions["saveStudioHistory"]>) => fromStudioStorage(
       "Failed to save Studio history",
-      () => actions.saveStudioHistory(connectionId, history),
+      () => actions.saveStudioHistory(...args),
     ),
-    insertHistoryEntry: (connectionId: number, entry: unknown) => fromStudioStorage(
+    insertHistoryEntry: (...args: Parameters<StudioStorageActions["insertHistoryEntry"]>) => fromStudioStorage(
       "Failed to insert Studio history entry",
-      () => actions.insertHistoryEntry(connectionId, entry),
+      () => actions.insertHistoryEntry(...args),
     ),
-    clearHistory: (connectionId: number) => fromStudioStorage(
+    clearHistory: (...args: Parameters<StudioStorageActions["clearStudioHistory"]>) => fromStudioStorage(
       "Failed to clear Studio history",
-      () => actions.clearStudioHistory(connectionId),
+      () => actions.clearStudioHistory(...args),
     ),
-    getTags: (connectionId: number) => fromStudioStorage(
+    getTags: (...args: Parameters<StudioStorageActions["getStudioTags"]>) => fromStudioStorage(
       "Failed to fetch Studio tags",
-      () => actions.getStudioTags(connectionId),
+      () => actions.getStudioTags(...args),
     ),
-    saveTags: (connectionId: number, tags: unknown[]) => fromStudioStorage(
+    saveTags: (...args: Parameters<StudioStorageActions["saveStudioTags"]>) => fromStudioStorage(
       "Failed to save Studio tags",
-      () => actions.saveStudioTags(connectionId, tags),
+      () => actions.saveStudioTags(...args),
     ),
-    getTableTags: (connectionId: number) => fromStudioStorage(
+    getTableTags: (...args: Parameters<StudioStorageActions["getStudioTableTags"]>) => fromStudioStorage(
       "Failed to fetch Studio table tags",
-      () => actions.getStudioTableTags(connectionId),
+      () => actions.getStudioTableTags(...args),
     ),
-    saveTableTags: (connectionId: number, tags: Record<string, string[]>) => fromStudioStorage(
+    saveTableTags: (...args: Parameters<StudioStorageActions["saveStudioTableTags"]>) => fromStudioStorage(
       "Failed to save Studio table tags",
-      () => actions.saveStudioTableTags(connectionId, tags),
+      () => actions.saveStudioTableTags(...args),
     ),
-    getTabs: (connectionId: number) => fromStudioStorage(
+    getTabs: (...args: Parameters<StudioStorageActions["getStudioTabs"]>) => fromStudioStorage(
       "Failed to fetch Studio tabs",
-      () => actions.getStudioTabs(connectionId),
+      () => actions.getStudioTabs(...args),
     ),
-    saveTabs: (connectionId: number, tabs: unknown[]) => fromStudioStorage(
+    saveTabs: (...args: Parameters<StudioStorageActions["saveStudioTabs"]>) => fromStudioStorage(
       "Failed to save Studio tabs",
-      () => actions.saveStudioTabs(connectionId, tabs),
+      () => actions.saveStudioTabs(...args),
     ),
-    getSettings: (connectionId: number) => fromStudioStorage(
+    getSettings: (...args: Parameters<StudioStorageActions["getStudioSettings"]>) => fromStudioStorage(
       "Failed to fetch Studio settings",
-      () => actions.getStudioSettings(connectionId),
+      () => actions.getStudioSettings(...args),
     ),
-    saveSettings: (connectionId: number, settings: unknown) => fromStudioStorage(
+    saveSettings: (...args: Parameters<StudioStorageActions["saveStudioSettings"]>) => fromStudioStorage(
       "Failed to save Studio settings",
-      () => actions.saveStudioSettings(connectionId, settings),
+      () => actions.saveStudioSettings(...args),
     ),
-    getDashboards: (connectionId: number) => fromStudioStorage(
+    getDashboards: (...args: Parameters<StudioStorageActions["getStudioDashboards"]>) => fromStudioStorage(
       "Failed to fetch Studio dashboards",
-      () => actions.getStudioDashboards(connectionId),
+      () => actions.getStudioDashboards(...args),
     ),
-    saveDashboards: (connectionId: number, payload: unknown) => fromStudioStorage(
+    saveDashboards: (...args: Parameters<StudioStorageActions["saveStudioDashboards"]>) => fromStudioStorage(
       "Failed to save Studio dashboards",
-      () => actions.saveStudioDashboards(connectionId, payload),
+      () => actions.saveStudioDashboards(...args),
     ),
-    getNotes: (connectionId: number) => fromStudioStorage(
+    getNotes: (...args: Parameters<StudioStorageActions["getStudioNotes"]>) => fromStudioStorage(
       "Failed to fetch Studio notes",
-      () => actions.getStudioNotes(connectionId),
+      () => actions.getStudioNotes(...args),
     ),
-    saveNotes: (connectionId: number, payload: unknown) => fromStudioStorage(
+    saveNotes: (...args: Parameters<StudioStorageActions["saveStudioNotes"]>) => fromStudioStorage(
       "Failed to save Studio notes",
-      () => actions.saveStudioNotes(connectionId, payload),
+      () => actions.saveStudioNotes(...args),
     ),
   };
 }
