@@ -82,6 +82,7 @@
     "concurrently": "^9.2.1",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",
+    "effect": "^4.0.5",
     "html-to-image": "^1.11.13",
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
