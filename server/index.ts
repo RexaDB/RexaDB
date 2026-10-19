@@ -984,13 +984,13 @@ app.post("/api/tables/search-all", async (req, res) => {
 });
 
 // Search index routes (local SQLite cache for universal search)
-app.post("/api/search-index/query", dynamicPostRoute("../lib/db/search-index-actions", (body, m) => m.searchLocalIndex(body.connectionString, body.term)));
+app.post("/api/search-index/query", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.searchLocalIndex(body.connectionString, body.term)));
 
-app.post("/api/search-index/save", dynamicPostRoute("../lib/db/search-index-actions", (body, m) => m.saveSearchResultsToIndex(body.connectionString, body.results)));
+app.post("/api/search-index/save", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.saveSearchResultsToIndex(body.connectionString, body.results)));
 
-app.post("/api/search-index/clear", dynamicPostRoute("../lib/db/search-index-actions", (body, m) => m.clearSearchIndex(body.connectionString)));
+app.post("/api/search-index/clear", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.clearSearchIndex(body.connectionString)));
 
-app.post("/api/search-index/status", dynamicPostRoute("../lib/db/search-index-actions", (body, m) => m.getSearchIndexStatus(body.connectionString)));
+app.post("/api/search-index/status", dynamicPostRoute(() => import("../lib/db/search-index-actions"), (body, m) => m.getSearchIndexStatus(body.connectionString)));
 
 app.post("/api/table-structure", proxyThreeArgRoute(mod.fetchTableStructure));
 

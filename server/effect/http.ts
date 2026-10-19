@@ -54,6 +54,10 @@ export function fromPromise<A>(
  * Run an Effect and write JSON. On failure, respond with
  * `{ success: false, error }` using statusForError (default 200 to match
  * most existing sidecar routes).
+ *
+ * Construction of the Effect is deferred into `Effect.suspend` so a
+ * synchronously throwing `programFromReq` becomes a typed failure (JSON
+ * error) instead of an unhandled Express async rejection.
  */
 export function effectHandler<A, E = ServerError>(
   programFromReq: EffectFromRequest<A, E>,
@@ -66,7 +70,17 @@ export function effectHandler<A, E = ServerError>(
 ): RequestHandler {
   const fallbackStatus = options?.fallbackStatus ?? 200;
   return async (req, res) => {
-    const exit = await runServerPromiseExit(programFromReq(req));
+    const exit = await runServerPromiseExit(
+      Effect.suspend(() => {
+        try {
+          return programFromReq(req) as Effect.Effect<A, E | Error>;
+        } catch (cause) {
+          return Effect.fail(
+            cause instanceof Error ? cause : new Error(String(cause)),
+          ) as Effect.Effect<A, E | Error>;
+        }
+      }),
+    );
     if (Exit.isSuccess(exit)) {
       if (options?.onSuccess) {
         options.onSuccess(exit.value, req, res);
@@ -112,6 +126,9 @@ export function effectJsonHandler<A, E = ServerError>(
 /**
  * Drop-in replacement for simplePostRoute: accepts either an Effect or a Promise.
  * Prefer returning Effect from new code.
+ *
+ * `fn` runs inside the Effect runtime (via effectHandler + suspend), so a
+ * synchronous throw becomes a JSON `{ success: false, error }` response.
  */
 export function simplePostRoute(
   fn: (
@@ -128,10 +145,16 @@ export function simplePostRoute(
 
 /**
  * Drop-in replacement for dynamicPostRoute with the same Promise/Effect bridge.
- * Keep importPath static string literals for bun build --compile.
+ *
+ * Pass an import callback defined at the call site (e.g. in `server/index.ts`)
+ * so relative module paths resolve from that file — not from this helper:
+ *
+ *   dynamicPostRoute(() => import("../lib/db/search-index-actions"), …)
+ *
+ * Keep the `import("…")` string literal static for `bun build --compile`.
  */
 export function dynamicPostRoute(
-  importPath: string,
+  loadModule: () => PromiseLike<any>,
   fn: (
     body: any,
     mod: any,
@@ -139,8 +162,15 @@ export function dynamicPostRoute(
 ): RequestHandler {
   return effectHandler((req) =>
     Effect.gen(function* () {
-      const m = yield* fromPromise(() => import(importPath));
-      const result = fn(req.body, m);
+      const m = yield* fromPromise(() => loadModule());
+      let result: Effect.Effect<any, any> | PromiseLike<any> | any;
+      try {
+        result = fn(req.body, m);
+      } catch (cause) {
+        return yield* Effect.fail(
+          cause instanceof Error ? cause : new Error(String(cause)),
+        );
+      }
       if (Effect.isEffect(result)) return yield* result;
       if (isPromiseLike(result)) return yield* fromPromise(() => result);
       return result;

@@ -53,7 +53,19 @@ app.get(
     ),
   ),
 )
+
+// dynamicPostRoute takes an import callback so relative paths resolve at the
+// call site (server/index.ts), not inside server/effect/http.ts:
+app.post(
+  "/api/search-index/query",
+  dynamicPostRoute(
+    () => import("../lib/db/search-index-actions"),
+    (body, m) => m.searchLocalIndex(body.connectionString, body.term),
+  ),
+)
 ```
+
+`effectHandler` builds the program inside `Effect.suspend` and catches synchronous throws from `programFromReq`, so a callback that throws while constructing its Effect still returns `{ success: false, error }` instead of leaving the Express request hanging.
 
 ## Tagged errors
 

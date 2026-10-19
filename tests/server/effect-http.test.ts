@@ -6,11 +6,39 @@ import {
   messageForError,
   statusForError,
 } from "../../server/effect/errors";
-import { fromPromise, simplePostRoute } from "../../server/effect/http";
+import {
+  dynamicPostRoute,
+  effectHandler,
+  fromPromise,
+  simplePostRoute,
+} from "../../server/effect/http";
 import {
   failureFromExit,
   runServerPromiseExit,
 } from "../../server/effect/runtime";
+
+function mockRes() {
+  let statusCode = 200;
+  let json: unknown;
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(payload: unknown) {
+      json = payload;
+    },
+  };
+  return {
+    res,
+    get statusCode() {
+      return statusCode;
+    },
+    get json() {
+      return json;
+    },
+  };
+}
 
 describe("server/effect errors", () => {
   test("statusForError maps tagged errors", () => {
@@ -68,24 +96,65 @@ describe("server/effect http bridge", () => {
     );
 
     for (const route of [promiseRoute, effectRoute]) {
-      let statusCode = 200;
-      let json: unknown;
-      const res = {
-        status(code: number) {
-          statusCode = code;
-          return this;
-        },
-        json(payload: unknown) {
-          json = payload;
-        },
-      };
+      const mocked = mockRes();
       await route(
         { body: { n: 7 } } as any,
-        res as any,
+        mocked.res as any,
         (() => undefined) as any,
       );
-      expect(statusCode).toBe(200);
-      expect(json).toEqual({ success: true, echo: 7 });
+      expect(mocked.statusCode).toBe(200);
+      expect(mocked.json).toEqual({ success: true, echo: 7 });
     }
+  });
+
+  test("effectHandler returns JSON when programFromReq throws synchronously", async () => {
+    const route = effectHandler(() => {
+      throw new Error("boom while building effect");
+    });
+    const mocked = mockRes();
+    await route(
+      { body: {} } as any,
+      mocked.res as any,
+      (() => undefined) as any,
+    );
+    expect(mocked.statusCode).toBe(200);
+    expect(mocked.json).toEqual({
+      success: false,
+      error: "boom while building effect",
+    });
+  });
+
+  test("simplePostRoute returns JSON when callback throws synchronously", async () => {
+    const route = simplePostRoute(() => {
+      throw new Error("sync post failure");
+    });
+    const mocked = mockRes();
+    await route(
+      { body: {} } as any,
+      mocked.res as any,
+      (() => undefined) as any,
+    );
+    expect(mocked.statusCode).toBe(200);
+    expect(mocked.json).toEqual({
+      success: false,
+      error: "sync post failure",
+    });
+  });
+
+  test("dynamicPostRoute loads via call-site import callback", async () => {
+    const route = dynamicPostRoute(
+      async () => ({
+        echo: (body: { n: number }) => ({ success: true, echo: body.n }),
+      }),
+      (body, m) => m.echo(body),
+    );
+    const mocked = mockRes();
+    await route(
+      { body: { n: 3 } } as any,
+      mocked.res as any,
+      (() => undefined) as any,
+    );
+    expect(mocked.statusCode).toBe(200);
+    expect(mocked.json).toEqual({ success: true, echo: 3 });
   });
 });
