@@ -2,8 +2,12 @@
  * Server-side API handlers for transfer operations.
  * Runs real provider-to-provider transfers in the background with
  * pollable progress (see TransferService.transferProject).
+ *
+ * Effect APIs are primary for the sidecar; Promise facades keep call sites
+ * that still await the older helpers working during the migration.
  */
 
+import { Effect } from "effect";
 import { createTransferService } from "@/lib/transfer/transfer-service";
 // Side-effect import: registers the server query implementation for
 // dual-use modules (storage-utils, auth/fetch). Server-only file — safe.
@@ -14,6 +18,8 @@ import type {
   TransferJobStatus,
 } from "@/lib/transfer/transfer-client";
 import type { TransferProgress } from "@/lib/transfer/transfer-types";
+import { fromPromise } from "./effect/http";
+import { DbError } from "./effect/errors";
 
 type TransferJob = {
   progress: TransferProgress;
@@ -63,42 +69,55 @@ function newTransferId(): string {
   return `transfer_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-export async function handleTransferStart(request: TransferApiRequest): Promise<TransferApiResponse> {
-  pruneJobs();
-  const clash = getActiveTransferIdForDestination(request.destinationConnectionString);
-  if (clash) {
-    return {
-      success: false,
-      error: `Another transfer to this destination is already running (${clash}). Wait for it to finish before starting a new one — concurrent imports would corrupt the destination.`,
-    };
-  }
-  try {
-    const transferId = newTransferId();
+/**
+ * Start a transfer. Clash / start failures are returned in the success
+ * envelope (`success: false`) to match the existing HTTP contract.
+ */
+export const handleTransferStartEffect = (
+  request: TransferApiRequest,
+): Effect.Effect<TransferApiResponse, never> =>
+  Effect.sync(() => {
+    pruneJobs();
+    const clash = getActiveTransferIdForDestination(request.destinationConnectionString);
+    if (clash) {
+      return {
+        success: false,
+        error: `Another transfer to this destination is already running (${clash}). Wait for it to finish before starting a new one — concurrent imports would corrupt the destination.`,
+      } satisfies TransferApiResponse;
+    }
+    try {
+      const transferId = newTransferId();
 
-    const job: TransferJob = {
-      progress: {
-        currentStep: "validating",
-        totalSteps: 1,
-        currentStepIndex: 0,
-        percentage: 0,
-        message: "Starting transfer...",
-      },
-      done: false,
-      updatedAt: Date.now(),
-    };
-    jobs.set(transferId, job);
-    activeByDestination.set(request.destinationConnectionString, transferId);
+      const job: TransferJob = {
+        progress: {
+          currentStep: "validating",
+          totalSteps: 1,
+          currentStepIndex: 0,
+          percentage: 0,
+          message: "Starting transfer...",
+        },
+        done: false,
+        updatedAt: Date.now(),
+      };
+      jobs.set(transferId, job);
+      activeByDestination.set(request.destinationConnectionString, transferId);
 
-    // Run in the background; the client polls /progress/:transferId.
-    void executeTransfer(transferId, request);
+      // Run in the background; the client polls /progress/:transferId.
+      void executeTransfer(transferId, request);
 
-    return { success: true, transferId };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Transfer failed to start",
-    };
-  }
+      return { success: true, transferId } satisfies TransferApiResponse;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Transfer failed to start",
+      } satisfies TransferApiResponse;
+    }
+  });
+
+export async function handleTransferStart(
+  request: TransferApiRequest,
+): Promise<TransferApiResponse> {
+  return Effect.runPromise(handleTransferStartEffect(request));
 }
 
 async function executeTransfer(transferId: string, request: TransferApiRequest): Promise<void> {
@@ -164,40 +183,79 @@ async function executeTransfer(transferId: string, request: TransferApiRequest):
   }
 }
 
-export async function handleTransferProgress(transferId: string): Promise<TransferJobStatus> {
-  const job = jobs.get(transferId);
-  if (!job) {
-    return {
-      currentStep: "validating",
-      totalSteps: 1,
-      currentStepIndex: 0,
-      percentage: 0,
-      message: "Unknown transfer",
-      error: `No transfer found for id ${transferId}`,
-      done: true,
-      result: { success: false, error: `No transfer found for id ${transferId}` },
-    };
-  }
-  return { ...job.progress, done: job.done, result: job.result };
+export const handleTransferProgressEffect = (
+  transferId: string,
+): Effect.Effect<TransferJobStatus, never> =>
+  Effect.sync(() => {
+    const job = jobs.get(transferId);
+    if (!job) {
+      return {
+        currentStep: "validating",
+        totalSteps: 1,
+        currentStepIndex: 0,
+        percentage: 0,
+        message: "Unknown transfer",
+        error: `No transfer found for id ${transferId}`,
+        done: true,
+        result: { success: false, error: `No transfer found for id ${transferId}` },
+      } satisfies TransferJobStatus;
+    }
+    return { ...job.progress, done: job.done, result: job.result };
+  });
+
+export async function handleTransferProgress(
+  transferId: string,
+): Promise<TransferJobStatus> {
+  return Effect.runPromise(handleTransferProgressEffect(transferId));
 }
+
+export const handleTransferExportEffect = (
+  request: TransferApiRequest,
+): Effect.Effect<
+  { success: boolean; packageJson?: string; error?: string },
+  DbError
+> =>
+  Effect.gen(function* () {
+    const service = yield* fromPromise(
+      () => createTransferService(),
+      (cause) =>
+        new DbError({
+          message:
+            cause instanceof Error ? cause.message : "Failed to create transfer service",
+        }),
+    );
+    const packageJson = yield* fromPromise(
+      () =>
+        service.exportPackage(
+          {
+            provider: request.sourceProvider as
+              | "supabase"
+              | "neon"
+              | "postgres"
+              | "generic",
+            connectionString: request.sourceConnectionString,
+          },
+          request.options,
+        ),
+      (cause) =>
+        new DbError({
+          message: cause instanceof Error ? cause.message : "Export failed",
+        }),
+    );
+    return { success: true, packageJson };
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed({
+        success: false as const,
+        error: error instanceof Error || (error && typeof error === "object" && "message" in error)
+          ? String((error as { message: unknown }).message)
+          : "Export failed",
+      }),
+    ),
+  );
 
 export async function handleTransferExport(
   request: TransferApiRequest,
 ): Promise<{ success: boolean; packageJson?: string; error?: string }> {
-  try {
-    const service = await createTransferService();
-    const packageJson = await service.exportPackage(
-      {
-        provider: request.sourceProvider as "supabase" | "neon" | "postgres" | "generic",
-        connectionString: request.sourceConnectionString,
-      },
-      request.options,
-    );
-    return { success: true, packageJson };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Export failed",
-    };
-  }
+  return Effect.runPromise(handleTransferExportEffect(request));
 }

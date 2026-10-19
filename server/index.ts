@@ -3,6 +3,7 @@ import cors from "cors";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { Effect } from "effect";
 import "pg";
 import "redis";
 import "drizzle-orm";
@@ -19,7 +20,18 @@ import {
   syncPaykitProducts,
 } from "./supabase-paykit";
 import { createStripeWebhookEndpoint } from "./stripe";
-import { handleTransferStart, handleTransferProgress, handleTransferExport } from "./transfer-api";
+import {
+  handleTransferStartEffect,
+  handleTransferProgressEffect,
+  handleTransferExportEffect,
+} from "./transfer-api";
+import {
+  dynamicPostRoute,
+  effectHandler,
+  fromPromise,
+  setDefectLogger,
+  simplePostRoute,
+} from "./effect";
 import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseEvent } from "../lib/ai/pi-agent";
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
@@ -75,6 +87,11 @@ logToFile("USERPROFILE:", process.env.USERPROFILE);
 log("[rexadb:snapshot] Server startup — DB path:", process.env.REXADB_USER_DATA_DIR
   ? `${process.env.REXADB_USER_DATA_DIR}/sqlite.db`
   : `${process.cwd()}/sqlite.db`);
+
+setDefectLogger((...args) => {
+  logToFile("[effect]", ...args);
+  log("[effect]", ...args);
+});
 
 
 const app = express();
@@ -161,10 +178,13 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
 
 app.use(authMiddleware);
 
-// Health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", port: PORT });
-});
+// Health check (Effect template route)
+app.get(
+  "/health",
+  effectHandler(() =>
+    Effect.succeed({ status: "ok" as const, port: PORT }),
+  ),
+);
 
 // Shared helpers for the management-API proxies below (Supabase, PlanetScale,
 // SpacetimeDB). Each proxy forwards method/headers/body to the upstream host
@@ -252,33 +272,27 @@ app.post("/api/supabase-paykit/secrets", simplePostRoute((body) => setPaykitSecr
 app.post("/api/stripe/create-webhook-endpoint", simplePostRoute((body) => createStripeWebhookEndpoint(body)));
 
 // Transfer API endpoints for project migration between providers
-app.post("/api/transfer/start", async (req, res) => {
-  try {
-    const result = await handleTransferStart(req.body);
-    res.json(result);
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/transfer/start",
+  effectHandler((req) => handleTransferStartEffect(req.body), {
+    fallbackStatus: 500,
+  }),
+);
 
-app.get("/api/transfer/progress/:transferId", async (req, res) => {
-  try {
-    const progress = await handleTransferProgress(req.params.transferId);
-    res.json(progress);
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+app.get(
+  "/api/transfer/progress/:transferId",
+  effectHandler((req) => handleTransferProgressEffect(req.params.transferId), {
+    fallbackStatus: 500,
+  }),
+);
 
 // Export-only: builds a real transfer package from the source (no import).
-app.post("/api/transfer/export", async (req, res) => {
-  try {
-    const result = await handleTransferExport(req.body);
-    res.json(result);
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+app.post(
+  "/api/transfer/export",
+  effectHandler((req) => handleTransferExportEffect(req.body), {
+    fallbackStatus: 500,
+  }),
+);
 
 // PlanetScale API proxy (avoids CORS in the browser). Used for browsing
 // orgs/databases/branches and minting branch passwords — never for query
@@ -609,14 +623,21 @@ app.post("/api/connections/credential-cache/lock", (_req, res) => {
 });
 
 // Connection groups (MUST be before /:id routes to avoid param capture)
-app.get("/api/connections/groups", async (_req, res) => {
-  try {
-    const groups = await mod.listConnectionGroups();
-    res.json({ success: true, groups });
-  } catch (e: any) {
-    res.json({ success: false, error: e.message, groups: [] });
-  }
-});
+app.get(
+  "/api/connections/groups",
+  effectHandler(() =>
+    fromPromise(() => mod.listConnectionGroups()).pipe(
+      Effect.map((groups) => ({ success: true as const, groups })),
+      Effect.catch((e) =>
+        Effect.succeed({
+          success: false as const,
+          error: e instanceof Error ? e.message : String(e),
+          groups: [] as unknown[],
+        }),
+      ),
+    ),
+  ),
+);
 
 app.post("/api/connections/groups/add", simplePostRoute(body => mod.addConnectionGroup(body.folderName)));
 
@@ -1891,24 +1912,7 @@ function proxyThreeArgRoute(fn: (cs: string, schema: string, table: string) => P
   };
 }
 
-/** POST /api/X — pass req.body to fn, return result */
-function simplePostRoute(fn: (body: any) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      res.json(await fn(req.body));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
-}
-
-/** POST /api/X — dynamic import, then call fn(body, importedModule) */
-function dynamicPostRoute(importPath: string, fn: (body: any, mod: any) => Promise<any>): Handler {
-  return async (req, res) => {
-    try {
-      const m = await import(importPath);
-      res.json(await fn(req.body, m));
-    } catch (e: any) { res.json({ success: false, error: e.message }); }
-  };
-}
+// simplePostRoute / dynamicPostRoute: imported from ./effect (Promise + Effect bridge)
 
 /** Dynamic-import the workflow dependencies (better-drizzle client, ensureCoreTables) */
 async function getWorkflowDeps() {
