@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { NeonResourcesPanel } from "@/components/studio/neon/neon-resources-panel";
-import { isNeonManagementConnection } from "@/lib/studio/neon-management";
+import { getNeonManagementPointer } from "@/lib/studio/neon-management";
+import { listFunctions } from "@/lib/neon-cli/client";
 import { getTabIcon } from "@/lib/studio/tab-registry";
 import {
   EdgeFunctionsIcon,
@@ -25,11 +25,6 @@ const ROW =
  * functions; Secrets opens secret management; each function opens its tab.
  */
 export function EdgeFunctionsPanel({ studio }: { studio: any }) {
-  const connectionType = studio.connection?.connectionType ?? studio.dbType;
-  const connectionString = studio.connection?.connectionString;
-  if (isNeonManagementConnection(connectionType, connectionString)) {
-    return <NeonResourcesPanel studio={studio} kind="functions" />;
-  }
   return <SupabaseEdgeFunctionsPanel studio={studio} />;
 }
 
@@ -39,12 +34,39 @@ function SupabaseEdgeFunctionsPanel({ studio }: { studio: any }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const connectionType: string | undefined =
     studio.connection?.connectionType ?? studio.dbType;
-  const connectionString: string | undefined =
-    studio.currentConnectionString || studio.connection?.connectionString;
+  const managementConnection = studio.connection?.connectionString ?? "";
+  const neon = getNeonManagementPointer(managementConnection);
+  const connectionString: string | undefined = neon
+    ? managementConnection
+    : studio.currentConnectionString || managementConnection;
 
   const loadFunctions = useCallback(async () => {
     if (!connectionString) return;
     setLoading(true);
+    const neonPointer = getNeonManagementPointer(managementConnection);
+    if (neonPointer) {
+      try {
+        const rows = await listFunctions(neonPointer.profile, neonPointer.projectId, neonPointer.branchId);
+        setFunctions(rows.map((fn) => ({
+          id: fn.slug,
+          slug: fn.slug,
+          name: fn.name || fn.slug,
+          status: fn.status || "UNKNOWN",
+          version: null,
+          verify_jwt: null,
+          created_at: fn.created_at ?? null,
+          updated_at: fn.updated_at ?? null,
+          invocation_url: fn.invocation_url,
+        })));
+        setLoadError(null);
+      } catch (error) {
+        setFunctions([]);
+        setLoadError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     const { access: resolved, error: accessError } =
       await resolveEdgeAccess(connectionType, connectionString);
     if (!resolved) {
@@ -58,7 +80,7 @@ function SupabaseEdgeFunctionsPanel({ studio }: { studio: any }) {
     setLoadError(error ?? null);
     if (error) console.warn("[edge-functions] failed to list:", error);
     setLoading(false);
-  }, [connectionString, connectionType]);
+  }, [connectionString, connectionType, managementConnection]);
 
   useEffect(() => {
     void loadFunctions();
@@ -81,7 +103,7 @@ function SupabaseEdgeFunctionsPanel({ studio }: { studio: any }) {
 
   return (
     <div className="flex flex-col gap-0.5 pt-1">
-      {navItems.map((i) => {
+      {(neon ? navItems.slice(0, 1) : navItems).map((i) => {
         const Icon = getTabIcon(i.tabType);
         return (
           <button
@@ -129,7 +151,7 @@ function SupabaseEdgeFunctionsPanel({ studio }: { studio: any }) {
           <button
             key={f.slug}
             type="button"
-            onClick={() => studio.openEdgeFunctionTab?.(f.slug)}
+            onClick={() => neon ? studio.openEdgeFunctionsTab?.() : studio.openEdgeFunctionTab?.(f.slug)}
             title={f.slug}
             className={cn(
               ROW,

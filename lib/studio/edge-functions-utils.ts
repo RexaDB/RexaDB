@@ -30,6 +30,7 @@ export type EdgeFunction = {
   verify_jwt: boolean | null;
   created_at: string | null;
   updated_at: string | null;
+  invocation_url?: string;
 };
 
 export type EdgeSecret = {

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { runQuery } from "@/lib/api/actions-client";
 import { fetchStorageBuckets } from "@/lib/studio/storage-utils";
+import { createBucket } from "@/lib/neon-cli/client";
+import { getNeonManagementPointer } from "@/lib/studio/neon-management";
 import type { StorageBucket } from "@/lib/studio/storage-utils";
 
 export const BUCKET_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
@@ -32,6 +34,14 @@ export async function createStorageBucket(
 ): Promise<void> {
   const validationError = validateBucketName(name);
   if (validationError) throw new Error(validationError);
+  const neon = getNeonManagementPointer(connectionString);
+  if (neon) {
+    await createBucket(
+      neon.profile, neon.projectId, neon.branchId, name,
+      isPublic ? "public_read" : "private",
+    );
+    return;
+  }
   const res = await runQuery(connectionString, buildCreateBucketSql(name, isPublic));
   if (res?.error) throw new Error(res.error);
 }

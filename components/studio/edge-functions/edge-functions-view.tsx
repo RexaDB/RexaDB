@@ -19,17 +19,21 @@ import {
   listEdgeFunctions,
   resolveEdgeAccess,
   timeAgo,
-  type EdgeAccess,
   type EdgeFunction,
 } from "@/lib/studio/edge-functions-utils";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { listFunctions } from "@/lib/neon-cli/client";
+import { getNeonManagementPointer } from "@/lib/studio/neon-management";
 
 export function EdgeFunctionsView({ studio }: { studio: any }) {
   const connectionType: string | undefined =
     studio.connection?.connectionType ?? studio.dbType;
-  const connectionString: string | undefined =
-    studio.currentConnectionString || studio.connection?.connectionString;
+  const managementConnection = studio.connection?.connectionString ?? "";
+  const neon = getNeonManagementPointer(managementConnection);
+  const connectionString: string | undefined = neon
+    ? managementConnection
+    : studio.currentConnectionString || managementConnection;
   const [functions, setFunctions] = useState<EdgeFunction[]>([]);
   const [projectRef, setProjectRef] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,6 +43,31 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
   const loadFunctions = useCallback(async () => {
     if (!connectionString) return;
     setLoading(true);
+    const neonPointer = getNeonManagementPointer(managementConnection);
+    if (neonPointer) {
+      try {
+        const list = await listFunctions(neonPointer.profile, neonPointer.projectId, neonPointer.branchId);
+        setFunctions(list.map((fn) => ({
+          id: fn.slug,
+          slug: fn.slug,
+          name: fn.name || fn.slug,
+          status: fn.status || "UNKNOWN",
+          version: null,
+          verify_jwt: null,
+          created_at: fn.created_at ?? null,
+          updated_at: fn.updated_at ?? null,
+          invocation_url: fn.invocation_url,
+        })));
+        setProjectRef(null);
+        setLoadError(null);
+      } catch (error) {
+        setFunctions([]);
+        setLoadError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     const { access, error: accessError } = await resolveEdgeAccess(
       connectionType,
       connectionString,
@@ -56,7 +85,7 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
     setLoadError(error ?? null);
     if (error) toast.error(error);
     setLoading(false);
-  }, [connectionString, connectionType]);
+  }, [connectionString, connectionType, managementConnection]);
 
   useEffect(() => {
     void loadFunctions();
@@ -98,7 +127,7 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
         header: "URL",
         width: "1.6fr",
         cell: (f) => {
-          const url = projectRef ? edgeFunctionUrl(projectRef, f.slug) : "";
+          const url = f.invocation_url || (projectRef ? edgeFunctionUrl(projectRef, f.slug) : "");
           return (
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={url}>
@@ -186,7 +215,9 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
             description={
               search
                 ? "Try a different search term."
-                : "Deploy an Edge Function with the Supabase CLI to see it here."
+                : neon
+                  ? "Deploy a Neon Function to the selected branch to see it here."
+                  : "Deploy an Edge Function with the Supabase CLI to see it here."
             }
           />
         ) : (
@@ -194,7 +225,7 @@ export function EdgeFunctionsView({ studio }: { studio: any }) {
             data={visible}
             columns={columns}
             getRowId={(f) => f.slug}
-            onRowClick={(f) => studio.openEdgeFunctionTab?.(f.slug)}
+            onRowClick={neon ? undefined : (f) => studio.openEdgeFunctionTab?.(f.slug)}
             emptyState={
               <div className="py-8 text-center">
                 <p className="text-sm text-foreground">No results found</p>

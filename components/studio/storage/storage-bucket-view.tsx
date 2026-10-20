@@ -19,7 +19,6 @@ import {
   ImageIcon,
   MoreHorizontal,
   Pencil,
-  Plus,
   RefreshCw,
   Search,
   Shield,
@@ -64,6 +63,7 @@ import {
   type StorageObject,
 } from "@/lib/studio/storage-utils";
 import { resolvePaymentsConnection } from "@/lib/supabase-paykit/supabase-ref";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -85,6 +85,13 @@ export function StorageBucketView({
     studio.currentConnectionString || studio.connection?.connectionString || "";
   const connectionType: string | undefined =
     studio.connection?.connectionType ?? studio.dbType;
+  const neonStorage = isNeonManagementConnection(
+    connectionType,
+    studio.connection?.connectionString,
+  );
+  const storageDataConnection = neonStorage
+    ? studio.connection.connectionString
+    : connectionString;
   const confirm = useConfirm();
 
   const [bucket, setBucket] = useState<StorageBucket | null>(null);
@@ -144,8 +151,8 @@ export function StorageBucketView({
       { bucket: b, error: bucketError },
       { objects: objs, error: objectsError },
     ] = await Promise.all([
-      fetchStorageBucket(connectionString, bucketName),
-      fetchStorageObjects(connectionString, bucketName),
+      fetchStorageBucket(storageDataConnection, bucketName),
+      fetchStorageObjects(storageDataConnection, bucketName),
     ]);
     const firstError = bucketError ?? objectsError;
     if (firstError) toast.error(firstError);
@@ -170,7 +177,7 @@ export function StorageBucketView({
     if (!objectsError) setObjects(objs);
     else setObjects([]);
     setLoading(false);
-  }, [connectionString, bucketName]);
+  }, [connectionString, storageDataConnection, bucketName]);
 
   const loadPolicyCount = useCallback(async () => {
     if (!connectionString) return;
