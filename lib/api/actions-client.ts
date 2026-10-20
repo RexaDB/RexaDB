@@ -151,6 +151,15 @@ export async function getConnectionsResult(
   const retries = opts.retries ?? 5;
   const retryDelayMs = opts.retryDelayMs ?? 700;
   const timeoutMs = opts.timeoutMs ?? 10_000;
+  if (isDesktopRuntime()) {
+    // The Rust read is intentionally read-only, so schema upgrades must have
+    // completed in the sidecar before it queries columns added by migrations.
+    const { waitForSidecarReady } = await import("@/lib/api-base");
+    const ready = await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+    if (!ready) {
+      return { ok: false, data: [], error: "The local database service is still starting." };
+    }
+  }
   const rustConnections = await rustListAppConnections();
   if (rustConnections.available && !rustConnections.success) {
     return { ok: false, data: [], error: rustConnections.error };

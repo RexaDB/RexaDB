@@ -3400,7 +3400,21 @@ app.post("/api/agents/chat/stream", async (req, res) => {
 });
 
 function startServer(port: number, maxPort: number = 3900) {
-  const server = app.listen(port, "127.0.0.1", () => {
+  const server = app.listen(port, "127.0.0.1", async () => {
+    // Desktop Rust reads the app database directly once the sidecar reports
+    // ready. Complete any SQLite schema upgrades before publishing readiness
+    // so those read-only queries never race an older database migration.
+    try {
+      const { ensureCoreTables } = await import("../lib/db/ensure-core-tables");
+      await ensureCoreTables();
+    } catch (err: any) {
+      const message = `app database schema setup failed: ${err?.message || String(err)}`;
+      log(`[rexadb-server] ${message}`);
+      logToFile(message);
+      server.close(() => process.exit(1));
+      return;
+    }
+
     log(`[rexadb-server] listening on port ${port}`);
     logToFile(`listening on port ${port}`);
     // Write port file for frontend discovery

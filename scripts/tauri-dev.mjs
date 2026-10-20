@@ -54,8 +54,10 @@ config.build.devUrl = `http://localhost:${devPort}`;
 writeFileSync(tauriConfigPath, JSON.stringify(config, null, 2));
 
 // Start Tauri
+const bunExecutable = process.execPath;
 const tauriProcess = spawn('tauri', ['dev'], {
-  stdio: 'inherit'
+  stdio: 'inherit',
+  env: { ...process.env, REXADB_BUN_EXECUTABLE: bunExecutable },
 });
 
 // Handle cleanup

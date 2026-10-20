@@ -202,8 +202,9 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       setSelectedConnection(null);
       return;
     }
-    // The app shell can retain an analytics tab across restarts. If its
-    // connection was removed, don't keep issuing requests for that stale ID.
+    // The app shell can retain an analytics tab across restarts. The parent
+    // list can lag behind a connection created by ConnectionManager, so verify
+    // against a fresh read before treating an absent row as deleted.
     if (connsError) return;
     const found = connections.find((c) => c.id === selectedConnectionId) || null;
     if (found) {
@@ -211,16 +212,28 @@ export function ConnectionsPage({ embedded = false }: { embedded?: boolean } = {
       return;
     }
     if (!connectionsLoadedRef.current) return;
-    setSelectedConnection(null);
-    setNav((prev) => {
-      const connectionsIndex = prev.stack.lastIndexOf(CONNECTIONS_TAB.id);
-      if (connectionsIndex >= 0) {
-        return { stack: prev.stack.slice(0, connectionsIndex + 1), index: connectionsIndex };
+    let cancelled = false;
+    void getConnectionsResult().then((result) => {
+      if (cancelled || !result.ok) return;
+      const current = result.data.find((connection) => connection.id === selectedConnectionId);
+      if (current) {
+        setConnections(result.data);
+        setSelectedConnection(current);
+        return;
       }
-      return { stack: [CONNECTIONS_TAB.id], index: 0 };
+      setSelectedConnection(null);
+      setNav((prev) => {
+        const connectionsIndex = prev.stack.lastIndexOf(CONNECTIONS_TAB.id);
+        if (connectionsIndex >= 0) {
+          return { stack: prev.stack.slice(0, connectionsIndex + 1), index: connectionsIndex };
+        }
+        return { stack: [CONNECTIONS_TAB.id], index: 0 };
+      });
+      setTabs((prev) => prev.filter((tab) => tab.kind !== "analytics" || tab.connectionId !== selectedConnectionId));
     });
-    setTabs((prev) => prev.filter((tab) => tab.kind !== "analytics" || tab.connectionId !== selectedConnectionId));
-    return;
+    return () => {
+      cancelled = true;
+    };
 
   }, [selectedConnectionId, connections, connsError]);
 
