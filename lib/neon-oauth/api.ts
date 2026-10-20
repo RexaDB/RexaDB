@@ -49,6 +49,21 @@ export interface NeonDatabase {
   created_at?: string;
 }
 
+export interface NeonFunction {
+  slug: string;
+  name?: string;
+  status?: string;
+  invocation_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NeonBucket {
+  name: string;
+  access_level?: "private" | "public_read";
+  created_at?: string;
+}
+
 export interface NeonRole {
   name: string;
   created_at?: string;
@@ -244,6 +259,47 @@ export async function listRoles(
     `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/roles`,
   );
   return data.roles ?? [];
+}
+
+export async function listFunctions(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<NeonFunction[]> {
+  const data = await neonFetch<{ functions?: NeonFunction[] } | NeonFunction[]>(
+    profile,
+    `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/functions`,
+  );
+  return Array.isArray(data) ? data : data.functions ?? [];
+}
+
+export async function listBuckets(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<NeonBucket[]> {
+  const data = await neonFetch<{ buckets?: NeonBucket[] } | NeonBucket[]>(
+    profile,
+    `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/buckets`,
+  );
+  return Array.isArray(data) ? data : data.buckets ?? [];
+}
+
+export async function createBucket(
+  profile: string,
+  projectId: string,
+  branchId: string,
+  name: string,
+  accessLevel: "private" | "public_read",
+): Promise<void> {
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(name)) {
+    throw new Error("Bucket names must be 3–63 lowercase letters, numbers, dots, or hyphens.");
+  }
+  await neonFetch<unknown>(
+    profile,
+    `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/buckets`,
+    { method: "POST", body: JSON.stringify({ name, access_level: accessLevel }) },
+  );
 }
 
 export async function getConnectionUri(

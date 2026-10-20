@@ -1,4 +1,5 @@
 import { resolvePaymentsConnection } from "@/lib/supabase-paykit/supabase-ref";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { transferQuery } from "@/lib/transfer/transfer-sql";
 
 /** Storage is available on supabase-mgmt and direct Postgres-to-Supabase connections. */
@@ -8,7 +9,8 @@ export function shouldShowStorage(
   schemas?: string[] | null,
 ): boolean {
   if (schemas?.includes("storage")) return true;
-  return resolvePaymentsConnection(connectionType, connectionString) !== null;
+  return isNeonManagementConnection(connectionType, connectionString) ||
+    resolvePaymentsConnection(connectionType, connectionString) !== null;
 }
 
 export type StorageBucket = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { API_BASE } from "@/lib/api-base";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { parseSupabaseMgmtConnectionString } from "@/lib/db/supabase-mgmt-client";
 import { listProjects } from "@/lib/supabase-mgmt/client";
 import {
@@ -16,7 +17,8 @@ export function shouldShowEdgeFunctions(
   connectionType: string | undefined,
   connectionString: string | undefined,
 ): boolean {
-  return resolvePaymentsConnection(connectionType, connectionString) !== null;
+  return isNeonManagementConnection(connectionType, connectionString) ||
+    resolvePaymentsConnection(connectionType, connectionString) !== null;
 }
 
 export type EdgeFunction = {

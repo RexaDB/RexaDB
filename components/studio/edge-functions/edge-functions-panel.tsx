@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { NeonResourcesPanel } from "@/components/studio/neon/neon-resources-panel";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { getTabIcon } from "@/lib/studio/tab-registry";
 import {
   EdgeFunctionsIcon,
@@ -11,7 +13,6 @@ import {
 import {
   listEdgeFunctions,
   resolveEdgeAccess,
-  type EdgeAccess,
   type EdgeFunction,
 } from "@/lib/studio/edge-functions-utils";
 
@@ -24,8 +25,16 @@ const ROW =
  * functions; Secrets opens secret management; each function opens its tab.
  */
 export function EdgeFunctionsPanel({ studio }: { studio: any }) {
+  const connectionType = studio.connection?.connectionType ?? studio.dbType;
+  const connectionString = studio.connection?.connectionString;
+  if (isNeonManagementConnection(connectionType, connectionString)) {
+    return <NeonResourcesPanel studio={studio} kind="functions" />;
+  }
+  return <SupabaseEdgeFunctionsPanel studio={studio} />;
+}
+
+function SupabaseEdgeFunctionsPanel({ studio }: { studio: any }) {
   const [functions, setFunctions] = useState<EdgeFunction[]>([]);
-  const [access, setAccess] = useState<EdgeAccess | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const connectionType: string | undefined =
@@ -40,12 +49,10 @@ export function EdgeFunctionsPanel({ studio }: { studio: any }) {
       await resolveEdgeAccess(connectionType, connectionString);
     if (!resolved) {
       setFunctions([]);
-      setAccess(null);
       setLoadError(accessError ?? null);
       setLoading(false);
       return;
     }
-    setAccess(resolved);
     const { functions: list, error } = await listEdgeFunctions(resolved);
     setFunctions(list);
     setLoadError(error ?? null);

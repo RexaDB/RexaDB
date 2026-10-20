@@ -20,11 +20,14 @@ const SESSIONS_QUERY = `
   LIMIT 200;
 `;
 
-export function useAuthSessions(connectionString: string, enabled: boolean) {
+export function useAuthSessions(connectionString: string, enabled: boolean, neonAuth = false) {
+  const query = neonAuth
+    ? `SELECT id, "userId" AS user_id, "createdAt" AS created_at, "updatedAt" AS refreshed_at, "expiresAt" AS not_after, "ipAddress" AS ip, "userAgent" AS user_agent, NULL::text AS aal FROM neon_auth.session ORDER BY "createdAt" DESC LIMIT 200;`
+    : SESSIONS_QUERY;
   const { data: sessions, loading, error, refresh } = useAuthQuery<AuthSessionRow>(
     connectionString,
     enabled,
-    SESSIONS_QUERY,
+    query,
     "Failed to load sessions.",
   );
 

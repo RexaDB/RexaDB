@@ -51,6 +51,7 @@ import {
 interface AuthUsersViewProps {
   connectionString: string;
   enabled: boolean;
+  neonAuth?: boolean;
 }
 
 interface ColumnDef {
@@ -95,8 +96,8 @@ function isSearchInvalid(search: string, filterColumn: SpecificFilterColumn): bo
   return !PHONE_NUMBER_LEFT_PREFIX_REGEX.test(search);
 }
 
-export function AuthUsersView({ connectionString, enabled }: AuthUsersViewProps) {
-  const { users, loading, error, refresh } = useAuthUsers(connectionString, enabled);
+export function AuthUsersView({ connectionString, enabled, neonAuth = false }: AuthUsersViewProps) {
+  const { users, loading, error, refresh } = useAuthUsers(connectionString, enabled, neonAuth);
   const [filterColumn, setFilterColumn] = useState<SpecificFilterColumn>("email");
   const [search, setSearch] = useState("");
   const [sortConfig, setSortConfig] = useState<{
@@ -300,7 +301,7 @@ export function AuthUsersView({ connectionString, enabled }: AuthUsersViewProps)
               <TooltipContent>Refresh</TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <AuthAddUserDropdown connectionString={connectionString} onUsersChanged={refresh} />
+          {!neonAuth && <AuthAddUserDropdown connectionString={connectionString} onUsersChanged={refresh} />}
         </div>
       </div>
       <div className="flex-1 min-h-0">
@@ -332,13 +333,13 @@ export function AuthUsersView({ connectionString, enabled }: AuthUsersViewProps)
             loading={false}
             error={null}
             search=""
-            selectedTable="auth.users"
-            selectedSchema="auth"
+            selectedTable={neonAuth ? "neon_auth.user" : "auth.users"}
+            selectedSchema={neonAuth ? "neon_auth" : "auth"}
             idKey="UID"
-            selectedRows={selectedRows}
-            setSelectedRows={setSelectedRows}
-            toggleAllSelection={toggleAllSelection}
-            toggleRowSelection={toggleRowSelection}
+            selectedRows={neonAuth ? new Set<number>() : selectedRows}
+            setSelectedRows={neonAuth ? () => {} : setSelectedRows}
+            toggleAllSelection={neonAuth ? () => {} : toggleAllSelection}
+            toggleRowSelection={neonAuth ? () => {} : toggleRowSelection}
           />
         )}
       </div>

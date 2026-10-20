@@ -193,11 +193,14 @@ function mapUserRow(row: any): AuthUserRow {
   } satisfies AuthUserRow;
 }
 
-export function useAuthUsers(connectionString: string, enabled: boolean) {
+export function useAuthUsers(connectionString: string, enabled: boolean, neonAuth = false) {
+  const query = neonAuth
+    ? `SELECT id, email, NULL::text AS phone, "createdAt" AS created_at, NULL::timestamptz AS last_sign_in_at, CASE WHEN "emailVerified" THEN "createdAt" ELSE NULL END AS confirmed_at, NULL::timestamptz AS email_confirmed_at, NULL::timestamptz AS phone_confirmed_at, false AS is_anonymous, jsonb_build_object('name', name) AS raw_user_meta_data, 'email' AS providers, 'email' AS provider_type, '[]'::jsonb AS all_identity_data FROM neon_auth."user" ORDER BY "createdAt" DESC LIMIT 200;`
+    : USERS_QUERY;
   const { data: users, loading, error, refresh } = useAuthQuery<AuthUserRow>(
     connectionString,
     enabled,
-    USERS_QUERY,
+    query,
     "Failed to load users.",
     mapUserRow,
   );

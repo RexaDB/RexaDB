@@ -360,7 +360,7 @@ export function StudioShellSidebar({
       id: "auth",
       label: "Authentication",
       Icon: Shield,
-      show: Boolean(studio.schemas?.includes?.("auth")),
+      show: Boolean(studio.schemas?.includes?.("auth") || studio.schemas?.includes?.("neon_auth")),
     },
     {
       id: "payments",

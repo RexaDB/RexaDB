@@ -8,11 +8,12 @@ import { useAuthSessions } from "@/hooks/use-auth-sessions";
 interface AuthSessionsViewProps {
   connectionString: string;
   enabled: boolean;
+  neonAuth?: boolean;
 }
 
-export function AuthSessionsView({ connectionString, enabled }: AuthSessionsViewProps) {
+export function AuthSessionsView({ connectionString, enabled, neonAuth = false }: AuthSessionsViewProps) {
   const [search, setSearch] = useState("");
-  const { sessions, loading, error, refresh } = useAuthSessions(connectionString, enabled);
+  const { sessions, loading, error, refresh } = useAuthSessions(connectionString, enabled, neonAuth);
   const columns = [
     { name: "id", type: "uuid", isPrimaryKey: true },
     { name: "user_id", type: "uuid" },
@@ -32,7 +33,7 @@ export function AuthSessionsView({ connectionString, enabled }: AuthSessionsView
     <div className="flex flex-col min-h-0 h-full">
       <AuthSectionHeader
         title="Sessions"
-        description="Track active Supabase auth sessions and metadata."
+        description={neonAuth ? "View Managed Auth sessions on this branch." : "Track active Supabase auth sessions and metadata."}
         search={search}
         onSearchChange={setSearch}
         onRefresh={refresh}
@@ -47,8 +48,8 @@ export function AuthSessionsView({ connectionString, enabled }: AuthSessionsView
           loading={loading}
           error={error}
           search={search}
-          selectedTable="auth.sessions"
-          selectedSchema="auth"
+          selectedTable={neonAuth ? "neon_auth.session" : "auth.sessions"}
+          selectedSchema={neonAuth ? "neon_auth" : "auth"}
         />
       </div>
     </div>

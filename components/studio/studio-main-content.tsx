@@ -35,6 +35,8 @@ import { SpacetimeDbReducerPanel } from "./spacetimedb/reducer-panel";
 import { SpacetimeDbLogViewer } from "./spacetimedb/log-viewer";
 import { SpacetimeDbSchemaViewer } from "./spacetimedb/schema-viewer";
 import { AuthUsersView } from "./auth/auth-users-view";
+import { NeonResourcesView } from "./neon/neon-resources-view";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { AuthSessionsView } from "./auth/auth-sessions-view";
 import { PaymentsPlansView } from "./payments/views/plans-view";
 import { BrowserTab } from "@/components/browser/browser-tab";
@@ -446,8 +448,15 @@ export function StudioMainContent({
   const effectiveGlobalSearchScope: "page" | "table" = supportsWholeTableSearch
     ? globalSearchScope
     : "page";
-  const hasAuthSchema = schemas.includes("auth");
-  const authEnabled = hasAuthSchema && (studio.dbType === "postgres" || studio.dbType === "supabase-mgmt");
+  const hasNeonAuthSchema = schemas.includes("neon_auth");
+  const isNeonConnection = studio.connection?.connectionType === "neon" || studio.dbType === "neon";
+  const neonAuth = isNeonConnection && hasNeonAuthSchema;
+  const neonManagement = isNeonManagementConnection(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.connection?.connectionString,
+  );
+  const hasAuthSchema = schemas.includes("auth") || hasNeonAuthSchema;
+  const authEnabled = hasAuthSchema && (studio.dbType === "postgres" || studio.dbType === "supabase-mgmt" || neonAuth);
   const dataApiInstalled =
     (studio.dbType === "postgres" || studio.dbType === "supabase-mgmt") &&
     (extensions || []).some(
@@ -1726,6 +1735,7 @@ export function StudioMainContent({
                   <AuthSessionsView
                     connectionString={currentConnectionString}
                     enabled={authEnabled}
+                    neonAuth={neonAuth}
                   />
                 ) : tab?.type === "auth-providers" ? (
                   <AuthProvidersView
@@ -1736,6 +1746,7 @@ export function StudioMainContent({
                   <AuthUsersView
                     connectionString={currentConnectionString}
                     enabled={authEnabled}
+                    neonAuth={neonAuth}
                   />
                 )
               ) : paneViewMode === "payments" ? (
@@ -1753,7 +1764,9 @@ export function StudioMainContent({
                   <PaymentsPlansView studio={studio} />
                 )
               ) : paneViewMode === "storage" ? (
-                tab?.type === "storage-settings" ? (
+                neonManagement ? (
+                  <NeonResourcesView studio={studio} kind="buckets" />
+                ) : tab?.type === "storage-settings" ? (
                   <StorageSettingsView studio={studio} />
                 ) : tab?.type === "storage-policies" ? (
                   <StoragePoliciesView studio={studio} />
@@ -1766,7 +1779,9 @@ export function StudioMainContent({
                   <StorageFilesView studio={studio} />
                 )
               ) : paneViewMode === "edge-functions" ? (
-                tab?.type === "edge-secrets" ? (
+                neonManagement ? (
+                  <NeonResourcesView studio={studio} kind="functions" />
+                ) : tab?.type === "edge-secrets" ? (
                   <EdgeSecretsView studio={studio} />
                 ) : tab?.type === "edge-function" ? (
                   <EdgeFunctionView
