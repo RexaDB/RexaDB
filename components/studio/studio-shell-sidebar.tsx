@@ -92,6 +92,7 @@ import { ErdsPanel } from "./erd/erds-panel";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { shouldShowStorage } from "@/lib/studio/storage-utils";
 import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
+import { isNeonDatabaseConnection } from "@/lib/studio/neon-management";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
 import { HardDrive } from "@/lib/icon-theme/lucide-react";
 import { EdgeFunctionsIcon } from "@/lib/icon-theme/lucide-react";
@@ -363,8 +364,11 @@ export function StudioShellSidebar({
       show: Boolean(
         studio.schemas?.includes?.("auth") ||
         studio.schemas?.includes?.("neon_auth") ||
-        studio.connection?.connectionType === "neon" ||
-        studio.dbType === "neon",
+        isNeonDatabaseConnection(
+          studio.connection?.connectionType ?? studio.dbType,
+          studio.currentConnectionString || studio.connection?.connectionString,
+          studio.schemas,
+        ),
       ),
     },
     {
@@ -2359,7 +2363,11 @@ function DatabasePanel({ studio }: { studio: any }) {
 }
 
 function AuthPanel({ studio }: { studio: any }) {
-  const isNeon = studio.connection?.connectionType === "neon" || studio.dbType === "neon" || studio.schemas?.includes?.("neon_auth");
+  const isNeon = isNeonDatabaseConnection(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.currentConnectionString || studio.connection?.connectionString,
+    studio.schemas,
+  );
   const items: Array<{ label: string; fn?: () => void }> = [
     { label: "Users", fn: studio.openAuthUsersTab },
     { label: "Sessions", fn: studio.openAuthSessionsTab },

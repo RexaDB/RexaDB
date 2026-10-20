@@ -35,7 +35,7 @@ import { SpacetimeDbReducerPanel } from "./spacetimedb/reducer-panel";
 import { SpacetimeDbLogViewer } from "./spacetimedb/log-viewer";
 import { SpacetimeDbSchemaViewer } from "./spacetimedb/schema-viewer";
 import { AuthUsersView } from "./auth/auth-users-view";
-import { isNeonManagementConnection } from "@/lib/studio/neon-management";
+import { isNeonDatabaseConnection, isNeonManagementConnection } from "@/lib/studio/neon-management";
 import { AuthSessionsView } from "./auth/auth-sessions-view";
 import { PaymentsPlansView } from "./payments/views/plans-view";
 import { BrowserTab } from "@/components/browser/browser-tab";
@@ -448,7 +448,11 @@ export function StudioMainContent({
     ? globalSearchScope
     : "page";
   const hasNeonAuthSchema = schemas.includes("neon_auth");
-  const isNeonConnection = studio.connection?.connectionType === "neon" || studio.dbType === "neon";
+  const isNeonConnection = isNeonDatabaseConnection(
+    studio.connection?.connectionType ?? studio.dbType,
+    studio.currentConnectionString || studio.connection?.connectionString,
+    schemas,
+  );
   const neonAuth = isNeonConnection;
   const neonManagement = isNeonManagementConnection(
     studio.connection?.connectionType ?? studio.dbType,
