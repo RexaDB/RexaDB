@@ -21,19 +21,24 @@ import {
   listOrgs,
   listProjects,
   listRoles,
+  listFunctions,
+  listBuckets,
+  createBucket,
   profileList,
   profileRemove,
   updateProfileMeta,
   writeCredentials,
   type NeonBranch,
+  type NeonBucket,
   type NeonDatabase,
+  type NeonFunction,
   type NeonOrg,
   type NeonProject,
   type NeonRole,
 } from "@/lib/neon-oauth/api";
 import { toNeonCliError, type NeonCliError } from "./effect-errors";
 
-export type { NeonBranch, NeonDatabase, NeonOrg, NeonProject, NeonRole };
+export type { NeonBranch, NeonBucket, NeonDatabase, NeonFunction, NeonOrg, NeonProject, NeonRole };
 export type { NeonCliError } from "./effect-errors";
 
 function fromNeonPromise<A>(
@@ -206,6 +211,29 @@ export async function neonConnectionString(
     neonConnectionStringEffect(profile, projectId, branchId, database, role),
   );
 }
+
+export const neonFunctionsListEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Effect.Effect<NeonFunction[], NeonCliError> =>
+  fromNeonPromise(() => listFunctions(profile, projectId, branchId));
+
+export const neonBucketsListEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Effect.Effect<NeonBucket[], NeonCliError> =>
+  fromNeonPromise(() => listBuckets(profile, projectId, branchId));
+
+export const neonBucketCreateEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+  name: string,
+  accessLevel: "private" | "public_read",
+): Effect.Effect<void, NeonCliError> =>
+  fromNeonPromise(() => createBucket(profile, projectId, branchId, name, accessLevel));
 
 export interface NeonProfile {
   name: string;

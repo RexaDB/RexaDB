@@ -40,6 +40,21 @@ export interface NeonBranch {
   created_at?: string;
 }
 
+export interface NeonFunction {
+  slug: string;
+  name?: string;
+  status?: string;
+  invocation_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NeonBucket {
+  name: string;
+  access_level?: "private" | "public_read";
+  created_at?: string;
+}
+
 export interface NeonDatabase {
   name: string;
   owner_name?: string;
@@ -69,6 +84,28 @@ export function listDatabases(profile: string, projectId: string, branchId: stri
 
 export function listRoles(profile: string, projectId: string, branchId: string): Promise<NeonRole[]> {
   return post<NeonRole[]>("/roles", { profile, projectId, branchId });
+}
+
+export function listFunctions(profile: string, projectId: string, branchId: string): Promise<NeonFunction[]> {
+  return post<NeonFunction[]>("/functions", { profile, projectId, branchId });
+}
+
+export function listBuckets(profile: string, projectId: string, branchId: string): Promise<NeonBucket[]> {
+  return post<NeonBucket[]>("/buckets", { profile, projectId, branchId });
+}
+
+export function listBucketObjects(profile: string, projectId: string, branchId: string, database: string, role: string, bucket: string): Promise<string[]> {
+  return post<string[]>("/buckets/objects", { profile, projectId, branchId, database, role, bucket });
+}
+
+export function createBucket(
+  profile: string,
+  projectId: string,
+  branchId: string,
+  name: string,
+  accessLevel: "private" | "public_read",
+): Promise<void> {
+  return post<void>("/buckets/create", { profile, projectId, branchId, name, accessLevel });
 }
 
 export function removeProfile(profile: string): Promise<void> {

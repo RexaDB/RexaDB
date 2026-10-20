@@ -649,6 +649,53 @@ app.post(
   ),
 );
 app.post(
+  "/api/neon-cli/functions",
+  effectJsonHandler((req) =>
+    neonCliRunner.neonFunctionsListEffect(
+      String(req.body?.profile ?? ""),
+      String(req.body?.projectId ?? ""),
+      String(req.body?.branchId ?? ""),
+    ),
+  ),
+);
+app.post(
+  "/api/neon-cli/buckets",
+  effectJsonHandler((req) =>
+    neonCliRunner.neonBucketsListEffect(
+      String(req.body?.profile ?? ""),
+      String(req.body?.projectId ?? ""),
+      String(req.body?.branchId ?? ""),
+    ),
+  ),
+);
+app.post("/api/neon-cli/buckets/objects", async (req, res) => {
+  const { profile, projectId, branchId, database, role, bucket } = req.body ?? {};
+  if (![profile, projectId, branchId, database, role].every((v) => typeof v === "string" && v.length > 0 && v.length <= 200) || typeof bucket !== "string" || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) {
+    res.status(400).json({ success: false, error: "Invalid Neon storage request." });
+    return;
+  }
+  const { buildNeonCliConnectionString } = await import("../lib/neon-cli/pointer");
+  const { listNeonObjects } = await import("../lib/transfer/neon-storage");
+  const pointer = buildNeonCliConnectionString({ profile, projectId, branchId, database, role });
+  const result = await listNeonObjects(pointer, bucket);
+  if ("error" in result) res.status(400).json({ success: false, error: result.error });
+  else res.json({ success: true, data: result.keys });
+});
+
+app.post(
+  "/api/neon-cli/buckets/create",
+  effectJsonHandler((req) =>
+    neonCliRunner.neonBucketCreateEffect(
+      String(req.body?.profile ?? ""),
+      String(req.body?.projectId ?? ""),
+      String(req.body?.branchId ?? ""),
+      String(req.body?.name ?? "").trim(),
+      req.body?.accessLevel === "public_read" ? "public_read" : "private",
+    ),
+  ),
+);
+
+app.post(
   "/api/neon-cli/remove-profile",
   // neonProfileRemove already returns `{ success: true }`. effectJsonHandler
   // would pass that through and drop the outer `data` field — wrap explicitly.

@@ -18,6 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { NeonResourcesPanel } from "@/components/studio/neon/neon-resources-panel";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 
 const ROW =
   "flex h-8 w-full select-none items-center gap-2 rounded-lg px-1 text-left text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground";
@@ -27,6 +29,15 @@ const ROW =
  * Files lists buckets; Settings / Policies open their management tabs.
  */
 export function StoragePanel({ studio }: { studio: any }) {
+  const connectionType = studio.connection?.connectionType ?? studio.dbType;
+  const connectionString = studio.connection?.connectionString;
+  if (isNeonManagementConnection(connectionType, connectionString)) {
+    return <NeonResourcesPanel studio={studio} kind="buckets" />;
+  }
+  return <SupabaseStoragePanel studio={studio} />;
+}
+
+function SupabaseStoragePanel({ studio }: { studio: any }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
