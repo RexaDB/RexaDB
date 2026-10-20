@@ -5,10 +5,10 @@ import { runQuery } from "@/lib/api/actions-client";
 import { fetchStorageBuckets } from "@/lib/studio/storage-utils";
 import { createBucket } from "@/lib/neon-cli/client";
 import { getNeonManagementPointer } from "@/lib/studio/neon-management";
+import { validateNeonBucketName } from "@/lib/studio/neon-bucket-validation";
 import type { StorageBucket } from "@/lib/studio/storage-utils";
 
 export const BUCKET_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/;
-
 export function validateBucketName(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return "Bucket name is required.";
@@ -32,9 +32,11 @@ export async function createStorageBucket(
   name: string,
   isPublic: boolean,
 ): Promise<void> {
-  const validationError = validateBucketName(name);
-  if (validationError) throw new Error(validationError);
   const neon = getNeonManagementPointer(connectionString);
+  const validationError = neon
+    ? validateNeonBucketName(name)
+    : validateBucketName(name);
+  if (validationError) throw new Error(validationError);
   if (neon) {
     await createBucket(
       neon.profile, neon.projectId, neon.branchId, name,

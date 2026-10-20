@@ -180,7 +180,7 @@ export function StorageBucketView({
   }, [connectionString, storageDataConnection, bucketName]);
 
   const loadPolicyCount = useCallback(async () => {
-    if (!connectionString) return;
+    if (!connectionString || neonStorage) return;
     try {
       const res: any = await runQuery(
         connectionString,
@@ -197,7 +197,7 @@ export function StorageBucketView({
     } catch {
       // count is decorative — hide it on failure
     }
-  }, [connectionString]);
+  }, [connectionString, neonStorage]);
 
   useEffect(() => {
     void load();
@@ -762,21 +762,24 @@ export function StorageBucketView({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => studio.openStoragePoliciesTab?.()}
-          >
-            <Shield className="mr-1.5 size-3.5" />
-            Policies
-            {policyCount != null && (
-              <span className="ml-1.5 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {policyCount}
-              </span>
-            )}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          {!neonStorage && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => studio.openStoragePoliciesTab?.()}
+            >
+              <Shield className="mr-1.5 size-3.5" />
+              Policies
+              {policyCount != null && (
+                <span className="ml-1.5 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  {policyCount}
+                </span>
+              )}
+            </Button>
+          )}
+          {!neonStorage && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Pencil className="mr-1.5 size-3.5" />
                 Edit bucket
@@ -799,8 +802,9 @@ export function StorageBucketView({
                 <Trash2 className="mr-1.5 size-3.5" />
                 {deleting ? "Deleting…" : "Delete bucket…"}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -828,14 +832,18 @@ export function StorageBucketView({
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </button>
-          <Button variant="outline" size="sm" onClick={() => setFolderOpen(true)}>
-            <FolderPlus className="mr-1.5 size-3.5" />
-            Create folder
-          </Button>
-          <Button size="sm" onClick={handleUploadClick}>
-            <Upload className="mr-1.5 size-3.5" />
-            Upload files
-          </Button>
+          {!neonStorage && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setFolderOpen(true)}>
+                <FolderPlus className="mr-1.5 size-3.5" />
+                Create folder
+              </Button>
+              <Button size="sm" onClick={handleUploadClick}>
+                <Upload className="mr-1.5 size-3.5" />
+                Upload files
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -880,10 +888,12 @@ export function StorageBucketView({
                     <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                       {entry.name}
                     </span>
-                    <FolderActionsMenu
-                      folderPath={folderPath}
-                      folderName={entry.name}
-                    />
+                    {!neonStorage && (
+                      <FolderActionsMenu
+                        folderPath={folderPath}
+                        folderName={entry.name}
+                      />
+                    )}
                   </div>
                 );
               })
@@ -912,9 +922,11 @@ export function StorageBucketView({
                   <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
                     {search
                       ? "Try a different search term."
-                      : "This bucket is empty. Upload a file or create a folder to get started."}
+                      : neonStorage
+                        ? "This bucket is empty. Add objects in Neon Object Storage, then refresh."
+                        : "This bucket is empty. Upload a file or create a folder to get started."}
                   </p>
-                  {!search && (
+                  {!search && !neonStorage && (
                     <div className="mt-4 flex justify-center gap-2">
                       <Button
                         size="sm"
@@ -952,10 +964,12 @@ export function StorageBucketView({
                       <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                         {entry.name}
                       </span>
-                      <FolderActionsMenu
-                        folderPath={fullPath}
-                        folderName={entry.name}
-                      />
+                      {!neonStorage && (
+                        <FolderActionsMenu
+                          folderPath={fullPath}
+                          folderName={entry.name}
+                        />
+                      )}
                     </div>
                   );
                 }
@@ -987,8 +1001,9 @@ export function StorageBucketView({
                     <span className="min-w-0 flex-1 truncate font-medium text-foreground">
                       {entry.name}
                     </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                    {!neonStorage && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
                         <button
                           type="button"
                           aria-label="file actions"
@@ -1040,8 +1055,9 @@ export function StorageBucketView({
                           <Trash2 className="size-3.5" />
                           Delete
                         </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 );
               })
@@ -1121,33 +1137,37 @@ export function StorageBucketView({
 
             </div>
               <SheetFooter>
-                <div className="mr-auto flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownloadFile(selectedFile.fullPath)}
-                  >
-                    <Download className="mr-1.5 size-3.5" />
-                    Download
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleGetUrl(selectedFile.fullPath)}
-                  >
-                    <Copy className="mr-1.5 size-3.5" />
-                    Get URL
-                  </Button>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => void handleDeleteFile()}
-                >
-                  <Trash2 className="mr-1.5 size-3.5" />
-                  Delete file
-                </Button>
+                {!neonStorage && (
+                  <>
+                    <div className="mr-auto flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownloadFile(selectedFile.fullPath)}
+                      >
+                        <Download className="mr-1.5 size-3.5" />
+                        Download
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleGetUrl(selectedFile.fullPath)}
+                      >
+                        <Copy className="mr-1.5 size-3.5" />
+                        Get URL
+                      </Button>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => void handleDeleteFile()}
+                    >
+                      <Trash2 className="mr-1.5 size-3.5" />
+                      Delete file
+                    </Button>
+                  </>
+                )}
               </SheetFooter>
               </div>
             ) : (
