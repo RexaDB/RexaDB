@@ -1,3 +1,5 @@
+import { isDesktopRuntime } from "@/lib/desktop";
+
 // API base URL for the sidecar server (used in static export mode)
 // Exported as let so Tauri runtime can update it after port discovery
 export let API_BASE = `http://127.0.0.1:3867`;
@@ -67,19 +69,20 @@ export async function isSidecarReady(
   opts: { timeoutMs?: number } = {},
 ): Promise<boolean> {
   const timeoutMs = opts.timeoutMs ?? 5000;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
+  if (isDesktopRuntime()) {
     try {
+      const { invoke } = await import("@tauri-apps/api/core");
       const ok = await invoke<boolean>("is_sidecar_ready");
       if (ok) {
         await initApiBase().catch(() => undefined);
-        return true;
       }
+      // In Tauri, Rust only marks its spawned child ready after it reports
+      // listening. Do not let an HTTP health check bypass startup migrations
+      // or accept a different process that happens to own the default port.
+      return ok;
     } catch {
-      // Tauri import worked but the command failed — fall through to HTTP probe.
+      return false;
     }
-  } catch {
-    // Not running inside Tauri — fall through to HTTP probe.
   }
   return probeSidecarHttp(timeoutMs);
 }

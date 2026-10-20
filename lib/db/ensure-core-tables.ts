@@ -408,20 +408,17 @@ export async function ensureConnectionExists(connectionId: number) {
 
   await ensureCoreTables();
   const existing = await db
-    .select()
+    .select({ id: connections.id, connectionString: connections.connectionString })
     .from(connections)
     .where(eq(connections.id, connectionId))
     .limit(1);
-  if (existing.length > 0) return;
+  const connection = existing[0];
+  if (connection) {
+    if (/^dev:\/\/local(?:\/|$)/i.test(connection.connectionString || "")) {
+      throw new Error(`Connection ${connectionId} is an internal placeholder and cannot be opened.`);
+    }
+    return;
+  }
 
-  await db
-    .insert(connections)
-    .values({
-      id: connectionId,
-      name: `Dev Connection ${connectionId}`,
-      connectionString: `dev://local/${connectionId}`,
-      createdAt: new Date(),
-      sortOrder: Date.now(),
-    })
-    .onConflictDoNothing();
+  throw new Error(`Connection ${connectionId} does not exist.`);
 }

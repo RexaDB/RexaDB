@@ -29,11 +29,6 @@ const tauriConfigPath = join(process.cwd(), 'src-tauri', 'tauri.conf.json');
 const originalConfig = readFileSync(tauriConfigPath, 'utf-8');
 const config = JSON.parse(originalConfig);
 
-// Start server dev server
-const serverProcess = spawn('bun', ['run', 'server:dev'], {
-  stdio: 'inherit'
-});
-
 // Start Next.js dev server
 const nextProcess = spawn('bun', ['run', 'dev'], {
   stdio: ['inherit', 'pipe', 'inherit']
@@ -59,14 +54,15 @@ config.build.devUrl = `http://localhost:${devPort}`;
 writeFileSync(tauriConfigPath, JSON.stringify(config, null, 2));
 
 // Start Tauri
+const bunExecutable = process.execPath;
 const tauriProcess = spawn('tauri', ['dev'], {
-  stdio: 'inherit'
+  stdio: 'inherit',
+  env: { ...process.env, REXADB_BUN_EXECUTABLE: bunExecutable },
 });
 
 // Handle cleanup
 const cleanup = () => {
   nextProcess.kill();
-  serverProcess.kill();
   tauriProcess.kill();
   // Restore original config
   writeFileSync(tauriConfigPath, originalConfig);
@@ -78,6 +74,5 @@ tauriProcess.on('close', (code) => {
   // Restore original config
   writeFileSync(tauriConfigPath, originalConfig);
   nextProcess.kill();
-  serverProcess.kill();
   process.exit(code);
 });

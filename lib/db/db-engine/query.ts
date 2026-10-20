@@ -1,4 +1,5 @@
 import { detectConnectionDbType } from "../connection-type";
+import { assertUsableDatabaseConnectionString } from "../connection-string-guard";
 import type { QueryExecutionContext } from "@/lib/studio/table-permissions";
 
 export async function executeDbQuery(
@@ -7,6 +8,7 @@ export async function executeDbQuery(
   params: any[] = [],
   options: { queryId?: string; connectionType?: string; executionContext?: QueryExecutionContext | null } = {}
 ): Promise<any> {
+  assertUsableDatabaseConnectionString(connectionString);
   const dbType = detectConnectionDbType(connectionString, options.connectionType);
   if (dbType === "supabase-mgmt") return (await import("../supabase-mgmt-client")).executeSupabaseMgmtQuery(connectionString, query, params);
   if (dbType === "federated") return (await import("../federated")).executeFederatedQuery(connectionString, query, params);

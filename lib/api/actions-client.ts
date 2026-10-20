@@ -12,7 +12,8 @@ import type { AiProviderModel } from "@/lib/ai/provider-model-types";
 import { emitGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 import { API_BASE } from "@/lib/api-base";
 import { isDesktopRuntime } from "@/lib/desktop";
-import { migrateAndHydrateConnections } from "@/lib/credentials/connection-migration";
+import { hydrateConnectionsReadOnly, migrateAndHydrateConnections } from "@/lib/credentials/connection-migration";
+import { rustListAppConnections } from "@/lib/db/rust-app-database";
 
 type ApiResult<T> = { success: boolean; data?: T; error?: string } & Record<
   string,
@@ -150,6 +151,33 @@ export async function getConnectionsResult(
   const retries = opts.retries ?? 5;
   const retryDelayMs = opts.retryDelayMs ?? 700;
   const timeoutMs = opts.timeoutMs ?? 10_000;
+  if (isDesktopRuntime()) {
+    // The Rust read is intentionally read-only, so schema upgrades must have
+    // completed in the sidecar before it queries columns added by migrations.
+    const { waitForSidecarReady } = await import("@/lib/api-base");
+    const ready = await waitForSidecarReady({ timeoutMs: 30_000, pollMs: 500 });
+    if (!ready) {
+      return { ok: false, data: [], error: "The local database service is still starting." };
+    }
+  }
+  const rustConnections = await rustListAppConnections();
+  if (rustConnections.available && !rustConnections.success) {
+    return { ok: false, data: [], error: rustConnections.error };
+  }
+  if (rustConnections.available && rustConnections.success) {
+    try {
+      return {
+        ok: true,
+        data: await hydrateConnectionsReadOnly(rustConnections.connections),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        data: [],
+        error: error instanceof Error ? error.message : "Request failed.",
+      };
+    }
+  }
   // Ensure the dynamic Tauri sidecar port has been discovered at least once.
   try {
     const mod = await import("@/lib/api-base");

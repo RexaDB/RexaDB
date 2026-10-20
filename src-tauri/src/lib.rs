@@ -1,4 +1,5 @@
 mod dictionary;
+mod app_database;
 mod rexadb_studio;
 mod spacetimedb;
 mod cli_shim;
@@ -957,10 +958,28 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
     let data_dir = get_app_data_dir(app);
     let jdbc_drivers_dir = get_jdbc_drivers_dir(app);
     let resource_dir = app.path().resource_dir().ok();
-    let mut sidecar_command = app.shell().sidecar("rexadb-server")
-        .expect("failed to create sidecar command")
+    {
+        let state = app.state::<SidecarState>();
+        *state.port.lock().unwrap() = 3867;
+        *state.ready.lock().unwrap() = false;
+    }
+    let sidecar_command = if cfg!(debug_assertions) {
+        // In dev, run the TypeScript entrypoint with the same Bun runtime used
+        // by `bun run tauri:dev`. This avoids launching a stale or locally
+        // blocked `--compile` executable while iterating on the app.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_dir = manifest_dir.parent().unwrap_or(&manifest_dir);
+        let bun = std::env::var("REXADB_BUN_EXECUTABLE").unwrap_or_else(|_| "bun".to_string());
+        app.shell().command(bun)
+            .args(["run", repo_dir.join("server/index.ts").to_string_lossy().as_ref()])
+    } else {
+        app.shell().sidecar("rexadb-server")
+            .expect("failed to create sidecar command")
+    }
+        .env("REXADB_SERVER_PORT", "3867")
         .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref())
         .env("REXADB_JDBC_DRIVERS_DIR", jdbc_drivers_dir.to_string_lossy().as_ref());
+    let mut sidecar_command = sidecar_command;
     if let Some(rd) = &resource_dir {
         sidecar_command = sidecar_command.env("RESOURCEDIR", rd.to_string_lossy().as_ref());
     }
@@ -977,7 +996,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
         let mut buf = String::new();
         loop {
             match rx.recv().await {
-                Some(CommandEvent::Stderr(data)) => {
+                Some(CommandEvent::Stderr(data)) | Some(CommandEvent::Stdout(data)) => {
                     let text = String::from_utf8_lossy(&data);
                     buf.push_str(&text);
                     app_handle.state::<SidecarState>().log.lock().unwrap().push_str(&text);
@@ -990,6 +1009,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     }
                 }
                 Some(CommandEvent::Terminated(status)) => {
+                    rust_log(&format!("sidecar terminated: code={:?} signal={:?}", status.code, status.signal));
                     let state = app_handle.state::<SidecarState>();
                     *state.ready.lock().unwrap() = false;
                     *state.last_exit_code.lock().unwrap() = status.code;
@@ -1003,46 +1023,23 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     });
                     break;
                 }
+                Some(CommandEvent::Error(error)) => {
+                    rust_log(&format!("sidecar process error: {error}"));
+                    app_handle
+                        .state::<SidecarState>()
+                        .log
+                        .lock()
+                        .unwrap()
+                        .push_str(&format!("\n[sidecar] Process error: {error}\n"));
+                }
                 _ => {}
             }
         }
     });
 
-    // Fallback: health-check probe instead of blind ready=true
-    let app_handle2 = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        for attempt in 0..30 {
-            let state = app_handle2.state::<SidecarState>();
-            if *state.ready.lock().unwrap() {
-                return;
-            }
-            let port = *state.port.lock().unwrap();
-            let url = format!("http://127.0.0.1:{}/health", port);
-            drop(state);
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(2))
-                .build().unwrap();
-            match client.get(&url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    rust_log(&format!("sidecar fallback: confirmed alive at {}", url));
-                    let state = app_handle2.state::<SidecarState>();
-                    *state.ready.lock().unwrap() = true;
-                    state.log.lock().unwrap().push_str(
-                        &format!("\n[sidecar] confirmed alive via health-check (attempt {})\n", attempt + 1)
-                    );
-                    return;
-                }
-                _ => {
-                    rust_log(&format!("sidecar fallback: health check failed (attempt {}) on {}", attempt + 1, url));
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
-        let msg = "\n[sidecar] fallback: health check exhausted after 60s — sidecar never started\n";
-        rust_log("sidecar fallback: exhausted retries, sidecar never started");
-        app_handle2.state::<SidecarState>().log.lock().unwrap().push_str(msg);
-    });
+    // Readiness is set only when this child reports its bound port on stdout
+    // or stderr. A localhost health check could accidentally accept a separate
+    // server already using the default port and route requests to the wrong DB.
 }
 
 pub fn run() {
@@ -1166,6 +1163,7 @@ pub fn run() {
             dictionary::dictionary_set_column,
             dictionary::dictionary_set_decorator,
             dictionary::dictionary_delete_scope,
+            app_database::app_database_list_connections,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
