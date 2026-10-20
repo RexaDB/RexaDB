@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { RefreshCw } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,16 +17,32 @@ export function NeonResourcesView({ studio, kind }: { studio: any; kind: "bucket
   const [objects, setObjects] = useState<string[]>([]);
   const [objectsError, setObjectsError] = useState<string | null>(null);
   const [objectsLoading, setObjectsLoading] = useState(false);
+  const objectsRequest = useRef(0);
   const heading = kind === "buckets" ? "Object Storage" : "Neon Functions";
 
   async function toggleBucket(name: string) {
-    if (selectedBucket === name) return setSelectedBucket(null);
+    const requestId = ++objectsRequest.current;
+    if (selectedBucket === name) {
+      setSelectedBucket(null);
+      setObjects([]);
+      setObjectsError(null);
+      setObjectsLoading(false);
+      return;
+    }
     setSelectedBucket(name);
+    setObjects([]);
     setObjectsLoading(true);
     setObjectsError(null);
-    try { setObjects(await getObjects(name)); }
-    catch (e) { setObjectsError(e instanceof Error ? e.message : String(e)); }
-    finally { setObjectsLoading(false); }
+    try {
+      const result = await getObjects(name);
+      if (requestId === objectsRequest.current) setObjects(result);
+    } catch (e) {
+      if (requestId === objectsRequest.current) {
+        setObjectsError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      if (requestId === objectsRequest.current) setObjectsLoading(false);
+    }
   }
 
   async function handleCreate(name: string, access: "private" | "public_read") {

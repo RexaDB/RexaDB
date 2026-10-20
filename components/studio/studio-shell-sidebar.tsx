@@ -2354,10 +2354,11 @@ function DatabasePanel({ studio }: { studio: any }) {
 }
 
 function AuthPanel({ studio }: { studio: any }) {
+  const isNeon = studio.connection?.connectionType === "neon" || studio.dbType === "neon" || studio.schemas?.includes?.("neon_auth");
   const items: Array<{ label: string; fn?: () => void }> = [
     { label: "Users", fn: studio.openAuthUsersTab },
     { label: "Sessions", fn: studio.openAuthSessionsTab },
-    { label: "Providers", fn: studio.openAuthProvidersTab },
+    ...(!isNeon ? [{ label: "Providers", fn: studio.openAuthProvidersTab }] : []),
   ];
   return (
     <div className="flex flex-col gap-0.5 pt-1">

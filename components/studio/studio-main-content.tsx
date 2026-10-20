@@ -1738,7 +1738,9 @@ export function StudioMainContent({
                     neonAuth={neonAuth}
                   />
                 ) : tab?.type === "auth-providers" ? (
-                  <AuthProvidersView
+                  neonAuth ? (
+                    <div className="p-6 text-sm text-muted-foreground">Provider management is not available for Neon Managed Auth.</div>
+                  ) : <AuthProvidersView
                     connectionString={currentConnectionString}
                     enabled={authEnabled}
                   />
