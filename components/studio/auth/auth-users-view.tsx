@@ -318,7 +318,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
         </div>
       </div>
       )}
-      <div className="flex-1 min-h-0">
+      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 overflow-hidden rounded-t-lg border border-b-0 border-border bg-background md:mx-6" : ""}`}>
         {loading && users.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-studio-cell-muted" />
@@ -359,7 +359,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           />
         )}
       </div>
-      <div className="flex h-9 items-center justify-between border-t border-border bg-studio-bg px-6 text-xs text-muted-foreground">
+      <div className={`flex h-9 items-center justify-between px-6 text-xs text-muted-foreground ${neonAuth ? "mx-5 rounded-b-lg border-x border-b border-border bg-background md:mx-6" : "border-t border-border bg-studio-bg"}`}>
         {error ? <span className="text-destructive">Unable to refresh users</span> : loading ? <span>Refreshing users…</span> : <span>Showing {filteredUsers.length} of {users.length} users</span>}
         {neonAuth && users.length === 200 && <span>Showing the 200 most recent users</span>}
       </div>

@@ -18,7 +18,7 @@ interface NeonAuthUsersToolbarProps {
 
 export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusChange, onRefresh, loading }: NeonAuthUsersToolbarProps) {
   return (
-    <div className="flex items-center justify-between gap-3 bg-background px-5 pb-8 pt-5 md:px-6">
+    <div className="flex items-center justify-between gap-3 bg-background px-5 pb-4 pt-5 md:px-6">
       <div className="flex min-w-0 items-center gap-2">
         <div className="relative w-64 sm:w-[min(480px,45vw)]">
           <Search className="pointer-events-none absolute left-1.5 top-1/2 size-3.5 -translate-y-1/2 text-studio-cell-muted" />
