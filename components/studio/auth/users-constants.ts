@@ -6,6 +6,9 @@ export type UsersTableColumn = {
   resizable?: boolean;
 };
 
+/** Newest accounts the auth user queries load. Older ones need a query. */
+export const AUTH_USERS_LIMIT = 200;
+
 export const USERS_TABLE_COLUMNS: UsersTableColumn[] = [
   { id: "img", name: "", minWidth: 95, width: 95, resizable: false },
   { id: "id", name: "UID", width: 280 },

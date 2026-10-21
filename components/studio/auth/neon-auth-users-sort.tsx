@@ -17,7 +17,17 @@ const options: Array<{ label: string; sort: SortState }> = [
   { label: "Status · unverified first", sort: { key: "__confirmed", direction: "asc" } },
   { label: "Sign-in method · A to Z", sort: { key: "Providers", direction: "asc" } },
   { label: "Sign-in method · Z to A", sort: { key: "Providers", direction: "desc" } },
+  { label: "User ID · A to Z", sort: { key: "UID", direction: "asc" } },
+  { label: "User ID · Z to A", sort: { key: "UID", direction: "desc" } },
 ];
+
+const SORT_LABELS: Record<string, string> = {
+  "Display name": "User",
+  "__confirmed": "Status",
+  Providers: "Sign-in method",
+  UID: "User ID",
+  __created_at_raw: "Created",
+};
 
 interface NeonAuthUsersSortProps {
   sort: SortState | null;
@@ -25,7 +35,7 @@ interface NeonAuthUsersSortProps {
 }
 
 export function NeonAuthUsersSort({ sort, onSortChange }: NeonAuthUsersSortProps) {
-  const label = sort?.key === "Display name" ? "User" : sort?.key === "__confirmed" ? "Status" : sort?.key === "Providers" ? "Sign-in method" : "Created";
+  const label = sort ? SORT_LABELS[sort.key] ?? "Created" : "Created";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

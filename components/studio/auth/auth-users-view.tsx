@@ -39,7 +39,12 @@ import { runQuery } from "@/lib/api/actions-client";
 import { AuthDataGrid } from "./auth-data-grid";
 import { NeonAuthUsersTable } from "./neon-auth-users-table";
 import { NeonAuthUsersHeader } from "./neon-auth-users-header";
-import { NeonAuthUsersToolbar, type NeonUserStatusFilter } from "./neon-auth-users-toolbar";
+import { NeonAuthUsersStatus } from "./neon-auth-users-status";
+import { NeonAuthUsersToolbar } from "./neon-auth-users-toolbar";
+import {
+  neonUsersEmptyMessage,
+  type NeonUserStatusFilter,
+} from "./neon-auth-users-messages";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
 import { AuthAddUserDropdown } from "./auth-add-user-dropdown";
 import { useAuthUsers } from "@/hooks/use-auth-users";
@@ -50,6 +55,7 @@ import {
   SEARCH_PLACEHOLDERS,
   SpecificFilterColumn,
   UUIDV4_LEFT_PREFIX_REGEX,
+  AUTH_USERS_LIMIT,
 } from "./users-constants";
 
 interface AuthUsersViewProps {
@@ -143,7 +149,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
       !searchTerm || (value != null && String(value).toLowerCase().includes(searchTerm));
     return sortedUsers.filter((row) => {
       const searchMatches = neonAuth
-        ? matches(row.Email) || matches(row["Display name"])
+        ? matches(row.Email) || matches(row["Display name"]) || matches(row.UID)
         : filterColumn === "email" ? matches(row.Email)
           : filterColumn === "phone" ? matches(row.Phone)
             : filterColumn === "id" ? matches(row.UID)
@@ -153,6 +159,11 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
       return searchMatches && statusMatches;
     });
   }, [sortedUsers, searchTerm, filterColumn, neonAuth, neonStatus]);
+
+  const neonEmptyMessage = useMemo(
+    () => neonUsersEmptyMessage({ search, status: neonStatus }),
+    [search, neonStatus],
+  );
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) =>
@@ -330,22 +341,33 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
       )}
       <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 mb-3 md:mx-6" : ""}`}>
         {neonAuth ? (
-          <NeonAuthUsersTable
-            rows={filteredUsers}
-            loading={loading}
-            sort={neonTableSort}
-            onSortChange={setNeonTableSort}
-            emptyState={
-              error && users.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>
-              ) : (
-                <div className="py-8 text-center">
-                  <p className="text-sm font-medium text-foreground">{search.trim() ? "No users found" : "No users in your project"}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{search.trim() ? "There are currently no users based on the filters applied" : "There are currently no users who signed up to your project"}</p>
-                </div>
-              )
-            }
-          />
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1">
+              <NeonAuthUsersTable
+                rows={filteredUsers}
+                loading={loading}
+                sort={neonTableSort}
+                onSortChange={setNeonTableSort}
+                emptyState={
+                  error && users.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <p className="text-sm font-medium text-foreground">{neonEmptyMessage.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{neonEmptyMessage.description}</p>
+                    </div>
+                  )
+                }
+              />
+            </div>
+            <NeonAuthUsersStatus
+              error={error}
+              loading={loading}
+              filteredCount={filteredUsers.length}
+              totalCount={users.length}
+              limitReached={users.length >= AUTH_USERS_LIMIT}
+            />
+          </div>
         ) : loading && users.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-studio-cell-muted" />

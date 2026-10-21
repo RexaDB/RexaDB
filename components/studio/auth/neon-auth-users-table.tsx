@@ -4,16 +4,18 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { DataTable, type SortState, type TableColumn } from "@/components/data-table/components/data-table";
 import {
   NeonAuthUserCreated,
+  NeonAuthUserId,
   NeonAuthUserIdentity,
   NeonAuthUserStatus,
   type NeonAuthUser,
 } from "./neon-auth-user-row";
 
 const columns: TableColumn<NeonAuthUser>[] = [
-  { key: "Display name", header: "User", sortable: true, width: "1.5fr", cell: (user) => <NeonAuthUserIdentity user={user} /> },
-  { key: "__confirmed", header: "Status", sortable: true, width: "0.8fr", cell: (user) => <NeonAuthUserStatus user={user} />, sortValue: (user) => Number(user.__confirmed) },
-  { key: "Providers", header: "Sign-in method", sortable: true, width: "0.9fr", cell: (user) => user.Providers || "Email" },
+  { key: "Display name", header: "User", sortable: true, width: "1.4fr", cell: (user) => <NeonAuthUserIdentity user={user} /> },
+  { key: "__confirmed", header: "Status", sortable: true, width: "0.7fr", cell: (user) => <NeonAuthUserStatus user={user} />, sortValue: (user) => Number(user.__confirmed) },
+  { key: "Providers", header: "Sign-in method", sortable: true, width: "0.8fr", cell: (user) => user.Providers || "Email" },
   { key: "__created_at_raw", header: "Created", sortable: true, align: "right", width: "0.8fr", cell: (user) => <NeonAuthUserCreated user={user} />, sortValue: (user) => user.__created_at_raw ?? "" },
+  { key: "UID", header: "User ID", sortable: true, width: "1.1fr", cell: (user) => <NeonAuthUserId user={user} />, sortValue: (user) => user.UID },
 ];
 
 interface NeonAuthUsersTableProps {
