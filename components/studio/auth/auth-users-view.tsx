@@ -12,6 +12,7 @@ import {
   X,
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
+import type { SortState } from "@/components/data-table/components/data-table";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -36,6 +37,14 @@ import {
 import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { runQuery } from "@/lib/api/actions-client";
 import { AuthDataGrid } from "./auth-data-grid";
+import { NeonAuthUsersTable } from "./neon-auth-users-table";
+import { NeonAuthUsersHeader } from "./neon-auth-users-header";
+import { NeonAuthUsersStatus } from "./neon-auth-users-status";
+import { NeonAuthUsersToolbar } from "./neon-auth-users-toolbar";
+import {
+  neonUsersEmptyMessage,
+  type NeonUserStatusFilter,
+} from "./neon-auth-users-messages";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
 import { AuthAddUserDropdown } from "./auth-add-user-dropdown";
 import { useAuthUsers } from "@/hooks/use-auth-users";
@@ -46,6 +55,7 @@ import {
   SEARCH_PLACEHOLDERS,
   SpecificFilterColumn,
   UUIDV4_LEFT_PREFIX_REGEX,
+  AUTH_USERS_LIMIT,
 } from "./users-constants";
 
 interface AuthUsersViewProps {
@@ -100,6 +110,8 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const { users, loading, error, refresh } = useAuthUsers(connectionString, enabled, neonAuth);
   const [filterColumn, setFilterColumn] = useState<SpecificFilterColumn>("email");
   const [search, setSearch] = useState("");
+  const [neonStatus, setNeonStatus] = useState<NeonUserStatusFilter>("all");
+  const [neonTableSort, setNeonTableSort] = useState<SortState | null>({ key: "__created_at_raw", direction: "desc" });
   const [sortConfig, setSortConfig] = useState<{
     column: string;
     direction: "ASC" | "DESC";
@@ -133,22 +145,25 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const searchTerm = search.trim().toLowerCase();
   const searchInvalid = isSearchInvalid(search, filterColumn);
   const filteredUsers = useMemo(() => {
-    if (!searchTerm) return sortedUsers;
     const matches = (value: string | null | undefined) =>
-      value != null && String(value).toLowerCase().includes(searchTerm);
+      !searchTerm || (value != null && String(value).toLowerCase().includes(searchTerm));
     return sortedUsers.filter((row) => {
-      if (filterColumn === "email") return matches(row.Email);
-      if (filterColumn === "phone") return matches(row.Phone);
-      if (filterColumn === "id") return matches(row.UID);
-      if (filterColumn === "name") return matches(row["Display name"]);
-      return (
-        matches(row.Email) ||
-        matches(row.Phone) ||
-        matches(row.UID) ||
-        matches(row["Display name"])
-      );
+      const searchMatches = neonAuth
+        ? matches(row.Email) || matches(row["Display name"]) || matches(row.UID)
+        : filterColumn === "email" ? matches(row.Email)
+          : filterColumn === "phone" ? matches(row.Phone)
+            : filterColumn === "id" ? matches(row.UID)
+              : filterColumn === "name" ? matches(row["Display name"])
+                : matches(row.Email) || matches(row.Phone) || matches(row.UID) || matches(row["Display name"]);
+      const statusMatches = !neonAuth || neonStatus === "all" || row.__confirmed === (neonStatus === "verified");
+      return searchMatches && statusMatches;
     });
-  }, [sortedUsers, searchTerm, filterColumn]);
+  }, [sortedUsers, searchTerm, filterColumn, neonAuth, neonStatus]);
+
+  const neonEmptyMessage = useMemo(
+    () => neonUsersEmptyMessage({ search, status: neonStatus }),
+    [search, neonStatus],
+  );
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) =>
@@ -185,9 +200,26 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-full">
-      <div className="border-b border-studio-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
-        {selectedRows.size > 0 ? (
+    <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
+      {neonAuth ? (
+        <>
+          <NeonAuthUsersHeader />
+          <div className="px-5 pb-3 md:px-6">
+            <NeonAuthUsersToolbar
+            search={search}
+            onSearchChange={setSearch}
+            status={neonStatus}
+            onStatusChange={setNeonStatus}
+            onRefresh={refresh}
+            loading={loading}
+            sort={neonTableSort}
+            onSortChange={setNeonTableSort}
+            />
+          </div>
+        </>
+      ) : (
+      <div className="border-b border-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+        {selectedRows.size > 0 && !neonAuth ? (
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -205,12 +237,12 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <div
-              className={`flex h-[26px] items-stretch overflow-hidden rounded-md border bg-studio-header-bg ${searchInvalid ? "border-red-900" : "border-studio-border"}`}
+              className={`flex h-[26px] items-stretch overflow-hidden rounded-md border bg-studio-header-bg ${searchInvalid ? "border-destructive" : "border-border"}`}
             >
               <div className="flex items-center px-1.5">
                 <Search className="h-3.5 w-3.5 text-studio-cell-muted" />
               </div>
-              <div className="w-px bg-studio-border" />
+              <div className="w-px bg-border" />
               <Select value={filterColumn} onValueChange={(value) => setFilterColumn(value as SpecificFilterColumn)}>
                 <SelectTrigger
                   className={`h-[26px]! w-[130px] rounded-none border-0 bg-transparent! pt-0! pb-[2px]! text-xs ${filterColumn === "freeform" ? "text-warning" : ""}`}
@@ -239,7 +271,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
                   )}
                 </SelectContent>
               </Select>
-              <div className="w-px bg-studio-border" />
+              <div className="w-px bg-border" />
               <div className="relative">
                 <Input
                   value={search}
@@ -263,31 +295,33 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
               sortDirection={sortConfig.direction}
               onSortChange={(column, direction) => setSortConfig({ column, direction })}
             />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Columns2 className="h-3.5 w-3.5" />
-                  Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Columns</DropdownMenuLabel>
-                {TOGGLEABLE_COLUMNS.map((column) => (
-                  <DropdownMenuCheckboxItem
-                    key={column}
-                    checked={visibleColumns.has(column)}
-                    onCheckedChange={(checked) => {
-                      const next = new Set(visibleColumns);
-                      if (checked) next.add(column);
-                      else next.delete(column);
-                      setVisibleColumns(next);
-                    }}
-                  >
-                    {column}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {!neonAuth && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Columns2 className="h-3.5 w-3.5" />
+                    Columns
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>Columns</DropdownMenuLabel>
+                  {TOGGLEABLE_COLUMNS.map((column) => (
+                    <DropdownMenuCheckboxItem
+                      key={column}
+                      checked={visibleColumns.has(column)}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(visibleColumns);
+                        if (checked) next.add(column);
+                        else next.delete(column);
+                        setVisibleColumns(next);
+                      }}
+                    >
+                      {column}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -304,8 +338,37 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           {!neonAuth && <AuthAddUserDropdown connectionString={connectionString} onUsersChanged={refresh} />}
         </div>
       </div>
-      <div className="flex-1 min-h-0">
-        {loading && users.length === 0 ? (
+      )}
+      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 mb-3 md:mx-6" : ""}`}>
+        {neonAuth ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1">
+              <NeonAuthUsersTable
+                rows={filteredUsers}
+                loading={loading}
+                sort={neonTableSort}
+                onSortChange={setNeonTableSort}
+                emptyState={
+                  error && users.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>
+                  ) : (
+                    <div className="py-8 text-center">
+                      <p className="text-sm font-medium text-foreground">{neonEmptyMessage.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{neonEmptyMessage.description}</p>
+                    </div>
+                  )
+                }
+              />
+            </div>
+            <NeonAuthUsersStatus
+              error={error}
+              loading={loading}
+              filteredCount={filteredUsers.length}
+              totalCount={users.length}
+              limitReached={users.length >= AUTH_USERS_LIMIT}
+            />
+          </div>
+        ) : loading && users.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-studio-cell-muted" />
           </div>
@@ -333,27 +396,31 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
             loading={false}
             error={null}
             search=""
-            selectedTable={neonAuth ? "neon_auth.user" : "auth.users"}
-            selectedSchema={neonAuth ? "neon_auth" : "auth"}
+            selectedTable="auth.users"
+            selectedSchema="auth"
             idKey="UID"
-            selectedRows={neonAuth ? new Set<number>() : selectedRows}
-            setSelectedRows={neonAuth ? () => {} : setSelectedRows}
-            toggleAllSelection={neonAuth ? () => {} : toggleAllSelection}
-            toggleRowSelection={neonAuth ? () => {} : toggleRowSelection}
+            selectedRows={selectedRows}
+            setSelectedRows={setSelectedRows}
+            toggleAllSelection={toggleAllSelection}
+            toggleRowSelection={toggleRowSelection}
           />
         )}
       </div>
-      <div className="flex items-center justify-between h-9 border-t border-studio-border bg-studio-bg px-6 text-xs text-muted-foreground">
-        {loading || error ? <span>Loading...</span> : <span>Total: {users.length} users</span>}
-      </div>
-      <DeleteConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title={`Delete ${selectedRows.size} user${selectedRows.size === 1 ? "" : "s"}?`}
-        description="This action cannot be undone. The users will be permanently removed from auth.users and their sessions will be invalidated."
-        onConfirm={() => void handleDeleteUsers()}
-        loading={deleting}
-      />
+      {!neonAuth && (
+        <div className="flex h-9 items-center justify-between border-t border-border bg-studio-bg px-6 text-xs text-muted-foreground">
+          {error ? <span className="text-destructive">Unable to refresh users</span> : loading ? <span>Refreshing users…</span> : <span>Showing {filteredUsers.length} of {users.length} users</span>}
+        </div>
+      )}
+      {!neonAuth && (
+        <DeleteConfirmDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title={`Delete ${selectedRows.size} user${selectedRows.size === 1 ? "" : "s"}?`}
+          description="This action cannot be undone. The users will be permanently removed from auth.users and their sessions will be invalidated."
+          onConfirm={() => void handleDeleteUsers()}
+          loading={deleting}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { resolvePaymentsConnection } from "@/lib/supabase-paykit/supabase-ref";
-import { isNeonManagementConnection } from "@/lib/studio/neon-management";
+import { getNeonManagementPointer, isNeonManagementConnection } from "@/lib/studio/neon-management";
+import { listBucketObjects, listBuckets } from "@/lib/neon-cli/client";
 import { transferQuery } from "@/lib/transfer/transfer-sql";
 
 /** Storage is available on supabase-mgmt and direct Postgres-to-Supabase connections. */
@@ -262,6 +263,22 @@ export async function fetchStorageBuckets(
   connectionString: string,
 ): Promise<{ buckets: StorageBucket[]; error?: string }> {
   if (!connectionString) return { buckets: [] };
+  const neon = getNeonManagementPointer(connectionString);
+  if (neon) {
+    try {
+      const rows = await listBuckets(neon.profile, neon.projectId, neon.branchId);
+      return { buckets: rows.map((bucket) => ({
+        id: bucket.name,
+        name: bucket.name,
+        public: bucket.access_level === "public_read",
+        file_size_limit: null,
+        allowed_mime_types: null,
+        created_at: bucket.created_at ?? null,
+      })) };
+    } catch (error) {
+      return { buckets: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   const { rows, error } = await tryQueries(connectionString, [
     `SELECT ${BUCKETS_COLUMNS} FROM storage.buckets ORDER BY name`,
     `SELECT * FROM storage.buckets ORDER BY name`,
@@ -275,6 +292,10 @@ export async function fetchStorageBucket(
   bucketName: string,
 ): Promise<{ bucket: StorageBucket | null; error?: string }> {
   if (!connectionString || !bucketName) return { bucket: null };
+  if (getNeonManagementPointer(connectionString)) {
+    const { buckets, error } = await fetchStorageBuckets(connectionString);
+    return { bucket: buckets.find((bucket) => bucket.name === bucketName) ?? null, error };
+  }
   const safe = bucketName.replace(/'/g, "''");
   const where = `WHERE id = '${safe}' OR name = '${safe}' LIMIT 1`;
   const { rows, error } = await tryQueries(connectionString, [
@@ -290,6 +311,27 @@ export async function fetchStorageObjects(
   bucketName: string,
 ): Promise<{ objects: StorageObject[]; error?: string }> {
   if (!connectionString || !bucketName) return { objects: [] };
+  const neon = getNeonManagementPointer(connectionString);
+  if (neon) {
+    try {
+      const keys = await listBucketObjects(
+        neon.profile, neon.projectId, neon.branchId, neon.database, neon.role, bucketName,
+      );
+      return { objects: keys.map((name) => ({
+        id: name,
+        name,
+        bucket_id: bucketName,
+        owner: null,
+        owner_id: null,
+        created_at: null,
+        updated_at: null,
+        last_accessed_at: null,
+        metadata: null,
+      })) };
+    } catch (error) {
+      return { objects: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   const safe = bucketName.replace(/'/g, "''");
   const where = `WHERE bucket_id = '${safe}' ORDER BY name`;
   const { rows, error } = await tryQueries(connectionString, [

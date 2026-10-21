@@ -13,6 +13,7 @@ import {
 } from "@/components/studio/storage/storage-buckets-shared";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { isNeonManagementConnection } from "@/lib/studio/neon-management";
 import {
   Dialog,
   DialogContent,
@@ -24,8 +25,14 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
 export function StorageFilesView({ studio }: { studio: any }) {
-  const connectionString: string =
-    studio.currentConnectionString || studio.connection?.connectionString || "";
+  const connectionType = studio.connection?.connectionType ?? studio.dbType;
+  const neonStorage = isNeonManagementConnection(
+    connectionType,
+    studio.connection?.connectionString,
+  );
+  const connectionString: string = neonStorage
+    ? studio.connection.connectionString
+    : studio.currentConnectionString || studio.connection?.connectionString || "";
   const { buckets, loading, loadError, loadBuckets, notifyBucketsChanged } =
     useStorageBuckets(connectionString, {
       onError: (message) => toast.error(message),
@@ -65,7 +72,7 @@ export function StorageFilesView({ studio }: { studio: any }) {
         <div>
           <h1 className="text-sm font-semibold tracking-tight text-foreground">Files</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Browse buckets and manage objects in Supabase Storage.
+            Browse buckets and manage objects in {neonStorage ? "Neon Object Storage" : "Supabase Storage"}.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -104,11 +111,13 @@ export function StorageFilesView({ studio }: { studio: any }) {
           <div className="mx-auto w-full max-w-lg rounded-xl border border-destructive/30 bg-destructive/10 p-6 text-center">
             <div className="text-sm font-medium text-foreground">Failed to load buckets</div>
             <p className="mt-1 break-words text-xs text-muted-foreground">{loadError}</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Try running{" "}
-              <code className="rounded bg-muted px-1">SELECT * FROM storage.buckets;</code>{" "}
-              in the SQL editor to check access.
-            </p>
+            {!neonStorage && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Try running{" "}
+                <code className="rounded bg-muted px-1">SELECT * FROM storage.buckets;</code>{" "}
+                in the SQL editor to check access.
+              </p>
+            )}
             <Button size="sm" className="mt-3" onClick={() => void loadBuckets()}>
               <RefreshCw className="mr-1.5 size-3.5" />
               Retry

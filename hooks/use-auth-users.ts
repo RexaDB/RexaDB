@@ -2,6 +2,7 @@
 
 import { format } from "date-fns";
 import { useAuthQuery } from "./use-auth-query";
+import { AUTH_USERS_LIMIT } from "../components/studio/auth/users-constants";
 import {
   AUTH_PROVIDER_ICONS,
   AUTH_PROVIDER_NAMES,
@@ -71,7 +72,7 @@ const USERS_QUERY = `
   LEFT JOIN auth.identities i ON i.user_id = u.id
   GROUP BY u.id, u.email, u.phone, u.created_at, u.last_sign_in_at, u.confirmed_at, u.email_confirmed_at, u.phone_confirmed_at, u.is_anonymous, u.raw_user_meta_data
   ORDER BY u.created_at DESC
-  LIMIT 200;
+  LIMIT ${AUTH_USERS_LIMIT};
 `;
 
 function formatSupabaseDate(value: unknown): string | null {
@@ -195,7 +196,7 @@ function mapUserRow(row: any): AuthUserRow {
 
 export function useAuthUsers(connectionString: string, enabled: boolean, neonAuth = false) {
   const query = neonAuth
-    ? `SELECT id, email, NULL::text AS phone, "createdAt" AS created_at, NULL::timestamptz AS last_sign_in_at, CASE WHEN "emailVerified" THEN "createdAt" ELSE NULL END AS confirmed_at, NULL::timestamptz AS email_confirmed_at, NULL::timestamptz AS phone_confirmed_at, false AS is_anonymous, jsonb_build_object('name', name) AS raw_user_meta_data, 'email' AS providers, 'email' AS provider_type, '[]'::jsonb AS all_identity_data FROM neon_auth."user" ORDER BY "createdAt" DESC LIMIT 200;`
+    ? `SELECT id, email, NULL::text AS phone, "createdAt" AS created_at, NULL::timestamptz AS last_sign_in_at, CASE WHEN "emailVerified" THEN "createdAt" ELSE NULL END AS confirmed_at, NULL::timestamptz AS email_confirmed_at, NULL::timestamptz AS phone_confirmed_at, false AS is_anonymous, jsonb_build_object('name', name) AS raw_user_meta_data, 'email' AS providers, 'email' AS provider_type, '[]'::jsonb AS all_identity_data FROM neon_auth."user" ORDER BY "createdAt" DESC LIMIT ${AUTH_USERS_LIMIT};`
     : USERS_QUERY;
   const { data: users, loading, error, refresh } = useAuthQuery<AuthUserRow>(
     connectionString,
