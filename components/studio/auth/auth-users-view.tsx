@@ -324,7 +324,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
         </div>
       </div>
       )}
-      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 md:mx-6" : ""}`}>
+      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 mb-3 md:mx-6" : ""}`}>
         {neonAuth ? (
           <NeonAuthUsersTable
             rows={filteredUsers}
