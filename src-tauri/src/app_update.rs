@@ -10,7 +10,7 @@
 //! without the updater plugin, so the app can still tell a Nix user that a
 //! new version exists and how to get it.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -23,7 +23,9 @@ const RELEASE_MANIFEST: &str =
 /// The release page, for the "what changed" link.
 const RELEASES_PAGE: &str = "https://github.com/RexaDB/RexaDB/releases/latest";
 
-/// A release check must not hang the app.
+/// The time the whole check may take, both requests together: the API and
+/// the manifest fallback share this budget, so a slow first request cannot
+/// push the fallback past the deadline.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How the app was installed, which decides how it can be updated.
@@ -79,17 +81,37 @@ pub fn install_kind() -> InstallKind {
 pub async fn latest_release_info() -> Result<LatestRelease, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
         .user_agent("RexaDB")
         .build()
         .map_err(|error| format!("Could not reach the release feed: {error}"))?;
+    let deadline = Deadline::new(REQUEST_TIMEOUT);
 
     // The API carries the release date and the release page; the manifest is
     // the fallback for when the API is rate limited.
-    match fetch_release_from_api(&client).await {
+    match fetch_release_from_api(&client, &deadline).await {
         Ok(Some(release)) => Ok(release.into_latest(&current_version)),
-        Ok(None) => fetch_release_from_manifest(&client).await,
+        Ok(None) => fetch_release_from_manifest(&client, &deadline).await,
         Err(error) => Err(error),
+    }
+}
+
+/// The time the requests may still take.
+struct Deadline {
+    at: Instant,
+}
+
+impl Deadline {
+    fn new(budget: Duration) -> Self {
+        Self {
+            at: Instant::now() + budget,
+        }
+    }
+
+    /// What is left of the budget, or `None` when it is spent.
+    fn remaining(&self) -> Option<Duration> {
+        self.at
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
     }
 }
 
@@ -113,9 +135,16 @@ impl ApiRelease {
 }
 
 /// Read the newest release from the GitHub API.
-async fn fetch_release_from_api(client: &reqwest::Client) -> Result<Option<ApiRelease>, String> {
+async fn fetch_release_from_api(
+    client: &reqwest::Client,
+    deadline: &Deadline,
+) -> Result<Option<ApiRelease>, String> {
+    let left = deadline
+        .remaining()
+        .ok_or_else(|| "The release feed took too long.".to_string())?;
     let response = client
         .get(RELEASES_API)
+        .timeout(left)
         .send()
         .await
         .map_err(|error| format!("Could not reach GitHub: {error}"))?;
@@ -151,9 +180,16 @@ async fn fetch_release_from_api(client: &reqwest::Client) -> Result<Option<ApiRe
 }
 
 /// Read the newest release from the updater manifest the Tauri plugin uses.
-async fn fetch_release_from_manifest(client: &reqwest::Client) -> Result<LatestRelease, String> {
+async fn fetch_release_from_manifest(
+    client: &reqwest::Client,
+    deadline: &Deadline,
+) -> Result<LatestRelease, String> {
+    let left = deadline
+        .remaining()
+        .ok_or_else(|| "The release feed took too long.".to_string())?;
     let response = client
         .get(RELEASE_MANIFEST)
+        .timeout(left)
         .send()
         .await
         .map_err(|error| format!("Could not reach the release feed: {error}"))?;
@@ -277,5 +313,20 @@ mod app_update_tests {
         assert_eq!(info.current_version, env!("CARGO_PKG_VERSION"));
         assert!(info.latest_version.is_some(), "no version in the feed");
         assert!(info.release_url.is_some(), "no release page in the feed");
+    }
+
+    #[test]
+    fn both_requests_share_one_budget() {
+        use super::Deadline;
+        use std::time::Duration;
+
+        let deadline = Deadline::new(Duration::from_secs(15));
+        let first = deadline.remaining().expect("budget left");
+        assert!(first <= Duration::from_secs(15));
+        assert!(first > Duration::from_secs(14));
+
+        // A spent budget stops the second request instead of starting a
+        // fresh one.
+        assert!(Deadline::new(Duration::ZERO).remaining().is_none());
     }
 }

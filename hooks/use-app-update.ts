@@ -38,6 +38,11 @@ function formatUpdaterError(error: unknown): string {
 // (no built-in timeout). Bound every check so the UI never gets stuck on
 // "Checking...".
 const CHECK_TIMEOUT_MS = 15_000;
+// The release check reads the GitHub API and falls back to the updater
+// manifest, and both requests share one budget on the backend. The frontend
+// waits a little longer than that budget, so a slow answer still arrives
+// instead of being rejected while the backend is still working.
+const RELEASE_CHECK_TIMEOUT_MS = 20_000;
 
 export type AppUpdateReturn = ReturnType<typeof useAppUpdate>;
 
@@ -120,6 +125,9 @@ export function useAppUpdate() {
     try {
       const installKind = await getInstallKind();
       if (!mountedRef.current) return;
+      // Save it right away: the update instructions must stay available even
+      // when the release feed cannot be reached.
+      setUpdateState((prev) => ({ ...prev, installKind }));
 
       // A Nix install cannot replace its own binary, and the Nix build has
       // no updater plugin to ask — so the release is checked directly.
@@ -128,7 +136,7 @@ export function useAppUpdate() {
         const { invoke } = await import("@tauri-apps/api/core");
         const info = await withTimeout(
           invoke<LatestReleaseInfo>("latest_release_info"),
-          CHECK_TIMEOUT_MS,
+          RELEASE_CHECK_TIMEOUT_MS,
           "Update check timed out",
         );
         debug("nix release:", info.latestVersion ?? "unknown");
@@ -143,7 +151,6 @@ export function useAppUpdate() {
           latestVersion: info.latestVersion,
           releaseDate: info.publishedAt,
           releaseUrl: info.releaseUrl,
-          installKind,
         }));
         return;
       }
@@ -170,7 +177,6 @@ export function useAppUpdate() {
           currentVersion: update.currentVersion,
           latestVersion: update.version,
           releaseDate: update.date ?? null,
-          installKind,
         }));
       } else {
         setUpdateState((prev) => {
@@ -183,7 +189,6 @@ export function useAppUpdate() {
             checking: false,
             updateAvailable: false,
             currentVersion,
-            installKind,
           };
         });
       }
@@ -225,22 +230,39 @@ export function useAppUpdate() {
   }, [checkForUpdates]);
 
   /**
+   * Copy a Nix update command.
+   *
    * A Nix install cannot replace its own binary, so there is nothing to
    * download: the command that updates it is copied instead.
    */
+  const copyNixCommand = useCallback(
+    async (command: string, description?: string) => {
+      const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+      if (!clipboard) {
+        toast.error("Could not copy the update command.");
+        return;
+      }
+      try {
+        await clipboard.writeText(command);
+        toast.success(`Copied "${command}"`, description ? { description } : undefined);
+      } catch {
+        toast.error("Could not copy the update command.");
+      }
+    },
+    [],
+  );
+
+  /**
+   * The action behind the update notice. The command that is copied is the
+   * one for a configuration flake; the other ways of installing are named in
+   * the toast and listed in the settings.
+   */
   const applyNixUpdate = useCallback(async () => {
-    const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
-    if (!clipboard) {
-      toast.error("Could not copy the update command.");
-      return;
-    }
-    try {
-      await clipboard.writeText(NIX_UPDATE_COMMAND);
-      toast.success(`Copied "${NIX_UPDATE_COMMAND}" — rebuild to update RexaDB`);
-    } catch {
-      toast.error("Could not copy the update command.");
-    }
-  }, []);
+    await copyNixCommand(
+      NIX_UPDATE_COMMAND,
+      "Then rebuild your configuration. Installed as a profile? Run `nix profile upgrade` instead.",
+    );
+  }, [copyNixCommand]);
 
   const downloadUpdate = useCallback(async () => {
     if (!isDesktopRuntime()) return false;
@@ -377,5 +399,6 @@ export function useAppUpdate() {
     handleInstall,
     handleDismiss,
     handleRenewOtl,
+    copyNixCommand,
   };
 }

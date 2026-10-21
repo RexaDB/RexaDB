@@ -151,18 +151,27 @@ release feed and shows an **Update via nix** notice in the app header (and
 on the connections screen) when a newer version is out. Dismissing it hides
 it until the next release.
 
-To update:
+How you update depends on how you installed it:
+
+| Install | Update |
+| --- | --- |
+| Configuration flake, unpinned input | `nix flake update`, then rebuild and switch your configuration |
+| Configuration flake, pinned release tag | Change the RexaDB tag in your flake, then rebuild and switch your configuration |
+| Profile install (`nix profile install .#rexadb`) | `nix profile upgrade` — a configuration rebuild does not touch a profile |
 
 ```bash
-nix flake update      # bumps the RexaDB input in your flake.lock
-# then rebuild and switch, e.g.:
-nh os switch ./configuration
+# configuration flake
+nix flake update
+nh os switch ./configuration   # your rebuild command
+
+# profile install
+nix profile upgrade
 ```
 
 `nix flake update` without an argument updates every input, so it works
-whatever you named the RexaDB input in your flake. The app copies that
-command for you when you click the notice. The release notes are linked
-from Settings → App Updates.
+whatever you named the RexaDB input in your flake. Settings → App Updates
+lists the steps for each way of installing, with a button that copies the
+command, and links the release notes.
 - Supabase config is baked at build time (`NEXT_PUBLIC_*`): the Nix
   packages build with placeholder values, so all local-first features
   work but Supabase-backed features (sign-in, teams) are inert. Real
