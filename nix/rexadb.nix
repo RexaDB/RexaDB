@@ -221,7 +221,8 @@ pkgs.rustPlatform.buildRustPackage {
     test -d $debroot/usr/share/icons && cp -r $debroot/usr/share/icons $out/share/
 
     makeWrapper $out/share/rexadb/rexa-db $out/bin/rexa-db \
-      --set RESOURCEDIR $out/share/rexadb
+      --set RESOURCEDIR $out/share/rexadb \
+      --set REXADB_INSTALL_KIND nix
     runHook postInstall
   '';
 

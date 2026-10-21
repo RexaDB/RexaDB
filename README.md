@@ -142,6 +142,27 @@ Notes:
   `nix flake check --no-build` validates evaluation on all systems.
 - Like the other release builds, the Nix frontend build does not bake in
   `.env` secrets — provide runtime config the usual way.
+
+### Updating a Nix install
+
+A Nix install cannot replace its own binary — it lives in the read-only
+store — so RexaDB does not update itself there. Instead the app checks the
+release feed and shows an **Update via nix** notice in the app header (and
+on the connections screen) when a newer version is out. Dismissing it hides
+it until the next release.
+
+To update:
+
+```bash
+nix flake update      # bumps the RexaDB input in your flake.lock
+# then rebuild and switch, e.g.:
+nh os switch ./configuration
+```
+
+`nix flake update` without an argument updates every input, so it works
+whatever you named the RexaDB input in your flake. The app copies that
+command for you when you click the notice. The release notes are linked
+from Settings → App Updates.
 - Supabase config is baked at build time (`NEXT_PUBLIC_*`): the Nix
   packages build with placeholder values, so all local-first features
   work but Supabase-backed features (sign-in, teams) are inert. Real

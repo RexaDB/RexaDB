@@ -2,9 +2,18 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { toast } from "sonner";
 import { markEntitlementRefreshPending } from "@/lib/billing/entitlement-resolver";
 import { invokeBackendFunction } from "@/lib/supabase/backend-client";
-import { isDesktopRuntime, isWindowsDesktopRuntime } from "@/lib/desktop";
+import {
+  getInstallKind,
+  isDesktopRuntime,
+  isWindowsDesktopRuntime,
+  openExternalUrl,
+  type InstallKind,
+} from "@/lib/desktop";
+import { useLocalStorage } from "@/hooks/use-local-storage";
+import { isUpdateDismissed, NIX_UPDATE_COMMAND } from "@/lib/app-update";
 
 const DEBUG = true;
 function debug(...args: unknown[]) {
@@ -43,6 +52,10 @@ interface AppUpdateState {
   releaseDate: string | null;
   progressPercent: number | null;
   error: string | null;
+  /** How the app was installed, which decides how the update is applied. */
+  installKind: InstallKind;
+  /** Where the release notes are. */
+  releaseUrl: string | null;
 }
 
 const DEFAULT_UPDATE_STATE: AppUpdateState = {
@@ -56,6 +69,8 @@ const DEFAULT_UPDATE_STATE: AppUpdateState = {
   releaseDate: null,
   progressPercent: null,
   error: null,
+  installKind: "standalone",
+  releaseUrl: null,
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -74,10 +89,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+/** The release information the app backend reports for a Nix install. */
+interface LatestReleaseInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  publishedAt: string | null;
+}
+
 export function useAppUpdate() {
   const [updateState, setUpdateState] = useState<AppUpdateState>(DEFAULT_UPDATE_STATE);
-  const [dismissed, setDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
+  // The dismissed version, so the notice stays hidden until a newer release
+  // shows up instead of coming back on every launch.
+  const [dismissedVersion, setDismissedVersion] = useLocalStorage<string | null>(
+    "rexa-db-dismissed-update",
+    null,
+  );
+  const dismissed = isUpdateDismissed(dismissedVersion, updateState.latestVersion);
   const dismissedRef = useRef(dismissed);
   dismissedRef.current = dismissed;
   const updateRef = useRef<Update | null>(null);
@@ -88,6 +118,36 @@ export function useAppUpdate() {
 
     setUpdateState((prev) => ({ ...prev, checking: true, error: null }));
     try {
+      const installKind = await getInstallKind();
+      if (!mountedRef.current) return;
+
+      // A Nix install cannot replace its own binary, and the Nix build has
+      // no updater plugin to ask — so the release is checked directly.
+      if (installKind === "nix") {
+        debug("nix install: checking the release feed...");
+        const { invoke } = await import("@tauri-apps/api/core");
+        const info = await withTimeout(
+          invoke<LatestReleaseInfo>("latest_release_info"),
+          CHECK_TIMEOUT_MS,
+          "Update check timed out",
+        );
+        debug("nix release:", info.latestVersion ?? "unknown");
+        if (!mountedRef.current) return;
+        setUpdateState((prev) => ({
+          ...prev,
+          enabled: true,
+          checking: false,
+          updateAvailable: info.updateAvailable,
+          updateDownloaded: false,
+          currentVersion: info.currentVersion || prev.currentVersion,
+          latestVersion: info.latestVersion,
+          releaseDate: info.publishedAt,
+          releaseUrl: info.releaseUrl,
+          installKind,
+        }));
+        return;
+      }
+
       const { check } = await import("@tauri-apps/plugin-updater");
       debug("checking for update...");
       const update: Update | null = await withTimeout(
@@ -110,6 +170,7 @@ export function useAppUpdate() {
           currentVersion: update.currentVersion,
           latestVersion: update.version,
           releaseDate: update.date ?? null,
+          installKind,
         }));
       } else {
         setUpdateState((prev) => {
@@ -122,6 +183,7 @@ export function useAppUpdate() {
             checking: false,
             updateAvailable: false,
             currentVersion,
+            installKind,
           };
         });
       }
@@ -162,8 +224,31 @@ export function useAppUpdate() {
     };
   }, [checkForUpdates]);
 
+  /**
+   * A Nix install cannot replace its own binary, so there is nothing to
+   * download: the command that updates it is copied instead.
+   */
+  const applyNixUpdate = useCallback(async () => {
+    const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+    if (!clipboard) {
+      toast.error("Could not copy the update command.");
+      return;
+    }
+    try {
+      await clipboard.writeText(NIX_UPDATE_COMMAND);
+      toast.success(`Copied "${NIX_UPDATE_COMMAND}" — rebuild to update RexaDB`);
+    } catch {
+      toast.error("Could not copy the update command.");
+    }
+  }, []);
+
   const downloadUpdate = useCallback(async () => {
     if (!isDesktopRuntime()) return false;
+
+    if (updateState.installKind === "nix") {
+      await applyNixUpdate();
+      return true;
+    }
 
     try {
       let update = updateRef.current;
@@ -220,12 +305,16 @@ export function useAppUpdate() {
       }));
       return false;
     }
-  }, []);
+  }, [updateState.installKind, applyNixUpdate]);
 
   // Kept as the name consumers already use; performs the download+install step.
   const handleDownload = downloadUpdate;
 
   const handleInstall = useCallback(async () => {
+    if (updateState.installKind === "nix") {
+      await applyNixUpdate();
+      return;
+    }
     setInstalling(true);
     if (!isDesktopRuntime()) {
       setInstalling(false);
@@ -249,11 +338,20 @@ export function useAppUpdate() {
       }));
       setInstalling(false);
     }
-  }, [downloadUpdate, updateState.updateDownloaded]);
+  }, [downloadUpdate, updateState.updateDownloaded, updateState.installKind, applyNixUpdate]);
 
   const handleDismiss = useCallback(() => {
-    setDismissed(true);
-  }, []);
+    setDismissedVersion(updateState.latestVersion);
+  }, [setDismissedVersion, updateState.latestVersion]);
+
+  // Kept as the setter consumers already use: dismissing hides the notice
+  // for the version that is on screen, and a newer release brings it back.
+  const setDismissed = useCallback(
+    (value: boolean) => {
+      setDismissedVersion(value ? updateState.latestVersion : null);
+    },
+    [setDismissedVersion, updateState.latestVersion],
+  );
 
   const handleRenewOtl = useCallback(async () => {
     const { data, error } = await invokeBackendFunction("subscribe", {
@@ -262,7 +360,6 @@ export function useAppUpdate() {
     if (error || data?.error) return;
     if (data?.checkoutUrl) {
       markEntitlementRefreshPending();
-      const { openExternalUrl } = await import("@/lib/desktop");
       await openExternalUrl(data.checkoutUrl);
     }
   }, []);

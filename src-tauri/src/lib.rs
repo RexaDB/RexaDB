@@ -1,5 +1,6 @@
 mod dictionary;
 mod app_database;
+mod app_update;
 mod rexadb_studio;
 mod spacetimedb;
 mod cli_shim;
@@ -1121,6 +1122,8 @@ pub fn run() {
             connection_credential_get,
             connection_credential_delete,
             get_app_version,
+            app_update::install_kind,
+            app_update::latest_release_info,
             get_api_base_url,
             get_pending_open_url,
             is_sidecar_ready,
