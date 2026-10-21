@@ -37,6 +37,7 @@ import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-d
 import { runQuery } from "@/lib/api/actions-client";
 import { AuthDataGrid } from "./auth-data-grid";
 import { NeonAuthUsersTable } from "./neon-auth-users-table";
+import { NeonAuthUsersHeader } from "./neon-auth-users-header";
 import { NeonAuthUsersToolbar, type NeonUserStatusFilter } from "./neon-auth-users-toolbar";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
 import { AuthAddUserDropdown } from "./auth-add-user-dropdown";
@@ -188,16 +189,19 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   return (
     <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
       {neonAuth ? (
-        <div className="px-5 pt-3 pb-3 md:px-6">
-          <NeonAuthUsersToolbar
+        <>
+          <NeonAuthUsersHeader />
+          <div className="px-5 pb-3 md:px-6">
+            <NeonAuthUsersToolbar
             search={search}
             onSearchChange={setSearch}
             status={neonStatus}
             onStatusChange={setNeonStatus}
             onRefresh={refresh}
             loading={loading}
-          />
-        </div>
+            />
+          </div>
+        </>
       ) : (
       <div className="border-b border-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         {selectedRows.size > 0 && !neonAuth ? (
