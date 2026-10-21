@@ -329,12 +329,6 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           <NeonAuthUsersTable
             rows={filteredUsers}
             loading={loading}
-            footer={
-              <div className="flex h-9 items-center justify-between px-4 text-xs text-muted-foreground">
-                <span>Showing {filteredUsers.length} of {users.length} users</span>
-                {users.length === 200 && <span>Showing the 200 most recent users</span>}
-              </div>
-            }
             emptyState={
               error && users.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>

@@ -1,7 +1,7 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { DataTable, type TableColumn } from "@/components/data-table/components/data-table";
-import type { ReactNode } from "react";
 import {
   NeonAuthUserCreated,
   NeonAuthUserIdentity,
@@ -19,21 +19,35 @@ const columns: TableColumn<NeonAuthUser>[] = [
 interface NeonAuthUsersTableProps {
   rows: NeonAuthUser[];
   loading: boolean;
-  footer: ReactNode;
   emptyState: ReactNode;
 }
 
-export function NeonAuthUsersTable({ rows, loading, footer, emptyState }: NeonAuthUsersTableProps) {
+export function NeonAuthUsersTable({ rows, loading, emptyState }: NeonAuthUsersTableProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => setHeight(Math.floor(container.getBoundingClientRect().height));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <DataTable<NeonAuthUser>
-      data={rows}
-      columns={columns}
-      getRowId={(user) => user.UID}
-      defaultSort={{ key: "__created_at_raw", direction: "desc" }}
-      height={440}
-      loading={loading}
-      footer={footer}
-      emptyState={emptyState}
-    />
+    <div ref={containerRef} className="h-full min-h-0">
+      <DataTable<NeonAuthUser>
+        data={rows}
+        columns={columns}
+        getRowId={(user) => user.UID}
+        defaultSort={{ key: "__created_at_raw", direction: "desc" }}
+        height={height}
+        loading={loading}
+        emptyState={emptyState}
+        className="h-full min-h-0"
+      />
+    </div>
   );
 }
