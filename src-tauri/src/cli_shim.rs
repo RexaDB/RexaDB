@@ -10,8 +10,9 @@
 //!   duplicated, never touches other lines.
 //!
 //! Only the user's own shell is touched: a nushell user never gets a
-//! `.zshrc` written for them, and a zsh user never gets a fish config.
-//! When the shell cannot be determined, only rc files that already exist are
+//! `.zshrc` written for them, and a zsh user never gets a fish config. A
+//! shell we do not support is no reason to guess a different one; when the
+//! shell cannot be determined at all, only rc files that already exist are
 //! patched, so no file is created for a shell nobody uses.
 //!
 //! A read-only home (common on NixOS) is not an error: the app cannot write
@@ -30,10 +31,6 @@ const MARKER: &str = "rexa-db terminal command";
 const PATH_EXPORT: &str = "export PATH=\"$HOME/.local/bin:$PATH\"";
 /// PATH line for fish.
 const FISH_PATH_EXPORT: &str = "fish_add_path $HOME/.local/bin";
-/// PATH line for nushell. `$nu.home-path` is nushell's home directory, so
-/// the line works without assuming the user's name.
-const NUSHELL_PATH_EXPORT: &str =
-    "$env.PATH = ($env.PATH | prepend $\"($nu.home-path)/.local/bin\")";
 
 /// Shells we know how to put `~/.local/bin` on PATH for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,61 +53,113 @@ fn shell_from_path(value: &str) -> Option<Shell> {
     }
 }
 
+/// Where nushell reads its configuration from.
+///
+/// Nushell follows `XDG_CONFIG_HOME` when it is set and otherwise uses the
+/// platform default: `~/.config/nushell` on Linux,
+/// `~/Library/Application Support/nushell` on macOS. The file inside it is
+/// `config.nu` — the main config, and the place nushell recommends for
+/// environment variables. There is no `config.nushell`.
+fn nushell_config_dir(home: &Path) -> PathBuf {
+    let xdg = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    nushell_config_dir_in(home, xdg.as_deref(), cfg!(target_os = "macos"))
+}
+
+/// The config directory resolution, split out so every branch is testable.
+fn nushell_config_dir_in(home: &Path, xdg_config_home: Option<&Path>, macos: bool) -> PathBuf {
+    if let Some(base) = xdg_config_home {
+        return base.join("nushell");
+    }
+    if macos {
+        home.join("Library/Application Support/nushell")
+    } else {
+        home.join(".config/nushell")
+    }
+}
+
+/// The nushell config file: the main config, where env vars belong.
+fn nushell_config_file(home: &Path) -> PathBuf {
+    nushell_config_dir(home).join("config.nu")
+}
+
+/// PATH line for nushell.
+///
+/// The absolute path is written out on purpose: nushell does not expand `~`
+/// in PATH entries, and its `$nu` constants were renamed across versions
+/// (`$nu.home-path` -> `$nu.home-dir`), so a literal path is the only form
+/// that keeps working everywhere. A single quote in the path is escaped the
+/// way nushell expects.
+fn nushell_path_export(home: &Path) -> String {
+    let bin = home.join(".local/bin");
+    format!(
+        "$env.PATH = ($env.PATH | prepend '{}')",
+        bin.to_string_lossy().replace('\'', "''")
+    )
+}
+
 /// Guess the shell from the config files the user already has. Used when
 /// `$SHELL` is missing (GUI launch, minimal environment): the config that
 /// exists is the one the user actually reads.
 fn infer_shell_from_home(home: &Path) -> Option<Shell> {
-    let candidates = [
-        (".config/nushell/config.nushell", Shell::Nushell),
-        (".config/fish/config.fish", Shell::Fish),
-        (".zshrc", Shell::Zsh),
-        (".bashrc", Shell::Bash),
-    ];
-    candidates
-        .iter()
-        .find(|(relative, _)| home.join(relative).exists())
-        .map(|(_, shell)| *shell)
+    if nushell_config_file(home).exists() {
+        return Some(Shell::Nushell);
+    }
+    if home.join(".config/fish/config.fish").exists() {
+        return Some(Shell::Fish);
+    }
+    if home.join(".zshrc").exists() {
+        return Some(Shell::Zsh);
+    }
+    if home.join(".bashrc").exists() {
+        return Some(Shell::Bash);
+    }
+    None
 }
 
-/// The user's shell: `$SHELL` first, then what the home directory suggests.
+/// The user's shell.
+///
+/// `$SHELL` decides when it names a shell we know. A shell we do not know
+/// (`ksh`, `dash`, …) is not a reason to guess another one — that would
+/// write a startup file for a shell the user never runs — so it falls
+/// through to the existing-files-only path. Only a missing `$SHELL` is
+/// inferred from the configs the user has.
 fn user_shell(home: &Path) -> Option<Shell> {
-    std::env::var("SHELL")
-        .ok()
-        .and_then(|value| shell_from_path(&value))
-        .or_else(|| infer_shell_from_home(home))
+    match std::env::var("SHELL") {
+        Ok(value) => shell_from_path(&value),
+        Err(_) => infer_shell_from_home(home),
+    }
 }
 
-/// Shell rc files to patch: (relative path, export line for that shell).
-/// The bash login file is resolved dynamically: bash reads only the first
-/// existing `~/.bash_profile` > `~/.bash_login` > `~/.profile`, so creating a
-/// new `.bash_profile` would shadow an existing `.profile`/`.bash_login`.
+/// The bash login file. Bash reads only the first existing
+/// `~/.bash_profile` > `~/.bash_login` > `~/.profile`, so creating a new
+/// `.bash_profile` would shadow an existing `.profile`/`.bash_login`.
 /// Update the user's existing login config instead.
 fn bash_login_target(home: &Path) -> PathBuf {
     for candidate in [".bash_profile", ".bash_login", ".profile"] {
-        if home.join(candidate).exists() {
-            return PathBuf::from(candidate);
+        let path = home.join(candidate);
+        if path.exists() {
+            return path;
         }
     }
-    PathBuf::from(".bash_profile")
+    home.join(".bash_profile")
 }
 
-/// The rc files of one shell. Only these are ever patched for a user whose
-/// shell is known.
+/// The rc files of one shell: (absolute path, export line for that shell).
+/// Only these are ever patched for a user whose shell is known.
 fn rc_files_for(shell: Shell, home: &Path) -> Vec<(PathBuf, String)> {
     match shell {
-        Shell::Zsh => vec![(PathBuf::from(".zshrc"), PATH_EXPORT.to_string())],
+        Shell::Zsh => vec![(home.join(".zshrc"), PATH_EXPORT.to_string())],
         Shell::Bash => vec![
-            (PathBuf::from(".bashrc"), PATH_EXPORT.to_string()),
+            (home.join(".bashrc"), PATH_EXPORT.to_string()),
             (bash_login_target(home), PATH_EXPORT.to_string()),
         ],
         Shell::Fish => vec![(
-            PathBuf::from(".config/fish/config.fish"),
+            home.join(".config/fish/config.fish"),
             FISH_PATH_EXPORT.to_string(),
         )],
-        Shell::Nushell => vec![(
-            PathBuf::from(".config/nushell/config.nushell"),
-            NUSHELL_PATH_EXPORT.to_string(),
-        )],
+        Shell::Nushell => vec![(nushell_config_file(home), nushell_path_export(home))],
     }
 }
 
@@ -118,17 +167,14 @@ fn rc_files_for(shell: Shell, home: &Path) -> Vec<(PathBuf, String)> {
 /// Callers only patch the ones that already exist.
 fn all_rc_files(home: &Path) -> Vec<(PathBuf, String)> {
     vec![
-        (PathBuf::from(".zshrc"), PATH_EXPORT.to_string()),
-        (PathBuf::from(".bashrc"), PATH_EXPORT.to_string()),
+        (home.join(".zshrc"), PATH_EXPORT.to_string()),
+        (home.join(".bashrc"), PATH_EXPORT.to_string()),
         (bash_login_target(home), PATH_EXPORT.to_string()),
         (
-            PathBuf::from(".config/fish/config.fish"),
+            home.join(".config/fish/config.fish"),
             FISH_PATH_EXPORT.to_string(),
         ),
-        (
-            PathBuf::from(".config/nushell/config.nushell"),
-            NUSHELL_PATH_EXPORT.to_string(),
-        ),
+        (nushell_config_file(home), nushell_path_export(home)),
     ]
 }
 
@@ -267,7 +313,7 @@ fn rc_targets(home: &Path) -> Vec<(PathBuf, String)> {
 fn existing_rc_files(home: &Path) -> Vec<(PathBuf, String)> {
     all_rc_files(home)
         .into_iter()
-        .filter(|(relative, _)| home.join(relative).exists())
+        .filter(|(path, _)| path.exists())
         .collect()
 }
 
@@ -295,8 +341,7 @@ fn ensure_cli_shim_inner() -> std::io::Result<()> {
         }
     }
 
-    for (relative, export_line) in rc_targets(&home) {
-        let rc_path = home.join(relative);
+    for (rc_path, export_line) in rc_targets(&home) {
         match ensure_rc_entry(&rc_path, &export_line) {
             Ok(true) => log::info!("Added ~/.local/bin to PATH in {}", rc_path.display()),
             Ok(false) => {}
@@ -318,11 +363,15 @@ fn ensure_cli_shim_inner() -> std::io::Result<()> {
 mod cli_shim_tests {
     use super::{
         ensure_rc_entry, ensure_symlink, existing_rc_files, export_block, has_marker,
-        infer_shell_from_home, is_quiet_fs_error, rc_files_for, shell_from_path, Shell, EROFS,
-        NUSHELL_PATH_EXPORT, PATH_EXPORT,
+        infer_shell_from_home, is_quiet_fs_error, nushell_config_dir_in, nushell_config_file,
+        nushell_path_export, rc_files_for, shell_from_path, Shell, EROFS, PATH_EXPORT,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// The environment is global, so the tests that change it take turns.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn scratch_dir(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
@@ -412,12 +461,39 @@ mod cli_shim_tests {
         std::fs::write(dir.join(".zshrc"), "").unwrap();
         assert_eq!(infer_shell_from_home(&dir), Some(Shell::Zsh));
 
-        let nushell = dir.join(".config/nushell");
-        std::fs::create_dir_all(&nushell).unwrap();
-        std::fs::write(nushell.join("config.nushell"), "").unwrap();
+        // The nushell config lives in the platform directory, so ask the
+        // app where that is.
+        let nushell = nushell_config_file(&dir);
+        std::fs::create_dir_all(nushell.parent().unwrap()).unwrap();
+        std::fs::write(&nushell, "").unwrap();
         assert_eq!(infer_shell_from_home(&dir), Some(Shell::Nushell));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nushell_reads_its_config_from_the_platform_directory() {
+        let home = PathBuf::from("/home/user");
+
+        // Linux default.
+        assert_eq!(
+            nushell_config_dir_in(&home, None, false),
+            PathBuf::from("/home/user/.config/nushell")
+        );
+        // macOS default.
+        assert_eq!(
+            nushell_config_dir_in(&home, None, true),
+            PathBuf::from("/home/user/Library/Application Support/nushell")
+        );
+        // XDG_CONFIG_HOME wins on every platform.
+        assert_eq!(
+            nushell_config_dir_in(&home, Some(Path::new("/xdg")), false),
+            PathBuf::from("/xdg/nushell")
+        );
+        assert_eq!(
+            nushell_config_dir_in(&home, Some(Path::new("/xdg")), true),
+            PathBuf::from("/xdg/nushell")
+        );
     }
 
     #[test]
@@ -426,27 +502,30 @@ mod cli_shim_tests {
 
         let zsh = rc_files_for(Shell::Zsh, &dir);
         assert_eq!(zsh.len(), 1);
-        assert_eq!(zsh[0].0, PathBuf::from(".zshrc"));
+        assert_eq!(zsh[0].0, dir.join(".zshrc"));
         assert_eq!(zsh[0].1, PATH_EXPORT);
 
         let bash = rc_files_for(Shell::Bash, &dir);
-        assert_eq!(bash[0].0, PathBuf::from(".bashrc"));
+        assert_eq!(bash[0].0, dir.join(".bashrc"));
         // The login file is resolved dynamically, so bash reads the config
         // the user already has.
-        assert_eq!(bash[1].0, PathBuf::from(".bash_profile"));
+        assert_eq!(bash[1].0, dir.join(".bash_profile"));
 
         let fish = rc_files_for(Shell::Fish, &dir);
         assert_eq!(fish.len(), 1);
-        assert_eq!(fish[0].0, PathBuf::from(".config/fish/config.fish"));
+        assert_eq!(fish[0].0, dir.join(".config/fish/config.fish"));
         assert!(fish[0].1.contains("fish_add_path"));
 
+        // Nushell reads `config.nu`, not `config.nushell`.
         let nushell = rc_files_for(Shell::Nushell, &dir);
         assert_eq!(nushell.len(), 1);
-        assert_eq!(
-            nushell[0].0,
-            PathBuf::from(".config/nushell/config.nushell")
+        assert!(nushell[0].0.ends_with("config.nu"), "{:?}", nushell[0].0);
+        assert!(
+            !nushell[0].0.ends_with("config.nushell"),
+            "{:?}",
+            nushell[0].0
         );
-        assert_eq!(nushell[0].1, NUSHELL_PATH_EXPORT);
+        assert_eq!(nushell[0].1, nushell_path_export(&dir));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -458,11 +537,11 @@ mod cli_shim_tests {
 
         let targets = existing_rc_files(&dir);
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].0, PathBuf::from(".zshrc"));
+        assert_eq!(targets[0].0, dir.join(".zshrc"));
         // No file is created for a shell the user does not have.
         assert!(!dir.join(".bashrc").exists());
         assert!(!dir.join(".config/fish/config.fish").exists());
-        assert!(!dir.join(".config/nushell/config.nushell").exists());
+        assert!(!nushell_config_file(&dir).exists());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -470,16 +549,24 @@ mod cli_shim_tests {
     #[test]
     fn nushell_config_gets_a_path_line() {
         let dir = scratch_dir("nushell");
-        let rc = dir.join(".config/nushell/config.nushell");
-        assert!(ensure_rc_entry(&rc, NUSHELL_PATH_EXPORT).unwrap());
+        let rc = nushell_config_file(&dir);
+        let export_line = nushell_path_export(&dir);
+        assert!(ensure_rc_entry(&rc, &export_line).unwrap());
         // Second run changes nothing.
-        assert!(!ensure_rc_entry(&rc, NUSHELL_PATH_EXPORT).unwrap());
+        assert!(!ensure_rc_entry(&rc, &export_line).unwrap());
         let content = std::fs::read_to_string(&rc).unwrap();
         assert!(
             content.contains("$env.PATH = ($env.PATH | prepend"),
             "{content}"
         );
-        assert!(content.contains("($nu.home-path)/.local/bin"), "{content}");
+        // The absolute path is written out: nushell does not expand `~` in
+        // PATH entries, and its `$nu` constants change across versions.
+        assert!(
+            content.contains(&format!("{}/.local/bin", dir.display())),
+            "{content}"
+        );
+        assert!(!content.contains("$nu.home-path"), "{content}");
+        assert!(!content.contains("$nu.home-dir"), "{content}");
         assert!(content.contains("rexa-db terminal command"), "{content}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -505,6 +592,11 @@ mod cli_shim_tests {
     fn only_the_users_own_shell_is_touched() {
         use super::ensure_cli_shim_inner;
 
+        // The tests below change the environment, which is global.
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         let dir = scratch_dir("e2e");
         let previous_home = std::env::var_os("HOME");
         let previous_shell = std::env::var_os("SHELL");
@@ -517,8 +609,12 @@ mod cli_shim_tests {
         // The command is linked in, and the PATH line lands in the config of
         // the shell the user actually uses.
         assert!(dir.join(".local/bin/rexadb").exists());
-        let nushell = std::fs::read_to_string(dir.join(".config/nushell/config.nushell")).unwrap();
-        assert!(nushell.contains("($nu.home-path)/.local/bin"), "{nushell}");
+        let config = nushell_config_file(&dir);
+        let nushell = std::fs::read_to_string(&config).unwrap();
+        assert!(
+            nushell.contains(&format!("{}/.local/bin", dir.display())),
+            "{nushell}"
+        );
         // No rc file is created for a shell the user does not have.
         assert!(!dir.join(".zshrc").exists());
         assert!(!dir.join(".bashrc").exists());
@@ -528,6 +624,35 @@ mod cli_shim_tests {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
         }
+        match previous_shell {
+            Some(value) => std::env::set_var("SHELL", value),
+            None => std::env::remove_var("SHELL"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unsupported_shell_does_not_guess_another_one() {
+        use super::rc_targets;
+
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let dir = scratch_dir("unsupported-shell");
+        // The user has a bash config, but runs a shell we do not support.
+        std::fs::write(dir.join(".bashrc"), "").unwrap();
+
+        let previous_shell = std::env::var_os("SHELL");
+        std::env::set_var("SHELL", "/bin/ksh");
+
+        let targets = rc_targets(&dir);
+        // Only the file the user already has — no login file is created for
+        // a shell we had to guess.
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].0, dir.join(".bashrc"));
+
         match previous_shell {
             Some(value) => std::env::set_var("SHELL", value),
             None => std::env::remove_var("SHELL"),
