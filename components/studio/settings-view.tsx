@@ -110,6 +110,7 @@ import {
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
+import { NIX_UPDATE_OPTIONS } from "@/lib/app-update";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
@@ -923,6 +924,7 @@ export function SettingsView({
     checkForUpdates,
     handleDownload,
     handleInstall,
+    copyNixCommand,
   } = useAppUpdate();
   const [isEditorThemeDialogOpen, setIsEditorThemeDialogOpen] = useState(false);
   const [themeNameInput, setThemeNameInput] = useState("");
@@ -1377,7 +1379,10 @@ export function SettingsView({
       return;
     }
     await handleDownload();
-    toast.success("Downloading update...");
+    // A Nix install has nothing to download: the command was copied instead.
+    if (updateState.installKind !== "nix") {
+      toast.success("Downloading update...");
+    }
   };
 
   const handleInstallUpdate = async () => {
@@ -2746,6 +2751,45 @@ export function SettingsView({
                       Renew License
                       <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
                     </Button>
+                  </div>
+                ) : updateState.installKind === "nix" ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      This is a Nix install, so RexaDB updates through Nix.
+                      Pick how you installed it — the steps differ.
+                    </p>
+                    {NIX_UPDATE_OPTIONS.map((option) => {
+                      const command = option.command;
+                      return (
+                        <div className="space-y-1" key={option.label}>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-medium text-foreground">
+                              {option.label}
+                            </span>
+                            {command ? (
+                              <button
+                                onClick={() => void copyNixCommand(command)}
+                                className="h-6 rounded-md border border-border bg-secondary/40 px-2 text-[11px] font-medium text-foreground hover:bg-secondary/60"
+                              >
+                                Copy "{command}"
+                              </button>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{option.hint}</p>
+                        </div>
+                      );
+                    })}
+                    {updateState.releaseUrl ? (
+                      <a
+                        href={updateState.releaseUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
+                      >
+                        Release notes
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">

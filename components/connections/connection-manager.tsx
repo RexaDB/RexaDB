@@ -93,6 +93,7 @@ import {
   CheckCircle2,
   Loader2,
   Globe,
+  Terminal,
 } from "@/lib/icon-theme/lucide-react";
 import { useAppUpdateContext } from "@/components/providers/app-update-context";
 import Link from "next/link";
@@ -286,6 +287,7 @@ function ConnectionsUpdatePill({
     updateDownloaded: boolean;
     latestVersion: string | null;
     progressPercent: number | null;
+    installKind: "nix" | "standalone";
   };
   installing: boolean;
   dismissed: boolean;
@@ -302,6 +304,7 @@ function ConnectionsUpdatePill({
     updateDownloaded,
     latestVersion,
     progressPercent,
+    installKind,
   } = updateState;
 
   if (!enabled || checking || dismissed) return null;
@@ -310,6 +313,9 @@ function ConnectionsUpdatePill({
   const pill =
     "flex h-7 select-none items-center gap-1.5 rounded-full border px-2.5 text-xs no-drag transition-colors";
   const version = latestVersion ? ` · v${latestVersion}` : "";
+  // A Nix install cannot replace its own binary: the pill points at the
+  // command that updates it instead of a download.
+  const isNix = installKind === "nix";
 
   if (updatesExpired && updateAvailable) {
     return (
@@ -371,14 +377,14 @@ function ConnectionsUpdatePill({
     <button
       type="button"
       onClick={onDownload}
-      title="Download update"
+      title={isNix ? "Copy the nix command that updates RexaDB" : "Download update"}
       className={cn(
         pill,
         "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/40 hover:text-blue-300",
       )}
     >
-      <Download className="size-3.5 shrink-0" />
-      <span className="truncate">Update{version}</span>
+      {isNix ? <Terminal className="size-3.5 shrink-0" /> : <Download className="size-3.5 shrink-0" />}
+      <span className="truncate">{isNix ? "Update via nix" : "Update"}{version}</span>
     </button>
   );
 }

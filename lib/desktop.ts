@@ -73,3 +73,25 @@ export async function openExternalUrl(url: string) {
   }
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+/** How the app was installed, which decides how it can be updated. */
+export type InstallKind = "nix" | "standalone";
+
+/**
+ * The install kind of the running app.
+ *
+ * A Nix install lives in the read-only store and cannot replace itself, so
+ * it updates through the user's flake instead. Anything we cannot read is
+ * treated as a regular install, which is the safe default: the updater can
+ * always try, and it fails with a message the user can act on.
+ */
+export async function getInstallKind(): Promise<InstallKind> {
+  if (!isDesktopRuntime()) return "standalone";
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const kind = await invoke<string>("install_kind");
+    return kind === "nix" ? "nix" : "standalone";
+  } catch {
+    return "standalone";
+  }
+}

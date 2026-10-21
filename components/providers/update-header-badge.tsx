@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, CheckCircle2, Loader2, ExternalLink } from "@/lib/icon-theme/lucide-react";
+import { Download, CheckCircle2, Loader2, ExternalLink, Terminal } from "@/lib/icon-theme/lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppUpdateContext } from "@/components/providers/app-update-context";
 import { useAuthState } from "@/hooks/use-auth-state";
@@ -50,6 +50,9 @@ export function UpdateHeaderBadge({
   if (dismissed) return null;
 
   const isModern = variant === "modern";
+  // A Nix install cannot replace its own binary: the badge points at the
+  // command that updates it instead of a download.
+  const isNix = updateState.installKind === "nix";
 
   // Mirror the sibling search bar exactly (VS Code header: reduced py/radius) — border matches sidebar (border-border)
   const baseClasses = isModern
@@ -123,11 +126,12 @@ export function UpdateHeaderBadge({
   return (
     <button
       onClick={() => void handleDownload()}
+      title={isNix ? "Copy the nix command that updates RexaDB" : undefined}
       className={cn(baseClasses, "border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/40 hover:text-blue-300", className)}
     >
-      <Download className={iconClasses} />
+      {isNix ? <Terminal className={iconClasses} /> : <Download className={iconClasses} />}
       <span className="truncate">
-        <span className="hidden sm:inline">Update available</span>
+        <span className="hidden sm:inline">{isNix ? "Update via nix" : "Update available"}</span>
         <span className="sm:hidden">Update</span>
         {updateState.latestVersion ? ` · v${updateState.latestVersion}` : ""}
       </span>
