@@ -187,16 +187,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
 
   return (
     <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
-      {neonAuth ? (
-        <NeonAuthUsersToolbar
-          search={search}
-          onSearchChange={setSearch}
-          status={neonStatus}
-          onStatusChange={setNeonStatus}
-          onRefresh={refresh}
-          loading={loading}
-        />
-      ) : (
+      {!neonAuth && (
       <div className="border-b border-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         {selectedRows.size > 0 && !neonAuth ? (
           <div className="flex items-center gap-2">
@@ -318,8 +309,39 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
         </div>
       </div>
       )}
-      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 overflow-hidden rounded-t-lg border border-b-0 border-border bg-background md:mx-6" : ""}`}>
-        {loading && users.length === 0 ? (
+      <div className={`flex-1 min-h-0 ${neonAuth ? "mx-5 md:mx-6" : ""}`}>
+        {neonAuth ? (
+          <NeonAuthUsersTable
+            rows={filteredUsers}
+            loading={loading}
+            toolbar={
+              <NeonAuthUsersToolbar
+                search={search}
+                onSearchChange={setSearch}
+                status={neonStatus}
+                onStatusChange={setNeonStatus}
+                onRefresh={refresh}
+                loading={loading}
+              />
+            }
+            footer={
+              <div className="flex h-9 items-center justify-between px-4 text-xs text-muted-foreground">
+                <span>Showing {filteredUsers.length} of {users.length} users</span>
+                {users.length === 200 && <span>Showing the 200 most recent users</span>}
+              </div>
+            }
+            emptyState={
+              error && users.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>
+              ) : (
+                <div className="py-8 text-center">
+                  <p className="text-sm font-medium text-foreground">{search.trim() ? "No users found" : "No users in your project"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{search.trim() ? "There are currently no users based on the filters applied" : "There are currently no users who signed up to your project"}</p>
+                </div>
+              )
+            }
+          />
+        ) : loading && users.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-studio-cell-muted" />
           </div>
@@ -340,8 +362,6 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
                 : "There are currently no users who signed up to your project"}
             </p>
           </div>
-        ) : neonAuth ? (
-          <NeonAuthUsersTable rows={filteredUsers} />
         ) : (
           <AuthDataGrid
             rows={filteredUsers}
@@ -359,10 +379,11 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           />
         )}
       </div>
-      <div className={`flex h-9 items-center justify-between px-6 text-xs text-muted-foreground ${neonAuth ? "mx-5 rounded-b-lg border-x border-b border-border bg-background md:mx-6" : "border-t border-border bg-studio-bg"}`}>
-        {error ? <span className="text-destructive">Unable to refresh users</span> : loading ? <span>Refreshing users…</span> : <span>Showing {filteredUsers.length} of {users.length} users</span>}
-        {neonAuth && users.length === 200 && <span>Showing the 200 most recent users</span>}
-      </div>
+      {!neonAuth && (
+        <div className="flex h-9 items-center justify-between border-t border-border bg-studio-bg px-6 text-xs text-muted-foreground">
+          {error ? <span className="text-destructive">Unable to refresh users</span> : loading ? <span>Refreshing users…</span> : <span>Showing {filteredUsers.length} of {users.length} users</span>}
+        </div>
+      )}
       {!neonAuth && (
         <DeleteConfirmDialog
           open={deleteOpen}

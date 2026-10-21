@@ -1,20 +1,41 @@
-import { NeonAuthUserRow } from "./neon-auth-user-row";
+"use client";
 
-export function NeonAuthUsersTable({ rows }: { rows: any[] }) {
+import { DataTable, type TableColumn } from "@/components/data-table/components/data-table";
+import type { ReactNode } from "react";
+import {
+  NeonAuthUserCreated,
+  NeonAuthUserIdentity,
+  NeonAuthUserStatus,
+  type NeonAuthUser,
+} from "./neon-auth-user-row";
+
+const columns: TableColumn<NeonAuthUser>[] = [
+  { key: "Display name", header: "User", sortable: true, width: "1.5fr", cell: (user) => <NeonAuthUserIdentity user={user} /> },
+  { key: "__confirmed", header: "Status", sortable: true, width: "0.8fr", cell: (user) => <NeonAuthUserStatus user={user} />, sortValue: (user) => Number(user.__confirmed) },
+  { key: "Providers", header: "Sign-in method", sortable: true, width: "0.9fr", cell: (user) => user.Providers || "Email" },
+  { key: "__created_at_raw", header: "Created", sortable: true, align: "right", width: "0.8fr", cell: (user) => <NeonAuthUserCreated user={user} />, sortValue: (user) => user.__created_at_raw ?? "" },
+];
+
+interface NeonAuthUsersTableProps {
+  rows: NeonAuthUser[];
+  loading: boolean;
+  toolbar: ReactNode;
+  footer: ReactNode;
+  emptyState: ReactNode;
+}
+
+export function NeonAuthUsersTable({ rows, loading, toolbar, footer, emptyState }: NeonAuthUsersTableProps) {
   return (
-    <div className="h-full overflow-auto">
-      <table className="w-full min-w-[640px] border-collapse text-left">
-        <caption className="sr-only">Neon Auth project users</caption>
-        <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
-          <tr className="border-b border-border text-sm font-semibold text-foreground">
-            <th scope="col" className="px-5 py-4">User</th>
-            <th scope="col" className="px-5 py-4">Email status</th>
-            <th scope="col" className="px-5 py-4">Sign-in method</th>
-            <th scope="col" className="px-5 py-4 text-right">Created</th>
-          </tr>
-        </thead>
-        <tbody>{rows.map((user) => <NeonAuthUserRow key={user.UID} user={user} />)}</tbody>
-      </table>
-    </div>
+    <DataTable<NeonAuthUser>
+      data={rows}
+      columns={columns}
+      getRowId={(user) => user.UID}
+      defaultSort={{ key: "__created_at_raw", direction: "desc" }}
+      height={440}
+      loading={loading}
+      toolbar={toolbar}
+      footer={footer}
+      emptyState={emptyState}
+    />
   );
 }
