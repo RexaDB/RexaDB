@@ -187,7 +187,18 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
 
   return (
     <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
-      {!neonAuth && (
+      {neonAuth ? (
+        <div className="px-5 pb-3 md:px-6">
+          <NeonAuthUsersToolbar
+            search={search}
+            onSearchChange={setSearch}
+            status={neonStatus}
+            onStatusChange={setNeonStatus}
+            onRefresh={refresh}
+            loading={loading}
+          />
+        </div>
+      ) : (
       <div className="border-b border-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         {selectedRows.size > 0 && !neonAuth ? (
           <div className="flex items-center gap-2">
@@ -314,16 +325,6 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           <NeonAuthUsersTable
             rows={filteredUsers}
             loading={loading}
-            toolbar={
-              <NeonAuthUsersToolbar
-                search={search}
-                onSearchChange={setSearch}
-                status={neonStatus}
-                onStatusChange={setNeonStatus}
-                onRefresh={refresh}
-                loading={loading}
-              />
-            }
             footer={
               <div className="flex h-9 items-center justify-between px-4 text-xs text-muted-foreground">
                 <span>Showing {filteredUsers.length} of {users.length} users</span>

@@ -19,12 +19,11 @@ const columns: TableColumn<NeonAuthUser>[] = [
 interface NeonAuthUsersTableProps {
   rows: NeonAuthUser[];
   loading: boolean;
-  toolbar: ReactNode;
   footer: ReactNode;
   emptyState: ReactNode;
 }
 
-export function NeonAuthUsersTable({ rows, loading, toolbar, footer, emptyState }: NeonAuthUsersTableProps) {
+export function NeonAuthUsersTable({ rows, loading, footer, emptyState }: NeonAuthUsersTableProps) {
   return (
     <DataTable<NeonAuthUser>
       data={rows}
@@ -33,7 +32,6 @@ export function NeonAuthUsersTable({ rows, loading, toolbar, footer, emptyState 
       defaultSort={{ key: "__created_at_raw", direction: "desc" }}
       height={440}
       loading={loading}
-      toolbar={toolbar}
       footer={footer}
       emptyState={emptyState}
     />
