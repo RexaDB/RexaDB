@@ -37,6 +37,7 @@ import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-d
 import { runQuery } from "@/lib/api/actions-client";
 import { AuthDataGrid } from "./auth-data-grid";
 import { NeonAuthUsersTable } from "./neon-auth-users-table";
+import { NeonAuthUsersToolbar, type NeonUserStatusFilter } from "./neon-auth-users-toolbar";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
 import { AuthAddUserDropdown } from "./auth-add-user-dropdown";
 import { useAuthUsers } from "@/hooks/use-auth-users";
@@ -101,6 +102,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const { users, loading, error, refresh } = useAuthUsers(connectionString, enabled, neonAuth);
   const [filterColumn, setFilterColumn] = useState<SpecificFilterColumn>("email");
   const [search, setSearch] = useState("");
+  const [neonStatus, setNeonStatus] = useState<NeonUserStatusFilter>("all");
   const [sortConfig, setSortConfig] = useState<{
     column: string;
     direction: "ASC" | "DESC";
@@ -134,22 +136,20 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const searchTerm = search.trim().toLowerCase();
   const searchInvalid = isSearchInvalid(search, filterColumn);
   const filteredUsers = useMemo(() => {
-    if (!searchTerm) return sortedUsers;
     const matches = (value: string | null | undefined) =>
-      value != null && String(value).toLowerCase().includes(searchTerm);
+      !searchTerm || (value != null && String(value).toLowerCase().includes(searchTerm));
     return sortedUsers.filter((row) => {
-      if (filterColumn === "email") return matches(row.Email);
-      if (filterColumn === "phone") return matches(row.Phone);
-      if (filterColumn === "id") return matches(row.UID);
-      if (filterColumn === "name") return matches(row["Display name"]);
-      return (
-        matches(row.Email) ||
-        matches(row.Phone) ||
-        matches(row.UID) ||
-        matches(row["Display name"])
-      );
+      const searchMatches = neonAuth
+        ? matches(row.Email) || matches(row["Display name"])
+        : filterColumn === "email" ? matches(row.Email)
+          : filterColumn === "phone" ? matches(row.Phone)
+            : filterColumn === "id" ? matches(row.UID)
+              : filterColumn === "name" ? matches(row["Display name"])
+                : matches(row.Email) || matches(row.Phone) || matches(row.UID) || matches(row["Display name"]);
+      const statusMatches = !neonAuth || neonStatus === "all" || row.__confirmed === (neonStatus === "verified");
+      return searchMatches && statusMatches;
     });
-  }, [sortedUsers, searchTerm, filterColumn]);
+  }, [sortedUsers, searchTerm, filterColumn, neonAuth, neonStatus]);
 
   const toggleAllSelection = useCallback(() => {
     setSelectedRows((prev) =>
@@ -187,7 +187,17 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <div className="border-b border-studio-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+      {neonAuth ? (
+        <NeonAuthUsersToolbar
+          search={search}
+          onSearchChange={setSearch}
+          status={neonStatus}
+          onStatusChange={setNeonStatus}
+          onRefresh={refresh}
+          loading={loading}
+        />
+      ) : (
+      <div className="border-b border-border bg-studio-header-bg py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         {selectedRows.size > 0 && !neonAuth ? (
           <div className="flex items-center gap-2">
             <Button
@@ -206,12 +216,12 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <div
-              className={`flex h-[26px] items-stretch overflow-hidden rounded-md border bg-studio-header-bg ${searchInvalid ? "border-red-900" : "border-studio-border"}`}
+              className={`flex h-[26px] items-stretch overflow-hidden rounded-md border bg-studio-header-bg ${searchInvalid ? "border-destructive" : "border-border"}`}
             >
               <div className="flex items-center px-1.5">
                 <Search className="h-3.5 w-3.5 text-studio-cell-muted" />
               </div>
-              <div className="w-px bg-studio-border" />
+              <div className="w-px bg-border" />
               <Select value={filterColumn} onValueChange={(value) => setFilterColumn(value as SpecificFilterColumn)}>
                 <SelectTrigger
                   className={`h-[26px]! w-[130px] rounded-none border-0 bg-transparent! pt-0! pb-[2px]! text-xs ${filterColumn === "freeform" ? "text-warning" : ""}`}
@@ -240,7 +250,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
                   )}
                 </SelectContent>
               </Select>
-              <div className="w-px bg-studio-border" />
+              <div className="w-px bg-border" />
               <div className="relative">
                 <Input
                   value={search}
@@ -307,6 +317,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           {!neonAuth && <AuthAddUserDropdown connectionString={connectionString} onUsersChanged={refresh} />}
         </div>
       </div>
+      )}
       <div className="flex-1 min-h-0">
         {loading && users.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -348,7 +359,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           />
         )}
       </div>
-      <div className="flex h-9 items-center justify-between border-t border-studio-border bg-studio-bg px-6 text-xs text-muted-foreground">
+      <div className="flex h-9 items-center justify-between border-t border-border bg-studio-bg px-6 text-xs text-muted-foreground">
         {error ? <span className="text-destructive">Unable to refresh users</span> : loading ? <span>Refreshing users…</span> : <span>Showing {filteredUsers.length} of {users.length} users</span>}
         {neonAuth && users.length === 200 && <span>Showing the 200 most recent users</span>}
       </div>

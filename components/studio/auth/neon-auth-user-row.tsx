@@ -27,7 +27,7 @@ export function NeonAuthUserRow({ user }: { user: NeonAuthUser }) {
   const created = createdLabel(user.__created_at_raw ?? user["Created at"]);
   const verifiedStyle = "border-[color-mix(in_srgb,var(--success)_25%,var(--border))] bg-[color-mix(in_srgb,var(--success)_10%,var(--card))] text-success";
   return (
-    <tr className="group border-b border-border/70 transition-colors hover:bg-muted/35">
+    <tr className="group border-b border-border transition-colors hover:bg-muted/35">
       <td className="px-5 py-3.5"><div className="flex min-w-[230px] items-center gap-3"><Avatar className="size-9"><AvatarImage src={user.__avatar_url ?? undefined} alt="" /><AvatarFallback className="text-xs font-semibold">{initials(user["Display name"] || user.Email || "User")}</AvatarFallback></Avatar><div className="min-w-0"><div className="truncate text-sm font-medium text-foreground">{user["Display name"] || "Unnamed user"}</div><div className="truncate text-xs text-muted-foreground">{user.Email || "No email address"}</div></div></div></td>
       <td className="px-5 py-3.5"><span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${user.__confirmed ? verifiedStyle : "border-border bg-muted text-muted-foreground"}`}><span className={`size-1.5 rounded-full ${user.__confirmed ? "bg-[color:var(--success)]" : "bg-muted-foreground/50"}`} />{user.__confirmed ? "Verified" : "Unverified"}</span></td>
       <td className="px-5 py-3.5"><span className="inline-flex items-center rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground">{user.Providers || "Email"}</span></td>
