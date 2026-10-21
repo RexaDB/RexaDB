@@ -186,7 +186,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-full">
+    <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
       {neonAuth ? (
         <NeonAuthUsersToolbar
           search={search}
