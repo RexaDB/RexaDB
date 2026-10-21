@@ -4,6 +4,8 @@ import { RefreshCw, Search, X } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { SortState } from "@/components/data-table/components/data-table";
+import { NeonAuthUsersSort } from "./neon-auth-users-sort";
 
 export type NeonUserStatusFilter = "all" | "verified" | "unverified";
 
@@ -14,9 +16,11 @@ interface NeonAuthUsersToolbarProps {
   onStatusChange: (value: NeonUserStatusFilter) => void;
   onRefresh: () => void;
   loading: boolean;
+  sort: SortState | null;
+  onSortChange: (sort: SortState) => void;
 }
 
-export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusChange, onRefresh, loading }: NeonAuthUsersToolbarProps) {
+export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusChange, onRefresh, loading, sort, onSortChange }: NeonAuthUsersToolbarProps) {
   return (
     <div className="flex min-h-7 flex-wrap items-center gap-2">
       <div className="relative flex h-7 w-full max-w-80 min-w-0 flex-none items-center rounded-md border border-border bg-studio-bg">
@@ -32,6 +36,7 @@ export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusC
         <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
         Refresh
       </Button>
+      <NeonAuthUsersSort sort={sort} onSortChange={onSortChange} />
     </div>
   );
 }

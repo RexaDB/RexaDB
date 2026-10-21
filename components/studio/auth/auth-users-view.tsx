@@ -12,6 +12,7 @@ import {
   X,
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
+import type { SortState } from "@/components/data-table/components/data-table";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -104,6 +105,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const [filterColumn, setFilterColumn] = useState<SpecificFilterColumn>("email");
   const [search, setSearch] = useState("");
   const [neonStatus, setNeonStatus] = useState<NeonUserStatusFilter>("all");
+  const [neonTableSort, setNeonTableSort] = useState<SortState | null>({ key: "__created_at_raw", direction: "desc" });
   const [sortConfig, setSortConfig] = useState<{
     column: string;
     direction: "ASC" | "DESC";
@@ -199,6 +201,8 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
             onStatusChange={setNeonStatus}
             onRefresh={refresh}
             loading={loading}
+            sort={neonTableSort}
+            onSortChange={setNeonTableSort}
             />
           </div>
         </>
@@ -329,6 +333,8 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           <NeonAuthUsersTable
             rows={filteredUsers}
             loading={loading}
+            sort={neonTableSort}
+            onSortChange={setNeonTableSort}
             emptyState={
               error && users.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">{error}</div>

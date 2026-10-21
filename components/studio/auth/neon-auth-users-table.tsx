@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { DataTable, type TableColumn } from "@/components/data-table/components/data-table";
+import { DataTable, type SortState, type TableColumn } from "@/components/data-table/components/data-table";
 import {
   NeonAuthUserCreated,
   NeonAuthUserIdentity,
@@ -19,10 +19,12 @@ const columns: TableColumn<NeonAuthUser>[] = [
 interface NeonAuthUsersTableProps {
   rows: NeonAuthUser[];
   loading: boolean;
+  sort: SortState | null;
+  onSortChange: (sort: SortState | null) => void;
   emptyState: ReactNode;
 }
 
-export function NeonAuthUsersTable({ rows, loading, emptyState }: NeonAuthUsersTableProps) {
+export function NeonAuthUsersTable({ rows, loading, sort, onSortChange, emptyState }: NeonAuthUsersTableProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
 
@@ -42,7 +44,8 @@ export function NeonAuthUsersTable({ rows, loading, emptyState }: NeonAuthUsersT
         data={rows}
         columns={columns}
         getRowId={(user) => user.UID}
-        defaultSort={{ key: "__created_at_raw", direction: "desc" }}
+        sort={sort}
+        onSortChange={onSortChange}
         height={height}
         loading={loading}
         emptyState={emptyState}
