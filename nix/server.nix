@@ -20,7 +20,7 @@ let
     src = src;
     # v2 also caches packuments (see nix/frontend.nix).
     fetcherVersion = 2;
-    hash = "sha256-HZu3aGzQ4Y8+VoxE5InCF1SyCT/mj+azcb4boZgfnz0=";
+    hash = "sha256-4kVNPmymd5GBe7jY+7MJiT/X8TIGbttHNJYNx1hfAoQ=";
   };
   npmDepsServer = pkgs.fetchNpmDeps {
     name = "rexadb-server-npm-deps-${version}";
