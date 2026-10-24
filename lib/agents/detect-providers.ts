@@ -1,16 +1,16 @@
-import { execSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 import type { AgentProvider, AgentProviderId } from "./provider-types";
 import { AGENT_PROVIDER_META } from "./provider-types";
+import { localCliPath } from "./cli-path";
 
 function whichBinary(name: string): string | null {
   try {
-    const result = execSync(`which ${name} 2>/dev/null || true`, {
-      encoding: "utf-8",
-      timeout: 3000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
+    const result = execFileSync(process.platform === "win32" ? "where.exe" : "which", [name], {
+      env: { ...process.env, PATH: localCliPath() },
+      encoding: "utf-8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"],
+    }).trim().split(/\r?\n/)[0];
     return result.length > 0 ? result : null;
   } catch {
     return null;
@@ -19,19 +19,11 @@ function whichBinary(name: string): string | null {
 
 function checkClaudeAuth(binaryPath: string): "installed" | "auth-required" {
   try {
-    const result = execSync(`${binaryPath} auth status 2>&1 || true`, {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
+    const result = execFileSync(binaryPath, ["auth", "status"], {
+      env: { ...process.env, PATH: localCliPath() },
+      encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
     });
-    if (
-      result.includes("authenticated") ||
-      result.includes("Logged in") ||
-      result.includes('"loggedIn":true') ||
-      result.includes('"loggedIn": true')
-    ) {
-      return "installed";
-    }
+    if (JSON.parse(result).loggedIn === true) return "installed";
     return "auth-required";
   } catch {
     return "auth-required";
@@ -40,18 +32,12 @@ function checkClaudeAuth(binaryPath: string): "installed" | "auth-required" {
 
 function checkCodexAuth(binaryPath: string): "installed" | "auth-required" {
   try {
-    const result = execSync(`${binaryPath} login status 2>&1 || true`, {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
+    // Codex writes login status to stderr, so capture both without a shell.
+    const { stdout, stderr, status } = spawnSync(binaryPath, ["login", "status"], {
+      env: { ...process.env, PATH: localCliPath() },
+      encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
     });
-    if (
-      result.includes("Logged in") ||
-      result.includes("authenticated") ||
-      result.includes("logged in")
-    ) {
-      return "installed";
-    }
+    if (status === 0 && /logged in/i.test(`${stdout}\n${stderr}`)) return "installed";
     return "auth-required";
   } catch {
     return "auth-required";
@@ -110,6 +96,18 @@ function checkCursorAuth(): "installed" | "auth-required" {
   }
 }
 
+function checkPiAuth(binaryPath: string): "installed" | "auth-required" {
+  try {
+    const output = execFileSync(binaryPath, ["--list-models"], {
+      env: { ...process.env, PATH: localCliPath() },
+      encoding: "utf-8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
+    });
+    return /no models available/i.test(output) ? "auth-required" : "installed";
+  } catch {
+    return "auth-required";
+  }
+}
+
 const AUTH_CHECKERS: Partial<
   Record<AgentProviderId, (binaryPath: string) => "installed" | "auth-required">
 > = {
@@ -118,6 +116,7 @@ const AUTH_CHECKERS: Partial<
   opencode: checkOpenCodeAuth,
   "grok-build": checkGrokAuth,
   cursor: () => checkCursorAuth(),
+  pi: checkPiAuth,
 };
 
 export async function detectProviders(): Promise<AgentProvider[]> {

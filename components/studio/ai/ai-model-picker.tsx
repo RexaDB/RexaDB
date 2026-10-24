@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalCliProviders } from "@/hooks/use-local-cli-providers";
 import { ChevronDown, Settings, Bot } from "@/lib/icon-theme/lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import type { GlobalAiSettings } from "@/lib/api/actions-client";
 import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
 
 function getProviderBadge(provider: string) {
-  if (provider === "external") {
+  if (provider === "external" || provider.startsWith("cli:")) {
     return <Bot className="h-3 w-3" />;
   }
   if (provider === "ollama") {
@@ -61,10 +62,11 @@ export function AiModelPicker({
   onAddModels: () => void;
 }) {
   const discoveredAgents = useDiscoveredAgents();
+  const localCli = useLocalCliProviders();
 
-  const { agents, llmModels } = getConfiguredModels(settings, discoveredAgents);
-  const hasItems = agents.length > 0 || llmModels.length > 0;
-  const displayLabel = currentModel || "Select model";
+  const { agents, llmModels, localModels } = getConfiguredModels(settings, discoveredAgents, localCli.providers);
+  const hasItems = agents.length > 0 || llmModels.length > 0 || localModels.length > 0;
+  const displayLabel = localModels.find((m) => m.provider === currentProvider && m.model === currentModel)?.label || currentModel || "Select model";
   const displayProvider = currentProvider || "";
 
   return (
@@ -117,12 +119,19 @@ export function AiModelPicker({
               <span className="truncate">{model}</span>
             </DropdownMenuItem>
           ))}
+          {localModels.map((m) => (
+            <DropdownMenuItem key={`${m.provider}:${m.model}`} className="gap-2 text-xs"
+              onClick={() => onSelectProvider(m.provider, m.model)}>
+              <Bot className="h-3 w-3" /><span className="truncate">{m.label}</span>
+            </DropdownMenuItem>
+          ))}
           {!hasItems && (
             <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-              No models or agents found
+              {localCli.loading ? "Detecting local CLIs…" : localCli.error || "Sign in to a supported CLI or configure an API provider."}
             </div>
           )}
         </div>
+        <DropdownMenuItem disabled={localCli.loading} onClick={() => void localCli.refresh()}>Refresh local CLIs</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="gap-2 px-2 py-1.5 text-xs text-muted-foreground"

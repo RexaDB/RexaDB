@@ -2,7 +2,7 @@ import { isDesktopRuntime } from "@/lib/desktop";
 
 // API base URL for the sidecar server (used in static export mode)
 // Exported as let so Tauri runtime can update it after port discovery
-export let API_BASE = `http://127.0.0.1:3867`;
+export let API_BASE = process.env.NEXT_PUBLIC_REXADB_API_URL || "http://127.0.0.1:3867";
 let initialization: Promise<void> | undefined;
 
 async function discoverApiBase(): Promise<void> {

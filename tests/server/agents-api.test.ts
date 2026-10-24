@@ -30,6 +30,13 @@ function fixture(initialCache: ProvidersCachePayload | null = null) {
 }
 
 describe("agent provider discovery Effects", () => {
+  test("explicit refresh bypasses a fresh cache after a new CLI login", async () => {
+    const api = fixture({ providers: [{ ...provider, status: "auth-required" }], cachedAt: 9_999 });
+    const result = await Effect.runPromise(api.refreshEffect);
+    expect(result?.[0].status).toBe("installed");
+    expect(api.detected()).toBe(1);
+    expect(api.cache()?.providers[0].status).toBe("installed");
+  });
   test("serves a fresh cached provider list without probing local CLIs", async () => {
     const cached = { ...provider, models: [{ id: "cached", label: "Cached" }] };
     const api = fixture({ providers: [cached], cachedAt: 9_999 });

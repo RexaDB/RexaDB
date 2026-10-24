@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { getLocalCliProviderId } from "@/lib/agents/local-provider";
 import { apiFetch } from "@/lib/api-base";
 import {
   getGlobalAiSettings,
@@ -142,15 +143,17 @@ export function useAiAssistant(input: {
     if (!settings) throw new Error("AI settings not loaded.");
 
     const config = settings.providers[provider as keyof typeof settings.providers];
-    if (!config) throw new Error(`AI provider "${provider}" is not configured.`);
+    const isLocalCli = getLocalCliProviderId(provider) !== null;
+    if (!isLocalCli && !config) throw new Error(`AI provider "${provider}" is not configured.`);
 
     const isExternal = provider === "external";
     const isOllama = provider === "ollama";
-    if (!isExternal && !isOllama) {
+    if (!isExternal && !isOllama && !isLocalCli) {
       if (!config.apiKey.trim() || !model.trim()) {
         throw new Error("Configure an AI provider with an API key and model first.");
       }
     }
+    if (isLocalCli && !model.trim()) throw new Error("Select a local CLI model first.");
     if (isOllama) {
       if (!model.trim()) {
         throw new Error("Configure Ollama with a model first.");
@@ -266,7 +269,8 @@ export function useAiAssistant(input: {
               message.id === assistantId ? { ...message, content: payload.message } : message,
             ),
           );
-          await saveStudioChatMessages(chatId, input.connectionId, messagesRef.current.find(m => m.role === "user")?.content.slice(0, 80) || "Chat", [...messagesRef.current]);
+          const savedMessages = [...messages.filter((m) => m.id !== assistantId), userMessage, { id: assistantId, chatId, role: "assistant" as const, content: payload.message, timestamp: Date.now() }];
+          await saveStudioChatMessages(chatId, input.connectionId, savedMessages.find(m => m.role === "user")?.content.slice(0, 80) || "Chat", savedMessages);
           if (payload.type === "error") break;
           continue;
         }

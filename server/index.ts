@@ -1,4 +1,5 @@
 import express from "express";
+import { handleLocalCliChat } from "./local-cli-chat";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
@@ -44,6 +45,7 @@ import {
 import { failureFromExit } from "./effect/runtime";
 import {
   detectAgentProvidersEffect,
+  refreshAgentProvidersEffect,
   listAgentProviderModelsEffect,
 } from "./agents-api";
 import { createStudioStorageEffects } from "./studio-storage-api";
@@ -2414,6 +2416,10 @@ function setupSsePiAgent(req: any, res: any) {
 
 // Agent / SQL stream routes
 app.post("/api/agent/chat/stream", async (req, res) => {
+  if (String(req.body.provider || "").startsWith("cli:")) {
+    await handleLocalCliChat(req, res);
+    return;
+  }
   try {
     const { history, lightDashboardContext, lightWorkflowContext, permissionMode } = req.body;
     const resolved = await resolveAiReq(req, res);
@@ -2999,7 +3005,7 @@ app.get("/api/workflows/:id/runs/:runId", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent Harness Endpoints — Effect-backed provider/model discovery
 // ─────────────────────────────────────────────────────────────────────────────
-app.get("/api/agents/detect", effectHandler(() => detectAgentProvidersEffect));
+app.get("/api/agents/detect", effectHandler((req) => req.query.refresh === "1" ? refreshAgentProvidersEffect : detectAgentProvidersEffect));
 
 app.get(
   "/api/agents/models/:providerId",

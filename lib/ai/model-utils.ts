@@ -1,3 +1,5 @@
+import type { AgentProvider } from "@/lib/agents/provider-types";
+import { localCliModels } from "@/lib/agents/local-provider";
 import { useEffect, useState } from "react";
 import type { GlobalAiSettings } from "@/lib/api/actions-client";
 import type { AcpPreset } from "@/lib/acp/types";
@@ -21,7 +23,7 @@ export function useDiscoveredAgents() {
   return discoveredAgents;
 }
 
-export function getConfiguredModels(settings: GlobalAiSettings | null, discoveredAgents: AcpPreset[]) {
+export function getConfiguredModels(settings: GlobalAiSettings | null, discoveredAgents: AcpPreset[], localProviders: AgentProvider[] = []) {
   const agents = (discoveredAgents ?? []).map((a) => ({ model: a.name, provider: "external" as const, id: a.id }));
   const providers = settings?.providers && typeof settings.providers === "object" ? settings.providers : {};
   const llmModels = Object.entries(providers).flatMap(([provider, config]) => {
@@ -35,5 +37,5 @@ export function getConfiguredModels(settings: GlobalAiSettings | null, discovere
       .filter((m) => typeof m === "string" && m.trim())
       .map((model) => ({ model, provider: provider as string }));
   });
-  return { agents, llmModels };
+  return { agents, llmModels, localModels: localCliModels(localProviders) };
 }
