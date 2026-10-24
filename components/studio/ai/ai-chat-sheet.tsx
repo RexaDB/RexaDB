@@ -871,7 +871,7 @@ export function AiChatSheet({
                 onAddModels={_onOpenSettings}
                 modelsLoading={localCli.loading}
                 modelsError={localCli.error}
-                onRefreshModels={() => void localCli.refresh()}
+                onRefreshModels={localCli.enabled ? () => void localCli.refresh() : undefined}
                 validMentions={validMentions}
                 variant="Pill"
                 demo={false}

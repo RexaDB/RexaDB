@@ -1,5 +1,7 @@
 import express from "express";
 import { handleLocalCliChat } from "./local-cli-chat";
+import { desktopCliAccess } from "./desktop-cli-access";
+import { isLocalCliRequest, DESKTOP_CLI_HEADER } from "../lib/agents/desktop-access";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
@@ -171,7 +173,7 @@ const corsMiddleware = cors({
     callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'X-Studio-Url'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'X-Studio-Url', DESKTOP_CLI_HEADER],
   exposedHeaders: ['X-Studio-Request-Id'],
 });
 
@@ -2415,6 +2417,11 @@ function setupSsePiAgent(req: any, res: any) {
 }
 
 // Agent / SQL stream routes
+const requireDesktopCli = desktopCliAccess();
+app.use((req, res, next) => {
+  if (isLocalCliRequest(req.path, req.body)) requireDesktopCli(req, res, next);
+  else next();
+});
 app.post("/api/agent/chat/stream", async (req, res) => {
   if (String(req.body.provider || "").startsWith("cli:")) {
     await handleLocalCliChat(req, res);

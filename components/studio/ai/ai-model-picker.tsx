@@ -127,11 +127,11 @@ export function AiModelPicker({
           ))}
           {!hasItems && (
             <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-              {localCli.loading ? "Detecting local CLIs…" : localCli.error || "Sign in to a supported CLI or configure an API provider."}
+              {localCli.loading ? "Detecting local CLIs…" : localCli.error || (localCli.enabled ? "Sign in to a supported CLI or configure an API provider." : "Configure an API provider. Local CLI agents require the desktop app.")}
             </div>
           )}
         </div>
-        <DropdownMenuItem disabled={localCli.loading} onClick={() => void localCli.refresh()}>Refresh local CLIs</DropdownMenuItem>
+        {localCli.enabled && <DropdownMenuItem disabled={localCli.loading} onClick={() => void localCli.refresh()}>Refresh local CLIs</DropdownMenuItem>}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="gap-2 px-2 py-1.5 text-xs text-muted-foreground"

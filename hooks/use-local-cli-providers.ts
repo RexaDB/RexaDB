@@ -3,8 +3,9 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { apiFetch, initApiBase } from "@/lib/api-base";
 import type { AgentProvider } from "@/lib/agents/provider-types";
+import { isDesktopRuntime } from "@/lib/desktop";
 
-const initial = { providers: [] as AgentProvider[], loading: true, error: "" };
+const initial = { providers: [] as AgentProvider[], enabled: false, loading: false, error: "" };
 let snapshot = initial;
 let refreshedAt = 0;
 let pending: Promise<void> | null = null;
@@ -16,9 +17,13 @@ function publish(next: typeof initial) {
 }
 
 export function refreshLocalCliProviders(force = false): Promise<void> {
+  if (!isDesktopRuntime()) {
+    if (snapshot !== initial) publish(initial);
+    return Promise.resolve();
+  }
   if (pending) return pending;
   if (!force && Date.now() - refreshedAt < 30_000) return Promise.resolve();
-  publish({ ...snapshot, loading: true, error: "" });
+  publish({ ...snapshot, enabled: true, loading: true, error: "" });
   pending = (async () => {
     try {
       await initApiBase();
@@ -29,7 +34,7 @@ export function refreshLocalCliProviders(force = false): Promise<void> {
       if (data.error) throw new Error(data.error);
       if (!Array.isArray(data.providers)) throw new Error("Invalid CLI discovery response.");
       refreshedAt = Date.now();
-      publish({ providers: data.providers, loading: false, error: "" });
+      publish({ providers: data.providers, enabled: true, loading: false, error: "" });
     } catch (error) {
       publish({ ...snapshot, loading: false, error: error instanceof Error ? error.message : "Could not detect local CLIs." });
     } finally {

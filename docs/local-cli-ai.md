@@ -1,6 +1,8 @@
 # Use a local CLI in Ask AI
 
-Ask AI and the SQL AI model picker can use installed CLI agents without an API key configured in RexaDB. The CLI runs on the machine hosting the RexaDB sidecar and uses its own login, model configuration, subscription limits, and billing. Model inference still runs through that provider; this does not make cloud models offline.
+In the **RexaDB desktop app**, Ask AI and the SQL AI model picker can use installed CLI agents without an API key configured in RexaDB. The CLI runs on the same machine as the native app and uses its own login, model configuration, subscription limits, and billing. Model inference still runs through that provider; this does not make cloud models offline.
+
+The web version does not discover or offer local CLI subscriptions, even when opened on localhost. It continues to support API providers. A standalone sidecar cannot execute local CLI requests: the native Tauri host generates a random per-launch capability, passes it privately to its child sidecar, and exposes it to the desktop frontend through Tauri IPC. CLI discovery and execution endpoints require that capability. It is not persisted, exposed through HTTP, or sent to remote API origins.
 
 1. Install a supported CLI and sign in using its own terminal command. For example, `codex login` or `claude auth login`.
 2. Open **AI Settings → Local CLI agents**, then click **Refresh**. Discovery also refreshes when the app regains focus.
@@ -31,10 +33,10 @@ Common installer directories are added to the inherited PATH for desktop launche
 
 ## Development and checks
 
-Install dependencies in the repository and `server/` with a Bun version that supports the checked-in lockfile. Run the sidecar and Next.js as usual. To keep development separate from an installed app, set `REXADB_SERVER_PORT` and `REXADB_USER_DATA_DIR` on the sidecar and the matching `NEXT_PUBLIC_REXADB_API_URL` on Next.js. For a different frontend port, include its origin in `REXADB_CORS_ORIGINS`.
+Install dependencies in the repository and `server/` with a Bun version that supports the checked-in lockfile. Use `bun run tauri:dev` to test CLI subscriptions in the native host. Opening Next.js in an ordinary browser intentionally leaves them disabled. The native host supplies the capability in development and packaged builds; no public frontend flag enables it.
 
 ```sh
-bun test tests/agents tests/server/agents-api.test.ts tests/mcp/edge-gating.test.ts
+bun test tests/agents server/desktop-cli-access.test.ts tests/server/agents-api.test.ts tests/mcp/edge-gating.test.ts
 bun run server:build
 REXADB_TEST_COMPILED_SIDECAR=src-tauri/binaries/rexadb-server-aarch64-apple-darwin bun test tests/agents/mcp-stdio.test.ts
 ```

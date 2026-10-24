@@ -585,7 +585,7 @@ export default function AgentSidebarPromptBar({
           {MODELS.length === 0 ? (
             <div className="px-2 py-6 text-center">
               <div className="text-[12px] font-medium text-foreground">{modelsLoading ? "Detecting local CLIs…" : "No models available"}</div>
-              <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{modelsError || "Sign in to a supported local CLI, or add an API provider in AI Settings."}</div>
+              <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{modelsError || (onRefreshModels ? "Sign in to a supported local CLI, or add an API provider in AI Settings." : "Add an API provider in AI Settings. Local CLI agents require the desktop app.")}</div>
             </div>
           ) : (
             MODELS.map((m, i) => (
@@ -738,7 +738,7 @@ export default function AgentSidebarPromptBar({
             type="button"
             aria-expanded={modelOpen}
             aria-label="Choose model"
-            disabled={disabled}
+            disabled={isStreaming}
             onClick={() => {
               setPlusOpen(false);
               setModelOpen((current) => !current);

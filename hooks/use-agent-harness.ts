@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-base";
+import { isDesktopRuntime } from "@/lib/desktop";
 import {
   defaultModeId,
+  AGENT_PROVIDER_META,
   type AgentProvider,
   type AgentProviderId,
   type AgentChatMessage,
@@ -232,6 +234,12 @@ export function useAgentHarness(input: {
   );
 
   const detectProviders = useCallback(async () => {
+    if (!isDesktopRuntime()) {
+      setProviders([{ ...AGENT_PROVIDER_META.rexadb, id: "rexadb", available: true, status: "installed" }]);
+      setActiveProviderRaw("rexadb");
+      setIsDetecting(false);
+      return;
+    }
     // Hydrate from localStorage instantly — mirrors t3's hydrateCachedProvider / providerStatusCache
     try {
       const { readProvidersCache, isCacheFresh, isCacheStaleUsable, writeProvidersCache, mergeCachedProviders } =

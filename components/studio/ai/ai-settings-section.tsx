@@ -95,7 +95,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
         </Button>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      {localCli.enabled && <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <Label>Local CLI agents</Label>
           <Button variant="outline" size="sm" disabled={localCli.loading} onClick={() => void localCli.refresh()}>
@@ -113,7 +113,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
             <span className="text-muted-foreground">{p.status === "installed" ? "Available" : p.status === "auth-required" ? "Sign-in required" : p.status === "not-installed" ? "Not installed" : "Check CLI"}</span>
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Permissions Card */}
       <div className="rounded-lg border border-border bg-card p-4">
@@ -335,7 +335,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
 
       <p className="text-center text-xs text-muted-foreground">
         {modelCount} API model{modelCount === 1 ? "" : "s"} across {providerCount}{" "}
-        API provider{providerCount === 1 ? "" : "s"}. {new Set(cliModels.map((m) => m.provider)).size} local CLIs available.
+        API provider{providerCount === 1 ? "" : "s"}.{localCli.enabled && ` ${new Set(cliModels.map((m) => m.provider)).size} local CLIs available.`}
       </p>
     </section>
   );
