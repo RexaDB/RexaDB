@@ -5662,7 +5662,7 @@ export function ConnectionManager({
                                         <span className="truncate text-sm font-medium text-foreground" title={conn.name}>
                                           {conn.name}
                                         </span>
-                                        {(conn as any).isFavorite && (
+                                        {!!(conn as any).isFavorite && (
                                           <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" aria-label="Favorite" />
                                         )}
                                       </span>
