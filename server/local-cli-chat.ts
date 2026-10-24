@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getLocalCliProviderId } from "../lib/agents/local-provider";
-import { detectProviders } from "../lib/agents/detect-providers";
+import { detectProvider } from "../lib/agents/detect-providers";
+import { readServerProviderCache } from "../lib/agents/provider-cache-server";
 import { runHarness } from "../lib/agents/run-harness";
 import { buildRexaMcpServerConfig } from "../lib/agents/mcp/config";
 import { REXADB_PLAN_MODE } from "../lib/agents/app-modes";
@@ -49,7 +50,8 @@ export async function handleLocalCliChat(req: Request, res: Response): Promise<v
     if (!controller.signal.aborted) res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
   try {
-    const detected = (await detectProviders()).find((p) => p.id === provider);
+    const cached = readServerProviderCache()?.providers.find((p) => p.id === provider);
+    const detected = await detectProvider(provider, { cached, signal: controller.signal });
     if (!detected?.available || detected.status !== "installed") {
       res.status(400).json({ error: detected?.available
         ? `Sign in to ${detected.name} in your terminal, then refresh local CLIs.`
