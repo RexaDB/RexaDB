@@ -339,6 +339,246 @@ fn strip_trailing_delimiter(sql: &str) -> String {
     out
 }
 
+/// Synthetic row-number column added by `rownum_paginate`, stripped back out
+/// of the result before it reaches the caller. Kept to 15 bytes so it is
+/// safe under Oracle 11g's 30-byte identifier limit.
+const ROWNUM_PAGINATION_COLUMN: &str = "__REXADB_RNUM__";
+
+struct Tok<'a> {
+    text: &'a str,
+    start: usize,
+}
+
+/// Recognizes the opening of an Oracle "q-quote" alternate-quoted literal —
+/// `q'<delim> ... <delim>'`, optionally prefixed with `n`/`N` for an nchar
+/// literal — whose entire purpose is letting the literal contain unescaped
+/// apostrophes (e.g. `q'[it's]'`). `[`, `(`, `{` and `<` pair with their
+/// closing bracket; any other delimiter character closes on itself.
+///
+/// Returns the end index (one past the closing `'`) when `bytes` at `start`
+/// opens one, or `None` if it's just an ordinary word starting with `q`/`n`
+/// (e.g. an identifier). Once the `q'<delim>` prefix itself has matched
+/// there's no ordinary-SQL reading left, so an unterminated literal still
+/// returns `Some(bytes.len())` rather than `None` — consistent with how
+/// comments and ordinary quotes degrade in `tokenize` below.
+fn oracle_q_quote_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let n = bytes.len();
+    let mut i = start;
+    if matches!(bytes.get(i), Some(b'n') | Some(b'N')) {
+        i += 1;
+    }
+    if !matches!(bytes.get(i), Some(b'q') | Some(b'Q')) {
+        return None;
+    }
+    i += 1;
+    if bytes.get(i) != Some(&b'\'') {
+        return None;
+    }
+    i += 1;
+    let open = *bytes.get(i)?;
+    i += 1;
+    let close = match open {
+        b'[' => b']',
+        b'(' => b')',
+        b'{' => b'}',
+        b'<' => b'>',
+        other => other,
+    };
+    while i < n {
+        if bytes[i] == close && bytes.get(i + 1) == Some(&b'\'') {
+            return Some(i + 2);
+        }
+        i += 1;
+    }
+    Some(n)
+}
+
+/// Splits SQL into whitespace-separated tokens, keeping each token's byte
+/// offset in `s` so a matched suffix can be sliced back out of the original
+/// (non-uppercased) text.
+///
+/// `--` and `/* */` comments and quoted literals — ordinary `'...'` /
+/// `"..."` (honoring Oracle's doubled-quote escape) and q-quoted
+/// `q'<delim>...<delim>'` — are skipped as single units and never produce
+/// tokens of their own, so a keyword that only appears inside a comment or
+/// a string literal can't be mistaken for the pagination clause this is
+/// used to find.
+///
+/// Whitespace/comment/quote delimiters are matched on ASCII bytes only, and
+/// every slice boundary sits immediately after one of those single-byte
+/// ASCII delimiters (or at `n`), never inside a multi-byte UTF-8 sequence —
+/// safe on non-ASCII SQL such as a literal containing `'à'`.
+///
+/// Runs of identifier bytes (alnum, `_`, `$`, `#`) are one token each; any
+/// other non-whitespace, non-comment, non-quote byte (operators and
+/// punctuation: `=`, `(`, `,`, …) is its own single-byte token rather than
+/// gluing onto a neighboring identifier. Without this, `name=q'[...]'`
+/// would tokenize as one word `name=q` — swallowing the `q` that should
+/// have started a fresh dispatch — so the q-quote check below would never
+/// get to see it as the start of a token.
+///
+/// Every non-ASCII byte (>= 0x80, i.e. any lead or continuation byte of a
+/// multi-byte UTF-8 character) also counts as an identifier byte, so a
+/// character like the `é` in an unquoted `café` stays inside its word and
+/// the single-byte fallback only ever sees ASCII punctuation — it can
+/// never stop mid-character.
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b == b'#' || b >= 0x80
+}
+
+fn tokenize(s: &str) -> Vec<Tok<'_>> {
+    let mut toks = Vec::new();
+    let bytes = s.as_bytes();
+    let n = s.len();
+    let mut i = 0;
+    while i < n {
+        let c = bytes[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == b'-' && bytes.get(i + 1) == Some(&b'-') {
+            i = match s[i..].find('\n') {
+                Some(pos) => i + pos,
+                None => n,
+            };
+            continue;
+        }
+        if c == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = match s[i + 2..].find("*/") {
+                Some(pos) => i + 2 + pos + 2,
+                None => n,
+            };
+            continue;
+        }
+        if matches!(c, b'q' | b'Q' | b'n' | b'N') {
+            if let Some(end) = oracle_q_quote_end(bytes, i) {
+                let start = i;
+                toks.push(Tok { text: &s[start..end], start });
+                i = end;
+                continue;
+            }
+        }
+        if c == b'\'' || c == b'"' {
+            let quote = c;
+            let start = i;
+            i += 1;
+            while i < n {
+                if bytes[i] == quote {
+                    i += 1;
+                    if bytes.get(i) == Some(&quote) {
+                        i += 1; // doubled quote: escaped, literal continues
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            toks.push(Tok { text: &s[start..i], start });
+            continue;
+        }
+        let start = i;
+        if is_ident_byte(c) {
+            while i < n && is_ident_byte(bytes[i]) {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+        toks.push(Tok { text: &s[start..i], start });
+    }
+    toks
+}
+
+fn eq_ignore_case(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Pops a trailing keyword (any of `kws`, case-insensitive) off `toks`.
+fn pop_kw<'a, 'b>(toks: &'a [Tok<'b>], kws: &[&str]) -> Option<&'a [Tok<'b>]> {
+    let (last, rest) = toks.split_last()?;
+    kws.iter().any(|kw| eq_ignore_case(last.text, kw)).then_some(rest)
+}
+
+/// Pops a trailing row count off `toks`, along with an optional unary `+`
+/// right before it (the tokenizer splits `+10` into `+` and `10`). Only
+/// `+` is accepted: it doesn't change the value, whereas dropping a `-`
+/// would silently flip the sign.
+fn pop_count<'a, 'b>(toks: &'a [Tok<'b>]) -> Option<(&'a [Tok<'b>], u64)> {
+    let (last, rest) = toks.split_last()?;
+    let value: u64 = last.text.parse().ok()?;
+    match rest.split_last() {
+        Some((plus, before)) if plus.text == "+" => Some((before, value)),
+        _ => Some((rest, value)),
+    }
+}
+
+/// Rewrites a statement whose final clause is Oracle 12c's
+/// `OFFSET n ROWS FETCH {NEXT|FIRST} m ROWS ONLY` into the classic `ROWNUM`
+/// pagination idiom, which every Oracle version (8i through current)
+/// accepts. 12c+ rejects nothing extra by taking this path either, so it is
+/// safe to apply unconditionally rather than branching on a detected server
+/// version.
+///
+/// Older Oracle has no OFFSET/FETCH grammar at all: the parser treats the
+/// statement as complete at `ORDER BY ...` and the trailing clause as
+/// garbage, raising ORA-00933 ("SQL command not properly ended").
+///
+/// Returns `None` when the statement doesn't end in that exact clause, so
+/// the caller falls back to running it unmodified.
+fn rownum_paginate(sql: &str) -> Option<String> {
+    let trimmed = sql.trim_end();
+    let toks = tokenize(trimmed);
+    // Matched right-to-left so the optional `+` before either count can
+    // shift the clause's width without misaligning anything.
+    let rest = pop_kw(&toks, &["ONLY"])?;
+    let rest = pop_kw(rest, &["ROWS"])?;
+    let (rest, limit) = pop_count(rest)?;
+    let rest = pop_kw(rest, &["NEXT", "FIRST"])?;
+    let rest = pop_kw(rest, &["FETCH"])?;
+    let rest = pop_kw(rest, &["ROWS"])?;
+    let (rest, offset) = pop_count(rest)?;
+    let rest = pop_kw(rest, &["OFFSET"])?;
+    // Each pop returns a prefix of `toks`, so the OFFSET token sits at
+    // index `rest.len()`.
+    let clause_start = toks[rest.len()].start;
+    // Deliberately not trimmed: `core`'s own trailing whitespace may be the
+    // newline that terminates a `--` comment on its last line, and trimming
+    // it would let the wrapper SQL appended right after get swallowed into
+    // that now-unterminated comment. The explicit "\n" below guarantees the
+    // same thing independent of whatever core already ends with.
+    let core = &trimmed[..clause_start];
+    if core.trim().is_empty() {
+        return None;
+    }
+    let max_row = offset.saturating_add(limit);
+    Some(format!(
+        "SELECT * FROM (SELECT rexadb_pg__.*, ROWNUM AS \"{col}\" FROM ({core}\n) rexadb_pg__ WHERE ROWNUM <= {max_row}) WHERE \"{col}\" > {offset}",
+        col = ROWNUM_PAGINATION_COLUMN,
+    ))
+}
+
+/// Drops the synthetic `ROWNUM_PAGINATION_COLUMN` that `rownum_paginate`
+/// adds, so the rewrite is invisible to callers. Always the last column in
+/// the result (the rewrite appends it after `rexadb_pg__.*` and nothing is
+/// selected after it at any wrapping level), so it's removed by position —
+/// not by name — so a query whose own column is legitimately named
+/// `ROWNUM_PAGINATION_COLUMN` can't be confused with the appended one, and
+/// doesn't make the removal ambiguous.
+fn strip_rownum_column(mut columns: Vec<Value>, rows: Vec<Vec<Value>>) -> (Vec<Value>, Vec<Vec<Value>>) {
+    if columns.pop().is_none() {
+        return (columns, rows);
+    }
+    let rows = rows
+        .into_iter()
+        .map(|mut row| {
+            row.pop();
+            row
+        })
+        .collect();
+    (columns, rows)
+}
+
 fn value_to_bind(value: &Value) -> Result<Box<dyn oracledb::ToDbValue + '_>, String> {
     match value {
         Value::Null => Ok(Box::new(Option::<String>::None)),
@@ -397,10 +637,17 @@ fn run_query(conn: &Connection, sql: &str, params: &[Value]) -> Result<Value, St
     let bind_refs: Vec<&dyn oracledb::ToDbValue> = binds.iter().map(|b| b.as_ref()).collect();
 
     if is_select_like(&rewritten) {
+        let paginated = rownum_paginate(&rewritten);
+        let to_run = paginated.as_deref().unwrap_or(&rewritten);
         let cursor = conn
-            .query(&rewritten, &bind_refs)
+            .query(to_run, &bind_refs)
             .map_err(|e| e.to_string())?;
         let (columns, rows) = fetch_cursor(cursor)?;
+        let (columns, rows) = if paginated.is_some() {
+            strip_rownum_column(columns, rows)
+        } else {
+            (columns, rows)
+        };
         let row_count = rows.len();
         Ok(json!({
             "columns": columns,
@@ -701,5 +948,201 @@ mod tests {
     fn commented_selects_take_the_cursor_path() {
         assert!(is_select_like("-- report\nSELECT 1 FROM dual"));
         assert!(is_select_like("/* nightly */ WITH x AS (SELECT 1 FROM dual) SELECT * FROM x"));
+    }
+
+    #[test]
+    fn rewrites_trailing_offset_fetch_to_rownum() {
+        let sql = r#"SELECT * FROM "HR"."EMPLOYEES" ORDER BY 1 OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY"#;
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains(r#"SELECT * FROM "HR"."EMPLOYEES" ORDER BY 1"#));
+        assert!(rewritten.contains("ROWNUM <= 150"));
+        assert!(rewritten.contains(&format!("\"{ROWNUM_PAGINATION_COLUMN}\" > 100")));
+        assert!(!rewritten.to_ascii_uppercase().contains("OFFSET"));
+    }
+
+    #[test]
+    fn rewrites_fetch_first_variant_too() {
+        let sql = "SELECT * FROM t ORDER BY 1 OFFSET 0 ROWS FETCH FIRST 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn leaves_queries_without_a_trailing_offset_fetch_alone() {
+        for sql in [
+            "SELECT * FROM t",
+            "SELECT * FROM t WHERE x = 1 ORDER BY 1",
+            "SELECT * FROM (SELECT * FROM t OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY) sub WHERE sub.x = 1",
+        ] {
+            assert!(rownum_paginate(sql).is_none(), "should not rewrite: {sql}");
+        }
+    }
+
+    #[test]
+    fn strips_the_synthetic_column_from_results() {
+        let columns = vec![
+            json!({ "name": "ID", "type": "DB_TYPE_NUMBER" }),
+            json!({ "name": ROWNUM_PAGINATION_COLUMN, "type": "DB_TYPE_NUMBER" }),
+        ];
+        let rows = vec![vec![json!(1), json!(1)], vec![json!(2), json!(2)]];
+        let (columns, rows) = strip_rownum_column(columns, rows);
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0]["name"], "ID");
+        assert_eq!(rows, vec![vec![json!(1)], vec![json!(2)]]);
+    }
+
+    #[test]
+    fn strips_by_position_even_if_the_users_own_column_shares_the_name() {
+        // The appended rownum column is always last; a same-named column
+        // from the query itself (first here) must survive untouched.
+        let columns = vec![
+            json!({ "name": ROWNUM_PAGINATION_COLUMN, "type": "DB_TYPE_NUMBER" }),
+            json!({ "name": "ID", "type": "DB_TYPE_NUMBER" }),
+        ];
+        let rows = vec![vec![json!(42), json!(1)]];
+        let (columns, rows) = strip_rownum_column(columns, rows);
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0]["name"], ROWNUM_PAGINATION_COLUMN);
+        assert_eq!(rows, vec![vec![json!(42)]]);
+    }
+
+    #[test]
+    fn tokenize_does_not_panic_on_non_ascii_literals() {
+        // 'à' is C3 A0 in UTF-8; A0 alone casts to char U+00A0 (a Unicode
+        // whitespace), which used to make the byte-whitespace check slice
+        // through the middle of the character and panic.
+        let toks = tokenize("SELECT 'à' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(
+            texts,
+            vec!["SELECT", "'à'", "FROM", "dual", "OFFSET", "0", "ROWS", "FETCH", "NEXT", "10", "ROWS", "ONLY"]
+        );
+        assert!(rownum_paginate("SELECT 'à' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY").is_some());
+    }
+
+    #[test]
+    fn ignores_pagination_keywords_inside_a_trailing_comment() {
+        // The real last tokens are inside a `--` comment, not a live clause.
+        let sql = "SELECT * FROM t -- OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        assert!(rownum_paginate(sql).is_none());
+    }
+
+    #[test]
+    fn ignores_pagination_keywords_inside_a_string_literal() {
+        let sql = "SELECT 'OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY' FROM dual";
+        assert!(rownum_paginate(sql).is_none());
+    }
+
+    #[test]
+    fn preserves_a_trailing_line_comment_in_the_core_query() {
+        // The OFFSET clause is real SQL on the line after a `-- note`
+        // comment; the newline that ends that comment must survive into
+        // `core` so the wrapper SQL appended after it doesn't get eaten by
+        // an unterminated comment.
+        let sql = "SELECT * FROM t -- note\nOFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        let core_line = rewritten.lines().next().unwrap();
+        assert!(core_line.ends_with("-- note"), "comment must stay on its own line: {core_line:?}");
+        assert!(
+            rewritten.contains("ROWNUM <= 10"),
+            "wrapper SQL must not have been swallowed by the comment: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn q_quoted_literal_with_embedded_apostrophe_does_not_swallow_the_rest() {
+        let sql = "SELECT q'[it's]' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let toks = tokenize(sql);
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(
+            texts,
+            vec!["SELECT", "q'[it's]'", "FROM", "dual", "OFFSET", "0", "ROWS", "FETCH", "NEXT", "10", "ROWS", "ONLY"]
+        );
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quoted_filter_with_embedded_apostrophe_still_paginates() {
+        // Same shape as a real table filter: name = q'[O'Brien]'
+        let sql = "SELECT * FROM people WHERE name = q'[O'Brien]' ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("q'[O'Brien]'"));
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quote_delimiter_variants_and_nchar_prefix_are_recognized() {
+        for (sql, expected_literal) in [
+            ("SELECT q'(a)b)'", "q'(a)b)'"),
+            ("SELECT q'{x}'", "q'{x}'"),
+            ("SELECT q'<y>'", "q'<y>'"),
+            ("SELECT q'!z!'", "q'!z!'"),
+            ("SELECT nq'[nchar]'", "nq'[nchar]'"),
+            ("SELECT NQ'[NCHAR]'", "NQ'[NCHAR]'"),
+        ] {
+            let toks = tokenize(sql);
+            assert_eq!(toks.last().unwrap().text, expected_literal, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn q_prefixed_identifiers_are_not_mistaken_for_q_quotes() {
+        // No apostrophe directly after q/n, so these are ordinary words.
+        let toks = tokenize("SELECT quantity, name FROM t");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(texts, vec!["SELECT", "quantity", ",", "name", "FROM", "t"]);
+    }
+
+    #[test]
+    fn q_quote_immediately_after_an_operator_with_no_space_is_recognized() {
+        // `=` isn't an identifier byte, so it's its own token and `q'...'`
+        // still gets a fresh dispatch right after it, exactly like the
+        // `name = q'[O'Brien]'` case but with no surrounding whitespace.
+        let sql = "SELECT * FROM people WHERE name=q'[O'Brien]' ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let toks = tokenize(sql);
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert!(texts.contains(&"q'[O'Brien]'"), "q-quote must be its own token: {texts:?}");
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("q'[O'Brien]'"));
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quote_immediately_after_open_paren_or_comma_is_recognized() {
+        for sql in [
+            "SELECT f(q'[a]') FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
+            "SELECT x,q'[a]' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
+        ] {
+            assert!(rownum_paginate(sql).is_some(), "should rewrite: {sql}");
+        }
+    }
+
+    #[test]
+    fn tokenize_does_not_panic_on_unquoted_non_ascii_identifiers() {
+        let toks = tokenize("SELECT café, ñ FROM dual");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(texts, vec!["SELECT", "café", ",", "ñ", "FROM", "dual"]);
+        assert!(rownum_paginate("SELECT café FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY").is_some());
+    }
+
+    #[test]
+    fn accepts_a_unary_plus_on_either_row_count() {
+        for sql in [
+            "SELECT * FROM t ORDER BY 1 OFFSET +10 ROWS FETCH NEXT 50 ROWS ONLY",
+            "SELECT * FROM t ORDER BY 1 OFFSET 10 ROWS FETCH NEXT +50 ROWS ONLY",
+            "SELECT * FROM t ORDER BY 1 OFFSET +10 ROWS FETCH NEXT +50 ROWS ONLY",
+        ] {
+            let rewritten = rownum_paginate(sql).unwrap_or_else(|| panic!("should rewrite: {sql}"));
+            assert!(rewritten.contains("ROWNUM <= 60"), "{rewritten}");
+            assert!(rewritten.contains(&format!("\"{ROWNUM_PAGINATION_COLUMN}\" > 10")), "{rewritten}");
+            assert!(!rewritten.to_ascii_uppercase().contains("OFFSET"), "{rewritten}");
+        }
+    }
+
+    #[test]
+    fn does_not_strip_a_unary_minus_from_a_row_count() {
+        // Dropping `-` would silently turn -10 into 10; leave it unrewritten.
+        assert!(rownum_paginate("SELECT * FROM t OFFSET -10 ROWS FETCH NEXT 50 ROWS ONLY").is_none());
     }
 }

@@ -112,7 +112,7 @@ const COMPONENTS: Array<{
 ];
 
 const pillButton =
-  "h-11 flex-1 rounded-full border border-border bg-card px-8 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50";
+  "rexa-raised h-11 flex-1 rounded-full border border-border bg-card px-8 text-sm font-medium text-foreground shadow-sm hover:bg-muted/50";
 
 function ConfirmComponentRow({ icon, label, warning }: { icon: React.ReactNode; label: string; warning: string }) {
   return (
