@@ -349,15 +349,60 @@ struct Tok<'a> {
     start: usize,
 }
 
+/// Recognizes the opening of an Oracle "q-quote" alternate-quoted literal —
+/// `q'<delim> ... <delim>'`, optionally prefixed with `n`/`N` for an nchar
+/// literal — whose entire purpose is letting the literal contain unescaped
+/// apostrophes (e.g. `q'[it's]'`). `[`, `(`, `{` and `<` pair with their
+/// closing bracket; any other delimiter character closes on itself.
+///
+/// Returns the end index (one past the closing `'`) when `bytes` at `start`
+/// opens one, or `None` if it's just an ordinary word starting with `q`/`n`
+/// (e.g. an identifier). Once the `q'<delim>` prefix itself has matched
+/// there's no ordinary-SQL reading left, so an unterminated literal still
+/// returns `Some(bytes.len())` rather than `None` — consistent with how
+/// comments and ordinary quotes degrade in `tokenize` below.
+fn oracle_q_quote_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let n = bytes.len();
+    let mut i = start;
+    if matches!(bytes.get(i), Some(b'n') | Some(b'N')) {
+        i += 1;
+    }
+    if !matches!(bytes.get(i), Some(b'q') | Some(b'Q')) {
+        return None;
+    }
+    i += 1;
+    if bytes.get(i) != Some(&b'\'') {
+        return None;
+    }
+    i += 1;
+    let open = *bytes.get(i)?;
+    i += 1;
+    let close = match open {
+        b'[' => b']',
+        b'(' => b')',
+        b'{' => b'}',
+        b'<' => b'>',
+        other => other,
+    };
+    while i < n {
+        if bytes[i] == close && bytes.get(i + 1) == Some(&b'\'') {
+            return Some(i + 2);
+        }
+        i += 1;
+    }
+    Some(n)
+}
+
 /// Splits SQL into whitespace-separated tokens, keeping each token's byte
 /// offset in `s` so a matched suffix can be sliced back out of the original
 /// (non-uppercased) text.
 ///
-/// `--` and `/* */` comments and quoted literals (`'...'` / `"..."`,
-/// honoring Oracle's doubled-quote escape) are skipped as single units and
-/// never produce tokens of their own, so a keyword that only appears inside
-/// a comment or a string literal can't be mistaken for the pagination
-/// clause this is used to find.
+/// `--` and `/* */` comments and quoted literals — ordinary `'...'` /
+/// `"..."` (honoring Oracle's doubled-quote escape) and q-quoted
+/// `q'<delim>...<delim>'` — are skipped as single units and never produce
+/// tokens of their own, so a keyword that only appears inside a comment or
+/// a string literal can't be mistaken for the pagination clause this is
+/// used to find.
 ///
 /// Whitespace/comment/quote delimiters are matched on ASCII bytes only, and
 /// every slice boundary sits immediately after one of those single-byte
@@ -394,6 +439,14 @@ fn tokenize(s: &str) -> Vec<Tok<'_>> {
                 None => n,
             };
             continue;
+        }
+        if matches!(c, b'q' | b'Q' | b'n' | b'N') {
+            if let Some(end) = oracle_q_quote_end(bytes, i) {
+                let start = i;
+                toks.push(Tok { text: &s[start..end], start });
+                i = end;
+                continue;
+            }
         }
         if c == b'\'' || c == b'"' {
             let quote = c;
@@ -965,5 +1018,50 @@ mod tests {
             rewritten.contains("ROWNUM <= 10"),
             "wrapper SQL must not have been swallowed by the comment: {rewritten}"
         );
+    }
+
+    #[test]
+    fn q_quoted_literal_with_embedded_apostrophe_does_not_swallow_the_rest() {
+        let sql = "SELECT q'[it's]' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let toks = tokenize(sql);
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(
+            texts,
+            vec!["SELECT", "q'[it's]'", "FROM", "dual", "OFFSET", "0", "ROWS", "FETCH", "NEXT", "10", "ROWS", "ONLY"]
+        );
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quoted_filter_with_embedded_apostrophe_still_paginates() {
+        // Same shape as a real table filter: name = q'[O'Brien]'
+        let sql = "SELECT * FROM people WHERE name = q'[O'Brien]' ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("q'[O'Brien]'"));
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quote_delimiter_variants_and_nchar_prefix_are_recognized() {
+        for (sql, expected_literal) in [
+            ("SELECT q'(a)b)'", "q'(a)b)'"),
+            ("SELECT q'{x}'", "q'{x}'"),
+            ("SELECT q'<y>'", "q'<y>'"),
+            ("SELECT q'!z!'", "q'!z!'"),
+            ("SELECT nq'[nchar]'", "nq'[nchar]'"),
+            ("SELECT NQ'[NCHAR]'", "NQ'[NCHAR]'"),
+        ] {
+            let toks = tokenize(sql);
+            assert_eq!(toks.last().unwrap().text, expected_literal, "sql: {sql}");
+        }
+    }
+
+    #[test]
+    fn q_prefixed_identifiers_are_not_mistaken_for_q_quotes() {
+        // No apostrophe directly after q/n, so these are ordinary words.
+        let toks = tokenize("SELECT quantity, name FROM t");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(texts, vec!["SELECT", "quantity,", "name", "FROM", "t"]);
     }
 }
