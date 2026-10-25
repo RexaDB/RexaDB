@@ -5,7 +5,7 @@
   "identifier": "com.rexadb",
   "build": {
     "frontendDist": "../out",
-    "devUrl": "http://localhost:3001",
+    "devUrl": "http://localhost:3000",
     "beforeDevCommand": "",
     "beforeBuildCommand": "next build"
   },
