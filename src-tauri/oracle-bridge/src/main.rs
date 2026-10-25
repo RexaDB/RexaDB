@@ -339,6 +339,114 @@ fn strip_trailing_delimiter(sql: &str) -> String {
     out
 }
 
+/// Synthetic row-number column added by `rownum_paginate`, stripped back out
+/// of the result before it reaches the caller. Kept to 15 bytes so it is
+/// safe under Oracle 11g's 30-byte identifier limit.
+const ROWNUM_PAGINATION_COLUMN: &str = "__REXADB_RNUM__";
+
+struct Tok<'a> {
+    text: &'a str,
+    start: usize,
+}
+
+/// Splits on ASCII whitespace, keeping each token's byte offset in `s` so a
+/// matched suffix can be sliced back out of the original (non-uppercased)
+/// text. Good enough here because we only ever inspect the *last* few
+/// tokens of the statement — whatever tokenizing noise this causes earlier
+/// in the string (inside string literals, comments, etc.) is irrelevant.
+fn tokenize(s: &str) -> Vec<Tok<'_>> {
+    let mut toks = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let n = s.len();
+    while i < n {
+        while i < n && (bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+        let start = i;
+        while i < n && !(bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        toks.push(Tok { text: &s[start..i], start });
+    }
+    toks
+}
+
+fn eq_ignore_case(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Rewrites a statement whose final clause is Oracle 12c's
+/// `OFFSET n ROWS FETCH {NEXT|FIRST} m ROWS ONLY` into the classic `ROWNUM`
+/// pagination idiom, which every Oracle version (8i through current)
+/// accepts. 12c+ rejects nothing extra by taking this path either, so it is
+/// safe to apply unconditionally rather than branching on a detected server
+/// version.
+///
+/// Older Oracle has no OFFSET/FETCH grammar at all: the parser treats the
+/// statement as complete at `ORDER BY ...` and the trailing clause as
+/// garbage, raising ORA-00933 ("SQL command not properly ended").
+///
+/// Returns `None` when the statement doesn't end in that exact clause, so
+/// the caller falls back to running it unmodified.
+fn rownum_paginate(sql: &str) -> Option<String> {
+    let trimmed = sql.trim_end();
+    let toks = tokenize(trimmed);
+    if toks.len() < 8 {
+        return None;
+    }
+    let last = &toks[toks.len() - 8..];
+    if !eq_ignore_case(last[0].text, "OFFSET") {
+        return None;
+    }
+    let offset: u64 = last[1].text.parse().ok()?;
+    if !eq_ignore_case(last[2].text, "ROWS") || !eq_ignore_case(last[3].text, "FETCH") {
+        return None;
+    }
+    if !eq_ignore_case(last[4].text, "NEXT") && !eq_ignore_case(last[4].text, "FIRST") {
+        return None;
+    }
+    let limit: u64 = last[5].text.parse().ok()?;
+    if !eq_ignore_case(last[6].text, "ROWS") || !eq_ignore_case(last[7].text, "ONLY") {
+        return None;
+    }
+    let core = trimmed[..last[0].start].trim_end();
+    if core.is_empty() {
+        return None;
+    }
+    let max_row = offset.saturating_add(limit);
+    Some(format!(
+        "SELECT * FROM (SELECT rexadb_pg__.*, ROWNUM AS \"{col}\" FROM ({core}) rexadb_pg__ WHERE ROWNUM <= {max_row}) WHERE \"{col}\" > {offset}",
+        col = ROWNUM_PAGINATION_COLUMN,
+    ))
+}
+
+/// Drops the synthetic `ROWNUM_PAGINATION_COLUMN` that `rownum_paginate`
+/// adds, so the rewrite is invisible to callers.
+fn strip_rownum_column(columns: Vec<Value>, rows: Vec<Vec<Value>>) -> (Vec<Value>, Vec<Vec<Value>>) {
+    let Some(idx) = columns
+        .iter()
+        .position(|c| c.get("name").and_then(|n| n.as_str()) == Some(ROWNUM_PAGINATION_COLUMN))
+    else {
+        return (columns, rows);
+    };
+    let mut columns = columns;
+    columns.remove(idx);
+    let rows = rows
+        .into_iter()
+        .map(|mut row| {
+            if idx < row.len() {
+                row.remove(idx);
+            }
+            row
+        })
+        .collect();
+    (columns, rows)
+}
+
 fn value_to_bind(value: &Value) -> Result<Box<dyn oracledb::ToDbValue + '_>, String> {
     match value {
         Value::Null => Ok(Box::new(Option::<String>::None)),
@@ -397,10 +505,17 @@ fn run_query(conn: &Connection, sql: &str, params: &[Value]) -> Result<Value, St
     let bind_refs: Vec<&dyn oracledb::ToDbValue> = binds.iter().map(|b| b.as_ref()).collect();
 
     if is_select_like(&rewritten) {
+        let paginated = rownum_paginate(&rewritten);
+        let to_run = paginated.as_deref().unwrap_or(&rewritten);
         let cursor = conn
-            .query(&rewritten, &bind_refs)
+            .query(to_run, &bind_refs)
             .map_err(|e| e.to_string())?;
         let (columns, rows) = fetch_cursor(cursor)?;
+        let (columns, rows) = if paginated.is_some() {
+            strip_rownum_column(columns, rows)
+        } else {
+            (columns, rows)
+        };
         let row_count = rows.len();
         Ok(json!({
             "columns": columns,
@@ -701,5 +816,46 @@ mod tests {
     fn commented_selects_take_the_cursor_path() {
         assert!(is_select_like("-- report\nSELECT 1 FROM dual"));
         assert!(is_select_like("/* nightly */ WITH x AS (SELECT 1 FROM dual) SELECT * FROM x"));
+    }
+
+    #[test]
+    fn rewrites_trailing_offset_fetch_to_rownum() {
+        let sql = r#"SELECT * FROM "HR"."EMPLOYEES" ORDER BY 1 OFFSET 100 ROWS FETCH NEXT 50 ROWS ONLY"#;
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains(r#"SELECT * FROM "HR"."EMPLOYEES" ORDER BY 1"#));
+        assert!(rewritten.contains("ROWNUM <= 150"));
+        assert!(rewritten.contains(&format!("\"{ROWNUM_PAGINATION_COLUMN}\" > 100")));
+        assert!(!rewritten.to_ascii_uppercase().contains("OFFSET"));
+    }
+
+    #[test]
+    fn rewrites_fetch_first_variant_too() {
+        let sql = "SELECT * FROM t ORDER BY 1 OFFSET 0 ROWS FETCH FIRST 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn leaves_queries_without_a_trailing_offset_fetch_alone() {
+        for sql in [
+            "SELECT * FROM t",
+            "SELECT * FROM t WHERE x = 1 ORDER BY 1",
+            "SELECT * FROM (SELECT * FROM t OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY) sub WHERE sub.x = 1",
+        ] {
+            assert!(rownum_paginate(sql).is_none(), "should not rewrite: {sql}");
+        }
+    }
+
+    #[test]
+    fn strips_the_synthetic_column_from_results() {
+        let columns = vec![
+            json!({ "name": "ID", "type": "DB_TYPE_NUMBER" }),
+            json!({ "name": ROWNUM_PAGINATION_COLUMN, "type": "DB_TYPE_NUMBER" }),
+        ];
+        let rows = vec![vec![json!(1), json!(1)], vec![json!(2), json!(2)]];
+        let (columns, rows) = strip_rownum_column(columns, rows);
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0]["name"], "ID");
+        assert_eq!(rows, vec![vec![json!(1)], vec![json!(2)]]);
     }
 }
