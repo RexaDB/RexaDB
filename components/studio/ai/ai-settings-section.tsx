@@ -1,5 +1,7 @@
 "use client";
 
+import { useLocalCliProviders } from "@/hooks/use-local-cli-providers";
+import { localCliModels } from "@/lib/agents/local-provider";
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import { ArrowRight } from "@/lib/icon-theme/lucide-react";
@@ -51,6 +53,9 @@ function ProviderAvatar({ provider, label }: { provider: string; label: string }
 
 export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () => void }) {
   const { settings, catalogById, updateSettings, updateProvider, labelFor } = useAiProviderSettings();
+  const localCli = useLocalCliProviders();
+  const cliModels = localCliModels(localCli.providers);
+  const cliName = (id: string) => cliModels.find((m) => m.provider === id)?.name || labelFor(id);
   const [openItem, setOpenItem] = useState<string>("");
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
 
@@ -90,6 +95,26 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
         </Button>
       </div>
 
+      {localCli.enabled && <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label>Local CLI agents</Label>
+          <Button variant="outline" size="sm" disabled={localCli.loading} onClick={() => void localCli.refresh()}>
+            {localCli.loading ? "Detecting…" : "Refresh"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Uses each CLI’s existing sign-in and billing. No API key is required in RexaDB.
+          Sign in in your terminal, then refresh. CLI agents can use their own tools and permissions.
+        </p>
+        {localCli.error && <p role="alert" className="text-xs text-destructive">{localCli.error}</p>}
+        {localCli.providers.filter((p) => p.id !== "rexadb").map((p) => (
+          <div key={p.id} className="flex items-center justify-between gap-3 text-xs">
+            <span>{p.name}</span>
+            <span className="text-muted-foreground">{p.status === "installed" ? "Available" : p.status === "auth-required" ? "Sign-in required" : p.status === "not-installed" ? "Not installed" : "Check CLI"}</span>
+          </div>
+        ))}
+      </div>}
+
       {/* Permissions Card */}
       <div className="rounded-lg border border-border bg-card p-4">
         <Label className="text-xstracking-wider text-muted-foreground font-medium">
@@ -118,14 +143,17 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
 
       {/* Default provider — used for one-shot agent actions (e.g. AI filter). */}
       {(() => {
-        const usableProviders = Object.entries(settings.providers || {}).filter(
+        const usableProviders: Array<[string, { models: string[] }]> = Object.entries(settings.providers || {}).filter(
           ([p, c]) => !!c && (p === "ollama" || String(c.apiKey ?? "").trim()) && Array.isArray(c.models) && c.models.length > 0,
         );
+        for (const id of new Set(cliModels.map((m) => m.provider))) {
+          usableProviders.push([id, { models: cliModels.filter((m) => m.provider === id).map((m) => m.model) }]);
+        }
         const activeProvider = usableProviders.some(([p]) => p === settings.defaultProvider)
           ? settings.defaultProvider
           : "";
         const activeModels = activeProvider
-          ? (settings.providers[activeProvider]?.models || [])
+          ? (usableProviders.find(([id]) => id === activeProvider)?.[1].models || [])
           : [];
         const activeModel = activeModels.includes(settings.defaultModel)
           ? settings.defaultModel
@@ -142,7 +170,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
               <Select
                 value={activeProvider}
                 onValueChange={(provider) =>
-                  updateSettings({ ...settings, defaultProvider: provider, defaultModel: "" })
+                  updateSettings({ ...settings, defaultProvider: provider, defaultModel: provider.startsWith("cli:") ? "default" : "" })
                 }
               >
                 <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
@@ -151,7 +179,7 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
                 <SelectContent>
                   {usableProviders.map(([p]) => (
                     <SelectItem key={p} value={p}>
-                      {labelFor(p)}
+                      {cliName(p)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -306,8 +334,8 @@ export function AiSettingsSection({ onOpenProviders }: { onOpenProviders?: () =>
       </Accordion>
 
       <p className="text-center text-xs text-muted-foreground">
-        {modelCount} model{modelCount === 1 ? "" : "s"} across {providerCount}{" "}
-        provider{providerCount === 1 ? "" : "s"}.
+        {modelCount} API model{modelCount === 1 ? "" : "s"} across {providerCount}{" "}
+        API provider{providerCount === 1 ? "" : "s"}.{localCli.enabled && ` ${new Set(cliModels.map((m) => m.provider)).size} local CLIs available.`}
       </p>
     </section>
   );

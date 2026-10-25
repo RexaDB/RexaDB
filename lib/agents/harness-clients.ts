@@ -6,9 +6,12 @@ import type { RexaMcpServerConfig } from "./mcp/config";
 import { buildClaudeMcpConfigJson } from "./mcp/config";
 import type { AgentProviderId, AgentStreamEvent } from "./provider-types";
 import { JsonlHarnessClient } from "./harness-helpers";
+import { localCliPath } from "./cli-path";
 
 export interface HarnessSpawnOptions {
   prompt: string;
+  model?: string;
+  binaryPath?: string;
   cwd?: string;
   env?: Record<string, string>;
   history?: Array<{ role: string; content: string }>;
@@ -37,6 +40,8 @@ export interface HarnessClient {
 export interface InteractiveHarnessClient extends HarnessClient {
   runPrompt(opts: {
     prompt: string;
+    model?: string;
+    binaryPath?: string;
     cwd?: string;
     env?: Record<string, string>;
     mode?: string;
@@ -48,7 +53,7 @@ export interface InteractiveHarnessClient extends HarnessClient {
 
 function writeClaudeMcpConfig(cwd: string, mcp: RexaMcpServerConfig): string {
   const path = join(cwd, "rexadb-mcp-claude.json");
-  writeFileSync(path, buildClaudeMcpConfigJson(mcp), "utf8");
+  writeFileSync(path, buildClaudeMcpConfigJson(mcp), { encoding: "utf8", mode: 0o600 });
   return path;
 }
 
@@ -67,7 +72,7 @@ function resolveCwd(cwd?: string): string {
 }
 
 function makeEnv(cwd: string, extra?: Record<string, string>): NodeJS.ProcessEnv {
-  return { ...process.env, ...sandboxProcessEnv(cwd), ...extra } as NodeJS.ProcessEnv;
+  return { ...process.env, PATH: localCliPath(), ...sandboxProcessEnv(cwd), ...extra } as NodeJS.ProcessEnv;
 }
 
 /** Spawn a process and immediately close stdin so CLIs don't hang waiting for input. */
@@ -114,12 +119,14 @@ class ClaudeCodeClient extends JsonlHarnessClient implements HarnessClient {
   spawn(options: HarnessSpawnOptions): ChildProcess {
     const cwd = resolveCwd(options.cwd);
     const args = ["--output-format", "stream-json", "--verbose"];
+    if (options.model && options.model !== "default") args.push("--model", options.model);
     if (options.mode) args.push("--permission-mode", options.mode);
     if (options.mcp) {
       args.push("--mcp-config", writeClaudeMcpConfig(cwd, options.mcp));
+      args.push("--allowedTools", `mcp__${options.mcp.name}__*`);
     }
     args.push("-p", options.prompt);
-    return spawnCli("claude", args, { cwd, env: options.env });
+    return spawnCli(options.binaryPath || "claude", args, { cwd, env: options.env });
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -178,12 +185,12 @@ class ClaudeCodeClient extends JsonlHarnessClient implements HarnessClient {
 
       // Result = final event (t3code's turnStatusFromResult)
       if (msg.type === "result") {
-        if (msg.subtype === "success" || msg.subtype === "error_max_turns") {
+        if (msg.subtype === "success" && !msg.is_error) {
           events.push({ type: "done" });
-        } else if (msg.is_error || msg.error) {
+        } else if (msg.is_error || msg.error || String(msg.subtype || "").startsWith("error")) {
           events.push({
             type: "error",
-            content: msg.error || msg.result || "Claude Code error",
+            content: msg.error || msg.errors?.join("\n") || msg.result || `Claude Code: ${msg.subtype || "error"}`,
           });
         } else {
           events.push({ type: "done" });
@@ -222,6 +229,7 @@ class OpenCodeClient extends JsonlHarnessClient implements HarnessClient {
     // to bypass opencode's interactive permission gate here.
     const args = ["run", "--format", "json", "--dir", cwd, "--auto"];
     if (options.mode) args.push("--agent", options.mode);
+    if (options.model && options.model !== "default") args.push("--model", options.model);
     const env = { ...options.env };
     // OpenCode discovers MCP from project/user config; write a local overlay
     // into the sandbox so this turn sees RexaDB tools.
@@ -243,12 +251,12 @@ class OpenCodeClient extends JsonlHarnessClient implements HarnessClient {
           null,
           2,
         ),
-        "utf8",
+        { encoding: "utf8", mode: 0o600 },
       );
       env.OPENCODE_CONFIG = mcpPath;
     }
     args.push(options.prompt);
-    return spawnCli("opencode", args, { cwd, env });
+    return spawnCli(options.binaryPath || "opencode", args, { cwd, env });
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -318,8 +326,20 @@ class CodexClient extends JsonlHarnessClient implements HarnessClient {
     const cwd = resolveCwd(options.cwd);
     const args = ["exec", "--json", "--skip-git-repo-check", "--cd", cwd];
     if (options.mode) args.push("--sandbox", options.mode);
+    if (options.model && options.model !== "default") args.push("--model", options.model);
+    if (options.mcp) {
+      const mcp = options.mcp;
+      // Codex splits override keys on dots; quoting a segment becomes part of
+      // the server name (and makes it invalid), unlike a TOML file key.
+      if (!/^[a-zA-Z0-9_-]+$/.test(mcp.name)) throw new Error("Invalid MCP server name");
+      const key = `mcp_servers.${mcp.name}`;
+      args.push("-c", `${key}.command=${JSON.stringify(mcp.command)}`);
+      args.push("-c", `${key}.args=${JSON.stringify(mcp.args)}`);
+      // Forward credentials through the process environment, not argv.
+      args.push("-c", `${key}.env_vars=${JSON.stringify(Object.keys(mcp.env))}`);
+    }
     args.push(options.prompt);
-    return spawnCli("codex", args, { cwd, env: options.env });
+    return spawnCli(options.binaryPath || "codex", args, { cwd, env: { ...options.env, ...options.mcp?.env } });
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -348,7 +368,7 @@ class CodexClient extends JsonlHarnessClient implements HarnessClient {
       if (!item) return events;
 
       // Assistant text arrives as a completed agent_message item
-      if (item.type === "agent_message" && item.text) {
+      if (msg.type === "item.completed" && item.type === "agent_message" && item.text) {
         events.push({ type: "text_delta", content: item.text });
         return events;
       }
@@ -472,7 +492,7 @@ class AcpInteractiveClient implements InteractiveHarnessClient {
   spawn(options: HarnessSpawnOptions): ChildProcess {
     // One-shot compat only — real turns go through runPrompt (stdin must stay open).
     const cwd = resolveCwd(options.cwd);
-    const proc = spawn(this.command, this.resolveArgs(options.mode), {
+    const proc = spawn(options.binaryPath || this.command, this.resolveArgs(options.mode), {
       cwd,
       env: makeEnv(cwd, options.env),
       stdio: ["pipe", "pipe", "pipe"],
@@ -487,6 +507,8 @@ class AcpInteractiveClient implements InteractiveHarnessClient {
 
   async runPrompt(opts: {
     prompt: string;
+    model?: string;
+    binaryPath?: string;
     cwd?: string;
     env?: Record<string, string>;
     mode?: string;
@@ -495,7 +517,7 @@ class AcpInteractiveClient implements InteractiveHarnessClient {
     onSpawn?: (proc: ChildProcess) => void;
   }): Promise<{ exitCode: number }> {
     const cwd = resolveCwd(opts.cwd);
-    const proc = spawn(this.command, this.resolveArgs(opts.mode), {
+    const proc = spawn(opts.binaryPath || this.command, this.resolveArgs(opts.mode), {
       cwd,
       env: makeEnv(cwd, opts.env),
       stdio: ["pipe", "pipe", "pipe"],
@@ -553,11 +575,17 @@ class AcpInteractiveClient implements InteractiveHarnessClient {
 
     const exited = new Promise<void>((resolve) =>
       proc.on("close", (code) => {
+        for (const p of pending.values()) p.reject(new Error("CLI closed before completing the ACP request."));
+        pending.clear();
         exitCode = code ?? 0;
         resolve();
       }),
     );
 
+    proc.on("error", (error) => {
+      for (const p of pending.values()) p.reject(error);
+      pending.clear();
+    });
     try {
       await request("initialize", {
         protocolVersion: 1,
@@ -682,7 +710,7 @@ class FxClient extends JsonlHarnessClient implements HarnessClient {
     if (options.mode === "auto") args.push("--auto");
     if (options.mode === "yolo") args.push("--yolo");
     args.push(options.prompt);
-    return spawnCli("fx", args, { cwd, env: options.env });
+    return spawnCli(options.binaryPath || "fx", args, { cwd, env: options.env });
   }
 
   parseLineAll(line: string): AgentStreamEvent[] {
@@ -744,8 +772,8 @@ class PiClient extends JsonlHarnessClient implements HarnessClient {
   spawn(options: HarnessSpawnOptions): ChildProcess {
     const cwd = resolveCwd(options.cwd);
     return spawnCli(
-      "pi",
-      ["--print", "--mode", "json", "--no-approve", options.prompt],
+      options.binaryPath || "pi",
+      ["--print", "--mode", "json", ...(options.model && options.model !== "default" ? ["--model", options.model] : []), options.prompt],
       { cwd, env: options.env },
     );
   }

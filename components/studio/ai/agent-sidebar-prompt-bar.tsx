@@ -190,6 +190,9 @@ export type AgentSidebarPromptBarProps = {
   selectedModelKey?: string;
   onModelChange?: (model: AgentPromptBarModel) => void;
   onAddModels?: () => void;
+  modelsLoading?: boolean;
+  modelsError?: string;
+  onRefreshModels?: () => void;
   /** For the @ menu, validMentions for highlight parity (unused visually here) */
   validMentions?: Set<string>;
 };
@@ -211,6 +214,9 @@ export default function AgentSidebarPromptBar({
   selectedModelKey,
   onModelChange,
   onAddModels,
+  modelsLoading,
+  modelsError,
+  onRefreshModels,
 }: AgentSidebarPromptBarProps) {
   const pill = variant === "Pill";
   const [internalDraft, setInternalDraft] = useState("");
@@ -563,7 +569,7 @@ export default function AgentSidebarPromptBar({
       {modelOpen && (
         <div
           onMouseLeave={() => setModelHovered(null)}
-          className="absolute z-20 w-44 rounded-[10px] border border-border bg-popover p-1 shadow-lg max-h-[260px] overflow-y-auto overscroll-contain"
+          className="absolute z-20 w-80 max-w-[calc(100vw-2rem)] rounded-[10px] border border-border bg-popover p-1 shadow-lg max-h-[260px] overflow-y-auto overscroll-contain"
           style={{ left: modelMenuLeft, bottom: modelMenuBottom, animation: "promptbar-pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "bottom left" }}
         >
           <span
@@ -578,8 +584,8 @@ export default function AgentSidebarPromptBar({
           />
           {MODELS.length === 0 ? (
             <div className="px-2 py-6 text-center">
-              <div className="text-[12px] font-medium text-foreground">No models configured</div>
-              <div className="mt-1 text-[11px] leading-4 text-muted-foreground">Add an API key in AI Settings to enable the agent.</div>
+              <div className="text-[12px] font-medium text-foreground">{modelsLoading ? "Detecting local CLIs…" : "No models available"}</div>
+              <div className="mt-1 text-[11px] leading-4 text-muted-foreground">{modelsError || (onRefreshModels ? "Sign in to a supported local CLI, or add an API provider in AI Settings." : "Add an API provider in AI Settings. Local CLI agents require the desktop app.")}</div>
             </div>
           ) : (
             MODELS.map((m, i) => (
@@ -605,6 +611,11 @@ export default function AgentSidebarPromptBar({
                 </span>
               </button>
             ))
+          )}
+          {onRefreshModels && (
+            <button type="button" disabled={modelsLoading} onClick={onRefreshModels} className="relative z-10 w-full rounded px-2 py-2 text-left text-xs text-muted-foreground hover:bg-muted">
+              {modelsLoading ? "Detecting local CLIs…" : "Refresh local CLIs"}
+            </button>
           )}
           {onAddModels && (
             <>
@@ -727,7 +738,7 @@ export default function AgentSidebarPromptBar({
             type="button"
             aria-expanded={modelOpen}
             aria-label="Choose model"
-            disabled={disabled}
+            disabled={isStreaming}
             onClick={() => {
               setPlusOpen(false);
               setModelOpen((current) => !current);

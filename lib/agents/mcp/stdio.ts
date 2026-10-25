@@ -67,7 +67,7 @@ function toolText(result: Awaited<ReturnType<typeof executeDbTool>>) {
   };
 }
 
-async function main() {
+export async function runAgentMcpStdio() {
   const ctx = buildContext();
   const mode = process.env.REXADB_MODE || "rexadb-plan";
 
@@ -189,7 +189,7 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((error) => {
+if (import.meta.main) runAgentMcpStdio().catch((error) => {
   console.error("[rexadb-mcp] fatal:", error);
   process.exit(1);
 });

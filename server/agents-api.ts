@@ -121,12 +121,15 @@ function createProviderDiscoveryEffects(deps: AgentDiscoveryDependencies) {
     return Effect.succeed({ models: [] as AgentModel[], error: message });
   }));
 
-  return { detectEffect, modelsEffect };
+  return { detectEffect, modelsEffect, refreshEffect: refreshProvidersCacheEffect() };
 }
 
 const effects = createProviderDiscoveryEffects(defaultDependencies);
 
 export const detectAgentProvidersEffect = effects.detectEffect;
+export const refreshAgentProvidersEffect = effects.refreshEffect.pipe(Effect.map((providers) =>
+  providers ? { providers } : { providers: [], error: "Could not refresh local CLI providers." },
+));
 export const listAgentProviderModelsEffect = (providerId: AgentProviderId | string) =>
   effects.modelsEffect(providerId as AgentProviderId);
 

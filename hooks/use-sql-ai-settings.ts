@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { useLocalCliProviders } from "./use-local-cli-providers";
+import { localCliModels } from "@/lib/agents/local-provider";
 import { getGlobalAiSettings, type GlobalAiSettings } from "@/lib/api/actions-client";
 import { subscribeGlobalAiSettingsUpdated } from "@/lib/ai/ai-settings-events";
 
@@ -14,6 +16,7 @@ function hasAnyConfiguredModels(settings: GlobalAiSettings | null): boolean {
 }
 
 export function useSqlAiSettings() {
+  const localCli = useLocalCliProviders();
   const [settings, setSettings] = useState<GlobalAiSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -48,7 +51,7 @@ export function useSqlAiSettings() {
 
   return {
     settings,
-    isLoading,
-    hasAnyModels: useMemo(() => hasAnyConfiguredModels(settings), [settings]),
+    isLoading: isLoading || localCli.loading,
+    hasAnyModels: useMemo(() => hasAnyConfiguredModels(settings) || localCliModels(localCli.providers).length > 0, [settings, localCli.providers]),
   };
 }

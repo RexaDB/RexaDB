@@ -51,11 +51,14 @@ export function buildRexaMcpServerConfig(input: {
   appMode: RexaAgentAppMode;
   cwd?: string;
 }): RexaMcpServerConfig {
+  // Compiled desktop sidecars include the MCP entry; no external Bun or .ts
+  // sources are available in an installed app.
+  const compiled = /rexadb-server(?:-|\.|$)/i.test(process.execPath.split(/[\\/]/).pop() || "");
   const entry = getRexaMcpEntryPath(input.cwd);
   return {
     name: "rexadb",
-    command: process.execPath.includes("bun") ? process.execPath : "bun",
-    args: ["run", entry],
+    command: compiled ? process.execPath : process.execPath.includes("bun") ? process.execPath : "bun",
+    args: compiled ? ["--agent-mcp"] : ["run", entry],
     env: buildRexaMcpEnv(input),
   };
 }

@@ -235,7 +235,7 @@ export const AGENT_PROVIDER_META: Record<
     name: "Cursor",
     icon: "Box",
     description: "Cursor Agent CLI",
-    binaries: ["cursor"],
+    binaries: ["cursor-agent"],
     models: [
       { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
       { id: "gpt-4o", label: "GPT-4o" },

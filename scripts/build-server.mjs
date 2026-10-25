@@ -29,7 +29,7 @@ const outDir = join(ROOT, 'src-tauri', 'binaries');
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 const outfile = join(outDir, entry.name);
-const source = join(ROOT, 'server', 'index.ts');
+const source = join(ROOT, 'server', 'entry.ts');
 
 console.log(`[build-server] Building for ${key}`);
 console.log(`  target:  ${entry.target}`);

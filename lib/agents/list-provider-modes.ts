@@ -1,6 +1,7 @@
 import { spawnSync } from "child_process";
 import type { AgentMode, AgentProviderId } from "./provider-types";
 import { getAgentSandboxCwd } from "./sandbox-cwd";
+import { localCliPath } from "./cli-path";
 
 function labelize(slug: string): string {
   return slug
@@ -18,7 +19,7 @@ function runCli(
       encoding: "utf-8",
       timeout: opts?.timeout ?? 8000,
       cwd: opts?.cwd,
-      env: { ...process.env, NO_COLOR: "1", CLICOLOR: "0", TERM: "dumb" },
+      env: { ...process.env, PATH: localCliPath(), NO_COLOR: "1", CLICOLOR: "0", TERM: "dumb" },
     });
     const stdout = (result.stdout || "").trim();
     return stdout.length > 0 ? result.stdout : null;

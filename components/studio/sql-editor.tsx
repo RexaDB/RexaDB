@@ -905,7 +905,7 @@ export function SqlEditor({
       return;
     }
     if (!hasAnyModels) {
-      toast.error("Configure an AI provider with an API key and model first.");
+      toast.error("Select a signed-in local CLI or configure an API provider and model first.");
       onOpenAiSettings?.();
       return;
     }

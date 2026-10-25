@@ -1,8 +1,9 @@
 import { isDesktopRuntime } from "@/lib/desktop";
+import { DESKTOP_CLI_HEADER, DESKTOP_CLI_ONLY, isLocalCliRequest } from "@/lib/agents/desktop-access";
 
 // API base URL for the sidecar server (used in static export mode)
 // Exported as let so Tauri runtime can update it after port discovery
-export let API_BASE = `http://127.0.0.1:3867`;
+export let API_BASE = process.env.NEXT_PUBLIC_REXADB_API_URL || "http://127.0.0.1:3867";
 let initialization: Promise<void> | undefined;
 
 async function discoverApiBase(): Promise<void> {
@@ -121,7 +122,23 @@ export async function waitForSidecarReady(
 
 // Wrapper that routes API calls through the Express sidecar instead of same-origin.
 // Use this instead of raw fetch("/api/...") so calls work in static export AND dev mode.
-export function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   const resolved = url.startsWith("http") ? url : `${API_BASE}${url}`;
+  const target = new URL(resolved);
+  if (isLocalCliRequest(target.pathname, init?.body)) {
+    if (!isDesktopRuntime()) throw new Error(DESKTOP_CLI_ONLY);
+    await initApiBase();
+    // Never send the desktop capability to a remote or caller-supplied origin.
+    const local = new URL(API_BASE);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(local.hostname) ||
+        (url.startsWith("http") && target.origin !== local.origin)) {
+      throw new Error(DESKTOP_CLI_ONLY);
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    const token = await invoke<string>("get_desktop_cli_token");
+    const headers = new Headers(init?.headers);
+    headers.set(DESKTOP_CLI_HEADER, token);
+    return fetch(url.startsWith("http") ? url : `${API_BASE}${url}`, { ...init, headers, redirect: "error" });
+  }
   return fetch(resolved, init);
 }

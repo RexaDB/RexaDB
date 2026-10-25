@@ -113,6 +113,7 @@ fn rust_log(msg: &str) {
 }
 
 struct SidecarState {
+    desktop_cli_token: String,
     port: Mutex<u16>,
     child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
     ready: Mutex<bool>,
@@ -390,6 +391,11 @@ fn get_app_version() -> String {
 fn get_api_base_url(state: tauri::State<SidecarState>) -> String {
     let port = *state.port.lock().unwrap();
     format!("http://127.0.0.1:{}", port)
+}
+
+#[tauri::command]
+fn get_desktop_cli_token(state: tauri::State<SidecarState>) -> String {
+    state.desktop_cli_token.clone()
 }
 
 #[tauri::command]
@@ -935,6 +941,12 @@ fn settings_save_keybindings(
 impl SidecarState {
     fn new() -> Self {
         Self {
+            desktop_cli_token: {
+                use rand::RngCore;
+                let mut bytes = [0u8; 32];
+                rand::rngs::OsRng.fill_bytes(&mut bytes);
+                bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+            },
             port: Mutex::new(3867),
             child: Mutex::new(None),
             ready: Mutex::new(false),
@@ -978,6 +990,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
             .expect("failed to create sidecar command")
     }
         .env("REXADB_SERVER_PORT", "3867")
+        .env("REXADB_DESKTOP_CLI_TOKEN", &app.state::<SidecarState>().desktop_cli_token)
         .env("REXADB_USER_DATA_DIR", data_dir.to_string_lossy().as_ref())
         .env("REXADB_JDBC_DRIVERS_DIR", jdbc_drivers_dir.to_string_lossy().as_ref());
     let mut sidecar_command = sidecar_command;
@@ -1125,6 +1138,7 @@ pub fn run() {
             app_update::install_kind,
             app_update::latest_release_info,
             get_api_base_url,
+            get_desktop_cli_token,
             get_pending_open_url,
             is_sidecar_ready,
             get_sidecar_status,

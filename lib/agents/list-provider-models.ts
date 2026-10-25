@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
+import { localCliPath } from "./cli-path";
 import type { AgentModel, AgentProviderId } from "./provider-types";
 import { AGENT_PROVIDER_META } from "./provider-types";
 
@@ -8,11 +9,11 @@ import { AGENT_PROVIDER_META } from "./provider-types";
  */
 function runCli(binaryPath: string, args: string[], timeout = 8000): string | null {
   try {
-    const result = execSync(`${binaryPath} ${args.join(" ")}`, {
+    const result = execFileSync(binaryPath, args, {
       encoding: "utf-8",
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1", CLICOLOR: "0", TERM: "dumb" },
+      env: { ...process.env, PATH: localCliPath(), NO_COLOR: "1", CLICOLOR: "0", TERM: "dumb" },
     });
     return result;
   } catch {
@@ -93,13 +94,14 @@ function parseFxModels(output: string): AgentModel[] {
 // `pi --list-models` prints a TSV table:
 //   provider  model  context  max-out  thinking  images
 // Duplicate slugs across providers are collapsed.
-function parsePiModels(output: string): AgentModel[] {
+export function parsePiModels(output: string): AgentModel[] {
   const models: AgentModel[] = [];
   for (const line of output.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("provider")) continue;
     const parts = trimmed.split(/\s+/);
-    if (parts.length >= 2) {
+    // Only accept table rows; status messages ("No models available") are not models.
+    if (parts.length >= 4 && /^\d/.test(parts[2]) && /^\d/.test(parts[3])) {
       const slug = parts[1];
       models.push({ id: slug, label: labelize(slug), subProvider: parts[0] });
     }
@@ -151,7 +153,7 @@ async function listCodexModels(binaryPath: string): Promise<AgentModel[] | null>
 
     const proc = spawn(binaryPath, ["app-server"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+      env: { ...process.env, PATH: localCliPath(), NO_COLOR: "1", TERM: "dumb" },
     });
 
     const timeout = setTimeout(() => finish(null), 8000);

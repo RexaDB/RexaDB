@@ -43,6 +43,7 @@ import LoadingState from "@/components/studio/ai/loading-state";
 import AgentTrace from "@/components/studio/ai/agent-trace";
 import ApprovalCard from "@/components/studio/ai/approval-card";
 import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
+import { useLocalCliProviders } from "@/hooks/use-local-cli-providers";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
 import { useConfirm } from "@/hooks/use-confirm";
@@ -373,10 +374,11 @@ export function AiChatSheet({
 
   // ── PromptBar sidebar wiring (replaces classic AiPromptInput + AiModelPicker) ──
   const discoveredAgents = useDiscoveredAgents();
+  const localCli = useLocalCliProviders();
 
   const sidebarModels = useMemo(() => {
     if (!settings) return null;
-    const { agents, llmModels } = getConfiguredModels(settings, discoveredAgents);
+    const { agents, llmModels, localModels } = getConfiguredModels(settings, discoveredAgents, localCli.providers);
     const models: Array<{ key: string; name: string; tag?: string; provider: string; model: string }> = [];
     for (const a of agents) {
       models.push({ key: `external:${a.id}`, name: a.model, tag: "Agent", provider: "external", model: a.id });
@@ -384,11 +386,14 @@ export function AiChatSheet({
     for (const m of llmModels) {
       models.push({ key: `${m.provider}:${m.model}`, name: m.model, tag: m.provider, provider: m.provider, model: m.model });
     }
+    for (const m of localModels) {
+      models.push({ key: `${m.provider}:${m.model}`, name: m.label, tag: "Local CLI", provider: m.provider, model: m.model });
+    }
     // Return actual configured models — may be empty if the user has not
     // configured any provider. The pill must point at *real* models, not the
     // demo defaults (sprinkles/vanilla).
     return models;
-  }, [settings, discoveredAgents]);
+  }, [settings, discoveredAgents, localCli.providers]);
 
   const sidebarSources = useMemo(() => {
     const sources: Array<{ key: string; name: string; desc: string; glyph?: string }> = [
@@ -846,7 +851,7 @@ export function AiChatSheet({
                 onStop={stopGeneration}
                 isStreaming={isSending}
                 placeholder="Write a message..."
-                disabled={isLoading}
+                disabled={isLoading || !sidebarModels?.length}
                 sources={sidebarSources as any}
                 commands={sidebarCommands}
                 // Pill + actual models: always point at the user's real config,
@@ -864,6 +869,9 @@ export function AiChatSheet({
                   if (found) handlePromptBarModelChange(found);
                 }}
                 onAddModels={_onOpenSettings}
+                modelsLoading={localCli.loading}
+                modelsError={localCli.error}
+                onRefreshModels={localCli.enabled ? () => void localCli.refresh() : undefined}
                 validMentions={validMentions}
                 variant="Pill"
                 demo={false}

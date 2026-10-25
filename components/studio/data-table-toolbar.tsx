@@ -1,3 +1,4 @@
+import { getLocalCliProviderId } from "@/lib/agents/local-provider";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -206,6 +207,7 @@ function pickAiProviderAndModel(settings: GlobalAiSettings): { provider: string;
   };
   const defProvider = String(settings?.defaultProvider ?? "").trim();
   const defModel = String(settings?.defaultModel ?? "").trim();
+  if (getLocalCliProviderId(defProvider)) return { provider: defProvider, model: defModel || "default" };
   if (defProvider && usable(defProvider)) {
     const models = providers[defProvider].models;
     if (defModel && models.includes(defModel)) return { provider: defProvider, model: defModel };
