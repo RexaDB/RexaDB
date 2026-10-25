@@ -408,18 +408,23 @@ fn oracle_q_quote_end(bytes: &[u8], start: usize) -> Option<usize> {
 /// every slice boundary sits immediately after one of those single-byte
 /// ASCII delimiters (or at `n`), never inside a multi-byte UTF-8 sequence —
 /// safe on non-ASCII SQL such as a literal containing `'à'`.
+///
+/// Runs of identifier bytes (alnum, `_`, `$`, `#`) are one token each; any
+/// other non-whitespace, non-comment, non-quote byte (operators and
+/// punctuation: `=`, `(`, `,`, …) is its own single-byte token rather than
+/// gluing onto a neighboring identifier. Without this, `name=q'[...]'`
+/// would tokenize as one word `name=q` — swallowing the `q` that should
+/// have started a fresh dispatch — so the q-quote check below would never
+/// get to see it as the start of a token.
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b == b'#'
+}
+
 fn tokenize(s: &str) -> Vec<Tok<'_>> {
     let mut toks = Vec::new();
     let bytes = s.as_bytes();
     let n = s.len();
     let mut i = 0;
-    let is_boundary = |c: u8, next: Option<u8>| {
-        c.is_ascii_whitespace()
-            || c == b'\''
-            || c == b'"'
-            || (c == b'-' && next == Some(b'-'))
-            || (c == b'/' && next == Some(b'*'))
-    };
     while i < n {
         let c = bytes[i];
         if c.is_ascii_whitespace() {
@@ -467,7 +472,11 @@ fn tokenize(s: &str) -> Vec<Tok<'_>> {
             continue;
         }
         let start = i;
-        while i < n && !is_boundary(bytes[i], bytes.get(i + 1).copied()) {
+        if is_ident_byte(c) {
+            while i < n && is_ident_byte(bytes[i]) {
+                i += 1;
+            }
+        } else {
             i += 1;
         }
         toks.push(Tok { text: &s[start..i], start });
@@ -1062,6 +1071,30 @@ mod tests {
         // No apostrophe directly after q/n, so these are ordinary words.
         let toks = tokenize("SELECT quantity, name FROM t");
         let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
-        assert_eq!(texts, vec!["SELECT", "quantity,", "name", "FROM", "t"]);
+        assert_eq!(texts, vec!["SELECT", "quantity", ",", "name", "FROM", "t"]);
+    }
+
+    #[test]
+    fn q_quote_immediately_after_an_operator_with_no_space_is_recognized() {
+        // `=` isn't an identifier byte, so it's its own token and `q'...'`
+        // still gets a fresh dispatch right after it, exactly like the
+        // `name = q'[O'Brien]'` case but with no surrounding whitespace.
+        let sql = "SELECT * FROM people WHERE name=q'[O'Brien]' ORDER BY 1 OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let toks = tokenize(sql);
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert!(texts.contains(&"q'[O'Brien]'"), "q-quote must be its own token: {texts:?}");
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        assert!(rewritten.contains("q'[O'Brien]'"));
+        assert!(rewritten.contains("ROWNUM <= 10"));
+    }
+
+    #[test]
+    fn q_quote_immediately_after_open_paren_or_comma_is_recognized() {
+        for sql in [
+            "SELECT f(q'[a]') FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
+            "SELECT x,q'[a]' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY",
+        ] {
+            assert!(rownum_paginate(sql).is_some(), "should rewrite: {sql}");
+        }
     }
 }
