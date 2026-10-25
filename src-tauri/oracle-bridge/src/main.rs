@@ -349,25 +349,72 @@ struct Tok<'a> {
     start: usize,
 }
 
-/// Splits on ASCII whitespace, keeping each token's byte offset in `s` so a
-/// matched suffix can be sliced back out of the original (non-uppercased)
-/// text. Good enough here because we only ever inspect the *last* few
-/// tokens of the statement — whatever tokenizing noise this causes earlier
-/// in the string (inside string literals, comments, etc.) is irrelevant.
+/// Splits SQL into whitespace-separated tokens, keeping each token's byte
+/// offset in `s` so a matched suffix can be sliced back out of the original
+/// (non-uppercased) text.
+///
+/// `--` and `/* */` comments and quoted literals (`'...'` / `"..."`,
+/// honoring Oracle's doubled-quote escape) are skipped as single units and
+/// never produce tokens of their own, so a keyword that only appears inside
+/// a comment or a string literal can't be mistaken for the pagination
+/// clause this is used to find.
+///
+/// Whitespace/comment/quote delimiters are matched on ASCII bytes only, and
+/// every slice boundary sits immediately after one of those single-byte
+/// ASCII delimiters (or at `n`), never inside a multi-byte UTF-8 sequence —
+/// safe on non-ASCII SQL such as a literal containing `'à'`.
 fn tokenize(s: &str) -> Vec<Tok<'_>> {
     let mut toks = Vec::new();
     let bytes = s.as_bytes();
-    let mut i = 0;
     let n = s.len();
+    let mut i = 0;
+    let is_boundary = |c: u8, next: Option<u8>| {
+        c.is_ascii_whitespace()
+            || c == b'\''
+            || c == b'"'
+            || (c == b'-' && next == Some(b'-'))
+            || (c == b'/' && next == Some(b'*'))
+    };
     while i < n {
-        while i < n && (bytes[i] as char).is_whitespace() {
+        let c = bytes[i];
+        if c.is_ascii_whitespace() {
             i += 1;
+            continue;
         }
-        if i >= n {
-            break;
+        if c == b'-' && bytes.get(i + 1) == Some(&b'-') {
+            i = match s[i..].find('\n') {
+                Some(pos) => i + pos,
+                None => n,
+            };
+            continue;
+        }
+        if c == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = match s[i + 2..].find("*/") {
+                Some(pos) => i + 2 + pos + 2,
+                None => n,
+            };
+            continue;
+        }
+        if c == b'\'' || c == b'"' {
+            let quote = c;
+            let start = i;
+            i += 1;
+            while i < n {
+                if bytes[i] == quote {
+                    i += 1;
+                    if bytes.get(i) == Some(&quote) {
+                        i += 1; // doubled quote: escaped, literal continues
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            toks.push(Tok { text: &s[start..i], start });
+            continue;
         }
         let start = i;
-        while i < n && !(bytes[i] as char).is_whitespace() {
+        while i < n && !is_boundary(bytes[i], bytes.get(i + 1).copied()) {
             i += 1;
         }
         toks.push(Tok { text: &s[start..i], start });
@@ -413,34 +460,37 @@ fn rownum_paginate(sql: &str) -> Option<String> {
     if !eq_ignore_case(last[6].text, "ROWS") || !eq_ignore_case(last[7].text, "ONLY") {
         return None;
     }
-    let core = trimmed[..last[0].start].trim_end();
-    if core.is_empty() {
+    // Deliberately not trimmed: `core`'s own trailing whitespace may be the
+    // newline that terminates a `--` comment on its last line, and trimming
+    // it would let the wrapper SQL appended right after get swallowed into
+    // that now-unterminated comment. The explicit "\n" below guarantees the
+    // same thing independent of whatever core already ends with.
+    let core = &trimmed[..last[0].start];
+    if core.trim().is_empty() {
         return None;
     }
     let max_row = offset.saturating_add(limit);
     Some(format!(
-        "SELECT * FROM (SELECT rexadb_pg__.*, ROWNUM AS \"{col}\" FROM ({core}) rexadb_pg__ WHERE ROWNUM <= {max_row}) WHERE \"{col}\" > {offset}",
+        "SELECT * FROM (SELECT rexadb_pg__.*, ROWNUM AS \"{col}\" FROM ({core}\n) rexadb_pg__ WHERE ROWNUM <= {max_row}) WHERE \"{col}\" > {offset}",
         col = ROWNUM_PAGINATION_COLUMN,
     ))
 }
 
 /// Drops the synthetic `ROWNUM_PAGINATION_COLUMN` that `rownum_paginate`
-/// adds, so the rewrite is invisible to callers.
-fn strip_rownum_column(columns: Vec<Value>, rows: Vec<Vec<Value>>) -> (Vec<Value>, Vec<Vec<Value>>) {
-    let Some(idx) = columns
-        .iter()
-        .position(|c| c.get("name").and_then(|n| n.as_str()) == Some(ROWNUM_PAGINATION_COLUMN))
-    else {
+/// adds, so the rewrite is invisible to callers. Always the last column in
+/// the result (the rewrite appends it after `rexadb_pg__.*` and nothing is
+/// selected after it at any wrapping level), so it's removed by position —
+/// not by name — so a query whose own column is legitimately named
+/// `ROWNUM_PAGINATION_COLUMN` can't be confused with the appended one, and
+/// doesn't make the removal ambiguous.
+fn strip_rownum_column(mut columns: Vec<Value>, rows: Vec<Vec<Value>>) -> (Vec<Value>, Vec<Vec<Value>>) {
+    if columns.pop().is_none() {
         return (columns, rows);
-    };
-    let mut columns = columns;
-    columns.remove(idx);
+    }
     let rows = rows
         .into_iter()
         .map(|mut row| {
-            if idx < row.len() {
-                row.remove(idx);
-            }
+            row.pop();
             row
         })
         .collect();
@@ -857,5 +907,63 @@ mod tests {
         assert_eq!(columns.len(), 1);
         assert_eq!(columns[0]["name"], "ID");
         assert_eq!(rows, vec![vec![json!(1)], vec![json!(2)]]);
+    }
+
+    #[test]
+    fn strips_by_position_even_if_the_users_own_column_shares_the_name() {
+        // The appended rownum column is always last; a same-named column
+        // from the query itself (first here) must survive untouched.
+        let columns = vec![
+            json!({ "name": ROWNUM_PAGINATION_COLUMN, "type": "DB_TYPE_NUMBER" }),
+            json!({ "name": "ID", "type": "DB_TYPE_NUMBER" }),
+        ];
+        let rows = vec![vec![json!(42), json!(1)]];
+        let (columns, rows) = strip_rownum_column(columns, rows);
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0]["name"], ROWNUM_PAGINATION_COLUMN);
+        assert_eq!(rows, vec![vec![json!(42)]]);
+    }
+
+    #[test]
+    fn tokenize_does_not_panic_on_non_ascii_literals() {
+        // 'à' is C3 A0 in UTF-8; A0 alone casts to char U+00A0 (a Unicode
+        // whitespace), which used to make the byte-whitespace check slice
+        // through the middle of the character and panic.
+        let toks = tokenize("SELECT 'à' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(
+            texts,
+            vec!["SELECT", "'à'", "FROM", "dual", "OFFSET", "0", "ROWS", "FETCH", "NEXT", "10", "ROWS", "ONLY"]
+        );
+        assert!(rownum_paginate("SELECT 'à' FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY").is_some());
+    }
+
+    #[test]
+    fn ignores_pagination_keywords_inside_a_trailing_comment() {
+        // The real last tokens are inside a `--` comment, not a live clause.
+        let sql = "SELECT * FROM t -- OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        assert!(rownum_paginate(sql).is_none());
+    }
+
+    #[test]
+    fn ignores_pagination_keywords_inside_a_string_literal() {
+        let sql = "SELECT 'OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY' FROM dual";
+        assert!(rownum_paginate(sql).is_none());
+    }
+
+    #[test]
+    fn preserves_a_trailing_line_comment_in_the_core_query() {
+        // The OFFSET clause is real SQL on the line after a `-- note`
+        // comment; the newline that ends that comment must survive into
+        // `core` so the wrapper SQL appended after it doesn't get eaten by
+        // an unterminated comment.
+        let sql = "SELECT * FROM t -- note\nOFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY";
+        let rewritten = rownum_paginate(sql).expect("should rewrite");
+        let core_line = rewritten.lines().next().unwrap();
+        assert!(core_line.ends_with("-- note"), "comment must stay on its own line: {core_line:?}");
+        assert!(
+            rewritten.contains("ROWNUM <= 10"),
+            "wrapper SQL must not have been swallowed by the comment: {rewritten}"
+        );
     }
 }
