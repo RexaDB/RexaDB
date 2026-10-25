@@ -888,6 +888,37 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
   --surface-lift: inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 1px 2px hsl(0 0% 0% / 0.4);
 }
 
+/*
+ * Soft embossed "3D" surface for raised dark buttons and select triggers —
+ * a top sheen plus a dual-layer shadow so a pill reads as lifted off the
+ * page instead of a flat fill. Layered as background-image/box-shadow on
+ * top of each variant's own background-color, so brand colors (primary,
+ * destructive, …) still show through underneath the sheen.
+ */
+.dark .rexa-raised {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 1px 1px rgba(0, 0, 0, 0.45),
+    0 6px 16px -8px rgba(0, 0, 0, 0.6);
+  transition: background-image 120ms ease, box-shadow 120ms ease;
+}
+.dark .rexa-raised:hover:not(:disabled):not([data-disabled]) {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 55%);
+}
+.dark .rexa-raised:active:not(:disabled):not([data-disabled]) {
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.03) 60%);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.5),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+}
+.dark .rexa-raised:disabled,
+.dark .rexa-raised[data-disabled] {
+  background-image: none;
+  box-shadow: none;
+}
+
 .tui-mode {
   --radius: 0rem;
   --font-sans: var(--font-mono);
