@@ -416,8 +416,14 @@ fn oracle_q_quote_end(bytes: &[u8], start: usize) -> Option<usize> {
 /// would tokenize as one word `name=q` — swallowing the `q` that should
 /// have started a fresh dispatch — so the q-quote check below would never
 /// get to see it as the start of a token.
+///
+/// Every non-ASCII byte (>= 0x80, i.e. any lead or continuation byte of a
+/// multi-byte UTF-8 character) also counts as an identifier byte, so a
+/// character like the `é` in an unquoted `café` stays inside its word and
+/// the single-byte fallback only ever sees ASCII punctuation — it can
+/// never stop mid-character.
 fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b == b'#'
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$' || b == b'#' || b >= 0x80
 }
 
 fn tokenize(s: &str) -> Vec<Tok<'_>> {
@@ -488,6 +494,25 @@ fn eq_ignore_case(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
+/// Pops a trailing keyword (any of `kws`, case-insensitive) off `toks`.
+fn pop_kw<'a, 'b>(toks: &'a [Tok<'b>], kws: &[&str]) -> Option<&'a [Tok<'b>]> {
+    let (last, rest) = toks.split_last()?;
+    kws.iter().any(|kw| eq_ignore_case(last.text, kw)).then_some(rest)
+}
+
+/// Pops a trailing row count off `toks`, along with an optional unary `+`
+/// right before it (the tokenizer splits `+10` into `+` and `10`). Only
+/// `+` is accepted: it doesn't change the value, whereas dropping a `-`
+/// would silently flip the sign.
+fn pop_count<'a, 'b>(toks: &'a [Tok<'b>]) -> Option<(&'a [Tok<'b>], u64)> {
+    let (last, rest) = toks.split_last()?;
+    let value: u64 = last.text.parse().ok()?;
+    match rest.split_last() {
+        Some((plus, before)) if plus.text == "+" => Some((before, value)),
+        _ => Some((rest, value)),
+    }
+}
+
 /// Rewrites a statement whose final clause is Oracle 12c's
 /// `OFFSET n ROWS FETCH {NEXT|FIRST} m ROWS ONLY` into the classic `ROWNUM`
 /// pagination idiom, which every Oracle version (8i through current)
@@ -504,30 +529,25 @@ fn eq_ignore_case(a: &str, b: &str) -> bool {
 fn rownum_paginate(sql: &str) -> Option<String> {
     let trimmed = sql.trim_end();
     let toks = tokenize(trimmed);
-    if toks.len() < 8 {
-        return None;
-    }
-    let last = &toks[toks.len() - 8..];
-    if !eq_ignore_case(last[0].text, "OFFSET") {
-        return None;
-    }
-    let offset: u64 = last[1].text.parse().ok()?;
-    if !eq_ignore_case(last[2].text, "ROWS") || !eq_ignore_case(last[3].text, "FETCH") {
-        return None;
-    }
-    if !eq_ignore_case(last[4].text, "NEXT") && !eq_ignore_case(last[4].text, "FIRST") {
-        return None;
-    }
-    let limit: u64 = last[5].text.parse().ok()?;
-    if !eq_ignore_case(last[6].text, "ROWS") || !eq_ignore_case(last[7].text, "ONLY") {
-        return None;
-    }
+    // Matched right-to-left so the optional `+` before either count can
+    // shift the clause's width without misaligning anything.
+    let rest = pop_kw(&toks, &["ONLY"])?;
+    let rest = pop_kw(rest, &["ROWS"])?;
+    let (rest, limit) = pop_count(rest)?;
+    let rest = pop_kw(rest, &["NEXT", "FIRST"])?;
+    let rest = pop_kw(rest, &["FETCH"])?;
+    let rest = pop_kw(rest, &["ROWS"])?;
+    let (rest, offset) = pop_count(rest)?;
+    let rest = pop_kw(rest, &["OFFSET"])?;
+    // Each pop returns a prefix of `toks`, so the OFFSET token sits at
+    // index `rest.len()`.
+    let clause_start = toks[rest.len()].start;
     // Deliberately not trimmed: `core`'s own trailing whitespace may be the
     // newline that terminates a `--` comment on its last line, and trimming
     // it would let the wrapper SQL appended right after get swallowed into
     // that now-unterminated comment. The explicit "\n" below guarantees the
     // same thing independent of whatever core already ends with.
-    let core = &trimmed[..last[0].start];
+    let core = &trimmed[..clause_start];
     if core.trim().is_empty() {
         return None;
     }
@@ -1096,5 +1116,33 @@ mod tests {
         ] {
             assert!(rownum_paginate(sql).is_some(), "should rewrite: {sql}");
         }
+    }
+
+    #[test]
+    fn tokenize_does_not_panic_on_unquoted_non_ascii_identifiers() {
+        let toks = tokenize("SELECT café, ñ FROM dual");
+        let texts: Vec<&str> = toks.iter().map(|t| t.text).collect();
+        assert_eq!(texts, vec!["SELECT", "café", ",", "ñ", "FROM", "dual"]);
+        assert!(rownum_paginate("SELECT café FROM dual OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY").is_some());
+    }
+
+    #[test]
+    fn accepts_a_unary_plus_on_either_row_count() {
+        for sql in [
+            "SELECT * FROM t ORDER BY 1 OFFSET +10 ROWS FETCH NEXT 50 ROWS ONLY",
+            "SELECT * FROM t ORDER BY 1 OFFSET 10 ROWS FETCH NEXT +50 ROWS ONLY",
+            "SELECT * FROM t ORDER BY 1 OFFSET +10 ROWS FETCH NEXT +50 ROWS ONLY",
+        ] {
+            let rewritten = rownum_paginate(sql).unwrap_or_else(|| panic!("should rewrite: {sql}"));
+            assert!(rewritten.contains("ROWNUM <= 60"), "{rewritten}");
+            assert!(rewritten.contains(&format!("\"{ROWNUM_PAGINATION_COLUMN}\" > 10")), "{rewritten}");
+            assert!(!rewritten.to_ascii_uppercase().contains("OFFSET"), "{rewritten}");
+        }
+    }
+
+    #[test]
+    fn does_not_strip_a_unary_minus_from_a_row_count() {
+        // Dropping `-` would silently turn -10 into 10; leave it unrewritten.
+        assert!(rownum_paginate("SELECT * FROM t OFFSET -10 ROWS FETCH NEXT 50 ROWS ONLY").is_none());
     }
 }
