@@ -98,6 +98,7 @@ interface GlobalStudioSettings extends SqlFormatSettingsRequired {
   noiseBgBlendMode: "overlay" | "soft-light" | "multiply" | "screen";
   noiseBgColor: string;
   noiseBgTranslucent: boolean;
+  raisedButtons: boolean;
 }
 
 export function useGlobalStudioSettings(persist = false) {
@@ -171,6 +172,7 @@ export function useGlobalStudioSettings(persist = false) {
   const [noiseBgBlendMode, setNoiseBgBlendMode] = useState<"overlay" | "soft-light" | "multiply" | "screen">("overlay");
   const [noiseBgColor, setNoiseBgColor] = useState<string>("#000000");
   const [noiseBgTranslucent, setNoiseBgTranslucent] = useState<boolean>(false);
+  const [raisedButtons, setRaisedButtons] = useState<boolean>(true);
   const [sqlFormatTabWidth, setSqlFormatTabWidth] = useState<number>(2);
   const [sqlFormatUseTabs, setSqlFormatUseTabs] = useState<boolean>(false);
   const [sqlFormatKeywordCase, setSqlFormatKeywordCase] = useState<
@@ -348,6 +350,9 @@ export function useGlobalStudioSettings(persist = false) {
     if (d.noiseBgTranslucent !== undefined) {
       setNoiseBgTranslucent(d.noiseBgTranslucent);
     }
+    if (d.raisedButtons !== undefined) {
+      setRaisedButtons(d.raisedButtons);
+    }
   };
 
   // Current state as a plain record (same shape as the save payload).
@@ -402,6 +407,7 @@ export function useGlobalStudioSettings(persist = false) {
     noiseBgBlendMode,
     noiseBgColor,
     noiseBgTranslucent,
+    raisedButtons,
     sqlFormatTabWidth,
     sqlFormatUseTabs,
     sqlFormatKeywordCase,
@@ -666,6 +672,7 @@ export function useGlobalStudioSettings(persist = false) {
       noiseBgBlendMode,
       noiseBgColor,
       noiseBgTranslucent,
+      raisedButtons,
       sqlFormatTabWidth,
       sqlFormatUseTabs,
       sqlFormatKeywordCase,
@@ -798,6 +805,7 @@ export function useGlobalStudioSettings(persist = false) {
     noiseBgBlendMode,
     noiseBgColor,
     noiseBgTranslucent,
+    raisedButtons,
     sqlFormatTabWidth,
     sqlFormatUseTabs,
     sqlFormatKeywordCase,
@@ -826,6 +834,11 @@ export function useGlobalStudioSettings(persist = false) {
   useEffect(() => {
     setActiveSleekLayout(sleekLayout);
   }, [sleekLayout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    document.documentElement.classList.toggle("raised-buttons", raisedButtons);
+  }, [raisedButtons]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -936,6 +949,8 @@ export function useGlobalStudioSettings(persist = false) {
     setNoiseBgColor,
     noiseBgTranslucent,
     setNoiseBgTranslucent,
+    raisedButtons,
+    setRaisedButtons,
     resultTabsEnabled,
     setResultTabsEnabled,
     sqlFormatTabWidth,

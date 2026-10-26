@@ -889,39 +889,20 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
 }
 
 /*
- * Soft embossed "3D" surface for raised dark buttons and select triggers —
- * a top sheen plus a dual-layer shadow so a pill reads as lifted off the
- * page instead of a flat fill. Layered as background-image/box-shadow on
- * top of each variant's own background-color, so brand colors (primary,
- * destructive, …) still show through underneath the sheen.
- *
- * Scoped to the `components` layer (below Tailwind's `utilities` layer) so
- * state utilities like `focus-visible:ring-2` and `aria-invalid:ring-3`
- * still win the cascade and aren't hidden behind this box-shadow.
+ * Raised button treatment: a solid white-20% stroke plus a soft 0 1px 2px
+ * drop shadow. Fills stay whatever the variant sets.
  */
 @layer components {
-  .dark .rexa-raised {
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.08),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.35),
-      0 1px 1px rgba(0, 0, 0, 0.45),
-      0 6px 16px -8px rgba(0, 0, 0, 0.6);
-    transition: background-image 120ms ease, box-shadow 120ms ease;
+  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised {
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.045));
+    box-shadow: 0 1px 2px rgba(14, 18, 27, 0.24);
   }
-  .dark .rexa-raised:hover:not(:disabled):not([data-disabled]) {
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 55%);
+  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised:hover:not(:disabled) {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.07));
   }
-  .dark .rexa-raised:active:not(:disabled):not([data-disabled]) {
-    background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.03) 60%);
-    box-shadow:
-      inset 0 2px 4px rgba(0, 0, 0, 0.5),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.03);
-  }
-  .dark .rexa-raised:disabled,
-  .dark .rexa-raised[data-disabled] {
-    background-image: none;
-    box-shadow: none;
+  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised:focus-visible {
+    box-shadow: 0 1px 2px rgba(14, 18, 27, 0.24), 0 0 0 1px #288dff !important;
   }
 }
 
