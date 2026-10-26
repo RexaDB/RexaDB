@@ -412,6 +412,8 @@ interface StudioSettingsModel {
   setNoiseBgColor: (value: string) => void;
   noiseBgTranslucent: boolean;
   setNoiseBgTranslucent: (value: boolean) => void;
+  raisedButtons: boolean;
+  setRaisedButtons: (value: boolean) => void;
   sqlFormatTabWidth: number;
   setSqlFormatTabWidth: (value: number) => void;
   sqlFormatUseTabs: boolean;
@@ -838,6 +840,8 @@ export function SettingsView({
     setNoiseBgColor,
     noiseBgTranslucent,
     setNoiseBgTranslucent,
+    raisedButtons,
+    setRaisedButtons,
     sleekLayout,
     setSleekLayout,
     activeSleekLayout,
@@ -1683,6 +1687,15 @@ export function SettingsView({
                     </button>
                   </div>
                 </SettingRow>
+
+                {/* Raised Buttons */}
+                <ToggleSetting
+                  settingId="raised-buttons"
+                  title="Raised Buttons"
+                  description="Give buttons and dropdowns a subtle fill, solid border and soft shadow in dark mode."
+                  value={raisedButtons}
+                  onChange={setRaisedButtons}
+                />
 
                 {/* Translucent Background */}
                 <ToggleSetting
