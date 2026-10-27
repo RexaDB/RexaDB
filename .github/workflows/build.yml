@@ -32,7 +32,7 @@ jobs:
             artifact-name: RexaDB-macOS-Intel
 
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -285,6 +285,9 @@ jobs:
         # Intel job failed only at DMG packaging after sign+notarize succeeded).
         # Retry the whole build on failure — Rust/Next caches make retries cheap —
         # instead of failing the release on runner flakiness.
+        # Apple's timestamp/notary services also have multi-minute blips (v1.3.28
+        # Intel: "A timestamp was expected but was not found" + notary timeout),
+        # so retries back off and, on macOS, wait for timestamp.apple.com first.
         # NOTE: shell must stay bash — Windows runners default to PowerShell.
         shell: bash
         env:
@@ -295,9 +298,24 @@ jobs:
         run: |
           set -uo pipefail
           MAX_ATTEMPTS=3
+          wait_for_apple_timestamp() {
+            # codesign --timestamp needs this server. A plain GET normally gets a
+            # 302; no response (000) or a 5xx means it's down, so keep waiting.
+            for i in $(seq 1 10); do
+              code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' http://timestamp.apple.com/ts01 || true)
+              case "$code" in
+                000|5??) ;;
+                *) return 0 ;;
+              esac
+              echo "timestamp.apple.com not ready (HTTP ${code}, check ${i}/10), waiting 30s..."
+              sleep 30
+            done
+            echo "⚠️ timestamp.apple.com still unreachable, trying anyway"
+          }
           attempt=1
           while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
             echo "════ Tauri build attempt ${attempt}/${MAX_ATTEMPTS} ════"
+            if [ "$RUNNER_OS" = "macOS" ]; then wait_for_apple_timestamp; fi
             if bun run tauri build --bundles ${{ matrix.bundles }}; then
               echo "✅ Tauri build succeeded on attempt ${attempt}"
               exit 0
@@ -308,8 +326,9 @@ jobs:
             rm -rf src-tauri/target/release/bundle
             attempt=$((attempt + 1))
             if [ "$attempt" -le "$MAX_ATTEMPTS" ]; then
-              echo "Retrying in 30s..."
-              sleep 30
+              delay=$((attempt == 2 ? 60 : 180))
+              echo "Retrying in ${delay}s..."
+              sleep "$delay"
             fi
           done
           echo "❌ Tauri build failed after ${MAX_ATTEMPTS} attempts"
