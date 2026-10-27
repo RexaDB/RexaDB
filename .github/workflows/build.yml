@@ -299,11 +299,15 @@ jobs:
           set -uo pipefail
           MAX_ATTEMPTS=3
           wait_for_apple_timestamp() {
-            # codesign --timestamp needs this server; any HTTP response means it's up.
+            # codesign --timestamp needs this server. A plain GET normally gets a
+            # 302; no response (000) or a 5xx means it's down, so keep waiting.
             for i in $(seq 1 10); do
               code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' http://timestamp.apple.com/ts01 || true)
-              if [ "$code" != "000" ]; then return 0; fi
-              echo "timestamp.apple.com unreachable (check ${i}/10), waiting 30s..."
+              case "$code" in
+                000|5??) ;;
+                *) return 0 ;;
+              esac
+              echo "timestamp.apple.com not ready (HTTP ${code}, check ${i}/10), waiting 30s..."
               sleep 30
             done
             echo "⚠️ timestamp.apple.com still unreachable, trying anyway"
