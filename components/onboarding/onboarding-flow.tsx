@@ -138,14 +138,14 @@ export function OnboardingFlow({
       return;
     }
     setOtpSent(true);
-    toast.success("We sent a 6-digit OTP to your email.");
+    toast.success("We sent a sign-in code to your email.");
   }
 
   async function handleVerifyOtp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const token = otp.trim();
-    if (!/^\d{6}$/.test(token)) {
-      toast.error("Enter a valid 6-digit OTP.");
+    if (!/^\d{4,10}$/.test(token)) {
+      toast.error("Enter the code from your email.");
       return;
     }
 
@@ -354,7 +354,7 @@ export function OnboardingFlow({
                           inputMode="numeric"
                           placeholder="123456"
                           value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 10))}
                           className="h-11 border-border/60 bg-background/70 text-center tracking-widest"
                         />
                         <p className="text-center text-xs text-muted-foreground">Check your inbox</p>
