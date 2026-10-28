@@ -11,6 +11,12 @@ describe("Authentication section visibility", () => {
     expect(shouldShowAuth("supabase-mgmt", mgmt, undefined)).toBe(true);
   });
 
+  it("shows for connections saved through the Supabase provider before schemas load", () => {
+    const pooler = "postgresql://postgres.abcdefghijklmnop:pw@aws-0-us-east-1.pooler.supabase.com:6543/postgres";
+    expect(isSupabaseAuthConnection("supabase", pooler)).toBe(true);
+    expect(shouldShowAuth("supabase", pooler, [])).toBe(true);
+  });
+
   it("shows for direct Postgres connections to a Supabase project", () => {
     const url = "postgresql://postgres:pw@db.abcdefghijklmnop.supabase.co:5432/postgres";
     expect(shouldShowAuth("postgres", url, [])).toBe(true);

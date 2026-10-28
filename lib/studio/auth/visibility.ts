@@ -1,13 +1,15 @@
 import { isNeonDatabaseConnection } from "@/lib/studio/neon-management";
 import { resolvePaymentsConnection } from "@/lib/supabase-paykit/supabase-ref";
 
-/** Supabase projects (supabase-mgmt pointers and direct db.<ref>.supabase.co
- *  connections) always ship GoTrue's `auth` schema, so Authentication is
- *  available before the schema list has loaded. */
+/** Supabase projects (connections saved through the Supabase provider,
+ *  supabase-mgmt pointers and direct db.<ref>.supabase.co connections) always
+ *  ship GoTrue's `auth` schema, so Authentication is available before the
+ *  schema list has loaded. */
 export function isSupabaseAuthConnection(
   connectionType: string | undefined,
   connectionString: string | undefined,
 ): boolean {
+  if (connectionType === "supabase") return Boolean(connectionString);
   return resolvePaymentsConnection(connectionType, connectionString) !== null;
 }
 
