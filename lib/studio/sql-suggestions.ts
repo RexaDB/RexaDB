@@ -1,9 +1,11 @@
 import { getSqlContinuationRule, getSqlDialectKeywords } from "@/lib/studio/sql-dialects";
 import {
+  foldUnquotedSqlIdentifier,
   formatQualifiedSqlIdentifier,
   formatSqlIdentifier,
   getSqlIdentifierQuoteChars,
   quoteSqlIdentifierAlways,
+  sqlDialectFoldsCase,
   sqlIdentifierNeedsQuotes,
   unquoteSqlIdentifier,
 } from "@/lib/studio/sql-identifier";
@@ -127,31 +129,128 @@ function getContextInfo(before: string, hasTableContext: boolean): ContextInfo {
 const IDENTIFIER_PATTERN =
   '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[a-zA-Z_][a-zA-Z0-9_$]*)';
 
-function isInsideOpenQuote(statement: string, open: string, close: string) {
-  if (open === close) return statement.split(open).length % 2 === 0;
-  return statement.split(open).length > statement.split(close).length;
+interface ParsedIdentifier {
+  name: string;
+  quoted: boolean;
+}
+
+function parseIdentifier(raw: string): ParsedIdentifier {
+  return { name: unquoteSqlIdentifier(raw), quoted: /^["`[]/.test(raw) };
 }
 
 /**
- * The identifier fragment being typed, whether it follows an unclosed
- * identifier quote, and the text before it.
+ * How well a schema name matches an identifier written in the query:
+ * 2 = the name the database resolves it to, 1 = case-insensitive match,
+ * 0 = no match. Quoted names in case-folding dialects only match exactly.
+ */
+function matchIdentifier(candidate: string, id: ParsedIdentifier, dbType: string) {
+  const resolved = id.quoted ? id.name : foldUnquotedSqlIdentifier(id.name, dbType);
+  if (candidate === resolved) return 2;
+  if (id.quoted && sqlDialectFoldsCase(dbType)) return 0;
+  return normalize(candidate) === normalize(id.name) ? 1 : 0;
+}
+
+/**
+ * Index where an unclosed identifier quote starts, or -1. String literals and
+ * escaped (doubled) closing quotes are skipped.
+ */
+function findOpenIdentifierQuote(statement: string, open: string, close: string) {
+  let openAt = -1;
+  let index = 0;
+  while (index < statement.length) {
+    const char = statement[index];
+    if (openAt < 0) {
+      if (char === "'" || (char === '"' && open !== '"')) {
+        const end = statement.indexOf(char, index + 1);
+        if (end < 0) return -1;
+        index = end + 1;
+        continue;
+      }
+      if (statement.startsWith(open, index)) {
+        openAt = index;
+        index += open.length;
+        continue;
+      }
+    } else if (statement.startsWith(close, index)) {
+      if (statement.startsWith(close, index + close.length)) {
+        index += close.length * 2;
+        continue;
+      }
+      openAt = -1;
+      index += close.length;
+      continue;
+    }
+    index += 1;
+  }
+  return openAt;
+}
+
+/**
+ * The identifier fragment being typed, whether it is inside an unclosed
+ * identifier quote, how many characters it spans, and the text before it.
  */
 function parseCursorToken(statement: string, dbType: string) {
-  const token = statement.match(/[a-zA-Z_][a-zA-Z0-9_]*$/)?.[0] ?? "";
-  let head = statement.slice(0, statement.length - token.length);
   const [open, close] = getSqlIdentifierQuoteChars(dbType);
-  const quoted = head.endsWith(open) && isInsideOpenQuote(statement, open, close);
-  if (quoted) head = head.slice(0, -open.length);
-  return { token, quoted, head };
+  const openAt = findOpenIdentifierQuote(statement, open, close);
+  if (openAt >= 0) {
+    const fragment = statement.slice(openAt + open.length);
+    return {
+      token: fragment.split(close + close).join(close),
+      quoted: true,
+      span: statement.length - openAt,
+      head: statement.slice(0, openAt),
+    };
+  }
+  const token = statement.match(/[a-zA-Z_][a-zA-Z0-9_]*$/)?.[0] ?? "";
+  return {
+    token,
+    quoted: false,
+    span: token.length,
+    head: statement.slice(0, statement.length - token.length),
+  };
+}
+
+/** `FROM schema.` / `JOIN schema.`: the user is qualifying a table name. */
+function parseSchemaPrefix(head: string) {
+  const match = head.match(
+    new RegExp(`\\b(?:from|join|update|into)\\s+(${IDENTIFIER_PATTERN})\\.$`, "i"),
+  );
+  return match ? parseIdentifier(match[1]) : null;
 }
 
 function parseAliasContext(head: string) {
   const aliasMatch = head.match(new RegExp(`(${IDENTIFIER_PATTERN})\\.$`));
   if (!aliasMatch) return null;
-  return { alias: unquoteSqlIdentifier(aliasMatch[1]) };
+  return { alias: parseIdentifier(aliasMatch[1]) };
 }
 
-function getAliasMap(before: string, entries: SchemaEntry[]) {
+function findTableEntry(
+  entries: SchemaEntry[],
+  table: ParsedIdentifier,
+  schema: ParsedIdentifier | null,
+  dbType: string,
+) {
+  let best: SchemaEntry | undefined;
+  let bestScore = 0;
+  for (const entry of entries) {
+    const tableScore = matchIdentifier(String(entry.name || ""), table, dbType);
+    if (!tableScore) continue;
+    let score = tableScore * 2;
+    if (schema) {
+      const schemaScore = matchIdentifier(String(entry.schema || ""), schema, dbType);
+      // Prefer the named schema, but still resolve if it is not loaded.
+      score += schemaScore;
+    }
+    if (score > bestScore) {
+      best = entry;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** Table references and aliases in the statement, keyed by resolved name. */
+function getAliasMap(before: string, entries: SchemaEntry[], dbType: string) {
   const aliasMap = new Map<string, SchemaEntry>();
   const regex = new RegExp(
     `\\b(?:from|join|update|into)\\s+(${IDENTIFIER_PATTERN})(?:\\.(${IDENTIFIER_PATTERN}))?(?:\\s+(?:as\\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?`,
@@ -159,21 +258,28 @@ function getAliasMap(before: string, entries: SchemaEntry[]) {
   );
 
   for (const match of before.matchAll(regex)) {
-    const first = unquoteSqlIdentifier(match[1]);
-    const second = match[2] ? unquoteSqlIdentifier(match[2]) : undefined;
+    const first = parseIdentifier(match[1]);
+    const second = match[2] ? parseIdentifier(match[2]) : null;
     const alias = match[3];
-    const schema = second ? first : "";
-    const table = second || first;
-    const entry = entries.find((item) => normalize(String(item.schema || "")) === normalize(schema) && normalize(String(item.name || "")) === normalize(table))
-      ?? entries.find((item) => normalize(String(item.name || "")) === normalize(table));
+    const table = second ?? first;
+    const entry = findTableEntry(entries, table, second ? first : null, dbType);
     if (!entry) continue;
 
-    aliasMap.set(table, entry);
-    if (schema) aliasMap.set(`${schema}.${table}`, entry);
-    if (alias) aliasMap.set(alias, entry);
+    aliasMap.set(String(entry.name || ""), entry);
+    if (alias) aliasMap.set(foldUnquotedSqlIdentifier(alias, dbType), entry);
   }
 
   return aliasMap;
+}
+
+function lookupAlias(aliasMap: Map<string, SchemaEntry>, alias: ParsedIdentifier, dbType: string) {
+  for (const [key, entry] of aliasMap) {
+    if (matchIdentifier(key, alias, dbType) === 2) return entry;
+  }
+  for (const [key, entry] of aliasMap) {
+    if (matchIdentifier(key, alias, dbType) === 1) return entry;
+  }
+  return undefined;
 }
 
 function scorePrefix(label: string, prefix: string) {
@@ -232,12 +338,18 @@ export function getSqlSuggestions(
 ): { items: SqlSuggestionItem[]; tokenStart: number; tokenEnd: number } | null {
   const before = query.slice(0, cursor);
   const currentStatement = getCurrentStatement(before);
-  const { token, quoted, head } = parseCursorToken(currentStatement, dbType);
-  const aliasContext = parseAliasContext(head);
+  const { token, quoted, span, head } = parseCursorToken(currentStatement, dbType);
   const entries = Object.values(schemaData || {});
-  const aliasMap = getAliasMap(currentStatement, entries);
-  const context = getContextInfo(currentStatement, aliasMap.size > 0);
-  const trimmedTokens = currentStatement.trimEnd().match(/[a-zA-Z_*]+/g)?.map(normalize) ?? [];
+  const schemaPrefix = parseSchemaPrefix(head);
+  const schemaPrefixName = schemaPrefix
+    ? entries.map((entry) => String(entry.schema || "")).find((name) => name && matchIdentifier(name, schemaPrefix, dbType))
+    : undefined;
+  const aliasContext = schemaPrefixName ? null : parseAliasContext(head);
+  const aliasMap = getAliasMap(currentStatement, entries, dbType);
+  // Inside a quote, judge the clause from the text before it, not the quoted words.
+  const contextText = quoted ? head : currentStatement;
+  const context = getContextInfo(contextText, aliasMap.size > 0);
+  const trimmedTokens = contextText.trimEnd().match(/[a-zA-Z_*]+/g)?.map(normalize) ?? [];
   const lastCompletedKeyword = trimmedTokens[trimmedTokens.length - 1] ?? "";
   const continuationRule = getSqlContinuationRule(dbType, trimmedTokens);
   const dialectKeywords = getSqlDialectKeywords(dbType);
@@ -250,15 +362,16 @@ export function getSqlSuggestions(
       Boolean(continuationRule) ||
       context.clause === "select"
     );
-  if (!aliasContext && !quoted && token.length > 0 && !context.trailingWhitespace && exactTokenMatch) {
+  const qualifying = Boolean(aliasContext || schemaPrefixName);
+  if (!qualifying && !quoted && token.length > 0 && !context.trailingWhitespace && exactTokenMatch) {
     return null;
   }
-  if (!aliasContext && !quoted && token.length === 0 && !shouldOpenOnClauseBoundary) return null;
+  if (!qualifying && !quoted && token.length === 0 && !shouldOpenOnClauseBoundary) return null;
 
   // After an opening quote, replace the quote (and an auto-inserted closing
   // quote) so the identifier is inserted fully quoted exactly once.
   const [openQuote, closeQuote] = getSqlIdentifierQuoteChars(dbType);
-  const tokenStart = cursor - token.length - (quoted ? openQuote.length : 0);
+  const tokenStart = cursor - span;
   const tokenEnd = quoted && query.startsWith(closeQuote, cursor) ? cursor + closeQuote.length : cursor;
   const identifierText = (name: string) =>
     quoted ? quoteSqlIdentifierAlways(name, dbType) : formatSqlIdentifier(name, dbType);
@@ -266,8 +379,20 @@ export function getSqlSuggestions(
   const ranked: RankedSuggestion[] = [];
   const shortPrefix = token.length <= 2;
 
-  if (aliasContext) {
-    const entry = aliasMap.get(aliasContext.alias);
+  if (schemaPrefixName) {
+    for (const entry of entries) {
+      const table = String(entry?.name || "");
+      if (!table || entry.schema !== schemaPrefixName) continue;
+      addRanked(ranked, {
+        label: table,
+        insertText: identifierText(table),
+        filterText: filterText(table),
+        kind: "table",
+        detail: `Table (${schemaPrefixName})`,
+      }, 240, token);
+    }
+  } else if (aliasContext) {
+    const entry = lookupAlias(aliasMap, aliasContext.alias, dbType);
     if (!entry) return null;
     for (const column of entry.columns || []) {
       const columnName = String(column?.name || "");
@@ -343,7 +468,7 @@ export function getSqlSuggestions(
         addRanked(ranked, {
           label: qualified,
           insertText: quoted
-            ? identifierText(table)
+            ? [schema && formatSqlIdentifier(schema, dbType), identifierText(table)].filter(Boolean).join(".")
             : formatQualifiedSqlIdentifier([schema, table], dbType),
           filterText: filterText(qualified),
           kind: "table",

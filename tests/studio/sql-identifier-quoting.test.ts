@@ -73,7 +73,7 @@ test("an opening quote typed by the user is replaced, not doubled", () => {
   const query = 'select * from "Use"';
   const cursor = query.length - 1; // inside the auto-closed pair
   const { result, item } = insertTextFor(query, "public.Users", "postgres", cursor);
-  assert.equal(item?.insertText, '"Users"');
+  assert.equal(item?.insertText, 'public."Users"');
   assert.equal(result?.tokenStart, "select * from ".length);
   assert.equal(result?.tokenEnd, query.length);
   assert.ok(result?.items.every((entry) => entry.kind === "table" || entry.kind === "column"));
@@ -81,7 +81,67 @@ test("an opening quote typed by the user is replaced, not doubled", () => {
 
 test("mysql uses backticks only when required", () => {
   const { item } = insertTextFor("select * from orders o where o.us", "user", "mysql");
-  assert.equal(item?.insertText, "`user`");
+  // `user` is not reserved in MySQL, so it stays bare there.
+  assert.equal(item?.insertText, "user");
   const { item: table } = insertTextFor("select * from Use", "public.Users", "mysql");
   assert.equal(table?.insertText, "public.Users");
+});
+
+test("a quoted name containing spaces is replaced as a whole", () => {
+  const data = { t: { schema: "public", name: "t", columns: [{ name: "my column" }] } };
+  const query = 'select "my col';
+  const result = getSqlSuggestions(query, query.length, data, "postgres");
+  const item = result?.items.find((entry) => entry.label === "my column");
+  assert.equal(item?.insertText, '"my column"');
+  assert.equal(result?.tokenStart, "select ".length);
+});
+
+test("an escaped quote inside the fragment does not end it", () => {
+  const data = { t: { schema: "public", name: "t", columns: [{ name: 'we"ird' }] } };
+  const query = 'select "we""i';
+  const result = getSqlSuggestions(query, query.length, data, "postgres");
+  assert.equal(result?.items.find((entry) => entry.label === 'we"ird')?.insertText, '"we""ird"');
+  assert.equal(result?.tokenStart, "select ".length);
+});
+
+test("a quoted table keeps its schema", () => {
+  const data = { u: { schema: "analytics", name: "Users", columns: [] } };
+  const query = 'select * from "Use';
+  const result = getSqlSuggestions(query, query.length, data, "postgres");
+  assert.equal(result?.items.find((entry) => entry.kind === "table")?.insertText, 'analytics."Users"');
+});
+
+test("tables are suggested after a schema prefix", () => {
+  const quotedQuery = 'select * from public."Use';
+  const quoted = getSqlSuggestions(quotedQuery, quotedQuery.length, schemaData, "postgres");
+  assert.equal(quoted?.items.find((entry) => entry.label === "Users")?.insertText, '"Users"');
+  assert.equal(quoted?.tokenStart, "select * from public.".length);
+
+  const bareQuery = "select * from public.ord";
+  const bare = getSqlSuggestions(bareQuery, bareQuery.length, schemaData, "postgres");
+  assert.equal(bare?.items.find((entry) => entry.label === "orders")?.insertText, "orders");
+});
+
+test("quoted and unquoted tables that differ only by case resolve separately", () => {
+  const data = {
+    lower: { schema: "public", name: "users", columns: [{ name: "lower_col" }] },
+    upper: { schema: "public", name: "Users", columns: [{ name: "upper_col" }] },
+  };
+  const quotedQuery = 'select * from public."Users" u where u.';
+  const quoted = getSqlSuggestions(quotedQuery, quotedQuery.length, data, "postgres");
+  assert.deepEqual(quoted?.items.map((entry) => entry.label), ["upper_col"]);
+
+  const bareQuery = "select * from public.Users u where u.";
+  const bare = getSqlSuggestions(bareQuery, bareQuery.length, data, "postgres");
+  assert.deepEqual(bare?.items.map((entry) => entry.label), ["lower_col"]);
+});
+
+test("dialect-specific reserved words are quoted", () => {
+  assert.equal(formatSqlIdentifier("returning", "postgres"), '"returning"');
+  assert.equal(formatSqlIdentifier("top", "mssql"), "[top]");
+  assert.equal(formatSqlIdentifier("rank", "mysql"), "`rank`");
+  assert.equal(formatSqlIdentifier("pragma", "sqlite"), '"pragma"');
+  assert.equal(formatSqlIdentifier("level", "oracle"), '"level"');
+  assert.equal(formatSqlIdentifier("unnest", "trino"), '"unnest"');
+  assert.equal(formatSqlIdentifier("top", "postgres"), "top");
 });
