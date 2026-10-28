@@ -5,6 +5,7 @@ type ConnectionActionNames =
   | "addConnection" | "getConnections" | "getConnection" | "deleteConnectionsByPrefix"
   | "deleteConnection" | "updateConnection" | "listConnectionGroups" | "addConnectionGroup"
   | "renameConnectionGroup" | "deleteConnectionGroup" | "reorderConnections"
+  | "listConnectionTags" | "saveConnectionTag" | "deleteConnectionTag"
   | "getConnectionWorkspaceId" | "saveConnectionWorkspaceId" | "testConnection";
 type ConnectionActions = Pick<typeof import("../lib/db/actions-core"), ConnectionActionNames>;
 
@@ -36,6 +37,9 @@ export function createConnectionActionEffects(actions: ConnectionActions) {
     renameConnectionGroup: wrap("renameConnectionGroup"),
     deleteConnectionGroup: wrap("deleteConnectionGroup"),
     reorderConnections: wrap("reorderConnections"),
+    listConnectionTags: wrap("listConnectionTags"),
+    saveConnectionTag: wrap("saveConnectionTag"),
+    deleteConnectionTag: wrap("deleteConnectionTag"),
     getConnectionWorkspaceId: wrap("getConnectionWorkspaceId"),
     saveConnectionWorkspaceId: wrap("saveConnectionWorkspaceId"),
     testConnection: wrap("testConnection"),

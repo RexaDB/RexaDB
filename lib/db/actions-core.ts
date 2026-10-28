@@ -1237,6 +1237,89 @@ async function writeCachedColumns(
   return _writeCachedColumns(connectionString, rows, ensureCoreTables, schema);
 }
 
+const MAX_CONNECTION_ICON_LENGTH = 200_000;
+
+function parseConnectionTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((tag): tag is string => typeof tag === "string");
+  if (typeof value !== "string" || !value) return [];
+  try {
+    return parseConnectionTags(JSON.parse(value));
+  } catch {
+    return [];
+  }
+}
+
+function serializeConnectionTags(tags: unknown): string | null {
+  if (!Array.isArray(tags)) return null;
+  const unique = [...new Set(tags.map((tag) => String(tag ?? "").trim()).filter(Boolean))];
+  return unique.length > 0 ? JSON.stringify(unique) : null;
+}
+
+function normalizeConnectionIcon(icon: unknown): string | null {
+  if (typeof icon !== "string" || !icon) return null;
+  if (icon.length > MAX_CONNECTION_ICON_LENGTH) throw new Error("The connection icon image is too large.");
+  if (icon.startsWith("emoji:") || icon.startsWith("image:data:image/")) return icon;
+  throw new Error("Unsupported connection icon.");
+}
+
+function normalizeConnectionTagColor(value: unknown) {
+  const color = String(value ?? "").trim();
+  if (!/^#[\da-f]{6}$/i.test(color)) throw new Error("Tag colors must be 6-digit hex values.");
+  return color;
+}
+
+type CoreDb = typeof import("./index").db;
+
+const LEGACY_ENVIRONMENT_TAG_COLORS: Record<string, string> = {
+  production: "#ef4444",
+  staging: "#f59e0b",
+  local: "#0ea5e9",
+};
+
+/**
+ * Serializes a connection's tags against the tag library: names matching a
+ * library tag (ignoring case) take its spelling, and unknown names are added
+ * to the library, so tags that arrive with a connection (imports, legacy
+ * environments, API callers) stay manageable in the picker.
+ */
+async function resolveConnectionTags(tags: unknown): Promise<string | null> {
+  const names = parseConnectionTags(serializeConnectionTags(tags));
+  if (names.length === 0) return null;
+  const { db } = await import("./index");
+  const { connectionTags } = await import("./schema");
+  const library = new Map(
+    (await db.select({ name: connectionTags.name }).from(connectionTags)).map((tag) => [tag.name.toLowerCase(), tag.name]),
+  );
+  const resolved: string[] = [];
+  for (const name of names) {
+    const known = library.get(name.toLowerCase());
+    if (known) {
+      resolved.push(known);
+      continue;
+    }
+    const tagName = name.slice(0, 32);
+    const color = LEGACY_ENVIRONMENT_TAG_COLORS[tagName.toLowerCase()] ?? "#71717a";
+    await db.insert(connectionTags).values({ name: tagName, color, createdAt: new Date() }).onConflictDoNothing();
+    library.set(tagName.toLowerCase(), tagName);
+    resolved.push(tagName);
+  }
+  return serializeConnectionTags(resolved);
+}
+
+/** Rewrites every connection's tag list; `rename` returns the new name, or null to drop the tag. */
+async function rewriteConnectionTags(db: CoreDb, rename: (tag: string) => string | null) {
+  const { eq } = await import("drizzle-orm");
+  const { connections } = await import("./schema");
+  const rows = await db.select({ id: connections.id, tags: connections.tags }).from(connections);
+  for (const row of rows) {
+    const current = parseConnectionTags(row.tags);
+    if (current.length === 0) continue;
+    const next = current.map(rename).filter((tag): tag is string => !!tag);
+    if (next.length === current.length && next.every((tag, i) => tag === current[i])) continue;
+    await db.update(connections).set({ tags: serializeConnectionTags(next) }).where(eq(connections.id, row.id));
+  }
+}
+
 async function syncConnectionGroupMembers(connId: number, groupNames: string[]) {
   const { client } = await import("./index");
 
@@ -1283,6 +1366,8 @@ export async function addConnection(
   options?: {
     environment?: string;
     color?: string;
+    tags?: string[];
+    icon?: string | null;
     group?: string;
     groups?: string[];
     isFavorite?: boolean;
@@ -1324,6 +1409,8 @@ export async function addConnection(
         credentialSecret: options?.credentialSecret,
         environment: options?.environment,
         color: options?.color,
+        tags: await resolveConnectionTags(options?.tags),
+        icon: normalizeConnectionIcon(options?.icon),
         group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
         isFavorite: options?.isFavorite,
         createdAt: new Date(),
@@ -1333,6 +1420,7 @@ export async function addConnection(
     if (options?.groups && options.groups.length > 0) {
       await syncConnectionGroupMembers(newId, options.groups);
     }
+
     return { success: true, id: newId };
   } catch (error) {
     console.error("Failed to add connection:", error);
@@ -1378,6 +1466,7 @@ export async function getConnections(workspaceUrl?: string) {
       ...conn,
       ...(conn.credentialRef ? getCachedConnectionCredential(conn.credentialRef) : {}),
       groups: groupsByConnId.get(conn.id) || [],
+      tags: parseConnectionTags(conn.tags),
     }));
   } catch (error) {
     console.error("Failed to get connections:", error);
@@ -1500,6 +1589,8 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         credentialSecret: data.credentialSecret,
         environment: data.environment,
         color: data.color,
+        tags: data.tags === undefined ? undefined : await resolveConnectionTags(data.tags),
+        icon: data.icon === undefined ? undefined : normalizeConnectionIcon(data.icon),
         group: Array.isArray(data.groups) ? data.groups[0] || null : (data.group || null),
         isFavorite: data.isFavorite,
         lastActive: data.lastActive ? new Date(data.lastActive) : undefined,
@@ -1511,6 +1602,7 @@ export async function updateConnection(id: number, data: Record<string, any>) {
     if (data.groups !== undefined) {
       await syncConnectionGroupMembers(id, data.groups || []);
     }
+
     let warning: string | undefined;
     if (replacingLegacySecret && !data.secureMigration) {
       try {
@@ -2849,6 +2941,67 @@ export async function deleteConnectionGroup(name: string) {
         (error as Error)?.message || error || "Failed to delete group",
       ),
     };
+  }
+}
+
+export async function listConnectionTags() {
+  const { client } = await import("./index");
+
+  try {
+    await ensureCoreTables();
+    const tags = await client.connectionTags.findMany({ orderBy: { name: "asc" } });
+    return { success: true, tags: tags.map(({ id, name, color }) => ({ id, name, color })) };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error), tags: [] };
+  }
+}
+
+/** Creates a tag, or renames/recolors the tag named `previousName` and updates the connections using it. */
+export async function saveConnectionTag(input: { name: string; color: string; previousName?: string | null }) {
+  try {
+    await ensureCoreTables();
+    const name = String(input?.name ?? "").trim();
+    if (!name || name.length > 32) throw new Error("Tag names must contain 1–32 characters.");
+    const color = normalizeConnectionTagColor(input.color);
+    const previousName = input.previousName?.trim() || null;
+    const { eq } = await import("drizzle-orm");
+    const { connectionTags } = await import("./schema");
+    // The library change and every connection rewrite commit or roll back together.
+    await runCoreTransaction("saveConnectionTag", async (db) => {
+      const all = await db.select().from(connectionTags);
+      const clash = all.find(
+        (tag) => tag.name.toLowerCase() === name.toLowerCase() && tag.name !== previousName,
+      );
+      if (clash) throw new Error(`A tag named "${clash.name}" already exists.`);
+
+      const existing = previousName ? all.find((tag) => tag.name === previousName) : undefined;
+      if (existing) {
+        await db.update(connectionTags).set({ name, color }).where(eq(connectionTags.id, existing.id));
+        if (previousName !== name) {
+          await rewriteConnectionTags(db, (tag) => (tag === previousName ? name : tag));
+        }
+      } else {
+        await db.insert(connectionTags).values({ name, color, createdAt: new Date() });
+      }
+    });
+    return { success: true, tag: { name, color } };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error || "Failed to save tag") };
+  }
+}
+
+export async function deleteConnectionTag(name: string) {
+  try {
+    await ensureCoreTables();
+    const { eq } = await import("drizzle-orm");
+    const { connectionTags } = await import("./schema");
+    await runCoreTransaction("deleteConnectionTag", async (db) => {
+      await db.delete(connectionTags).where(eq(connectionTags.name, name));
+      await rewriteConnectionTags(db, (tag) => (tag === name ? null : tag));
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error || "Failed to delete tag") };
   }
 }
 

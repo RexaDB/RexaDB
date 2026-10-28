@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Connection } from "@/lib/db/schema";
 import { ProviderLogo } from "@/components/shared/provider-logo";
+import { ConnectionIcon } from "@/components/connections/connection-icon";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
 import { useResizeDrag } from "@/hooks/use-resize-drag";
 import type { AppTab } from "@/components/app-shell/app-shared";
@@ -267,9 +268,15 @@ export function AppSidebar({
                             }
                             title={c.name}
                           >
-                            <ProviderLogo
-                              type={c.connectionType}
-                              className="size-4 shrink-0"
+                            <ConnectionIcon
+                              icon={c.icon}
+                              className="size-4 text-base"
+                              fallback={
+                                <ProviderLogo
+                                  type={c.connectionType}
+                                  className="size-4 shrink-0"
+                                />
+                              }
                             />
                             <span className="min-w-0 flex-1 truncate">
                               {c.name}
