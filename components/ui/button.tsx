@@ -14,7 +14,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // Primary — solid. Same geometry as toolbar pill, only color differs.
-        default: "rexa-raised border-transparent bg-primary text-primary-foreground font-medium hover:bg-primary/90",
+        default: "rexa-raised rexa-raised-solid border-transparent bg-primary text-primary-foreground font-medium hover:bg-primary/90",
         // Neutral / toolbar — matches the reference pill:
         // dark: ~#1c1c1e fill, 1px rgba(255,255,255,0.12) border, #d4d4d4 text.
         outline:
@@ -24,7 +24,7 @@ const buttonVariants = cva(
         ghost:
           "border-transparent bg-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-white/[0.06] aria-expanded:bg-muted aria-expanded:text-foreground",
         destructive:
-          "rexa-raised border-transparent bg-destructive font-medium text-white hover:bg-destructive/90 dark:bg-[#b54444] dark:hover:bg-[#a53c3c]",
+          "rexa-raised rexa-raised-solid border-transparent bg-destructive font-medium text-white hover:bg-destructive/90 dark:bg-[#b54444] dark:hover:bg-[#a53c3c]",
         link: "border-transparent bg-transparent rounded-none gap-1 px-0 h-auto text-foreground underline-offset-4 hover:underline",
       },
       size: {

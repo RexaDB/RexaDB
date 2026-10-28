@@ -891,18 +891,45 @@ body[data-review-sheet-open="true"] .studio-grid-header th {
 /*
  * Raised button treatment: a solid white-20% stroke plus a soft 0 1px 2px
  * drop shadow. Fills stay whatever the variant sets.
+ * `.rexa-raised-solid` marks colored variants so the Glass style keeps their fill.
  */
 @layer components {
-  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised {
+  :is([data-button-style="raised"].dark, [data-button-style="raised"] .dark) .rexa-raised {
     border-color: rgba(255, 255, 255, 0.2) !important;
     background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.045));
     box-shadow: 0 1px 2px rgba(14, 18, 27, 0.24);
   }
-  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised:hover:not(:disabled) {
+  :is([data-button-style="raised"].dark, [data-button-style="raised"] .dark) .rexa-raised:hover:not(:disabled) {
     background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.07));
   }
-  :is(.raised-buttons.dark, .raised-buttons .dark) .rexa-raised:focus-visible {
+  :is([data-button-style="raised"].dark, [data-button-style="raised"] .dark) .rexa-raised:focus-visible {
     box-shadow: 0 1px 2px rgba(14, 18, 27, 0.24), 0 0 0 1px #288dff !important;
+  }
+
+  /* Glass (Paper spec): near-transparent tinted fill, hairline light ring,
+     inset top/bottom edges and a small drop shadow. Colored variants keep
+     their fill and get the same edges. */
+  :is([data-button-style="glass"].dark, [data-button-style="glass"] .dark) .rexa-raised {
+    border-color: #ffffff1a !important;
+    box-shadow:
+      inset 0 1px 0 #ffffff0a,
+      inset 0 -1px 0 #0000000f,
+      0 1px 3px #00000033;
+  }
+  :is([data-button-style="glass"].dark, [data-button-style="glass"] .dark) .rexa-raised:not(.rexa-raised-solid) {
+    background-color: #edefee08 !important;
+    background-image: linear-gradient(in oklab 180deg, #ffffff04 0%, #00000003 100%) !important;
+    color: #edefee;
+  }
+  :is([data-button-style="glass"].dark, [data-button-style="glass"] .dark) .rexa-raised:not(.rexa-raised-solid):hover:not(:disabled) {
+    background-color: #edefee10 !important;
+  }
+  :is([data-button-style="glass"].dark, [data-button-style="glass"] .dark) .rexa-raised:focus-visible {
+    box-shadow:
+      inset 0 1px 0 #ffffff0a,
+      inset 0 -1px 0 #0000000f,
+      0 1px 3px #00000033,
+      0 0 0 1px #288dff !important;
   }
 }
 

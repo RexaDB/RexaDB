@@ -35,7 +35,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "tui-mode", section: "general", title: "Terminal UI", description: "Switch the app to a blocky terminal-style UI with mono typography.", keywords: ["terminal", "tui", "mono", "experimental"] },
   { id: "tui-theme", section: "general", title: "Terminal Theme", description: "Choose light, dark, or follow system while in terminal UI.", keywords: ["terminal", "tui", "theme"] },
   { id: "sleek-layout", section: "general", title: "Sleek Layout", description: "Add padding and rounded corners to main interface panels.", keywords: ["layout", "padding", "rounded", "panels"] },
-  { id: "raised-buttons", section: "general", title: "Raised Buttons", description: "Give buttons and dropdowns a subtle fill, solid border and soft shadow in dark mode.", keywords: ["button", "raised", "3d", "border", "shadow", "style"] },
+  { id: "button-style", section: "general", title: "Button Style", description: "How buttons and dropdowns look in dark mode.", keywords: ["button", "raised", "glass", "flat", "3d", "border", "shadow", "style"] },
   { id: "translucent-bg", section: "general", title: "Translucent Background", description: "Make the outer chrome translucent with a blur effect.", keywords: ["translucent", "blur", "transparency", "vibrancy", "background"] },
   { id: "bg-noise", section: "general", title: "Background Noise", description: "Add a subtle grain texture to the sidebar and outer surface.", keywords: ["noise", "grain", "texture", "background"] },
   { id: "noise-size", section: "general", title: "Noise Size", description: "Scale of the noise pattern (smaller = finer grain).", keywords: ["noise", "grain", "size", "scale"] },

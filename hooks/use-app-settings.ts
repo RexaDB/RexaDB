@@ -171,8 +171,8 @@ export function useAppSettings(planCode = "free") {
     setNoiseBgColor: settings.setNoiseBgColor,
     noiseBgTranslucent: settings.noiseBgTranslucent,
     setNoiseBgTranslucent: settings.setNoiseBgTranslucent,
-    raisedButtons: settings.raisedButtons,
-    setRaisedButtons: settings.setRaisedButtons,
+    buttonStyle: settings.buttonStyle,
+    setButtonStyle: settings.setButtonStyle,
     isLoaded: settings.isLoaded,
   };
 }
