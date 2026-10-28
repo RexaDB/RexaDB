@@ -26,7 +26,7 @@ import { getEditorLabel, getTableLabels } from "@/lib/studio/db-labels";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { shouldShowStorage } from "@/lib/studio/storage-utils";
 import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
-import { isNeonDatabaseConnection } from "@/lib/studio/neon-management";
+import { shouldShowAuth } from "@/lib/studio/auth/visibility";
 import { NavigationRailItem } from "@/components/studio/navigation-rail-item";
 import { NavUser } from "@/components/navigation/nav-user";
 import { Sortable, SortableItem, SortableItemHandle } from "@/components/reui/sortable";
@@ -86,14 +86,13 @@ export function ModernUIRail({
   );
   const editorLabel = getEditorLabel(studio.dbType);
   const tableLabels = getTableLabels(studio.dbType);
-  const isSupabase = studio.connection?.connectionType === "supabase";
-  const isNeon = isNeonDatabaseConnection(
+  // Supabase projects (incl. supabase-mgmt pointers), Neon, or any
+  // connection exposing an auth schema.
+  const showAuth = shouldShowAuth(
     studio.connection?.connectionType ?? studio.dbType,
     studio.currentConnectionString || studio.connection?.connectionString,
     studio.schemas,
   );
-  const showAuth =
-    (studio.schemas?.includes?.("auth") && isSupabase) || isNeon;
   // Billing scaffolding for Supabase projects: supabase-mgmt connections plus
   // direct Postgres connections to db.<ref>.supabase.co. Other engines have
   // no Edge Functions target, so the item stays hidden there.

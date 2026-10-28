@@ -91,6 +91,7 @@ import { EdgeFunctionsPanel } from "./edge-functions/edge-functions-panel";
 import { ErdsPanel } from "./erd/erds-panel";
 import { shouldShowPayments } from "@/lib/supabase-paykit/supabase-ref";
 import { shouldShowStorage } from "@/lib/studio/storage-utils";
+import { shouldShowAuth } from "@/lib/studio/auth/visibility";
 import { shouldShowEdgeFunctions } from "@/lib/studio/edge-functions-utils";
 import { isNeonDatabaseConnection } from "@/lib/studio/neon-management";
 import { GitFork } from "@/lib/icon-theme/lucide-react";
@@ -361,14 +362,10 @@ export function StudioShellSidebar({
       id: "auth",
       label: "Authentication",
       Icon: Shield,
-      show: Boolean(
-        studio.schemas?.includes?.("auth") ||
-        studio.schemas?.includes?.("neon_auth") ||
-        isNeonDatabaseConnection(
-          studio.connection?.connectionType ?? studio.dbType,
-          studio.currentConnectionString || studio.connection?.connectionString,
-          studio.schemas,
-        ),
+      show: shouldShowAuth(
+        studio.connection?.connectionType ?? studio.dbType,
+        studio.currentConnectionString || studio.connection?.connectionString,
+        studio.schemas,
       ),
     },
     {

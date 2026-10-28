@@ -56,6 +56,7 @@ import { StorageBucketView } from "./storage/storage-bucket-view";
 import { EdgeFunctionsView } from "./edge-functions/edge-functions-view";
 import { EdgeSecretsView } from "./edge-functions/edge-secrets-view";
 import { EdgeFunctionView } from "./edge-functions/edge-function-view";
+import { isSupabaseAuthConnection } from "@/lib/studio/auth/visibility";
 import { SplitView } from "./split-view";
 import { HorizontalSplitView } from "./horizontal-split-view";
 import { cn } from "@/lib/utils";
@@ -458,7 +459,14 @@ export function StudioMainContent({
     studio.connection?.connectionType ?? studio.dbType,
     studio.connection?.connectionString,
   );
-  const hasAuthSchema = schemas.includes("auth") || hasNeonAuthSchema || neonAuth;
+  const hasAuthSchema =
+    schemas.includes("auth") ||
+    hasNeonAuthSchema ||
+    neonAuth ||
+    isSupabaseAuthConnection(
+      studio.connection?.connectionType ?? studio.dbType,
+      studio.currentConnectionString || studio.connection?.connectionString,
+    );
   const authEnabled = hasAuthSchema && (studio.dbType === "postgres" || studio.dbType === "supabase-mgmt" || neonAuth);
   const dataApiInstalled =
     (studio.dbType === "postgres" || studio.dbType === "supabase-mgmt") &&
