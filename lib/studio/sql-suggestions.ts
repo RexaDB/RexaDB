@@ -1,4 +1,12 @@
 import { getSqlContinuationRule, getSqlDialectKeywords } from "@/lib/studio/sql-dialects";
+import {
+  formatQualifiedSqlIdentifier,
+  formatSqlIdentifier,
+  getSqlIdentifierQuoteChars,
+  quoteSqlIdentifierAlways,
+  sqlIdentifierNeedsQuotes,
+  unquoteSqlIdentifier,
+} from "@/lib/studio/sql-identifier";
 
 const SQL_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE",
@@ -44,6 +52,8 @@ export interface SqlSuggestionItem {
   insertText: string;
   kind: "keyword" | "table" | "column" | "function";
   detail?: string;
+  /** Text the editor filters on when it differs from `label` (e.g. after an opening quote). */
+  filterText?: string;
 }
 
 interface SchemaEntry {
@@ -113,27 +123,44 @@ function getContextInfo(before: string, hasTableContext: boolean): ContextInfo {
   };
 }
 
-function parseAliasContext(before: string) {
-  const aliasMatch = before.match(/([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z0-9_]*)$/);
-  if (!aliasMatch) return null;
-  return {
-    alias: aliasMatch[1],
-    prefix: aliasMatch[2] ?? "",
-  };
+// A bare or quoted ("x", `x`, [x]) identifier.
+const IDENTIFIER_PATTERN =
+  '(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[(?:[^\\]]|\\]\\])+\\]|[a-zA-Z_][a-zA-Z0-9_$]*)';
+
+function isInsideOpenQuote(statement: string, open: string, close: string) {
+  if (open === close) return statement.split(open).length % 2 === 0;
+  return statement.split(open).length > statement.split(close).length;
 }
 
-function parseToken(before: string) {
-  const tokenMatch = before.match(/([a-zA-Z_][a-zA-Z0-9_]*)$/);
-  return tokenMatch?.[1] ?? "";
+/**
+ * The identifier fragment being typed, whether it follows an unclosed
+ * identifier quote, and the text before it.
+ */
+function parseCursorToken(statement: string, dbType: string) {
+  const token = statement.match(/[a-zA-Z_][a-zA-Z0-9_]*$/)?.[0] ?? "";
+  let head = statement.slice(0, statement.length - token.length);
+  const [open, close] = getSqlIdentifierQuoteChars(dbType);
+  const quoted = head.endsWith(open) && isInsideOpenQuote(statement, open, close);
+  if (quoted) head = head.slice(0, -open.length);
+  return { token, quoted, head };
+}
+
+function parseAliasContext(head: string) {
+  const aliasMatch = head.match(new RegExp(`(${IDENTIFIER_PATTERN})\\.$`));
+  if (!aliasMatch) return null;
+  return { alias: unquoteSqlIdentifier(aliasMatch[1]) };
 }
 
 function getAliasMap(before: string, entries: SchemaEntry[]) {
   const aliasMap = new Map<string, SchemaEntry>();
-  const regex = /\b(?:from|join|update|into)\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?/gi;
+  const regex = new RegExp(
+    `\\b(?:from|join|update|into)\\s+(${IDENTIFIER_PATTERN})(?:\\.(${IDENTIFIER_PATTERN}))?(?:\\s+(?:as\\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?`,
+    "gi",
+  );
 
   for (const match of before.matchAll(regex)) {
-    const first = match[1];
-    const second = match[2];
+    const first = unquoteSqlIdentifier(match[1]);
+    const second = match[2] ? unquoteSqlIdentifier(match[2]) : undefined;
     const alias = match[3];
     const schema = second ? first : "";
     const table = second || first;
@@ -176,6 +203,7 @@ function hasExactTokenMatch(
   token: string,
   entries: SchemaEntry[],
   dialectKeywords: string[],
+  dbType: string,
 ) {
   const normalizedToken = normalize(token);
   if (!normalizedToken) return false;
@@ -184,15 +212,15 @@ function hasExactTokenMatch(
     .some((item) => normalize(item) === normalizedToken);
   if (keywordMatch) return true;
 
-  return entries.some((entry) => {
-    const schema = String(entry?.schema || "");
-    const table = String(entry?.name || "");
-    const qualified = schema ? `${schema}.${table}` : table;
-    if (normalize(table) === normalizedToken || normalize(qualified) === normalizedToken) {
-      return true;
-    }
+  // A schema name only counts as already typed if it works without quotes;
+  // otherwise keep suggesting so the quoted form can be inserted.
+  const matchesBare = (name: string) =>
+    normalize(name) === normalizedToken && !sqlIdentifierNeedsQuotes(name, dbType);
 
-    return (entry.columns || []).some((column) => normalize(String(column?.name || "")) === normalizedToken);
+  return entries.some((entry) => {
+    const table = String(entry?.name || "");
+    if (matchesBare(table)) return true;
+    return (entry.columns || []).some((column) => matchesBare(String(column?.name || "")));
   });
 }
 
@@ -204,16 +232,16 @@ export function getSqlSuggestions(
 ): { items: SqlSuggestionItem[]; tokenStart: number; tokenEnd: number } | null {
   const before = query.slice(0, cursor);
   const currentStatement = getCurrentStatement(before);
-  const aliasContext = parseAliasContext(currentStatement);
+  const { token, quoted, head } = parseCursorToken(currentStatement, dbType);
+  const aliasContext = parseAliasContext(head);
   const entries = Object.values(schemaData || {});
   const aliasMap = getAliasMap(currentStatement, entries);
   const context = getContextInfo(currentStatement, aliasMap.size > 0);
-  const token = aliasContext ? aliasContext.prefix : parseToken(currentStatement);
   const trimmedTokens = currentStatement.trimEnd().match(/[a-zA-Z_*]+/g)?.map(normalize) ?? [];
   const lastCompletedKeyword = trimmedTokens[trimmedTokens.length - 1] ?? "";
   const continuationRule = getSqlContinuationRule(dbType, trimmedTokens);
   const dialectKeywords = getSqlDialectKeywords(dbType);
-  const exactTokenMatch = hasExactTokenMatch(token, entries, dialectKeywords);
+  const exactTokenMatch = hasExactTokenMatch(token, entries, dialectKeywords, dbType);
   const shouldOpenOnClauseBoundary =
     token.length === 0 &&
     context.trailingWhitespace &&
@@ -222,12 +250,19 @@ export function getSqlSuggestions(
       Boolean(continuationRule) ||
       context.clause === "select"
     );
-  if (!aliasContext && token.length > 0 && !context.trailingWhitespace && exactTokenMatch) {
+  if (!aliasContext && !quoted && token.length > 0 && !context.trailingWhitespace && exactTokenMatch) {
     return null;
   }
-  if (!aliasContext && token.length === 0 && !shouldOpenOnClauseBoundary) return null;
-  const tokenStart = cursor - token.length;
-  const tokenEnd = cursor;
+  if (!aliasContext && !quoted && token.length === 0 && !shouldOpenOnClauseBoundary) return null;
+
+  // After an opening quote, replace the quote (and an auto-inserted closing
+  // quote) so the identifier is inserted fully quoted exactly once.
+  const [openQuote, closeQuote] = getSqlIdentifierQuoteChars(dbType);
+  const tokenStart = cursor - token.length - (quoted ? openQuote.length : 0);
+  const tokenEnd = quoted && query.startsWith(closeQuote, cursor) ? cursor + closeQuote.length : cursor;
+  const identifierText = (name: string) =>
+    quoted ? quoteSqlIdentifierAlways(name, dbType) : formatSqlIdentifier(name, dbType);
+  const filterText = (label: string) => (quoted ? `${openQuote}${label}` : undefined);
   const ranked: RankedSuggestion[] = [];
   const shortPrefix = token.length <= 2;
 
@@ -239,10 +274,11 @@ export function getSqlSuggestions(
       if (!columnName) continue;
       addRanked(ranked, {
         label: columnName,
-        insertText: columnName,
+        insertText: identifierText(columnName),
+        filterText: filterText(columnName),
         kind: "column",
         detail: `${entry.schema || "public"}.${entry.name}.${columnName}`,
-      }, 240, aliasContext.prefix);
+      }, 240, token);
     }
   } else {
     const preferTables = context.clause === "from" || context.clause === "join" || context.clause === "update" || context.clause === "into";
@@ -252,8 +288,9 @@ export function getSqlSuggestions(
     const rulePreferTables = Boolean(continuationRule?.preferTables);
     const rulePreferColumns = Boolean(continuationRule?.preferColumns);
     const rulePreferFunctions = Boolean(continuationRule?.preferFunctions);
-    const suppressSchemaItemsForShortPrefix = (shortPrefix && !context.hasTableContext && !preferTables) || Boolean(continuationRule?.suppressSchemaItems);
+    const suppressSchemaItemsForShortPrefix = !quoted && ((shortPrefix && !context.hasTableContext && !preferTables) || Boolean(continuationRule?.suppressSchemaItems));
     const stronglyPreferKeywordPrefix =
+      !quoted &&
       shortPrefix &&
       !preferTables &&
       ["un", "sel", "se", "fro", "fr", "whe", "wh", "ord", "gro", "ins", "upd", "del", "set", "val", "joi", "jon", "uni"].includes(normalize(token));
@@ -262,7 +299,7 @@ export function getSqlSuggestions(
     const selectFollowKeywords = ["FROM", "CASE", "CAST", "COALESCE", "COUNT", "SUM", "AVG", "MIN", "MAX"];
     const unionLeadKeywords = ["ALL", "SELECT"];
 
-    if (normalize(token) === "s" || normalize(token) === "se") {
+    if (!quoted && (normalize(token) === "s" || normalize(token) === "se")) {
       addRanked(ranked, {
         label: "SELECT",
         insertText: "SELECT",
@@ -270,7 +307,7 @@ export function getSqlSuggestions(
       }, 1000, token);
     }
 
-    if (context.justTypedSelect) {
+    if (!quoted && context.justTypedSelect) {
       addRanked(ranked, {
         label: "*",
         insertText: "*",
@@ -278,7 +315,7 @@ export function getSqlSuggestions(
       }, 820, token);
     }
 
-    if (context.justTypedUnion) {
+    if (!quoted && context.justTypedUnion) {
       for (const keyword of unionLeadKeywords) {
         addRanked(ranked, {
           label: keyword,
@@ -288,7 +325,7 @@ export function getSqlSuggestions(
       }
     }
 
-    if (context.justTypedUnionAll) {
+    if (!quoted && context.justTypedUnionAll) {
       addRanked(ranked, {
         label: "SELECT",
         insertText: "SELECT",
@@ -305,7 +342,10 @@ export function getSqlSuggestions(
       if ((!suppressSchemaItemsForShortPrefix && !stronglyPreferKeywordPrefix) || rulePreferTables) {
         addRanked(ranked, {
           label: qualified,
-          insertText: qualified,
+          insertText: quoted
+            ? identifierText(table)
+            : formatQualifiedSqlIdentifier([schema, table], dbType),
+          filterText: filterText(qualified),
           kind: "table",
           detail: schema ? `Table (${schema})` : "Table",
         }, rulePreferTables ? 320 : preferTables ? 240 : constrainedSelectList ? 15 : preferKeywords ? 40 : 90, token);
@@ -317,7 +357,8 @@ export function getSqlSuggestions(
         if ((!suppressSchemaItemsForShortPrefix && !stronglyPreferKeywordPrefix) || rulePreferColumns) {
           addRanked(ranked, {
             label: columnName,
-            insertText: columnName,
+            insertText: identifierText(columnName),
+            filterText: filterText(columnName),
             kind: "column",
             detail: `${qualified}.${columnName}`,
           }, rulePreferColumns ? 300 : constrainedSelectList ? 10 : preferColumns ? (preferKeywords ? 80 : 220) : 90, token);
@@ -325,7 +366,9 @@ export function getSqlSuggestions(
       }
     }
 
-    for (const fn of SQL_FUNCTIONS) {
+    // Inside an identifier quote only schema names make sense.
+    const keywordPool = quoted ? [] : Array.from(new Set([...SQL_KEYWORDS, ...dialectKeywords]));
+    for (const fn of quoted ? [] : SQL_FUNCTIONS) {
       addRanked(ranked, {
         label: fn,
         insertText: `${fn}()`,
@@ -334,7 +377,6 @@ export function getSqlSuggestions(
       }, rulePreferFunctions ? 300 : constrainedSelectList ? 120 : preferColumns ? (preferKeywords ? 120 : 200) : 95, token);
     }
 
-    const keywordPool = Array.from(new Set([...SQL_KEYWORDS, ...dialectKeywords]));
     for (const keyword of keywordPool) {
       if (token.length === 0 && context.trailingWhitespace && normalize(keyword) === lastCompletedKeyword) {
         continue;

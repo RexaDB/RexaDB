@@ -23,6 +23,7 @@ import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { DataGridAg as DataGrid } from "@/components/studio/data-grid-ag";
 import { MonacoSqlInput } from "@/components/studio/monaco-sql-input";
+import { formatSqlIdentifier } from "@/lib/studio/sql-identifier";
 import { SqlQueryInput } from "@/components/studio/sql-query-input";
 import {
   SnippetVersion,
@@ -719,7 +720,7 @@ export function SqlEditor({
             suggestions.push({
               label: tableName,
               kind: monaco.languages.CompletionItemKind.Class,
-              insertText: tableName,
+              insertText: formatSqlIdentifier(tableName, dbType),
               detail: schemaName ? `Table (${schemaName})` : "Table",
               range,
             });
@@ -754,7 +755,7 @@ export function SqlEditor({
                 suggestions.push({
                   label: col.name,
                   kind: monaco.languages.CompletionItemKind.Field,
-                  insertText: col.name,
+                  insertText: formatSqlIdentifier(String(col.name), dbType),
                   detail: `${col.type}${col.isPrimary ? " (PK)" : ""}`,
                   range,
                 });
@@ -827,7 +828,7 @@ export function SqlEditor({
           return { suggestions };
         },
       });
-  }, [isMongo, isRedis, schemaData]);
+  }, [dbType, isMongo, isRedis, schemaData]);
 
   useEffect(() => {
     registerSqlCompletionProvider();
