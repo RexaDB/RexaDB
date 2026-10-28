@@ -818,6 +818,17 @@ app.post("/api/connections/groups/rename", simplePostRoute(body => connectionAct
 
 app.post("/api/connections/groups/delete", simplePostRoute(body => connectionActions.deleteConnectionGroup(body.folderName)));
 
+// Connection tags (also before /:id routes)
+app.get("/api/connections/tags", effectHandler(() => connectionActions.listConnectionTags()));
+
+app.post("/api/connections/tags/save", simplePostRoute(body => connectionActions.saveConnectionTag({
+  name: body.name,
+  color: body.color,
+  previousName: body.previousName,
+})));
+
+app.post("/api/connections/tags/delete", simplePostRoute(body => connectionActions.deleteConnectionTag(body.name)));
+
 app.get(
   "/api/connections/:id",
   effectHandler((req) =>
@@ -848,6 +859,8 @@ app.post(
       connectionType,
       environment,
       color,
+      tags,
+      icon,
       groups,
       group,
       isFavorite,
@@ -870,6 +883,8 @@ app.post(
     return connectionActions.addConnection(name, connectionString, connectionType, {
       environment,
       color,
+      tags: Array.isArray(tags) ? tags : undefined,
+      icon,
       groups: resolvedGroups,
       group: resolvedGroups[0] || null,
       isFavorite,

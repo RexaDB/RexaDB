@@ -1237,6 +1237,50 @@ async function writeCachedColumns(
   return _writeCachedColumns(connectionString, rows, ensureCoreTables, schema);
 }
 
+const MAX_CONNECTION_ICON_LENGTH = 200_000;
+
+function parseConnectionTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((tag): tag is string => typeof tag === "string");
+  if (typeof value !== "string" || !value) return [];
+  try {
+    return parseConnectionTags(JSON.parse(value));
+  } catch {
+    return [];
+  }
+}
+
+function serializeConnectionTags(tags: unknown): string | null {
+  if (!Array.isArray(tags)) return null;
+  const unique = [...new Set(tags.map((tag) => String(tag ?? "").trim()).filter(Boolean))];
+  return unique.length > 0 ? JSON.stringify(unique) : null;
+}
+
+function normalizeConnectionIcon(icon: unknown): string | null {
+  if (typeof icon !== "string" || !icon) return null;
+  if (icon.length > MAX_CONNECTION_ICON_LENGTH) throw new Error("The connection icon image is too large.");
+  if (icon.startsWith("emoji:") || icon.startsWith("image:data:image/")) return icon;
+  throw new Error("Unsupported connection icon.");
+}
+
+function normalizeConnectionTagColor(value: unknown) {
+  const color = String(value ?? "").trim();
+  if (!/^#[\da-f]{6}$/i.test(color)) throw new Error("Tag colors must be 6-digit hex values.");
+  return color;
+}
+
+/** Rewrites every connection's tag list; `rename` returns the new name, or null to drop the tag. */
+async function rewriteConnectionTags(rename: (tag: string) => string | null) {
+  const { client } = await import("./index");
+  const rows = await client.connections.findMany({});
+  for (const row of rows) {
+    const current = parseConnectionTags(row.tags);
+    if (current.length === 0) continue;
+    const next = current.map(rename).filter((tag): tag is string => !!tag);
+    if (next.length === current.length && next.every((tag, i) => tag === current[i])) continue;
+    await client.connections.update({ where: { id: row.id }, data: { tags: serializeConnectionTags(next) } });
+  }
+}
+
 async function syncConnectionGroupMembers(connId: number, groupNames: string[]) {
   const { client } = await import("./index");
 
@@ -1283,6 +1327,8 @@ export async function addConnection(
   options?: {
     environment?: string;
     color?: string;
+    tags?: string[];
+    icon?: string | null;
     group?: string;
     groups?: string[];
     isFavorite?: boolean;
@@ -1324,6 +1370,8 @@ export async function addConnection(
         credentialSecret: options?.credentialSecret,
         environment: options?.environment,
         color: options?.color,
+        tags: serializeConnectionTags(options?.tags),
+        icon: normalizeConnectionIcon(options?.icon),
         group: Array.isArray(options?.groups) ? options.groups[0] : (options?.group || null),
         isFavorite: options?.isFavorite,
         createdAt: new Date(),
@@ -1378,6 +1426,7 @@ export async function getConnections(workspaceUrl?: string) {
       ...conn,
       ...(conn.credentialRef ? getCachedConnectionCredential(conn.credentialRef) : {}),
       groups: groupsByConnId.get(conn.id) || [],
+      tags: parseConnectionTags(conn.tags),
     }));
   } catch (error) {
     console.error("Failed to get connections:", error);
@@ -1500,6 +1549,8 @@ export async function updateConnection(id: number, data: Record<string, any>) {
         credentialSecret: data.credentialSecret,
         environment: data.environment,
         color: data.color,
+        tags: data.tags === undefined ? undefined : serializeConnectionTags(data.tags),
+        icon: data.icon === undefined ? undefined : normalizeConnectionIcon(data.icon),
         group: Array.isArray(data.groups) ? data.groups[0] || null : (data.group || null),
         isFavorite: data.isFavorite,
         lastActive: data.lastActive ? new Date(data.lastActive) : undefined,
@@ -2849,6 +2900,62 @@ export async function deleteConnectionGroup(name: string) {
         (error as Error)?.message || error || "Failed to delete group",
       ),
     };
+  }
+}
+
+export async function listConnectionTags() {
+  const { client } = await import("./index");
+
+  try {
+    await ensureCoreTables();
+    const tags = await client.connectionTags.findMany({ orderBy: { name: "asc" } });
+    return { success: true, tags: tags.map(({ id, name, color }) => ({ id, name, color })) };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error), tags: [] };
+  }
+}
+
+/** Creates a tag, or renames/recolors the tag named `previousName` and updates the connections using it. */
+export async function saveConnectionTag(input: { name: string; color: string; previousName?: string | null }) {
+  const { client } = await import("./index");
+
+  try {
+    await ensureCoreTables();
+    const name = String(input?.name ?? "").trim();
+    if (!name || name.length > 32) throw new Error("Tag names must contain 1–32 characters.");
+    const color = normalizeConnectionTagColor(input.color);
+    const previousName = input.previousName?.trim() || null;
+    const all = await client.connectionTags.findMany({});
+    const clash = all.find(
+      (tag) => tag.name.toLowerCase() === name.toLowerCase() && tag.name !== previousName,
+    );
+    if (clash) throw new Error(`A tag named "${clash.name}" already exists.`);
+
+    const existing = previousName ? all.find((tag) => tag.name === previousName) : undefined;
+    if (existing) {
+      await client.connectionTags.update({ where: { id: existing.id }, data: { name, color } });
+      if (previousName !== name) {
+        await rewriteConnectionTags((tag) => (tag === previousName ? name : tag));
+      }
+    } else {
+      await client.connectionTags.create({ data: { name, color, createdAt: new Date() } });
+    }
+    return { success: true, tag: { name, color } };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error || "Failed to save tag") };
+  }
+}
+
+export async function deleteConnectionTag(name: string) {
+  const { client } = await import("./index");
+
+  try {
+    await ensureCoreTables();
+    await client.connectionTags.deleteMany({ where: { name } });
+    await rewriteConnectionTags((tag) => (tag === name ? null : tag));
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String((error as Error)?.message || error || "Failed to delete tag") };
   }
 }
 

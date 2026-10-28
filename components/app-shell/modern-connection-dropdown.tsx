@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProviderLogo } from "@/components/shared/provider-logo";
+import { ConnectionIcon } from "@/components/connections/connection-icon";
 import { openConnectionInNewWindow } from "@/lib/connections/open-connection-window";
 import { useGlobalStudioSettings } from "@/hooks/use-global-studio-settings";
 import { getConnections } from "@/lib/api/actions-client";
@@ -165,9 +166,15 @@ export function ModernConnectionDropdown({
             "data-[state=open]:border-border data-[state=open]:text-foreground",
           )}
         >
-          <ProviderLogo
-            type={connection.connectionType}
-            className="size-3.5 shrink-0"
+          <ConnectionIcon
+            icon={connections.find((conn) => conn.id === connection.id)?.icon}
+            className="size-3.5 text-sm"
+            fallback={
+              <ProviderLogo
+                type={connection.connectionType}
+                className="size-3.5 shrink-0"
+              />
+            }
           />
           <span className="min-w-0 flex-1 truncate text-left font-medium select-none">
             {connection.name}
@@ -207,9 +214,15 @@ export function ModernConnectionDropdown({
                   void switchTo(conn);
                 }}
               >
-                <ProviderLogo
-                  type={conn.connectionType}
-                  className="size-3.5 shrink-0"
+                <ConnectionIcon
+                  icon={conn.icon}
+                  className="size-3.5 text-sm"
+                  fallback={
+                    <ProviderLogo
+                      type={conn.connectionType}
+                      className="size-3.5 shrink-0"
+                    />
+                  }
                 />
                 <span
                   className={cn(

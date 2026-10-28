@@ -8,6 +8,13 @@ export const connectionGroups = sqliteTable("connection_groups", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
 
+export const connectionTags = sqliteTable("connection_tags", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  color: text("color").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+});
+
 export const connections = sqliteTable("connections", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
@@ -24,8 +31,13 @@ export const connections = sqliteTable("connections", {
   credentialSecret: text("credential_secret"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   sortOrder: integer("sort_order"),
+  /** Legacy single environment label; migrated into `tags` on startup. */
   environment: text("environment"),
   color: text("color"),
+  /** JSON array of connection tag names (see `connectionTags`). */
+  tags: text("tags"),
+  /** Custom icon: `emoji:<char>` or `image:<data url>`; null uses the provider logo. */
+  icon: text("icon"),
   group: text("group"),
   isFavorite: integer("is_favorite", { mode: "boolean" }).default(false),
   lastActive: integer("last_active", { mode: "timestamp" }),

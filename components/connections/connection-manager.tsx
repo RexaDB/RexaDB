@@ -18,7 +18,16 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ConnectionsHeader } from "@/components/connections/connections-header";
 import { ConnectionViewToggle } from "@/components/connections/connection-view-toggle";
-import { EnvironmentBadge } from "@/components/connections/environment-badge";
+import {
+  ConnectionTagList,
+  ConnectionTagPicker,
+  getConnectionTagNames,
+  type ConnectionTag,
+} from "@/components/connections/connection-tags";
+import {
+  ConnectionIcon,
+  ConnectionIconPicker,
+} from "@/components/connections/connection-icon";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Kbd } from "@/components/ui/kbd";
@@ -717,12 +726,12 @@ export function ConnectionManager({
       detectProvider(conn.connectionString, (conn as any).connectionType) ??
       "postgresql";
     const providerCard = providerCards.find((card) => card.id === provider);
-    const env = (conn as any).environment;
     return {
       provider,
       providerCard,
       providerLogo: getProviderLogoUrl(provider),
-      env,
+      tagNames: getConnectionTagNames(conn),
+      icon: (conn as any).icon as string | null | undefined,
     };
   }, []);
 
@@ -1127,9 +1136,9 @@ export function ConnectionManager({
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [name, setName] = useState("");
   const [connectionString, setConnectionString] = useState("");
-  const [environment, setEnvironment] = useState<
-    "production" | "staging" | "local" | null
-  >(null);
+  const [connectionTags, setConnectionTags] = useState<string[]>([]);
+  const [connectionIcon, setConnectionIcon] = useState<string | null>(null);
+  const [tagLibrary, setTagLibrary] = useState<ConnectionTag[]>([]);
   const [color, setColor] = useState<string | null>(null);
   const [groups, setGroups] = useState<string[]>([]);
   const [folderPopoverOpen, setFolderPopoverOpen] = useState(false);
@@ -1582,6 +1591,8 @@ export function ConnectionManager({
             sortOrder: null,
             environment: null,
             color: null,
+            tags: null,
+            icon: null,
             group: null,
             isFavorite: null,
             lastActive: null,
@@ -1619,12 +1630,69 @@ export function ConnectionManager({
     return [];
   }, [workspaceMode]);
 
+  const loadTagLibrary = useCallback(async () => {
+    if (workspaceMode) return;
+    const res = await sidecarFetch("/api/connections/tags");
+    if (res?.success && Array.isArray(res.tags)) setTagLibrary(res.tags);
+  }, [workspaceMode, sidecarFetch]);
+
+  const saveConnectionTag = useCallback(
+    async (tag: ConnectionTag, previousName?: string) => {
+      const res = await sidecarFetch("/api/connections/tags/save", {
+        method: "POST",
+        body: JSON.stringify({ ...tag, previousName }),
+      });
+      if (!res?.success) {
+        toast.error(res?.error || "Failed to save tag.");
+        return false;
+      }
+      await loadTagLibrary();
+      if (previousName && previousName !== tag.name) {
+        setConnections((prev) =>
+          prev.map((conn) => {
+            const names = getConnectionTagNames(conn);
+            return names.includes(previousName)
+              ? ({ ...conn, tags: names.map((name) => (name === previousName ? tag.name : name)) } as any)
+              : conn;
+          }),
+        );
+      }
+      return true;
+    },
+    [sidecarFetch, loadTagLibrary],
+  );
+
+  const deleteConnectionTag = useCallback(
+    async (name: string) => {
+      const res = await sidecarFetch("/api/connections/tags/delete", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      if (!res?.success) {
+        toast.error(res?.error || "Failed to delete tag.");
+        return false;
+      }
+      await loadTagLibrary();
+      setConnections((prev) =>
+        prev.map((conn) => {
+          const names = getConnectionTagNames(conn);
+          return names.includes(name)
+            ? ({ ...conn, tags: names.filter((tag) => tag !== name) } as any)
+            : conn;
+        }),
+      );
+      return true;
+    },
+    [sidecarFetch, loadTagLibrary],
+  );
+
   const createConnection = async (payload: {
     name: string;
     connectionString: string;
     connectionType?: string;
     maxConnections?: number | null;
-    environment?: string | null;
+    tags?: string[];
+    icon?: string | null;
     color?: string | null;
     group?: string | null;
     groups?: string[];
@@ -1719,7 +1787,8 @@ export function ConnectionManager({
       name: string;
       connectionString: string;
       connectionType?: string;
-      environment?: string | null;
+      tags?: string[];
+      icon?: string | null;
       color?: string | null;
       group?: string | null;
       groups?: string[];
@@ -1971,7 +2040,8 @@ export function ConnectionManager({
     setEditingConnection(null);
     setName("");
     setConnectionString("");
-    setEnvironment(null);
+    setConnectionTags([]);
+    setConnectionIcon(null);
     setColor(null);
     setGroups([]);
     setIsFavorite(false);
@@ -2036,6 +2106,7 @@ export function ConnectionManager({
       const [conns, groups] = await Promise.all([
         fetchConnections(),
         fetchConnectionGroups(),
+        loadTagLibrary(),
       ]);
       if (generation !== loadGenRef.current) return;
       setConnections(conns);
@@ -2941,7 +3012,8 @@ export function ConnectionManager({
           name: finalName,
           connectionString: normalizedConnectionString,
           connectionType: selectedProvider,
-          environment,
+          tags: connectionTags,
+          icon: connectionIcon,
           color,
           groups,
           isFavorite,
@@ -2966,7 +3038,8 @@ export function ConnectionManager({
           connectionString: normalizedConnectionString,
           connectionType: selectedProvider,
           maxConnections: plan.maxConnections,
-          environment,
+          tags: connectionTags,
+          icon: connectionIcon,
           color,
           groups,
           isFavorite,
@@ -3011,7 +3084,8 @@ export function ConnectionManager({
       setLastActive((conn as any).lastActive || null);
     }
     setConnectionString(conn.connectionString);
-    setEnvironment(((conn as any).environment as any) || null);
+    setConnectionTags(getConnectionTagNames(conn));
+    setConnectionIcon((conn as any).icon || null);
     setColor((conn as any).color || null);
     setGroups(
       (conn as any).groups ||
@@ -3631,7 +3705,12 @@ export function ConnectionManager({
               name: conn.name || "Imported Connection",
               connectionString: conn.connectionString,
               connectionType: conn.connectionType || conn.connection_type,
-              environment: conn.environment,
+              tags: Array.isArray(conn.tags)
+                ? conn.tags
+                : conn.environment
+                  ? [conn.environment]
+                  : undefined,
+              icon: typeof conn.icon === "string" ? conn.icon : undefined,
               color: conn.color,
               group: conn.group,
               groups: conn.groups,
@@ -4699,7 +4778,7 @@ export function ConnectionManager({
                   className="p-0! **:[[cmdk-group-heading]]:scroll-mt-16 **:[[cmdk-group-heading]]:p-3! **:[[cmdk-group-heading]]:pb-1!"
                 >
                 {visibleCommandMenuConnections.map((conn) => {
-                    const { provider } = getProviderInfo(conn);
+                    const { provider, icon } = getProviderInfo(conn);
                     return (
                       <CommandItem
                         key={conn.id}
@@ -4712,7 +4791,11 @@ export function ConnectionManager({
                         className="px-3! h-9 rounded-lg border border-transparent font-medium hover:border-studio-border/80 hover:bg-studio-row-hover gap-3"
                       >
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-studio-border bg-studio-bg/60">
-                          <ProviderLogo type={provider} className="size-4" />
+                          <ConnectionIcon
+                            icon={icon}
+                            className="size-4 text-base"
+                            fallback={<ProviderLogo type={provider} className="size-4" />}
+                          />
                         </span>
                         <span
                           className="min-w-0 flex-1 truncate"
@@ -5363,7 +5446,7 @@ export function ConnectionManager({
                               const globalIndex = visibleConnections.findIndex(
                                 (c) => c.id === conn.id,
                               );
-                              const { provider, providerCard, providerLogo, env } =
+                              const { provider, providerCard, providerLogo, tagNames, icon } =
                                 getProviderInfo(conn);
                               const isFav = (conn as any).isFavorite;
 
@@ -5411,23 +5494,29 @@ export function ConnectionManager({
                                   <div className="flex items-start justify-between mb-3">
                                     <div className="flex items-center gap-3">
                                       <div className="relative">
-                                        {provider === "spacetimedb" ? (
-                                          <SpacetimeDbLogo className="h-[27px] w-[27px] text-foreground" />
-                                        ) : (
-                                          <Image
-                                            src={
-                                              providerCard?.logoSrc ??
-                                              providerLogo
-                                            }
-                                            alt={
-                                              providerCard?.label ??
-                                              "PostgreSQL"
-                                            }
-                                            width={27}
-                                            height={27}
-                                            className="object-contain rounded-lg"
-                                          />
-                                        )}
+                                        <ConnectionIcon
+                                          icon={icon}
+                                          className="size-[27px] text-[27px]"
+                                          fallback={
+                                            provider === "spacetimedb" ? (
+                                              <SpacetimeDbLogo className="h-[27px] w-[27px] text-foreground" />
+                                            ) : (
+                                              <Image
+                                                src={
+                                                  providerCard?.logoSrc ??
+                                                  providerLogo
+                                                }
+                                                alt={
+                                                  providerCard?.label ??
+                                                  "PostgreSQL"
+                                                }
+                                                width={27}
+                                                height={27}
+                                                className="object-contain rounded-lg"
+                                              />
+                                            )
+                                          }
+                                        />
                                         {!!isFav && (
                                           <div className="absolute -top-2 -right-2 bg-studio-bg rounded-lg p-0.5 shadow-sm border border-border/40">
                                             <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500" />
@@ -5440,10 +5529,11 @@ export function ConnectionManager({
                                           <h3 className="text-sm font-medium text-foreground truncate max-w-[120px]">
                                             {conn.name}
                                           </h3>
-                                          {(env === "production" ||
-                                            env === "staging") && (
-                                            <EnvironmentBadge environment={env} />
-                                          )}
+                                          <ConnectionTagList
+                                            names={tagNames}
+                                            library={tagLibrary}
+                                            max={2}
+                                          />
                                         </div>
                                         <p className="text-xs text-muted-foreground tracking-tight">
                                           {providerCard?.label}
@@ -5624,7 +5714,7 @@ export function ConnectionManager({
                             className="overflow-hidden rounded-lg border border-border bg-card"
                           >
                             {visibleConnections.map((conn, index) => {
-                              const { provider, providerCard, providerLogo, env } = getProviderInfo(conn);
+                              const { provider, providerCard, providerLogo, tagNames, icon } = getProviderInfo(conn);
                               const isOpening = openingConnectionIds.has(conn.id);
                               const isLast = index === visibleConnections.length - 1;
 
@@ -5645,17 +5735,23 @@ export function ConnectionManager({
                                     })}
                                     className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                                   >
-                                    {provider === "spacetimedb" ? (
-                                      <SpacetimeDbLogo className="size-5 shrink-0 text-foreground" />
-                                    ) : (
-                                      <Image
-                                        src={providerCard?.logoSrc ?? providerLogo}
-                                        alt=""
-                                        width={20}
-                                        height={20}
-                                        className="block size-5 shrink-0 rounded-md object-contain"
-                                      />
-                                    )}
+                                    <ConnectionIcon
+                                      icon={icon}
+                                      className="size-5 text-xl"
+                                      fallback={
+                                        provider === "spacetimedb" ? (
+                                          <SpacetimeDbLogo className="size-5 shrink-0 text-foreground" />
+                                        ) : (
+                                          <Image
+                                            src={providerCard?.logoSrc ?? providerLogo}
+                                            alt=""
+                                            width={20}
+                                            height={20}
+                                            className="block size-5 shrink-0 rounded-md object-contain"
+                                          />
+                                        )
+                                      }
+                                    />
 
                                     <span className="min-w-0 flex-1">
                                       <span className="flex min-w-0 items-center gap-2">
@@ -5681,7 +5777,7 @@ export function ConnectionManager({
                                     {isOpening && (
                                       <span role="status" className="text-xs text-muted-foreground">Connecting…</span>
                                     )}
-                                    {env && <EnvironmentBadge environment={env} />}
+                                    <ConnectionTagList names={tagNames} library={tagLibrary} />
                                     {renderConnectionListActions(conn)}
                                   </div>
                                 </li>
@@ -6349,7 +6445,7 @@ export function ConnectionManager({
                       <div className="space-y-1">
                         <h3 className="text-sm font-semibold">Details</h3>
                         <p className="text-xs text-muted-foreground">
-                          Name, environment, folder and favorite.
+                          Name, icon, tags, folder and favorite.
                         </p>
                       </div>
                       <div className="space-y-4">
@@ -6360,37 +6456,48 @@ export function ConnectionManager({
                           >
                             Connection Name
                           </Label>
-                          <Input
-                            id="name-screen"
-                            placeholder={buildConnectionName(
-                              getCandidateConnectionString(),
-                              selectedProvider,
-                            )}
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="h-10 border-border/60 bg-background"
-                          />
+                          <div className="flex gap-2">
+                            <ConnectionIconPicker
+                              value={connectionIcon}
+                              onChange={setConnectionIcon}
+                              fallback={
+                                selectedProvider === "spacetimedb" ? (
+                                  <SpacetimeDbLogo className="size-6 text-foreground" />
+                                ) : (
+                                  <Image
+                                    src={getProviderLogoUrl(selectedProvider ?? "postgresql")}
+                                    alt=""
+                                    width={24}
+                                    height={24}
+                                    className="size-6 rounded-md object-contain"
+                                  />
+                                )
+                              }
+                            />
+                            <Input
+                              id="name-screen"
+                              placeholder={buildConnectionName(
+                                getCandidateConnectionString(),
+                                selectedProvider,
+                              )}
+                              value={name}
+                              onChange={(e) => setName(e.target.value)}
+                              className="h-10 border-border/60 bg-background"
+                            />
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label className="text-sm font-medium">
-                              Environment
+                              Tags
                             </Label>
-                            <SearchableSelect
-                              value={environment || ""}
-                              onValueChange={(value) =>
-                                setEnvironment((value as any) || null)
-                              }
-                              placeholder="Select environment"
-                              searchThreshold={0}
-                              className="h-10 w-full border-border/60 bg-background"
-                              options={[
-                                { value: "", label: "None" },
-                                { value: "production", label: "Production" },
-                                { value: "staging", label: "Staging" },
-                                { value: "local", label: "Local" },
-                              ]}
+                            <ConnectionTagPicker
+                              library={tagLibrary}
+                              value={connectionTags}
+                              onChange={setConnectionTags}
+                              onSaveTag={saveConnectionTag}
+                              onDeleteTag={deleteConnectionTag}
                             />
                           </div>
                           <div className="space-y-2">

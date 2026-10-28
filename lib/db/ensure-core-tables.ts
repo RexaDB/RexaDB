@@ -49,6 +49,8 @@ async function migrateCoreTables() {
     { column: "connection_type", statement: "ALTER TABLE connections ADD COLUMN connection_type TEXT" },
     { column: "environment", statement: "ALTER TABLE connections ADD COLUMN environment TEXT" },
     { column: "color", statement: "ALTER TABLE connections ADD COLUMN color TEXT" },
+    { column: "tags", statement: "ALTER TABLE connections ADD COLUMN tags TEXT" },
+    { column: "icon", statement: "ALTER TABLE connections ADD COLUMN icon TEXT" },
     { column: "group", statement: "ALTER TABLE connections ADD COLUMN \"group\" TEXT" },
     { column: "is_favorite", statement: "ALTER TABLE connections ADD COLUMN is_favorite INTEGER DEFAULT 0" },
     { column: "last_active", statement: "ALTER TABLE connections ADD COLUMN last_active INTEGER" },
@@ -234,6 +236,25 @@ async function migrateCoreTables() {
     { name: "credential_secret", type: "TEXT" },
   ]);
   await ensureColumns("connections", connectionColumnMigrations);
+  await createTableIfNotExists("connection_tags", [
+    { name: "id", type: "INTEGER", constraints: "PRIMARY KEY AUTOINCREMENT" },
+    { name: "name", type: "TEXT", constraints: "NOT NULL UNIQUE" },
+    { name: "color", type: "TEXT", constraints: "NOT NULL" },
+    { name: "created_at", type: "INTEGER", constraints: "NOT NULL" },
+  ]);
+  // Environments became custom tags: seed a tag per environment in use, then
+  // move each connection's environment into its tag list.
+  await db.run(sql`
+    INSERT OR IGNORE INTO connection_tags (name, color, created_at)
+    SELECT DISTINCT environment,
+      CASE environment WHEN 'production' THEN '#ef4444' WHEN 'staging' THEN '#f59e0b' WHEN 'local' THEN '#0ea5e9' ELSE '#71717a' END,
+      ${Math.floor(Date.now() / 1000)}
+    FROM connections WHERE environment IS NOT NULL AND environment != ''
+  `);
+  await db.run(sql`
+    UPDATE connections SET tags = json_array(environment), environment = NULL
+    WHERE environment IS NOT NULL AND environment != '' AND (tags IS NULL OR tags = '[]')
+  `);
   await createTableIfNotExists("folders", [
     { name: "id", type: "TEXT", constraints: "PRIMARY KEY NOT NULL" },
     { name: "connection_id", type: "INTEGER", constraints: "REFERENCES connections(id) ON DELETE CASCADE" },
