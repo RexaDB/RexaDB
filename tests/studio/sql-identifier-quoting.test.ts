@@ -145,3 +145,28 @@ test("dialect-specific reserved words are quoted", () => {
   assert.equal(formatSqlIdentifier("unnest", "trino"), '"unnest"');
   assert.equal(formatSqlIdentifier("top", "postgres"), "top");
 });
+
+test("a schema prefix prefers the exactly resolved schema", () => {
+  const data = {
+    upper: { schema: "Foo", name: "upper_table", columns: [] },
+    lower: { schema: "foo", name: "lower_table", columns: [] },
+  };
+  const query = "select * from foo.";
+  const result = getSqlSuggestions(query, query.length, data, "postgres");
+  assert.deepEqual(result?.items.map((entry) => entry.label), ["lower_table"]);
+
+  const quotedQuery = 'select * from "Foo".';
+  const quoted = getSqlSuggestions(quotedQuery, quotedQuery.length, data, "postgres");
+  assert.deepEqual(quoted?.items.map((entry) => entry.label), ["upper_table"]);
+});
+
+test("quotes inside comments do not open an identifier", () => {
+  for (const comment of ['-- "example\n', '/* "example */ ']) {
+    const query = `${comment}select * from Use`;
+    const result = getSqlSuggestions(query, query.length, schemaData, "postgres");
+    assert.equal(result?.items.find((entry) => entry.kind === "table")?.insertText, 'public."Users"');
+  }
+  const mysqlQuery = "# `example\nselect * from ord";
+  const mysql = getSqlSuggestions(mysqlQuery, mysqlQuery.length, schemaData, "mysql");
+  assert.equal(mysql?.items.find((entry) => entry.kind === "table")?.insertText, "public.orders");
+});

@@ -151,15 +151,29 @@ function matchIdentifier(candidate: string, id: ParsedIdentifier, dbType: string
 }
 
 /**
- * Index where an unclosed identifier quote starts, or -1. String literals and
- * escaped (doubled) closing quotes are skipped.
+ * Index where an unclosed identifier quote starts, or -1. String literals,
+ * comments and escaped (doubled) closing quotes are skipped.
  */
-function findOpenIdentifierQuote(statement: string, open: string, close: string) {
+function findOpenIdentifierQuote(statement: string, open: string, close: string, dbType: string) {
   let openAt = -1;
   let index = 0;
   while (index < statement.length) {
     const char = statement[index];
     if (openAt < 0) {
+      const lineComment =
+        statement.startsWith("--", index) || (char === "#" && dbType === "mysql");
+      if (lineComment) {
+        const end = statement.indexOf("\n", index);
+        if (end < 0) return -1;
+        index = end + 1;
+        continue;
+      }
+      if (statement.startsWith("/*", index)) {
+        const end = statement.indexOf("*/", index + 2);
+        if (end < 0) return -1;
+        index = end + 2;
+        continue;
+      }
       if (char === "'" || (char === '"' && open !== '"')) {
         const end = statement.indexOf(char, index + 1);
         if (end < 0) return -1;
@@ -191,7 +205,7 @@ function findOpenIdentifierQuote(statement: string, open: string, close: string)
  */
 function parseCursorToken(statement: string, dbType: string) {
   const [open, close] = getSqlIdentifierQuoteChars(dbType);
-  const openAt = findOpenIdentifierQuote(statement, open, close);
+  const openAt = findOpenIdentifierQuote(statement, open, close, dbType);
   if (openAt >= 0) {
     const fragment = statement.slice(openAt + open.length);
     return {
@@ -341,8 +355,11 @@ export function getSqlSuggestions(
   const { token, quoted, span, head } = parseCursorToken(currentStatement, dbType);
   const entries = Object.values(schemaData || {});
   const schemaPrefix = parseSchemaPrefix(head);
+  const schemaNames = Array.from(new Set(entries.map((entry) => String(entry.schema || "")).filter(Boolean)));
+  // Prefer the schema the database resolves the prefix to over a case-insensitive match.
   const schemaPrefixName = schemaPrefix
-    ? entries.map((entry) => String(entry.schema || "")).find((name) => name && matchIdentifier(name, schemaPrefix, dbType))
+    ? schemaNames.find((name) => matchIdentifier(name, schemaPrefix, dbType) === 2)
+      ?? schemaNames.find((name) => matchIdentifier(name, schemaPrefix, dbType) === 1)
     : undefined;
   const aliasContext = schemaPrefixName ? null : parseAliasContext(head);
   const aliasMap = getAliasMap(currentStatement, entries, dbType);
