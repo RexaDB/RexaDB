@@ -301,32 +301,31 @@ export function ConnectionTagPicker({
               ) : (
                 <div
                   key={tag.name}
-                  role="option"
-                  aria-selected={value.includes(tag.name)}
-                  className="group/tag flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    toggle(tag.name);
-                  }}
+                  className="group/tag flex items-center gap-1 rounded hover:bg-accent focus-within:bg-accent"
                 >
-                  <span
-                    className={cn(
-                      "flex size-4 shrink-0 items-center justify-center rounded border",
-                      value.includes(tag.name) ? "border-primary bg-primary" : "border-border",
-                    )}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={value.includes(tag.name)}
+                    aria-label={tag.name}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => toggle(tag.name)}
                   >
-                    {value.includes(tag.name) && <Check className="size-3 text-primary-foreground" />}
-                  </span>
-                  <ConnectionTagBadge name={tag.name} color={tag.color} />
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded border",
+                        value.includes(tag.name) ? "border-primary bg-primary" : "border-border",
+                      )}
+                    >
+                      {value.includes(tag.name) && <Check className="size-3 text-primary-foreground" />}
+                    </span>
+                    <ConnectionTagBadge name={tag.name} color={tag.color} />
+                  </button>
                   <button
                     type="button"
                     aria-label={`Edit tag ${tag.name}`}
-                    className="ml-auto rounded p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover/tag:opacity-100 focus-visible:opacity-100"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setEditing(tag.name);
-                    }}
+                    className="mr-1 rounded p-1 text-muted-foreground opacity-0 outline-none hover:text-foreground group-hover/tag:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setEditing(tag.name)}
                   >
                     <Pencil className="size-3.5" />
                   </button>

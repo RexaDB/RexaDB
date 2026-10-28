@@ -69,6 +69,15 @@ export function ConnectionIcon({
   );
 }
 
+/** First user-perceived character, so ZWJ sequences like 👩‍💻 or flags stay whole. */
+function firstGrapheme(text: string) {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    const [first] = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text);
+    if (first) return first.segment;
+  }
+  return [...text][0] ?? "";
+}
+
 /** Downscales an image file to a square PNG data URL so it stays small in SQLite. */
 function imageFileToIconDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -153,7 +162,7 @@ export function ConnectionIconPicker({
             const emoji = customEmoji.trim();
             if (!emoji) return;
             setCustomEmoji("");
-            pick(`emoji:${[...emoji].slice(0, 2).join("")}`);
+            pick(`emoji:${firstGrapheme(emoji)}`);
           }}
         >
           <Input
