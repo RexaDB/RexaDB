@@ -152,7 +152,7 @@ export function MonacoSqlInput({
     if (!monaco || dbType === "mongodb" || dbType === "redis" || aiMode) return;
     completionProviderRef.current =
       monaco.languages.registerCompletionItemProvider("sql", {
-        triggerCharacters: [".", " "],
+        triggerCharacters: [".", " ", '"', "`", "["],
         provideCompletionItems: (model: any, position: any) => {
           const offset = model.getOffsetAt(position);
           const result = getSqlSuggestions(
@@ -168,6 +168,7 @@ export function MonacoSqlInput({
             return {
               label: item.label,
               insertText: item.insertText,
+              filterText: item.filterText,
               detail: item.detail,
               sortText: index.toString().padStart(4, "0"),
               kind:
