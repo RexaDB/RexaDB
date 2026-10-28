@@ -352,8 +352,6 @@ export function useGlobalStudioSettings(persist = false) {
     }
     if (d.buttonStyle === "raised" || d.buttonStyle === "glass" || d.buttonStyle === "off") {
       setButtonStyle(d.buttonStyle);
-    } else if (d.raisedButtons === false) {
-      setButtonStyle("off");
     }
   };
 
@@ -455,6 +453,11 @@ export function useGlobalStudioSettings(persist = false) {
     incoming: Record<string, unknown>,
     opts?: { confirmServerState?: boolean },
   ) => {
+    // Convert the legacy raisedButtons flag before merging, so the baseline
+    // records the migrated buttonStyle instead of it looking like a local edit.
+    if (incoming.buttonStyle === undefined && incoming.raisedButtons === false) {
+      incoming = { ...incoming, buttonStyle: "off" };
+    }
     const prev = appliedRef.current ?? {};
     // Dirty = differs from the last server-acknowledged state (falls back to
     // the applied baseline before the first confirmed read). Pure helper —
