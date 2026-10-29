@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Register RexaDB as a handler for database connection URLs so
+    `open 'postgres://…'` (terminal) or clicking such a link in a browser
+    launches the app. Merged into the bundle's Info.plist by Tauri; the URLs
+    arrive as `RunEvent::Opened` in src/lib.rs.
+  -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.rexadb.database-url</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>postgres</string>
+        <string>postgresql</string>
+        <string>mysql</string>
+        <string>mariadb</string>
+        <string>mongodb</string>
+        <string>mongodb+srv</string>
+        <string>redis</string>
+        <string>rediss</string>
+        <string>mssql</string>
+        <string>sqlserver</string>
+        <string>clickhouse</string>
+        <string>clickhouses</string>
+        <string>duckdb</string>
+        <string>libsql</string>
+        <string>sqlite</string>
+        <string>oracle</string>
+        <string>trino</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

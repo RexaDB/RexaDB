@@ -248,6 +248,17 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Hand an `open` target to the frontend: stash it for a frontend that
+/// hasn't booted yet (drained via `get_pending_open_url`), emit it for one
+/// that is listening, and bring the window forward.
+fn deliver_open_target(app: &tauri::AppHandle, target: String) {
+    if let Some(state) = app.try_state::<PendingOpenUrl>() {
+        stash_open_target(&state, target.clone());
+    }
+    let _ = app.emit("open-database", serde_json::json!({ "target": target }));
+    focus_main_window(app);
+}
+
 #[tauri::command]
 fn get_pending_open_url(state: tauri::State<PendingOpenUrl>) -> Option<String> {
     // Pops one request per call; the frontend drains in a loop until `None`,
@@ -1072,11 +1083,7 @@ pub fn run() {
             // resolve against the caller's cwd, not the running app's cwd.
             let cwd_path = std::path::PathBuf::from(&cwd);
             if let Some(target) = parse_open_target(&args, Some(&cwd_path)) {
-                if let Some(state) = app.try_state::<PendingOpenUrl>() {
-                    stash_open_target(&state, target.clone());
-                }
-                let _ = app.emit("open-database", serde_json::json!({ "target": target }));
-                focus_main_window(app);
+                deliver_open_target(app, target);
             } else {
                 focus_main_window(app);
             }
@@ -1185,14 +1192,27 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::Exit => {
             if let Some(state) = app_handle.try_state::<SidecarState>() {
                 if let Some(child) = state.child.lock().unwrap().take() {
                     let _ = child.kill();
                 }
             }
         }
+        // macOS delivers URLs for the schemes registered in Info.plist
+        // (`open 'postgres://…'`, browser links) as Apple Events, both on
+        // cold launch and while running — never as argv.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => {
+            for url in urls {
+                let target = normalize_open_target(url.as_str());
+                if !target.is_empty() {
+                    deliver_open_target(app_handle, target);
+                }
+            }
+        }
+        _ => {}
     });
 }
 
