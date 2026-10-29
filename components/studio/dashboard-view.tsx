@@ -1791,6 +1791,12 @@ function TableWidget({
     fetchData();
   }, [fetchData]);
 
+  // A new filter can shrink the result set below the current page, so start over at the first page.
+  const applyFilterQuery = useCallback((query: string) => {
+    setFilterQuery(query);
+    setPage(0);
+  }, []);
+
   // fallow-ignore-next-line code-duplication
   const handlePageChange = useCallback((newPage: number) => {
     setPage(newPage);
@@ -2001,7 +2007,7 @@ function TableWidget({
         handleDeleteRows={handleDeleteRows}
         isDeleting={isDeleting}
         filterQuery={filterQuery}
-        setFilterQuery={setFilterQuery}
+        setFilterQuery={applyFilterQuery}
         sortConfig={sortConfig ? [sortConfig] : []}
         setSortConfig={(config) =>
           setSortConfig(config.length > 0 ? config[0] : null)

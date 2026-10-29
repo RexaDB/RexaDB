@@ -4584,6 +4584,12 @@ END $$;`.trim();
   }, [infiniteScrolling, activeTableTabId, selectedTable, selectedSchema, tableLoading, loadingMore, hasMoreRows,
     getTableTabSnapshot, filterQuery, sortConfig, pageSize, page, tablePermissionContext, refreshTableData]);
 
+  // A new filter can shrink the result set below the current page, so start over at the first page.
+  const applyFilterQuery = useCallback((query: string) => {
+    if (query !== filterQueryRef.current) setPage(0);
+    setFilterQuery(query);
+  }, []);
+
   // fallow-ignore-next-line code-duplication
   const handlePageChange = useCallback((newPage: number) => {
     setPage(newPage);
@@ -9525,7 +9531,7 @@ END $$;`.trim();
     addFolder, updateFolder, deleteFolder, handleImportSnippets,
     isInsertSheetOpen, setIsInsertSheetOpen,
     insertData, setInsertData,
-    filterQuery, setFilterQuery,
+    filterQuery, setFilterQuery: applyFilterQuery,
     sortConfig, setSortConfig,
     tableSearch, setTableSearch,
     refreshTablesSidebar,
