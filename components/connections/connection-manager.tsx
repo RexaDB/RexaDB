@@ -189,6 +189,8 @@ import {
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useDesktopWindow } from "@/hooks/use-desktop-window";
+import { isMacDesktopRuntime } from "@/lib/desktop";
+import { isLocalNetworkConnectError } from "@/lib/connections/local-network-error";
 import { openConnectionInNewWindow } from "@/lib/connections/open-connection-window";
 import { API_BASE } from "@/lib/api-base";
 import {
@@ -4876,6 +4878,14 @@ export function ConnectionManager({
                       Your network, VPN, SSH tunnel, or firewall is not blocking
                       the connection.
                     </li>
+                    {isMacDesktopRuntime() &&
+                      isLocalNetworkConnectError(connectionFailureDialog.error) && (
+                        <li className="ml-4 list-disc">
+                          RexaDB is allowed under System Settings › Privacy &amp;
+                          Security › Local Network. macOS can block this
+                          connection even when the error says it was refused.
+                        </li>
+                      )}
                   </ul>
                 </div>
               )}
