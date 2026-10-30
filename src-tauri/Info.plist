@@ -3,6 +3,12 @@
 <plist version="1.0">
 <dict>
   <!--
+    Shown in the macOS Local Network prompt. Database connections to LAN hosts
+    are made by the rexadb-server sidecar and are gated on this permission.
+  -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>RexaDB connects to databases running on devices on your local network.</string>
+  <!--
     Register RexaDB as a handler for database connection URLs so
     `open 'postgres://…'` (terminal) or clicking such a link in a browser
     launches the app. Merged into the bundle's Info.plist by Tauri; the URLs
