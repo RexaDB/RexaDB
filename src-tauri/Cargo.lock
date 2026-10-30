@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "rexa-db"
-version = "1.3.29"
+version = "1.3.30"
 dependencies = [
  "aes-gcm",
  "axum",
