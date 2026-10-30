@@ -1,7 +1,13 @@
 const CONNECT_ERROR_TARGET = /connect\s+E[A-Z]+\s+([^\s]+):\d+/;
 
-function isPrivateHost(host: string): boolean {
+// Unique-local (fc00::/7) and link-local (fe80::/10). The first group must be
+// fully written out: `fd::1` is 00fd::1, which is outside both ranges.
+const PRIVATE_IPV6 = /^(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i;
+
+function isPrivateHost(target: string): boolean {
+  const host = target.replace(/^\[|\]$/g, "").replace(/%.*$/, "");
   if (/\.local$/i.test(host)) return true;
+  if (host.includes(":")) return PRIVATE_IPV6.test(host);
   const octets = host.split(".").map(Number);
   if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) {
     return false;
