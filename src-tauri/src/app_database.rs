@@ -37,7 +37,7 @@ fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 
 fn list_connections(db: &Connection) -> Result<Value, String> {
     let mut stmt = db
-        .prepare("SELECT id, name, connection_string AS connectionString, connection_type AS connectionType, host, port, database, username, password, ssl_mode AS sslMode, auth_token AS authToken, credential_ref AS credentialRef, credential_secret AS credentialSecret, created_at AS createdAt, sort_order AS sortOrder, environment, color, \"group\", is_favorite AS isFavorite, last_active AS lastActive FROM connections WHERE connection_string NOT LIKE 'dev://local/%' ORDER BY sort_order DESC, created_at DESC")
+        .prepare("SELECT id, name, connection_string AS connectionString, connection_type AS connectionType, host, port, database, username, password, ssl_mode AS sslMode, auth_token AS authToken, credential_ref AS credentialRef, credential_secret AS credentialSecret, created_at AS createdAt, sort_order AS sortOrder, environment, color, tags, icon, \"group\", is_favorite AS isFavorite, last_active AS lastActive FROM connections WHERE connection_string NOT LIKE 'dev://local/%' ORDER BY sort_order DESC, created_at DESC")
         .map_err(|error| error.to_string())?;
     let mut rows = stmt
         .query_map([], row_json)
@@ -59,6 +59,13 @@ fn list_connections(db: &Connection) -> Result<Value, String> {
         };
         if let Some(object) = row.as_object_mut() {
             object.insert("groups".into(), json!(groups));
+            // Stored as JSON text; the HTTP API returns these as an array.
+            let tags = object
+                .get("tags")
+                .and_then(Value::as_str)
+                .and_then(|tags| serde_json::from_str::<Vec<String>>(tags).ok())
+                .unwrap_or_default();
+            object.insert("tags".into(), json!(tags));
         }
     }
     Ok(json!(rows))
@@ -91,10 +98,10 @@ mod tests {
     #[test]
     fn reads_connections_and_groups_without_writing() {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE connections (id INTEGER PRIMARY KEY, name TEXT NOT NULL, connection_string TEXT NOT NULL, connection_type TEXT, host TEXT, port TEXT, database TEXT, username TEXT, password TEXT, ssl_mode TEXT, auth_token TEXT, credential_ref TEXT, credential_secret TEXT, created_at INTEGER NOT NULL, sort_order INTEGER, environment TEXT, color TEXT, \"group\" TEXT, is_favorite INTEGER, last_active INTEGER);
+        db.execute_batch("CREATE TABLE connections (id INTEGER PRIMARY KEY, name TEXT NOT NULL, connection_string TEXT NOT NULL, connection_type TEXT, host TEXT, port TEXT, database TEXT, username TEXT, password TEXT, ssl_mode TEXT, auth_token TEXT, credential_ref TEXT, credential_secret TEXT, created_at INTEGER NOT NULL, sort_order INTEGER, environment TEXT, color TEXT, tags TEXT, icon TEXT, \"group\" TEXT, is_favorite INTEGER, last_active INTEGER);
             CREATE TABLE connection_groups (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER);
             CREATE TABLE connection_group_members (connection_id INTEGER NOT NULL, group_id INTEGER NOT NULL);").unwrap();
-        db.execute("INSERT INTO connections (id, name, connection_string, created_at, sort_order) VALUES (1, 'local', 'postgres://example', 1, 2)", []).unwrap();
+        db.execute("INSERT INTO connections (id, name, connection_string, created_at, sort_order, tags, icon) VALUES (1, 'local', 'postgres://example', 1, 2, '[\"prod\"]', 'emoji:🚀')", []).unwrap();
         db.execute("INSERT INTO connections (id, name, connection_string, created_at, sort_order) VALUES (2, 'placeholder', 'dev://local/2', 2, 3)", []).unwrap();
         db.execute(
             "INSERT INTO connection_groups (name, created_at) VALUES ('Personal', 1)",
@@ -110,5 +117,7 @@ mod tests {
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(rows[0]["connectionString"], "postgres://example");
         assert_eq!(rows[0]["groups"], json!(["Personal"]));
+        assert_eq!(rows[0]["tags"], json!(["prod"]));
+        assert_eq!(rows[0]["icon"], "emoji:🚀");
     }
 }
