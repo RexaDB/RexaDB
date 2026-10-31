@@ -139,7 +139,7 @@ export function useConnectionDataLoader({
         fetchEnums(connString).then(r => r.success && r.data && setEnums(r.data));
         fetchIndexes(connString).then(r => r.success && r.data && setIndexes(r.data));
         fetchPostgresRoles(connString).then(r => r.success && r.data && setPostgresRoles(r.data));
-      } else if (isMssql) {
+      } else if (isMssql || connType === "mysql") {
         setExtensions([]);
         setEnums([]);
         setIndexes([]);

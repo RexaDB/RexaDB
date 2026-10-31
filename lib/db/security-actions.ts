@@ -145,11 +145,12 @@ export async function toggleExtension(connectionString: string, name: string, in
 
 export async function fetchTriggers(connectionString: string, schema?: string) {
   const dbType = detectConnectionDbType(connectionString);
-  if (dbType === "mssql" || dbType === "oracle") {
+  if (dbType === "mysql" && !schema) return { success: true, data: [] as any[] };
+  if (dbType === "mssql" || dbType === "mysql" || dbType === "oracle") {
     try {
       const { getDbTriggers } = await import("./db-engine");
       const fallback =
-        dbType === "oracle" ? schema || "" : schema || "dbo";
+        dbType === "mssql" ? schema || "dbo" : schema || "";
       const rows = await getDbTriggers(connectionString, fallback);
       // Normalize to both the legacy pg trigger shape
       // ({ schema, name, table_name, timing, event, definition })
@@ -187,21 +188,38 @@ export async function fetchTriggers(connectionString: string, schema?: string) {
     }
   }
   return withPgClientRead(connectionString, "triggers", async (executeQuery) => {
-    const sql = `
+    const params = schema ? [schema] : [];
+    const buildSql = (extraColumn: string) => `
       SELECT 
         trigger_schema as schema,
         trigger_name as name,
         event_object_table as table_name,
         action_timing as timing,
         event_manipulation as event,
-        action_statement as definition
+        action_statement as definition${extraColumn}
       FROM information_schema.triggers
       WHERE trigger_schema NOT IN ('information_schema', 'pg_catalog')
       ${schema ? "AND trigger_schema = $1" : ""}
       ORDER BY trigger_schema, trigger_name;
     `;
-    const res = await executeQuery(connectionString, sql, schema ? [schema] : []);
-    return res.rows;
+    try {
+      const res = await executeQuery(connectionString, buildSql(`,
+        (
+          SELECT pg_get_triggerdef(t.oid, true)
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE t.tgname = trigger_name
+            AND c.relname = event_object_table
+            AND n.nspname = event_object_schema
+            AND NOT t.tgisinternal
+        ) as full_definition`), params);
+      return res.rows;
+    } catch {
+      // Postgres-compatible engines may not expose pg_get_triggerdef.
+      const res = await executeQuery(connectionString, buildSql(""), params);
+      return res.rows;
+    }
   });
 }
 
@@ -787,6 +805,29 @@ export async function fetchPackages(connectionString: string, schema: string) {
 
 export async function fetchSequences(connectionString: string, schema: string) {
   const dbType = detectConnectionDbType(connectionString);
+  if (dbType === "postgres" || dbType === "supabase-mgmt") {
+    return withPgClientRead(connectionString, "sequences", async (executeQuery) => {
+      const sql = `
+        SELECT
+          schemaname as schema,
+          sequencename as name,
+          sequenceowner as owner,
+          data_type,
+          start_value,
+          min_value,
+          max_value,
+          increment_by,
+          cycle as cycle_flag,
+          cache_size,
+          last_value as last_number
+        FROM pg_sequences
+        WHERE schemaname = $1
+        ORDER BY sequencename;
+      `;
+      const res = await executeQuery(connectionString, sql, [schema]);
+      return res.rows;
+    });
+  }
   if (dbType !== "oracle") return { success: true, data: [] as any[] };
   try {
     const { getDbSequences } = await import("./db-engine");

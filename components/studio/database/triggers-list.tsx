@@ -82,10 +82,13 @@ export function TriggersList({
   const isOracle = dbType === "oracle";
   // Oracle trigger SQL differs from the Postgres shapes these controls
   // emit, so Oracle stays read-only until Oracle-aware actions exist.
-  const readOnlyTriggers = isMssql || isOracle;
+  const isMysql = dbType === "mysql";
+  const readOnlyTriggers = isMssql || isOracle || isMysql;
   const readOnlyTitle = isOracle
     ? "Triggers are read-only for Oracle connections"
-    : "Editing MSSQL triggers coming soon";
+    : isMysql
+      ? "Triggers are read-only for MySQL connections"
+      : "Editing MSSQL triggers coming soon";
   // MSSQL rows carry table_name/timing/event; pg-explorer rows carry
   // table/activation/events — accept both.
   const normalizedTriggers = useMemo(

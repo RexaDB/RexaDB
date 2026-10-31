@@ -262,6 +262,107 @@ export async function getViews(connectionString: string, schema: string) {
   return result.rows.map((r) => String((r as any).name || ""));
 }
 
+export async function getRoutines(connectionString: string, schema: string) {
+  const routines = await executeMysqlQuery(
+    connectionString,
+    `
+    SELECT
+      ROUTINE_SCHEMA AS \`schema\`,
+      ROUTINE_NAME AS name,
+      ROUTINE_TYPE AS type,
+      DTD_IDENTIFIER AS return_type,
+      ROUTINE_DEFINITION AS body,
+      IS_DETERMINISTIC AS is_deterministic,
+      SECURITY_TYPE AS security_type,
+      DEFINER AS owner
+    FROM information_schema.ROUTINES
+    WHERE ROUTINE_SCHEMA = ?
+    ORDER BY ROUTINE_NAME;
+  `,
+    [schema],
+  );
+
+  // Arguments are best-effort: some MySQL-compatible engines leave
+  // information_schema.PARAMETERS out, and the routine list is still useful.
+  const argumentsByRoutine = new Map<string, string[]>();
+  try {
+    const parameters = await executeMysqlQuery(
+      connectionString,
+      `
+      SELECT
+        SPECIFIC_NAME AS routine_name,
+        ROUTINE_TYPE AS routine_type,
+        PARAMETER_MODE AS mode,
+        PARAMETER_NAME AS name,
+        DTD_IDENTIFIER AS data_type
+      FROM information_schema.PARAMETERS
+      WHERE SPECIFIC_SCHEMA = ? AND ORDINAL_POSITION > 0
+      ORDER BY SPECIFIC_NAME, ORDINAL_POSITION;
+    `,
+      [schema],
+    );
+    for (const row of parameters.rows as any[]) {
+      const key = `${row.routine_type}:${row.routine_name}`;
+      // Function parameters are always IN, and CREATE FUNCTION rejects the keyword.
+      const mode = row.routine_type === "PROCEDURE" ? row.mode : null;
+      const argument = [mode, row.name, row.data_type].filter(Boolean).join(" ");
+      argumentsByRoutine.set(key, [...(argumentsByRoutine.get(key) ?? []), argument]);
+    }
+  } catch {
+    // Listed without arguments below.
+  }
+
+  return (routines.rows as any[]).map((row) => {
+    const type = String(row.type || "").toUpperCase();
+    const args = (argumentsByRoutine.get(`${type}:${row.name}`) ?? []).join(", ");
+    const returnType = String(row.return_type || "");
+    const returns = type === "FUNCTION" && returnType ? ` RETURNS ${returnType}` : "";
+    return {
+      schema: String(row.schema || ""),
+      name: String(row.name || ""),
+      type,
+      arguments: args,
+      return_type: type === "FUNCTION" ? returnType : "",
+      language: "SQL",
+      // ROUTINE_DEFINITION is null without SHOW_ROUTINE/CREATE ROUTINE access.
+      definition: row.body
+        ? `CREATE ${type} ${quoteMysqlIdentifier(row.name)}(${args})${returns}\n${row.body}`
+        : "",
+      volatility: row.is_deterministic === "YES" ? "DETERMINISTIC" : "NOT DETERMINISTIC",
+      security_definer: row.security_type === "DEFINER",
+      owner: row.owner ? String(row.owner) : null,
+    };
+  });
+}
+
+export async function getTriggers(connectionString: string, schema: string) {
+  const result = await executeMysqlQuery(
+    connectionString,
+    `
+    SELECT
+      TRIGGER_SCHEMA AS \`schema\`,
+      TRIGGER_NAME AS name,
+      EVENT_OBJECT_TABLE AS table_name,
+      ACTION_TIMING AS timing,
+      EVENT_MANIPULATION AS event,
+      ACTION_ORIENTATION AS orientation,
+      ACTION_STATEMENT AS statement
+    FROM information_schema.TRIGGERS
+    WHERE TRIGGER_SCHEMA = ?
+    ORDER BY TRIGGER_NAME;
+  `,
+    [schema],
+  );
+  return (result.rows as any[]).map((row) => ({
+    ...row,
+    definition: [
+      `CREATE TRIGGER ${quoteMysqlIdentifier(row.name)} ${row.timing} ${row.event}`,
+      `ON ${quoteMysqlIdentifier(row.table_name)} FOR EACH ${row.orientation}`,
+      row.statement,
+    ].join("\n"),
+  }));
+}
+
 export async function getSchemas(connectionString: string) {
   try {
     const showResult = await executeMysqlQuery(

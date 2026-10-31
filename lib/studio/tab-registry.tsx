@@ -3,6 +3,10 @@ import type { StudioInitialTab } from "@/lib/studio/types";
 import { QueryHistoryView } from "@/components/studio/query-history-view";
 import { ConnectionAnalytics } from "@/components/connections/connection-analytics";
 import { AdvisorView } from "@/components/advisor/advisor-view";
+import {
+  DatabaseObjectView,
+  type DatabaseObjectEditorProps,
+} from "@/components/studio/database/database-object-view";
 import { WorkflowView } from "@/components/workflows/workflow-view";
 import { ErdDesignerView } from "@/components/studio/erd/erd-designer-view";
 import type { ConnectionDbType } from "@/lib/db/connection-type";
@@ -198,6 +202,7 @@ export const TAB_REGISTRY: {
   history: TabTypeConfig;
   analytics: TabTypeConfig;
   advisor: TabTypeConfig;
+  "database-object": TabTypeConfig;
   "rls-policy-edit": TabTypeConfig;
   snapshots: TabTypeConfig;
   "snapshot-table": TabTypeConfig;
@@ -779,6 +784,39 @@ export const TAB_REGISTRY: {
         dbType={opts.context?.dbType as any}
       />
     ),
+  },
+
+  "database-object": {
+    type: "database-object",
+    viewMode: "database-object",
+    defaultName: "Database Object",
+    buildTabId: () => `object-${uid()}`,
+    createTab: (id) => ({ id, type: "database-object", name: "Database Object" }),
+    icon: "file",
+    group: "special",
+    renderComponent: (opts) => {
+      const studio = opts.studio as {
+        openTabs: StudioInitialTab[];
+        setOpenTabs: (tabs: StudioInitialTab[]) => void;
+        switchTab: (id: string, tabs?: StudioInitialTab[]) => void;
+      };
+      return (
+        <DatabaseObjectView
+          object={opts.tab.databaseObject}
+          dbType={opts.context?.dbType as string | undefined}
+          editor={opts.context?.definitionEditor as DatabaseObjectEditorProps | undefined}
+          onOpenInEditor={(object) => {
+            const tabId = `sql-object-${uid()}`;
+            const nextTabs = [
+              ...studio.openTabs,
+              { id: tabId, type: "sql" as const, name: object.name, query: object.definition },
+            ];
+            studio.setOpenTabs(nextTabs);
+            studio.switchTab(tabId, nextTabs);
+          }}
+        />
+      );
+    },
   },
 
   "rls-policy-edit": {

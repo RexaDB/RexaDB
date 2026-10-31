@@ -74,6 +74,8 @@ export async function getDbFunctions(connectionString: string, schema: string): 
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "mssql")
     return (await import("../mssql-client")).getRoutines(connectionString, schema);
+  if (dbType === "mysql")
+    return (await import("../mysql-client")).getRoutines(connectionString, schema);
   if (dbType === "oracle")
     return (await import("../oracle-client")).getRoutines(connectionString, schema);
   return [];
@@ -109,6 +111,8 @@ export async function getDbTriggers(connectionString: string, schema: string): P
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "mssql")
     return (await import("../mssql-client")).getTriggers(connectionString, schema);
+  if (dbType === "mysql")
+    return (await import("../mysql-client")).getTriggers(connectionString, schema);
   if (dbType === "oracle")
     return (await import("../oracle-client")).getTriggers(connectionString, schema);
   return [];

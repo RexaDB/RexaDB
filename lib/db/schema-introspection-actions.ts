@@ -71,10 +71,10 @@ export async function fetchRedisKeys(
 
 export async function fetchFunctions(connectionString: string, schema: string) {
   const dbType = detectConnectionDbType(connectionString);
-  if (dbType === "mssql" || dbType === "oracle") {
+  if (dbType === "mssql" || dbType === "mysql" || dbType === "oracle") {
     const { getDbFunctions } = await import("./db-engine");
     try {
-      const fallback = dbType === "oracle" ? schema : schema || "dbo";
+      const fallback = dbType === "mssql" ? schema || "dbo" : schema;
       const routines = await getDbFunctions(connectionString, fallback);
       return { success: true, data: routines };
     } catch (error: any) {
@@ -86,9 +86,54 @@ export async function fetchFunctions(connectionString: string, schema: string) {
     return { success: true, data: [] as any[] };
   }
 
+  const schemaFilter = `'${schema.replace(/'/g, "''")}'`;
+  const { executeDbQuery } = await import("./db-engine/query");
   try {
-    const sql = `
-      SELECT 
+    const res = await executeDbQuery(connectionString, buildPostgresRoutinesSql(schemaFilter));
+    return { success: true, data: res.rows };
+  } catch (detailedError) {
+    // Postgres-compatible engines may lack pg_get_functiondef or the
+    // volatility/owner columns; the plain listing still works there.
+    try {
+      const res = await executeDbQuery(connectionString, buildBasicPostgresRoutinesSql(schemaFilter));
+      return { success: true, data: res.rows };
+    } catch (error: any) {
+      console.error("Failed to fetch functions:", detailedError, error);
+      return { success: false, error: error.message };
+    }
+  }
+}
+
+function buildPostgresRoutinesSql(schemaFilter: string) {
+  return `
+      SELECT
+        n.nspname as schema,
+        p.proname as name,
+        pg_get_function_arguments(p.oid) as arguments,
+        t.typname as return_type,
+        l.lanname as language,
+        CASE WHEN p.prokind = 'a' THEN '' ELSE pg_get_functiondef(p.oid) END as definition,
+        CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END as type,
+        CASE p.provolatile
+          WHEN 'i' THEN 'IMMUTABLE'
+          WHEN 's' THEN 'STABLE'
+          ELSE 'VOLATILE'
+        END as volatility,
+        p.prosecdef as security_definer,
+        pg_get_userbyid(p.proowner) as owner
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      JOIN pg_type t ON p.prorettype = t.oid
+      JOIN pg_language l ON p.prolang = l.oid
+      WHERE n.nspname = ${schemaFilter}
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      ORDER BY p.proname;
+    `;
+}
+
+function buildBasicPostgresRoutinesSql(schemaFilter: string) {
+  return `
+      SELECT
         n.nspname as schema,
         p.proname as name,
         pg_get_function_arguments(p.oid) as arguments,
@@ -100,17 +145,10 @@ export async function fetchFunctions(connectionString: string, schema: string) {
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_type t ON p.prorettype = t.oid
       JOIN pg_language l ON p.prolang = l.oid
-      WHERE n.nspname = '${schema.replace(/'/g, "''")}'
+      WHERE n.nspname = ${schemaFilter}
       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
       ORDER BY p.proname;
     `;
-    const { executeDbQuery } = await import("./db-engine/query");
-    const res = await executeDbQuery(connectionString, sql);
-    return { success: true, data: res.rows };
-  } catch (error: any) {
-    console.error("Failed to fetch functions:", error);
-    return { success: false, error: error.message };
-  }
 }
 
 export async function createDatabase(connectionString: string, dbName: string) {

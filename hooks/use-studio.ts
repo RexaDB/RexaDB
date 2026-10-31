@@ -29,6 +29,7 @@ import {
   supportsOracleExtraCatalog,
   supportsRoutineCatalog,
   supportsRoutineWrite,
+  supportsSequenceCatalog,
   supportsTriggerWrite,
 } from "@/lib/db/connection-type";
 import { parseOracleConnectionString } from "@/lib/db/oracle-connection";
@@ -67,6 +68,8 @@ import { normalizeCloudFolders, normalizeCloudSnippets, mapStudioSnippet } from 
 import { normalizeJsonColumnValue } from "@/lib/studio/data-utils";
 import { isDatabaseTabType, TAB_TYPE_TO_DATABASE_VIEW } from "@/lib/studio/tab-types";
 import { getViewMode, getTabConfig } from "@/lib/studio/tab-registry";
+import { useSidebarDatabaseObjects } from "./use-sidebar-database-objects";
+import { databaseObjectKey, type DatabaseObjectDetail } from "@/lib/studio/database-objects";
 import { useInitialStudioData } from "./use-initial-studio-data";
 import { useStudioTagSync } from "./use-studio-tag-sync";
 import { useSchemaDataLoader } from "./use-schema-data-loader";
@@ -1896,7 +1899,12 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       setIndexes([]);
       setFunctions([]);
       setRlsPolicies([]);
+      setSequences([]);
     }
+    setPackages([]);
+    setSynonyms([]);
+    setMaterializedViews([]);
+    setDbLinks([]);
   }, [dbType, currentConnectionString]);
 
   const loadDatabases = useCallback(async () => {
@@ -1956,6 +1964,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       setTriggers([]);
       setEnums([]);
       setIndexes([]);
+      setSequences([]);
       setExtensions([]);
       setSelectedTable(null);
       setSelectedSchema("");
@@ -2301,12 +2310,29 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     }
   }, [currentConnectionString, selectedSchema, dbType]);
 
+  const reloadSidebarObjects = useSidebarDatabaseObjects({
+    enabled: !databaseExplorer,
+    connectionString: currentConnectionString,
+    dbType,
+    schema: selectedSchema,
+    setFunctions,
+    setTriggers,
+    setIndexes,
+    setEnums,
+    setSequences,
+    setPackages,
+    setSynonyms,
+    setMaterializedViews,
+    setDbLinks,
+  });
+
   const refreshTablesSidebar = useCallback(async () => {
     await loadSchemas(true);
     if (selectedSchema) {
       await loadTables(true);
     }
-  }, [loadSchemas, loadTables, selectedSchema]);
+    reloadSidebarObjects();
+  }, [loadSchemas, loadTables, reloadSidebarObjects, selectedSchema]);
 
 
 
@@ -2334,22 +2360,6 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
     await loadData(setFetchingEnums, setEnums, () => 
       fetchEnums(currentConnectionString));
   }, [currentConnectionString]);
-
-  useEffect(() => {
-    if (databaseExplorer) return;
-    const isRoutineDb = supportsRoutineCatalog(dbType);
-    if (!schemaExplorer || !isRoutineDb || !selectedSchema) {
-      return;
-    }
-    void loadFunctions();
-    void loadTriggers();
-    if (supportsIndexCatalog(dbType)) {
-      void loadIndexes();
-    }
-    if (dbType === "postgres" || dbType === "supabase-mgmt") {
-      void loadEnums();
-    }
-  }, [schemaExplorer, databaseExplorer, selectedSchema, dbType]);
 
   const loadAllSchemaData = useCallback(async () => {
     const isRoutineDb = supportsRoutineCatalog(dbType);
@@ -2387,7 +2397,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
       );
       setFunctions(funcResults.flat());
 
-      if (dbType === "mssql" || dbType === "oracle") {
+      if (dbType === "mssql" || dbType === "mysql" || dbType === "oracle") {
         const trigResults = await Promise.all(
           schemaList.map(async (schema) => {
             const res = await fetchTriggers(currentConnectionString, schema);
@@ -2437,7 +2447,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
   }, [currentConnectionString, selectedSchema, dbType]);
 
   const loadSequences = useCallback(async () => {
-    if (!selectedSchema || !supportsOracleExtraCatalog(dbType)) return;
+    if (!selectedSchema || !supportsSequenceCatalog(dbType)) return;
     setFetchingSequences(true);
     try {
       const res = await apiFetchSequences(currentConnectionString, selectedSchema);
@@ -5930,6 +5940,18 @@ END $$;`.trim();
     openSimpleTab('analytics', 'analytics', 'Analytics');
   }, [openSimpleTab]);
 
+  const openDatabaseObjectTab = useCallback((object: DatabaseObjectDetail) => {
+    const tabId = `object-${databaseObjectKey(object)}`;
+    const newTab = { id: tabId, type: "database-object" as const, name: object.name, databaseObject: object };
+    const existing = openTabs.some((tab) => tab.id === tabId);
+    // Re-opening refreshes the snapshot so the tab shows the latest definition.
+    const nextTabs = existing
+      ? openTabs.map((tab) => (tab.id === tabId ? { ...tab, databaseObject: object } : tab))
+      : buildNewTabs(newTab);
+    setOpenTabs(nextTabs);
+    switchTab(tabId, nextTabs);
+  }, [openTabs, buildNewTabs, setOpenTabs, switchTab]);
+
   const openAdvisorTab = useCallback(() => {
     openSimpleTab('advisor', 'advisor', 'Advisor');
   }, [openSimpleTab]);
@@ -8967,8 +8989,12 @@ END $$;`.trim();
       toast.error("Indexes are not supported for this database type.");
       return;
     }
+    if (type === "sequences" && !supportsSequenceCatalog(dbType)) {
+      toast.error("Sequences are not supported for this database type.");
+      return;
+    }
     if (
-      ["packages", "sequences", "synonyms", "db-links", "materialized-views"].includes(type) &&
+      ["packages", "synonyms", "db-links", "materialized-views"].includes(type) &&
       !oracleOk
     ) {
       toast.error("That catalog view is supported only for Oracle connections.");
@@ -9588,6 +9614,7 @@ END $$;`.trim();
     openHistoryTab,
     openAnalyticsTab,
     openAdvisorTab,
+    openDatabaseObjectTab,
     openWorkflowsTab,
     openErdTab,
     openSnapshotsTab,

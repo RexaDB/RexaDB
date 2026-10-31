@@ -1325,6 +1325,17 @@ export function StudioMainContent({
                     connection,
                     connectionString: currentConnectionString,
                     dbType: studio.dbType,
+                    definitionEditor: {
+                      sqlEditorEngine,
+                      fontSize:
+                        typeof editorFontSize === "string"
+                          ? parseInt(editorFontSize, 10) || 13
+                          : editorFontSize || 13,
+                      fontFamily: studio.editorFontFamily,
+                      themeId: resolvedEditorThemeId,
+                      appEditorTheme,
+                      customEditorThemes,
+                    },
                     onOpenThemeCreator,
                     onOpenIconThemeCreator,
                   },
