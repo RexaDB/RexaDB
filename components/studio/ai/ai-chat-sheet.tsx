@@ -45,6 +45,7 @@ import ApprovalCard from "@/components/studio/ai/approval-card";
 import { useDiscoveredAgents, getConfiguredModels } from "@/lib/ai/model-utils";
 import { useLocalCliProviders } from "@/hooks/use-local-cli-providers";
 import { useAiAssistant } from "@/hooks/use-ai-assistant";
+import type { StudioArtifact } from "@/lib/ai/studio-artifacts";
 import { useAiMentionCatalog } from "@/hooks/use-ai-mention-catalog";
 import { useConfirm } from "@/hooks/use-confirm";
 import { useAiUser } from "@/hooks/use-ai-user";
@@ -65,7 +66,6 @@ import type { AgentWorkflowContext, AgentWorkflowPlan } from "@/lib/ai/types";
 interface AiChatSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
-  dashboardApplyLabel?: string;
   initialPrompt?: string | null;
   /** Chat (thread) to select when the panel opens. */
   initialChatId?: string | null;
@@ -88,7 +88,6 @@ interface AiChatSheetProps {
   onRunSql?: (query: string) => void;
   onApplyDashboard: (dashboard: any) => void;
   onApplyWorkflow?: (plan: AgentWorkflowPlan) => void;
-  workflowApplyBusy?: boolean;
   workflowContext?: AgentWorkflowContext;
   onOpenSettings: () => void;
   sleek?: boolean;
@@ -110,7 +109,6 @@ interface AiChatSheetProps {
 export function AiChatSheet({
   isOpen,
   onOpenChange,
-  dashboardApplyLabel,
   initialPrompt,
   initialChatId,
   startNewChatToken,
@@ -126,7 +124,6 @@ export function AiChatSheet({
   onRunSql,
   onApplyDashboard,
   onApplyWorkflow,
-  workflowApplyBusy,
   workflowContext,
   onOpenSettings: _onOpenSettings,
   sleek,
@@ -267,6 +264,15 @@ export function AiChatSheet({
     ],
   );
 
+  const handleArtifact = useCallback(
+    (artifact: StudioArtifact) => {
+      if (artifact.kind === "theme") handleApplyTheme(artifact.theme);
+      else if (artifact.kind === "workflow") onApplyWorkflow?.(artifact.plan);
+      else onApplyDashboard({ ...artifact.dashboard, dashboardId: artifact.dashboardId });
+    },
+    [handleApplyTheme, onApplyDashboard, onApplyWorkflow],
+  );
+
   const mentionCatalog = useAiMentionCatalog({
     connectionString,
     dbType,
@@ -302,6 +308,7 @@ export function AiChatSheet({
     schemaContext: mentionCatalog,
     workflowContext,
     userId,
+    onArtifact: handleArtifact,
   });
 
   const onActiveChatChangeRef = useRef(onActiveChatChange);
@@ -786,18 +793,12 @@ export function AiChatSheet({
 
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-44">
             <AiMessageList
-              dashboardApplyLabel={dashboardApplyLabel}
               emptyIdeas={emptyIdeas}
               messages={messages}
-              onApplyAppTheme={handleApplyTheme}
-              onApplyEditorTheme={handleApplyTheme}
-              onApplyDashboard={onApplyDashboard}
-              onApplyWorkflow={onApplyWorkflow || (() => {})}
               onRunSql={onRunSql}
               onSelectIdea={(idea) => setMessage(idea)}
               onSendToSql={onSendToSql}
               userName={userName}
-              workflowApplyBusy={workflowApplyBusy}
               onApprovalSubmit={handleApprovalSubmit}
             />
             {pendingApproval && (

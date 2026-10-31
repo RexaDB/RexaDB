@@ -1,42 +1,28 @@
 "use client";
 
 import { AiDashboardBlock } from "@/components/studio/ai/ai-dashboard-block";
-import {
-  AiThemeBlock,
-  type ThemeBlockData,
-} from "@/components/studio/ai/ai-theme-block";
+import { AiThemeBlock } from "@/components/studio/ai/ai-theme-block";
 import { AiWorkflowBlock } from "@/components/studio/ai/ai-workflow-block";
 import { renderInlineMarkdown } from "@/components/studio/ai/ai-inline-markdown";
 import { AiSqlBlock } from "@/components/studio/ai/ai-sql-block";
-import { parseDashboardBlock, parseThemeBlock, parseWorkflowBlock } from "@/lib/ai/chat-blocks";
 import { parseTaskBlock } from "@/lib/ai/task-block";
 import { parseApprovalBlock } from "@/lib/ai/approval-block";
 import TaskRows from "@/components/studio/ai/task-rows";
 import ApprovalCard from "@/components/studio/ai/approval-card";
 import { parseMarkdownBlocks } from "@/lib/ai/markdown-blocks";
-import type { AgentWorkflowPlan } from "@/lib/ai/types";
+import type { StudioArtifact } from "@/lib/ai/studio-artifacts";
 
 export function AiMessageContent({
   content,
-  dashboardApplyLabel,
+  artifacts = [],
   onSendToSql,
   onRunSql,
-  onApplyDashboard,
-  onApplyAppTheme,
-  onApplyEditorTheme,
-  onApplyWorkflow,
-  workflowApplyBusy,
   onApprovalSubmit,
 }: {
   content: string;
-  dashboardApplyLabel?: string;
+  artifacts?: StudioArtifact[];
   onSendToSql: (query: string) => void;
   onRunSql?: (query: string) => void;
-  onApplyDashboard: (dashboard: any) => void;
-  onApplyAppTheme?: (block: ThemeBlockData) => void;
-  onApplyEditorTheme?: (block: ThemeBlockData) => void;
-  onApplyWorkflow: (plan: AgentWorkflowPlan) => void;
-  workflowApplyBusy?: boolean;
   onApprovalSubmit?: (answers: { question: string; type: string; selected: string[]; custom?: string }[]) => void;
 }) {
   const blocks = parseMarkdownBlocks(content);
@@ -70,65 +56,6 @@ export function AiMessageContent({
                 query={block.code}
               />
             );
-          }
-
-          if (block.language.toLowerCase() === "dashboard") {
-            const dashboard = parseDashboardBlock(
-              `\`\`\`dashboard\n${block.code}\n\`\`\``,
-            );
-            if (dashboard) {
-              return (
-                <AiDashboardBlock
-                  applyLabel={dashboardApplyLabel}
-                  key={index}
-                  dashboard={dashboard}
-                  onApplyDashboard={onApplyDashboard}
-                />
-              );
-            }
-          }
-
-          if (block.language.toLowerCase() === "theme") {
-            const themeBlock = parseThemeBlock(
-              `\`\`\`theme\n${block.code}\n\`\`\``,
-            );
-            if (themeBlock) {
-              const handleApply = () => {
-                if (themeBlock.type === "app" && onApplyAppTheme) {
-                  onApplyAppTheme(themeBlock);
-                } else if (themeBlock.type === "editor" && onApplyEditorTheme) {
-                  onApplyEditorTheme(themeBlock);
-                }
-              };
-              const needsButton =
-                (themeBlock.type === "app" && onApplyAppTheme) ||
-                (themeBlock.type === "editor" && onApplyEditorTheme);
-              if (needsButton) {
-                return (
-                  <AiThemeBlock
-                    key={index}
-                    themeBlock={themeBlock}
-                    onApply={handleApply}
-                  />
-                );
-              }
-            }
-          }
-
-          if (block.language.toLowerCase() === "workflow") {
-            const workflowPlan = parseWorkflowBlock(
-              `\`\`\`workflow\n${block.code}\n\`\`\``,
-            );
-            if (workflowPlan) {
-              return (
-                <AiWorkflowBlock
-                  busy={workflowApplyBusy}
-                  key={index}
-                  onApplyWorkflow={onApplyWorkflow}
-                  plan={workflowPlan}
-                />
-              );
-            }
           }
 
           if (["tasks", "task", "task-rows", "task_rows"].includes(block.language.toLowerCase())) {
@@ -202,6 +129,15 @@ export function AiMessageContent({
             </table>
           </div>
         );
+      })}
+      {artifacts.map((artifact, index) => {
+        if (artifact.kind === "dashboard") {
+          return <AiDashboardBlock key={`artifact-${index}`} action={artifact.action} dashboard={artifact.dashboard} />;
+        }
+        if (artifact.kind === "workflow") {
+          return <AiWorkflowBlock key={`artifact-${index}`} action={artifact.action} plan={artifact.plan} />;
+        }
+        return <AiThemeBlock key={`artifact-${index}`} themeBlock={artifact.theme} />;
       })}
     </div>
   );

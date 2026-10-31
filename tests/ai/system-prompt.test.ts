@@ -8,8 +8,9 @@ test("renderWorkflowInstructions lists implemented nodes only", () => {
   assert.ok(!out.includes("ai-chat"));
 });
 
-test("buildAgentInstructions includes the workflow block schema without unimplemented nodes", () => {
+test("buildAgentInstructions directs creation to tools without unimplemented nodes", () => {
   const out = buildAgentInstructions({ dbType: "postgres" });
-  assert.ok(out.includes("```workflow"));
+  for (const tool of ["create_dashboard", "create_workflow", "create_app_theme"]) assert.ok(out.includes(tool));
+  for (const fence of ["```dashboard", "```workflow", "```theme"]) assert.ok(!out.includes(fence));
   assert.ok(!out.includes("ai-chat"));
 });

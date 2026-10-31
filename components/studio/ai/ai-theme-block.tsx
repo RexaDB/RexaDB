@@ -2,8 +2,7 @@
 
 import { Palette, Check, Sparkles } from "@/lib/icon-theme/lucide-react";
 
-import { Button } from "@/components/ui/button";
-import type { ParsedThemeBlock as ThemeBlockData } from "@/lib/ai/chat-blocks";
+import type { ParsedThemeBlock as ThemeBlockData } from "@/lib/ai/studio-artifacts";
 export type { ThemeBlockData };
 
 function extractKeyColors(colors?: Record<string, string>) {
@@ -44,10 +43,8 @@ function extractKeyColors(colors?: Record<string, string>) {
 
 export function AiThemeBlock({
   themeBlock,
-  onApply,
 }: {
   themeBlock: ThemeBlockData;
-  onApply: (block: ThemeBlockData) => void;
 }) {
   const isApp = themeBlock.type === "app";
   const title = themeBlock.theme.name;
@@ -92,14 +89,10 @@ export function AiThemeBlock({
           </div>
         )}
 
-        <Button
-          className="h-8 gap-1.5 px-3 text-xs"
-          onClick={() => onApply(themeBlock)}
-          variant="outline"
-        >
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <Check className="h-3.5 w-3.5" />
-          Add Theme
-        </Button>
+          Applied
+        </span>
       </div>
     </div>
   );

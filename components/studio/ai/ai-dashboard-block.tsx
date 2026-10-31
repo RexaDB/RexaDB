@@ -1,8 +1,7 @@
 "use client";
 
-import { LayoutDashboard, PlusSquare } from "@/lib/icon-theme/lucide-react";
+import { Check, LayoutDashboard } from "@/lib/icon-theme/lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { countDashboardBlockWidgets } from "@/lib/ai/dashboard-plan";
 
 function summarizeWidgets(dashboard: any) {
@@ -29,12 +28,10 @@ function summarizeWidgets(dashboard: any) {
 
 export function AiDashboardBlock({
   dashboard,
-  applyLabel = "Create Dashboard",
-  onApplyDashboard,
+  action,
 }: {
   dashboard: any;
-  applyLabel?: string;
-  onApplyDashboard: (dashboard: any) => void;
+  action: "create" | "update";
 }) {
   const widgetCount = countDashboardBlockWidgets(dashboard);
 
@@ -53,19 +50,12 @@ export function AiDashboardBlock({
         </span>
       </div>
 
-      <div className="space-y-3 px-3 py-3">
-        <p className="text-xs text-muted-foreground">
-          {summarizeWidgets(dashboard)}
-        </p>
-
-        <Button
-          className="h-8 gap-1.5 px-3 text-xs"
-          onClick={() => onApplyDashboard(dashboard)}
-          variant="outline"
-        >
-          <PlusSquare className="h-3.5 w-3.5" />
-          {applyLabel}
-        </Button>
+      <div className="flex items-center justify-between gap-3 px-3 py-3 text-xs text-muted-foreground">
+        <p>{summarizeWidgets(dashboard)}</p>
+        <span className="flex items-center gap-1">
+          <Check className="h-3.5 w-3.5" />
+          {action === "update" ? "Updated" : "Created"}
+        </span>
       </div>
     </div>
   );

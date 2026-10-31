@@ -2,19 +2,13 @@
 
 import { AiEmptyState } from "@/components/studio/ai/ai-empty-state";
 import { AiMessageContent } from "@/components/studio/ai/ai-message-content";
-import type { ThemeBlockData } from "@/components/studio/ai/ai-theme-block";
-import type { StoredAiChatMessage, AgentWorkflowPlan } from "@/lib/ai/types";
+import { readMessageArtifacts } from "@/lib/ai/studio-artifacts";
+import type { StoredAiChatMessage } from "@/lib/ai/types";
 
 interface AiMessageListProps {
   messages: StoredAiChatMessage[];
-  dashboardApplyLabel?: string;
   onSendToSql: (query: string) => void;
   onRunSql?: (query: string) => void;
-  onApplyDashboard: (dashboard: any) => void;
-  onApplyAppTheme?: (block: ThemeBlockData) => void;
-  onApplyEditorTheme?: (block: ThemeBlockData) => void;
-  onApplyWorkflow: (plan: AgentWorkflowPlan) => void;
-  workflowApplyBusy?: boolean;
   userName: string;
   emptyIdeas: string[];
   onSelectIdea: (idea: string) => void;
@@ -23,14 +17,8 @@ interface AiMessageListProps {
 
 export function AiMessageList({
   messages,
-  dashboardApplyLabel,
   onSendToSql,
   onRunSql,
-  onApplyDashboard,
-  onApplyAppTheme,
-  onApplyEditorTheme,
-  onApplyWorkflow,
-  workflowApplyBusy,
   userName,
   emptyIdeas,
   onSelectIdea,
@@ -49,18 +37,13 @@ export function AiMessageList({
                 {message.content}
               </div>
             </div>
-          ) : message.content ? (
+          ) : message.content || message.metaJson ? (
             <div key={message.id} className="text-sm leading-7 text-foreground">
               <AiMessageContent
+                artifacts={readMessageArtifacts(message.metaJson)}
                 content={message.content}
-                dashboardApplyLabel={dashboardApplyLabel}
-                onApplyAppTheme={onApplyAppTheme}
-                onApplyEditorTheme={onApplyEditorTheme}
-                onApplyDashboard={onApplyDashboard}
-                onApplyWorkflow={onApplyWorkflow}
                 onRunSql={onRunSql}
                 onSendToSql={onSendToSql}
-                workflowApplyBusy={workflowApplyBusy}
                 onApprovalSubmit={onApprovalSubmit}
               />
             </div>

@@ -8,6 +8,7 @@ export type RexaMcpLaunchEnv = {
   REXADB_ALLOW_SQL_READ: string;
   REXADB_ALLOW_SQL_WRITE: string;
   REXADB_MODE: string;
+  REXADB_STUDIO_ARTIFACT_FILE?: string;
 };
 
 export type RexaMcpServerConfig = {
@@ -29,6 +30,7 @@ export function buildRexaMcpEnv(input: {
   dbType: string;
   connectionName?: string;
   appMode: RexaAgentAppMode;
+  studioArtifactFile?: string;
 }): RexaMcpLaunchEnv {
   return {
     REXADB_CONNECTION_STRING: input.connectionString,
@@ -37,6 +39,7 @@ export function buildRexaMcpEnv(input: {
     REXADB_ALLOW_SQL_READ: input.appMode.allowSqlRead ? "1" : "0",
     REXADB_ALLOW_SQL_WRITE: input.appMode.allowSqlWrite ? "1" : "0",
     REXADB_MODE: input.appMode.id,
+    ...(input.studioArtifactFile ? { REXADB_STUDIO_ARTIFACT_FILE: input.studioArtifactFile } : {}),
   };
 }
 
@@ -44,16 +47,30 @@ export function buildRexaMcpEnv(input: {
  * ACP / Claude-compatible MCP server descriptor for a single agent turn.
  * Uses `bun` to run the TypeScript entry directly.
  */
+function isCompiledSidecar(): boolean {
+  return /rexadb-server(?:-|\.|$)/i.test(process.execPath.split(/[\\/]/).pop() || "");
+}
+
+/** Shell command for CLIs without MCP; callers append a tool name and pipe its JSON arguments. */
+export function buildStudioToolCommand(cwd = process.cwd()): string {
+  const parts = isCompiledSidecar()
+    ? [process.execPath, "--agent-studio-tool"]
+    : [process.execPath.includes("bun") ? process.execPath : "bun", "run", join(cwd, "lib/agents/mcp/studio-tool-cli.ts")];
+  return parts.map((part) => JSON.stringify(part)).join(" ");
+}
+
 export function buildRexaMcpServerConfig(input: {
   connectionString: string;
   dbType: string;
   connectionName?: string;
   appMode: RexaAgentAppMode;
   cwd?: string;
+  /** Enables chat-only studio tools; they append results to this JSONL file. */
+  studioArtifactFile?: string;
 }): RexaMcpServerConfig {
   // Compiled desktop sidecars include the MCP entry; no external Bun or .ts
   // sources are available in an installed app.
-  const compiled = /rexadb-server(?:-|\.|$)/i.test(process.execPath.split(/[\\/]/).pop() || "");
+  const compiled = isCompiledSidecar();
   const entry = getRexaMcpEntryPath(input.cwd);
   return {
     name: "rexadb",

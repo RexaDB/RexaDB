@@ -8,9 +8,11 @@
  *   REXADB_ALLOW_SQL_READ=1|0
  *   REXADB_ALLOW_SQL_WRITE=1|0
  *   REXADB_MODE=rexadb-plan|rexadb-build|…
+ *   REXADB_STUDIO_ARTIFACT_FILE=<path> (chat only: enables dashboard, workflow and theme tools)
  *
  * Run: bun run lib/agents/mcp/stdio.ts
  */
+import { appendFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -19,6 +21,7 @@ import {
   type DbToolsContext,
   type DbToolName,
 } from "../db-tools-core";
+import { registerStudioArtifactTools } from "./studio-artifact-tools";
 
 /**
  * The MCP SDK's `AnySchema` type is `z3.ZodTypeAny | z4.$ZodType`, but zod v4's
@@ -179,6 +182,14 @@ export async function runAgentMcpStdio() {
     },
     async (args: Record<string, unknown>) => run("search_schema", args),
   );
+
+  const artifactFile = process.env.REXADB_STUDIO_ARTIFACT_FILE;
+  if (artifactFile) {
+    registerStudioArtifactTools(server, {
+      dbType: ctx.dbType || "unknown",
+      publish: (artifact) => appendFileSync(artifactFile, `${JSON.stringify(artifact)}\n`),
+    });
+  }
 
   // Log to stderr only — stdout is the MCP JSON-RPC channel.
   console.error(
