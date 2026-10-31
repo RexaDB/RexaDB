@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { SettingRow } from "@/components/studio/settings-view";
 import { Button } from "@/components/ui/button";
 import {
+  APP_ICON_CHANGED_EVENT,
   APP_ICON_PRESETS,
   CUSTOM_APP_ICON_ID,
   getAppIcon,
@@ -23,6 +24,8 @@ function errorMessage(error: unknown) {
 }
 
 export function AppIconSetting() {
+  // Hydration-safe: match SSR (`false`) on first render, resolve after mount.
+  const [isDesktop, setIsDesktop] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [customUrl, setCustomUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,8 +40,11 @@ export function AppIconSetting() {
 
   useEffect(() => {
     if (!isDesktopRuntime()) return;
+    setIsDesktop(true);
     let cancelled = false;
-    void (async () => {
+    let unlisten: (() => void) | undefined;
+
+    const refresh = async () => {
       try {
         const state = await getAppIcon();
         if (cancelled) return;
@@ -50,9 +56,20 @@ export function AppIconSetting() {
       } catch (error) {
         console.error("Could not read the app icon", error);
       }
+    };
+
+    void refresh();
+    // The icon is shared by every window, and any of them can change it.
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const stop = await listen(APP_ICON_CHANGED_EVENT, () => void refresh());
+      if (cancelled) stop();
+      else unlisten = stop;
     })();
+
     return () => {
       cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -64,7 +81,7 @@ export function AppIconSetting() {
   );
 
   const choose = async (id: string) => {
-    if (busy || id === selected) return;
+    if (busy) return;
     setBusy(true);
     try {
       await setAppIcon(id);
@@ -91,8 +108,9 @@ export function AppIconSetting() {
     }
   };
 
-  if (selected === null) return null;
+  if (!isDesktop) return null;
 
+  const disabled = busy || selected === null;
   const tileClass = (active: boolean) =>
     cn(
       "flex h-10 w-10 items-center justify-center overflow-hidden rounded-md border-2 transition-colors disabled:opacity-60",
@@ -113,7 +131,7 @@ export function AppIconSetting() {
             title={preset.label}
             aria-label={preset.label}
             aria-pressed={selected === preset.id}
-            disabled={busy}
+            disabled={disabled}
             className={tileClass(selected === preset.id)}
             onClick={() => void choose(preset.id)}
           >
@@ -126,7 +144,7 @@ export function AppIconSetting() {
             title="Custom"
             aria-label="Custom"
             aria-pressed={selected === CUSTOM_APP_ICON_ID}
-            disabled={busy}
+            disabled={disabled}
             className={tileClass(selected === CUSTOM_APP_ICON_ID)}
             onClick={() => void choose(CUSTOM_APP_ICON_ID)}
           >
@@ -137,7 +155,7 @@ export function AppIconSetting() {
           type="button"
           variant="outline"
           className="ml-1 h-8 gap-1 px-2.5 text-xs"
-          disabled={busy}
+          disabled={disabled}
           onClick={() => fileInput.current?.click()}
         >
           <Plus className="h-3 w-3" />

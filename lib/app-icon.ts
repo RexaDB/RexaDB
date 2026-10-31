@@ -6,6 +6,7 @@ export const APP_ICON_PRESETS = [
 ] as const;
 
 export const CUSTOM_APP_ICON_ID = "custom";
+export const APP_ICON_CHANGED_EVENT = "app-icon-changed";
 
 const ICON_SIZE = 1024;
 // The macOS Dock draws an icon as given, so a custom image has to carry the

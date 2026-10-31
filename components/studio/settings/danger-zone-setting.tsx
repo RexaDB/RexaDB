@@ -158,6 +158,9 @@ export function DangerZoneSetting() {
       );
       // Server-side normalizer refills pinned provider defaults (empty keys).
       await runStep("AI providers", () => saveGlobalAiSettings({}));
+      if (isDesktopRuntime()) {
+        await runStep("App icon", () => setAppIcon("default"));
+      }
 
       // 2. Per-connection workspace content. Tabs, dashboards, notes, and
       // friends also live in backend SQLite — clearing browser storage alone
@@ -230,13 +233,6 @@ export function DangerZoneSetting() {
         await clearAllStudioData();
       } catch {
         /* best-effort */
-      }
-      if (isDesktopRuntime()) {
-        try {
-          await setAppIcon("default");
-        } catch {
-          /* best-effort */
-        }
       }
 
       clearBrowserStorage();

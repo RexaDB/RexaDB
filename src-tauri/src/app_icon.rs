@@ -12,8 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::image::Image;
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Webview};
+use tauri::{AppHandle, Emitter, Webview};
 
+const CHANGED_EVENT: &str = "app-icon-changed";
 const DEFAULT_ID: &str = "default";
 const CUSTOM_ID: &str = "custom";
 const SELECTION_FILE: &str = "selection";
@@ -148,6 +149,7 @@ pub fn set_app_icon(app: AppHandle, id: String) -> Result<(), String> {
     }
     write_selection(&dir, &id)?;
     apply(&app, icon_bytes(&dir, &id));
+    let _ = app.emit(CHANGED_EVENT, ());
     Ok(())
 }
 
@@ -179,6 +181,7 @@ pub fn set_custom_app_icon(app: AppHandle, request: Request<'_>) -> Result<(), S
     fs::write(dir.join(CUSTOM_FILE), bytes).map_err(|e| e.to_string())?;
     write_selection(&dir, CUSTOM_ID)?;
     apply(&app, Some(bytes.clone()));
+    let _ = app.emit(CHANGED_EVENT, ());
     Ok(())
 }
 
