@@ -1,5 +1,6 @@
 mod dictionary;
 mod app_database;
+mod app_icon;
 mod app_update;
 mod rexadb_studio;
 mod spacetimedb;
@@ -1088,6 +1089,11 @@ pub fn run() {
                 focus_main_window(app);
             }
         }))
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                app_icon::apply_to_new_window(webview);
+            }
+        })
         .setup(|app| {
             #[cfg(target_os = "linux")]
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -1112,6 +1118,7 @@ pub fn run() {
 
             let data_dir = get_app_data_dir(app.handle());
             fs::create_dir_all(&data_dir).ok();
+            app_icon::apply_saved(app.handle());
             spawn_sidecar(app.handle());
 
             // Auto-install the `rexadb` terminal command (symlink + PATH).
@@ -1188,6 +1195,10 @@ pub fn run() {
             dictionary::dictionary_set_decorator,
             dictionary::dictionary_delete_scope,
             app_database::app_database_list_connections,
+            app_icon::get_app_icon,
+            app_icon::set_app_icon,
+            app_icon::get_custom_app_icon,
+            app_icon::set_custom_app_icon,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

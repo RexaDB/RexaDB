@@ -1,5 +1,7 @@
 "use client";
 
+import { setAppIcon } from "@/lib/app-icon";
+import { isDesktopRuntime } from "@/lib/desktop";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "@/lib/icon-theme/lucide-react";
@@ -156,6 +158,9 @@ export function DangerZoneSetting() {
       );
       // Server-side normalizer refills pinned provider defaults (empty keys).
       await runStep("AI providers", () => saveGlobalAiSettings({}));
+      if (isDesktopRuntime()) {
+        await runStep("App icon", () => setAppIcon("default"));
+      }
 
       // 2. Per-connection workspace content. Tabs, dashboards, notes, and
       // friends also live in backend SQLite — clearing browser storage alone
@@ -287,6 +292,7 @@ export function DangerZoneSetting() {
           <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
             <li>Appearance, editor, grid, tab, and behavior preferences</li>
             <li>Custom app, editor, and icon themes</li>
+            <li>App icon</li>
             <li>Keybindings and AI provider settings (including API keys)</li>
             <li>
               Per-connection content: open tabs, dashboards, notes, snippets,
