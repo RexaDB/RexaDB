@@ -4,7 +4,12 @@ import {
   dbTypeToProvider,
   deriveOpenConnectionName,
   shouldUpdateStoredCredentials,
+  studioPathForConnection,
 } from "../../lib/desktop-open";
+
+test("studioPathForConnection uses the route that exists for timestamp ids", () => {
+  assert.equal(studioPathForConnection(1792860670147), "/studio?id=1792860670147");
+});
 
 test("dbTypeToProvider maps UI provider ids", () => {
   assert.equal(dbTypeToProvider("postgres"), "postgresql");

@@ -40,12 +40,12 @@ export function DesktopOpenHandler() {
       try {
         while (queueRef.current.length > 0 && !cancelled) {
           const target = queueRef.current.shift() as string;
-          const { openDatabaseTarget } = await import("@/lib/desktop-open");
+          const { openDatabaseTarget, studioPathForConnection } = await import("@/lib/desktop-open");
           const result = await openDatabaseTarget(target);
           if (cancelled) return;
           if (result.success && result.id != null) {
             if (result.name) toast.success(`Opened ${result.name}`);
-            router.push(`/studio/${result.id}`);
+            router.push(studioPathForConnection(result.id));
           } else {
             toast.error("Could not open database", {
               description: result.error || "Unknown error",
