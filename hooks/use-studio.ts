@@ -69,7 +69,7 @@ import { normalizeJsonColumnValue } from "@/lib/studio/data-utils";
 import { isDatabaseTabType, TAB_TYPE_TO_DATABASE_VIEW } from "@/lib/studio/tab-types";
 import { getViewMode, getTabConfig } from "@/lib/studio/tab-registry";
 import { useSidebarDatabaseObjects } from "./use-sidebar-database-objects";
-import { databaseObjectKey, type DatabaseObjectDetail } from "@/lib/studio/database-objects";
+import { databaseObjectKey, isRestorableTab, type DatabaseObjectDetail } from "@/lib/studio/database-objects";
 import { useInitialStudioData } from "./use-initial-studio-data";
 import { useStudioTagSync } from "./use-studio-tag-sync";
 import { useSchemaDataLoader } from "./use-schema-data-loader";
@@ -602,7 +602,7 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
         const storageKey = `rexa-db-tabs-${propConnection.id}`;
         try {
           const cached = window.localStorage.getItem(storageKey);
-          if (cached) return JSON.parse(cached);
+          if (cached) return JSON.parse(cached).filter(isRestorableTab);
         } catch {}
       }
     }

@@ -1,3 +1,5 @@
+import { quotePgIdentifier } from "@/lib/db/quote-identifier";
+
 export type DatabaseObjectKind =
   | "function"
   | "procedure"
@@ -14,6 +16,8 @@ export interface DatabaseObjectDetail {
   kind: DatabaseObjectKind;
   schema: string;
   name: string;
+  /** Table a trigger belongs to; trigger names are only unique per table. */
+  parent?: string;
   /** Distinguishes overloads, e.g. the argument list of a function. */
   signature?: string;
   definition: string;
@@ -79,7 +83,7 @@ function triggerDetails(rows: any[]): DatabaseObjectDetail[] {
   // information_schema.triggers has one row per event of the same trigger.
   const byTrigger = new Map<string, { row: any; events: string[] }>();
   for (const row of rows) {
-    const key = `${row.table_name ?? row.table ?? ""}.${row.name}`;
+    const key = JSON.stringify([row.table_name ?? row.table ?? "", row.name]);
     const entry = byTrigger.get(key) ?? { row, events: [] };
     entry.events.push(...String(row.event ?? "").split(",").map((event) => event.trim()).filter(Boolean));
     byTrigger.set(key, entry);
@@ -88,7 +92,7 @@ function triggerDetails(rows: any[]): DatabaseObjectDetail[] {
     kind: "trigger" as const,
     schema: row.schema,
     name: row.name,
-    signature: undefined,
+    parent: row.table_name ?? row.table ?? undefined,
     definition: row.full_definition || row.definition || "",
     metadata: metadata([
       ["Table", row.table_name ?? row.table],
@@ -101,7 +105,7 @@ function triggerDetails(rows: any[]): DatabaseObjectDetail[] {
 function sequenceDefinition(row: any) {
   if (row.start_value === undefined) return "";
   return [
-    `CREATE SEQUENCE "${row.schema}"."${row.name}"`,
+    `CREATE SEQUENCE ${quotePgIdentifier(row.schema)}.${quotePgIdentifier(row.name)}`,
     `  AS ${row.data_type}`,
     `  INCREMENT BY ${row.increment_by}`,
     `  MINVALUE ${row.min_value}`,
@@ -134,7 +138,7 @@ function enumDetail(row: any): DatabaseObjectDetail {
     schema: row.schema,
     name: row.name,
     definition: [
-      `CREATE TYPE "${row.schema}"."${row.name}" AS ENUM (`,
+      `CREATE TYPE ${quotePgIdentifier(row.schema)}.${quotePgIdentifier(row.name)} AS ENUM (`,
       values.map((value) => `  '${value.replace(/'/g, "''")}'`).join(",\n"),
       ");",
     ].join("\n"),
@@ -157,7 +161,7 @@ function indexDetail(row: any): DatabaseObjectDetail {
 }
 
 function rowInSchema(row: any, schema: string) {
-  return !row.schema || String(row.schema).toUpperCase() === schema.toUpperCase();
+  return !row.schema || String(row.schema) === schema;
 }
 
 /** The non-empty object groups of a schema, in sidebar order. */
@@ -238,18 +242,57 @@ export function buildDatabaseObjectSections(
 }
 
 export function databaseObjectKey(object: DatabaseObjectDetail) {
-  return `${object.kind}:${object.schema}.${object.name}(${object.signature ?? ""})`;
+  return JSON.stringify([object.kind, object.schema, object.parent ?? "", object.name, object.signature ?? ""]);
 }
 
 /**
- * Points a `CREATE FUNCTION` statement at a new routine name. Only the text
- * before the argument list is touched, and the schema is skipped by taking the
- * last match, so a schema named like the routine stays intact.
+ * Object tabs hold a snapshot of the object, which only local storage keeps.
+ * Tabs restored without one have nothing to show, so they are left out.
+ */
+export function isRestorableTab(tab: { type: string; databaseObject?: unknown }) {
+  return tab.type !== "database-object" || Boolean(tab.databaseObject);
+}
+
+const ROUTINE_HEADER = /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\s+/i;
+
+/** Reads a bare or double-quoted identifier starting at `start`. */
+function readIdentifier(sql: string, start: number) {
+  if (sql[start] !== '"') {
+    const bare = /^[^\s."(]+/.exec(sql.slice(start))?.[0];
+    return bare ? { start, end: start + bare.length, value: bare, quoted: false } : null;
+  }
+  let value = "";
+  for (let index = start + 1; index < sql.length; index++) {
+    if (sql[index] !== '"') {
+      value += sql[index];
+    } else if (sql[index + 1] === '"') {
+      value += '"';
+      index++;
+    } else {
+      return { start, end: index + 1, value, quoted: true };
+    }
+  }
+  return null;
+}
+
+/**
+ * Points a Postgres `CREATE FUNCTION` statement at a new routine name. Returns
+ * null unless the statement's routine name is exactly `name`, so a caller never
+ * ends up saving a statement that still targets the original routine.
  */
 export function renameRoutineDefinition(definition: string, name: string, newName: string) {
-  const argumentsStart = definition.indexOf("(");
-  const header = argumentsStart === -1 ? definition : definition.slice(0, argumentsStart);
-  const nameStart = header.lastIndexOf(name);
-  if (nameStart === -1) return definition;
-  return definition.slice(0, nameStart) + newName + definition.slice(nameStart + name.length);
+  const header = ROUTINE_HEADER.exec(definition);
+  if (!header) return null;
+
+  let identifier = readIdentifier(definition, header[0].length);
+  while (identifier) {
+    const dot = /^\s*\.\s*/.exec(definition.slice(identifier.end));
+    if (!dot) break;
+    identifier = readIdentifier(definition, identifier.end + dot[0].length);
+  }
+  if (!identifier || identifier.value !== name) return null;
+
+  const replacement =
+    !identifier.quoted && /^[a-z_][a-z0-9_$]*$/.test(newName) ? newName : quotePgIdentifier(newName);
+  return definition.slice(0, identifier.start) + replacement + definition.slice(identifier.end);
 }

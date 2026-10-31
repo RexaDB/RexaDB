@@ -262,6 +262,23 @@ export async function getViews(connectionString: string, schema: string) {
   return result.rows.map((r) => String((r as any).name || ""));
 }
 
+/** The characteristics recreating a routine needs to keep its behavior. */
+export function mysqlRoutineCharacteristics(row: {
+  is_deterministic?: string;
+  data_access?: string;
+  security_type?: string;
+  comment?: string;
+}) {
+  return [
+    row.is_deterministic === "YES" ? "DETERMINISTIC" : "NOT DETERMINISTIC",
+    ...(row.data_access ? [row.data_access] : []),
+    ...(row.security_type ? [`SQL SECURITY ${row.security_type}`] : []),
+    ...(row.comment
+      ? [`COMMENT '${row.comment.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`]
+      : []),
+  ];
+}
+
 export async function getRoutines(connectionString: string, schema: string) {
   const routines = await executeMysqlQuery(
     connectionString,
@@ -273,6 +290,8 @@ export async function getRoutines(connectionString: string, schema: string) {
       DTD_IDENTIFIER AS return_type,
       ROUTINE_DEFINITION AS body,
       IS_DETERMINISTIC AS is_deterministic,
+      SQL_DATA_ACCESS AS data_access,
+      ROUTINE_COMMENT AS comment,
       SECURITY_TYPE AS security_type,
       DEFINER AS owner
     FROM information_schema.ROUTINES
@@ -326,7 +345,11 @@ export async function getRoutines(connectionString: string, schema: string) {
       language: "SQL",
       // ROUTINE_DEFINITION is null without SHOW_ROUTINE/CREATE ROUTINE access.
       definition: row.body
-        ? `CREATE ${type} ${quoteMysqlIdentifier(row.name)}(${args})${returns}\n${row.body}`
+        ? [
+            `CREATE ${type} ${quoteMysqlIdentifier(row.name)}(${args})${returns}`,
+            ...mysqlRoutineCharacteristics(row),
+            row.body,
+          ].join("\n")
         : "",
       volatility: row.is_deterministic === "YES" ? "DETERMINISTIC" : "NOT DETERMINISTIC",
       security_definer: row.security_type === "DEFINER",

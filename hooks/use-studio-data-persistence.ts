@@ -143,7 +143,7 @@ export function useStudioDataPersistence({
     if (tabsDidMountRef.current) {
       if (tabsSaveTimeoutRef.current) clearTimeout(tabsSaveTimeoutRef.current);
       tabsSaveTimeoutRef.current = setTimeout(() => {
-        queueStudioSave("tabs", openTabs.map((t, index) => ({
+        queueStudioSave("tabs", openTabs.filter((t) => t.type !== "database-object").map((t, index) => ({
           id: t.id,
           type: t.type,
           name: t.name,

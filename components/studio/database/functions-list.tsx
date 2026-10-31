@@ -25,6 +25,7 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import { Input } from "@/components/ui/input";
 import { useEffect, useState, useMemo } from "react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -319,12 +320,12 @@ export function FunctionsList({
                   onClick={() => {
                     if (readOnlyRoutines) return;
                     const name = `${fn.name}_duplicate`;
-                    openFunctionViewer({
-                      ...fn,
-                      name,
-                      definition: renameRoutineDefinition(fn.definition || "", fn.name, name),
-                      isDuplicate: true,
-                    });
+                    const definition = renameRoutineDefinition(fn.definition || "", fn.name, name);
+                    if (definition === null) {
+                      toast.error(`Could not duplicate ${fn.name}: its definition could not be renamed.`);
+                      return;
+                    }
+                    openFunctionViewer({ ...fn, name, definition, isDuplicate: true });
                   }}
                 >
                   <Copy size={14} />

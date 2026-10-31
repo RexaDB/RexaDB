@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 // services
 import { getStudioBootstrap } from "@/lib/api/actions-client";
+import { isRestorableTab } from "@/lib/studio/database-objects";
 
 // types
 import type { Connection } from "@/lib/db/schema";
@@ -47,7 +48,7 @@ export function useStudioBootstrap(connectionId: number | null, requestedSchema:
               name: String(tab.name),
               schema: tab.schema || undefined,
               query: tab.query || undefined,
-            }))
+            })).filter(isRestorableTab)
           : [];
         const activeTabId = bootstrap?.settings?.activeTabId ? String(bootstrap.settings.activeTabId) : null;
         setInitialUiState({
