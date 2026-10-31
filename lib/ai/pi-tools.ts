@@ -18,8 +18,20 @@ import { executeRedisCommand } from "@/lib/db/redis-client";
 import { buildDashboardRef } from "@/lib/ai/dashboard-refs";
 import { createStudioTagTools } from "@/lib/ai/studio-tag-tools";
 import type { AgentWorkflowContext, LightDashboardContext } from "@/lib/ai/types";
-import { parseAppThemeJson, BUILTIN_APP_THEMES, type CustomAppTheme } from "@/lib/studio/app-themes";
-import { parseThemeJson, createThemeId, type CustomEditorTheme } from "@/lib/studio/editor-themes";
+import { BUILTIN_APP_THEMES, type CustomAppTheme } from "@/lib/studio/app-themes";
+import type { CustomEditorTheme } from "@/lib/studio/editor-themes";
+import {
+  APP_COLOR_KEYS_DESCRIPTION,
+  DASHBOARD_WIDGET_TYPES,
+  describeStudioArtifact,
+  prepareAppThemeArtifact,
+  prepareDashboardArtifact,
+  prepareEditorThemeArtifact,
+  prepareWorkflowArtifact,
+  type DashboardArtifactInput,
+  type StudioArtifact,
+} from "@/lib/ai/studio-artifacts";
+import { normalizeWorkflowPlan } from "@/lib/workflows/agent-plan";
 import {
   getGlobalAppThemeSettings,
   saveGlobalAppThemeSettings,
@@ -51,8 +63,10 @@ export type PiToolContext = {
   notifyStudioTagsChanged?: () => void;
   /** Exa web-search key (Settings → AI → Web search). Tools report a setup hint when missing. */
   exaApiKey?: string | null;
-  /** Persist a new workflow row; injected server-side so create_workflow is durable. */
-  persistWorkflow?: (input: { name: string; description?: string }) => Promise<{
+  /** True when a studio client is listening and applies artifacts from the stream. */
+  studioChat?: boolean;
+  /** Saves workflows on the server for sessions without a studio client (Agents). */
+  persistWorkflow?: (input: { name: string; nodes: unknown[]; edges: unknown[] }) => Promise<{
     id: string;
     name: string;
   }>;
@@ -61,6 +75,13 @@ export type PiToolContext = {
 function textResult(data: unknown): AgentToolResult<unknown> {
   const text = JSON.stringify(data ?? null);
   return { content: [{ type: "text", text }], details: (data as JsonValue) ?? null };
+}
+
+function artifactResult(artifact: StudioArtifact): AgentToolResult<unknown> {
+  return {
+    content: [{ type: "text", text: describeStudioArtifact(artifact) }],
+    details: { artifact } as unknown as JsonValue,
+  };
 }
 
 function failTool(error: unknown): never {
@@ -104,53 +125,37 @@ function resolveDashboardRef(ref: string, dashboards: LightDashboardContext[]) {
   return bySlug || null;
 }
 
-const APP_COLOR_KEYS_DESCRIPTION = [
-  "YOU MUST INCLUDE ALL of the following CSS variables. Use this as a complete template:",
-  "{",
-  '  "--background": "<page bg>",',
-  '  "--foreground": "<body text>",',
-  '  "--card": "<card bg>",',
-  '  "--card-foreground": "<card text>",',
-  '  "--popover": "<popover bg>",',
-  '  "--popover-foreground": "<popover text>",',
-  '  "--primary": "<accent color>",',
-  '  "--primary-foreground": "<text on primary>",',
-  '  "--secondary": "<secondary bg>",',
-  '  "--secondary-foreground": "<text on secondary>",',
-  '  "--muted": "<muted bg>",',
-  '  "--muted-foreground": "<muted text>",',
-  '  "--accent": "<accent bg>",',
-  '  "--accent-foreground": "<text on accent>",',
-  '  "--destructive": "<danger color>",',
-  '  "--border": "<dividers>",',
-  '  "--input": "<input bg>",',
-  '  "--ring": "<focus ring>",',
-  '  "--chart-1": "<chart color>",',
-  '  "--chart-2": "<chart color>",',
-  '  "--chart-3": "<chart color>",',
-  '  "--chart-4": "<chart color>",',
-  '  "--sidebar": "<sidebar bg>",',
-  '  "--sidebar-foreground": "<sidebar text>",',
-  '  "--sidebar-primary": "<sidebar accent>",',
-  '  "--sidebar-primary-foreground": "<text>",',
-  '  "--sidebar-accent": "<sidebar hover>",',
-  '  "--sidebar-accent-foreground": "<text>",',
-  '  "--sidebar-border": "<dividers>",',
-  '  "--sidebar-ring": "<focus ring>",',
-  '  "--studio-bg": "<editor bg>",',
-  '  "--studio-border": "<editor borders>",',
-  '  "--studio-header-bg": "<header bg>",',
-  '  "--table-header-bg": "<header bg>",',
-  '  "--studio-cell-text": "<cell text>",',
-  '  "--studio-cell-muted": "<muted cell text>",',
-  '  "--studio-tab-active": "<active tab>",',
-  '  "--studio-tab-inactive": "<inactive tab>",',
-  '  "--studio-row-hover": "<row hover>",',
-  '  "--studio-selection": "<selection (use rgba)>",',
-  '  "--studio-accent-purple": "<purple accent>"',
-  "}",
-  "FAILING TO INCLUDE ALL OF THESE WILL RESULT IN AN INCOMPLETE THEME.",
-].join("\n");
+const STUDIO_CHAT_ONLY = "This is only available from the Studio AI chat.";
+
+const dashboardWidgetsParameter = Type.Array(
+  Type.Object({
+    title: Type.String(),
+    type: Type.Union(DASHBOARD_WIDGET_TYPES.map((type) => Type.Literal(type))),
+    query: Type.Optional(Type.String({ description: "Read-only query. Required for every type except text." })),
+    tintColor: Type.Optional(Type.String({ description: "Hex color" })),
+    xLabel: Type.Optional(Type.String()),
+    yLabel: Type.Optional(Type.String()),
+    valueFormat: Type.Optional(Type.Union([Type.Literal("number"), Type.Literal("compact")])),
+    showChange: Type.Optional(Type.Boolean()),
+    colorByChange: Type.Optional(Type.Boolean()),
+    template: Type.Optional(Type.String({ description: "Text widget template with {{column}} placeholders" })),
+  }),
+  { minItems: 1 },
+);
+
+const workflowGraphParameters = {
+  name: Type.String({ description: "Workflow name" }),
+  nodes: Type.Array(
+    Type.Object({
+      id: Type.String(),
+      type: Type.String({ description: "Node type from the catalog" }),
+      name: Type.String(),
+      config: Type.Record(Type.String(), Type.Unknown()),
+    }),
+    { minItems: 1 },
+  ),
+  edges: Type.Array(Type.Object({ id: Type.String(), source: Type.String(), target: Type.String() })),
+};
 
 function readArrayFromDb<T>(data: unknown, key: string, validator: (item: unknown) => item is T): T[] {
   if (!data || typeof data !== "object") return [];
@@ -298,46 +303,84 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
     defineTool({
       name: "create_workflow",
       label: "Create workflow",
-      description: "Create a new workflow with a given name and optional starting nodes.",
-      promptSnippet: "create_workflow - create a new workflow with the specified name",
+      description: "Create a workflow in RexaDB Studio.",
+      promptSnippet: "create_workflow - create a workflow from nodes and edges",
+      parameters: Type.Object(workflowGraphParameters),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Creating workflow "${params.name}"`);
+        try {
+          const artifact = prepareWorkflowArtifact(params);
+          if (context.studioChat) return artifactResult(artifact);
+          if (!context.persistWorkflow || artifact.kind !== "workflow") {
+            failTool("Workflow persistence is unavailable for this session (missing connection).");
+          }
+          const { nodes, edges } = normalizeWorkflowPlan(artifact.plan, { mode: "create" });
+          const persisted = await context.persistWorkflow({ name: params.name, nodes, edges });
+          return textResult({ workflow: persisted, message: `Workflow "${persisted.name}" created (id: ${persisted.id}).` });
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "update_workflow",
+      label: "Update workflow",
+      description: "Replace the nodes and edges of an existing workflow.",
+      promptSnippet: "update_workflow - replace an existing workflow's nodes and edges",
       parameters: Type.Object({
-        name: Type.String({ description: "Workflow name" }),
-        description: Type.Optional(Type.String({ description: "Workflow description" })),
+        workflowId: Type.String({ description: "Existing workflow id" }),
+        ...workflowGraphParameters,
       }),
       execute: async (toolCallId, params) => {
-        const name = String(params.name || "").trim();
-        if (!name) failTool("Workflow name is required.");
-        context.emitStep(`Creating workflow "${name}"`);
+        context.emitStep(`Updating workflow "${params.name}"`);
         try {
-          if (!context.persistWorkflow) {
-            failTool(
-              "Workflow persistence is unavailable for this session (missing connection).",
-            );
+          if (!context.studioChat) failTool(STUDIO_CHAT_ONLY);
+          const existing = context.workflowContext?.existing ?? [];
+          if (!existing.some((workflow) => workflow.id === params.workflowId)) {
+            failTool(`Workflow "${params.workflowId}" was not found.`);
           }
-          const persisted = await context.persistWorkflow!({
-            name,
-            description: params.description || "",
-          });
-          const entry = {
-            id: persisted.id,
-            name: persisted.name,
-            nodeCount: 0,
-            nodeTypes: [] as string[],
-          };
-          const existing = context.workflowContext?.existing;
-          if (Array.isArray(existing) && !existing.some((w) => w.id === entry.id)) {
-            existing.push(entry);
-          }
-          return textResult({
-            workflow: {
-              id: persisted.id,
-              name: persisted.name,
-              description: params.description || "",
-              nodes: [],
-              edges: [],
-            },
-            message: `Workflow "${persisted.name}" created successfully (id: ${persisted.id}). You can now add nodes to it using the workflow editor.`,
-          });
+          return artifactResult(prepareWorkflowArtifact(params));
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "create_dashboard",
+      label: "Create dashboard",
+      description: "Create a dashboard in RexaDB Studio.",
+      promptSnippet: "create_dashboard - create a dashboard from widgets",
+      parameters: Type.Object({
+        name: Type.String({ description: "Dashboard name" }),
+        widgets: dashboardWidgetsParameter,
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Creating dashboard "${params.name}"`);
+        try {
+          if (!context.studioChat) failTool(STUDIO_CHAT_ONLY);
+          return artifactResult(prepareDashboardArtifact(params as DashboardArtifactInput, dbType));
+        } catch (error) {
+          failTool(error);
+        }
+      },
+    }),
+    defineTool({
+      name: "update_dashboard",
+      label: "Update dashboard",
+      description: "Add widgets to an existing dashboard or replace widgets that share a type and title.",
+      promptSnippet: "update_dashboard - add or replace widgets on an existing dashboard",
+      parameters: Type.Object({
+        dashboardId: Type.String({ description: "Dashboard id or reference token" }),
+        name: Type.String({ description: "Dashboard name" }),
+        widgets: dashboardWidgetsParameter,
+      }),
+      execute: async (toolCallId, params) => {
+        context.emitStep(`Updating dashboard "${params.name}"`);
+        try {
+          if (!context.studioChat) failTool(STUDIO_CHAT_ONLY);
+          const match = resolveDashboardRef(params.dashboardId, dashboardContext);
+          if (!match) failTool(`Dashboard "${params.dashboardId}" was not found.`);
+          return artifactResult(prepareDashboardArtifact({ ...params, dashboardId: match.id } as DashboardArtifactInput, dbType));
         } catch (error) {
           failTool(error);
         }
@@ -576,37 +619,22 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
       promptSnippet: "create_app_theme - create and persist a custom app color theme",
       parameters: Type.Object({
         name: Type.String({ minLength: 1, description: "Display name for the theme (e.g. 'Ocean Deep', 'Royal Purple')" }),
-        base: Type.Enum({ light: "light", dark: "dark" }, { description: "Base color scheme" }),
+        base: Type.Union([Type.Literal("light"), Type.Literal("dark")], { description: "Base color scheme" }),
         colors: Type.Record(Type.String(), Type.String(), { description: APP_COLOR_KEYS_DESCRIPTION }),
       }),
       execute: async (toolCallId, params) => {
         try {
-          const validateJson = JSON.stringify({ name: params.name, base: params.base, colors: params.colors });
-          const validated = parseAppThemeJson(validateJson);
-          if (validated.error || !validated.theme) {
-            failTool(validated.error || "Invalid theme definition.");
-          }
-
           const existingResult = await getGlobalAppThemeSettings();
           if (!existingResult.success) {
             failTool(existingResult.error || "Failed to read existing themes.");
           }
 
-          const existingIds = resolveExistingAppThemeIds(existingResult.data);
-          const id = createThemeId(params.name, existingIds);
-
-          const theme: CustomAppTheme = {
-            id,
-            name: validated.theme.name,
-            base: validated.theme.base,
-            colors: validated.theme.colors,
-          };
-
-          const existingThemes = readAppThemesFromDb(existingResult.data);
-          const updatedThemes = [theme, ...existingThemes];
+          const artifact = prepareAppThemeArtifact(params, resolveExistingAppThemeIds(existingResult.data));
+          const theme = artifact.theme.theme as CustomAppTheme;
+          const updatedThemes = [theme, ...readAppThemesFromDb(existingResult.data)];
 
           const saveResult = await saveGlobalAppThemeSettings({
-            appThemeId: id,
+            appThemeId: theme.id,
             customAppThemes: JSON.stringify(updatedThemes),
           });
 
@@ -614,13 +642,7 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
             failTool(saveResult.error || "Failed to save theme.");
           }
 
-          return textResult({
-            id: theme.id,
-            name: theme.name,
-            base: theme.base,
-            colors: theme.colors,
-            variableCount: Object.keys(theme.colors).length,
-          });
+          return artifactResult(artifact);
         } catch (error) {
           failTool(error);
         }
@@ -639,30 +661,17 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
       }),
       execute: async (toolCallId, params) => {
         try {
-          const parsed = parseThemeJson(params.themeJson);
-          if (parsed.error) {
-            failTool(parsed.error);
-          }
-
           const existingResult = await getGlobalEditorThemeSettings();
           if (!existingResult.success) {
             failTool(existingResult.error || "Failed to read existing editor themes.");
           }
 
-          const existingIds = resolveExistingEditorThemeIds(existingResult.data);
-          const id = createThemeId(params.name || parsed.name || params.name, existingIds);
-
-          const theme: CustomEditorTheme = {
-            id,
-            name: parsed.name || params.name,
-            themeJson: params.themeJson,
-          };
-
-          const existingThemes = readEditorThemesFromDb(existingResult.data);
-          const updatedThemes = [theme, ...existingThemes];
+          const artifact = prepareEditorThemeArtifact(params, resolveExistingEditorThemeIds(existingResult.data));
+          const theme = artifact.theme.theme as CustomEditorTheme;
+          const updatedThemes = [theme, ...readEditorThemesFromDb(existingResult.data)];
 
           const saveResult = await saveGlobalEditorThemeSettings({
-            editorThemeId: id,
+            editorThemeId: theme.id,
             customEditorThemes: JSON.stringify(updatedThemes),
           });
 
@@ -670,13 +679,7 @@ export function createPiDbTools(context: PiToolContext): ToolDefinition[] {
             failTool(saveResult.error || "Failed to save editor theme.");
           }
 
-          return textResult({
-            id: theme.id,
-            name: theme.name,
-            base: parsed.theme?.base || "vs-dark",
-            ruleCount: (parsed.theme?.rules || []).length,
-            colorCount: Object.keys(parsed.theme?.colors || {}).length,
-          });
+          return artifactResult(artifact);
         } catch (error) {
           failTool(error);
         }

@@ -1,25 +1,20 @@
 "use client";
 
-import { Loader2, PlusSquare, Workflow } from "@/lib/icon-theme/lucide-react";
+import { Check, Workflow } from "@/lib/icon-theme/lucide-react";
 
-import { Button } from "@/components/ui/button";
 import type { AgentWorkflowPlan } from "@/lib/ai/types";
 
 export function AiWorkflowBlock({
   plan,
-  onApplyWorkflow,
-  busy = false,
+  action,
 }: {
   plan: AgentWorkflowPlan;
-  onApplyWorkflow: (plan: AgentWorkflowPlan) => void;
-  busy?: boolean;
+  action: "create" | "update";
 }) {
   const name = plan.name?.trim() || "Untitled Workflow";
   const nodeCount = plan.nodes.length;
   const nodeSummary =
     nodeCount > 0 ? plan.nodes.map((node) => node.type).join(" → ") : "No nodes";
-  const applyLabel = plan.workflowId ? "Update Workflow" : "Create Workflow";
-  const disabled = busy || nodeCount === 0;
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -34,22 +29,12 @@ export function AiWorkflowBlock({
         </span>
       </div>
 
-      <div className="space-y-3 px-3 py-3">
-        <p className="truncate text-xs text-muted-foreground">{nodeSummary}</p>
-
-        <Button
-          className="h-8 gap-1.5 px-3 text-xs"
-          disabled={disabled}
-          onClick={() => onApplyWorkflow(plan)}
-          variant="outline"
-        >
-          {busy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <PlusSquare className="h-3.5 w-3.5" />
-          )}
-          {busy ? "Applying…" : applyLabel}
-        </Button>
+      <div className="flex items-center justify-between gap-3 px-3 py-3 text-xs text-muted-foreground">
+        <p className="truncate">{nodeSummary}</p>
+        <span className="flex shrink-0 items-center gap-1">
+          <Check className="h-3.5 w-3.5" />
+          {action === "update" ? "Updated" : "Created"}
+        </span>
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import { getPiProviderMeta } from "@/lib/ai/pi-provider-catalog";
 import { createPiDbTools, type PiToolContext } from "@/lib/ai/pi-tools";
 import { buildAgentInstructions } from "@/lib/ai/system-prompt";
 import { resolveLanguageModel } from "@/lib/ai/providers";
+import { isStudioArtifact, type StudioArtifact } from "@/lib/ai/studio-artifacts";
 import type {
   AgentChatHistoryMessage,
   AgentWorkflowContext,
@@ -26,6 +27,7 @@ import type {
 export type PiSseEvent =
   | { type: "step"; message: string }
   | { type: "assistant_delta"; message: string }
+  | { type: "artifact"; artifact: StudioArtifact }
   | { type: "tool_start"; tool: string; command: string; toolCallId?: string }
   | { type: "tool_output"; output: string; isError?: boolean; toolCallId?: string }
   | { type: "tool_end"; exitCode: number; toolCallId?: string };
@@ -39,6 +41,7 @@ export type PiAgentInput = {
   permissionMode?: "schema_only" | "schema_with_data";
   connectionString: string;
   connectionId?: number | null;
+  studioChat?: boolean;
   persistWorkflow?: PiToolContext["persistWorkflow"];
   notifyStudioTagsChanged?: PiToolContext["notifyStudioTagsChanged"];
   dbType: string;
@@ -217,6 +220,7 @@ export async function createRexaDbPiSession(input: PiAgentInput): Promise<{ sess
     workflowContext: input.workflowContext,
     emitStep: input.emitStep,
     exaApiKey: input.settings.providers?.["exa"]?.apiKey ?? null,
+    studioChat: input.studioChat,
     persistWorkflow: input.persistWorkflow,
     notifyStudioTagsChanged: input.notifyStudioTagsChanged,
   };
@@ -288,6 +292,7 @@ export async function streamPiResponse(params: {
 
   let fullText = "";
   let lastAssistantError: string | undefined;
+  let artifactCount = 0;
 
   params.session.subscribe((event) => {
     if (params.isAborted?.()) return;
@@ -322,6 +327,11 @@ export async function streamPiResponse(params: {
               .map((part: any) => part.text)
               .join("\n")
           : "";
+        const artifact = event.result?.details?.artifact;
+        if (!event.isError && isStudioArtifact(artifact)) {
+          artifactCount += 1;
+          params.emit({ type: "artifact", artifact });
+        }
         params.emit({ type: "tool_output", output, isError: event.isError, toolCallId: (event as any).toolCallId });
         params.emit({ type: "tool_end", exitCode: event.isError ? 1 : 0, toolCallId: (event as any).toolCallId });
         break;
@@ -339,7 +349,7 @@ export async function streamPiResponse(params: {
       const modelId = params.session.model?.id ?? "unknown";
       throw new Error(`AI request failed: ${lastAssistantError} (model: ${modelId})`);
     }
-    if (!fullText.trim()) {
+    if (!fullText.trim() && artifactCount === 0) {
       const lastAssistant = [...params.session.state.messages]
         .reverse()
         .find((message: any) => message.role === "assistant");

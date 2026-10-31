@@ -8,6 +8,7 @@ export type RexaMcpLaunchEnv = {
   REXADB_ALLOW_SQL_READ: string;
   REXADB_ALLOW_SQL_WRITE: string;
   REXADB_MODE: string;
+  REXADB_STUDIO_ARTIFACT_FILE?: string;
 };
 
 export type RexaMcpServerConfig = {
@@ -29,6 +30,7 @@ export function buildRexaMcpEnv(input: {
   dbType: string;
   connectionName?: string;
   appMode: RexaAgentAppMode;
+  studioArtifactFile?: string;
 }): RexaMcpLaunchEnv {
   return {
     REXADB_CONNECTION_STRING: input.connectionString,
@@ -37,6 +39,7 @@ export function buildRexaMcpEnv(input: {
     REXADB_ALLOW_SQL_READ: input.appMode.allowSqlRead ? "1" : "0",
     REXADB_ALLOW_SQL_WRITE: input.appMode.allowSqlWrite ? "1" : "0",
     REXADB_MODE: input.appMode.id,
+    ...(input.studioArtifactFile ? { REXADB_STUDIO_ARTIFACT_FILE: input.studioArtifactFile } : {}),
   };
 }
 
@@ -50,6 +53,8 @@ export function buildRexaMcpServerConfig(input: {
   connectionName?: string;
   appMode: RexaAgentAppMode;
   cwd?: string;
+  /** Enables chat-only studio tools; they append results to this JSONL file. */
+  studioArtifactFile?: string;
 }): RexaMcpServerConfig {
   // Compiled desktop sidecars include the MCP entry; no external Bun or .ts
   // sources are available in an installed app.

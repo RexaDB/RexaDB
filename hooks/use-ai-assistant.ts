@@ -24,6 +24,7 @@ import type {
   StoredAiChat,
   StoredAiChatMessage,
 } from "@/lib/ai/types";
+import { messageTextForHistory, serializeMessageArtifacts, type StudioArtifact } from "@/lib/ai/studio-artifacts";
 
 function randomId() {
   return Math.random().toString(36).slice(2, 10);
@@ -38,7 +39,10 @@ export function useAiAssistant(input: {
   dashboardContext?: LightDashboardContext[];
   workflowContext?: AgentWorkflowContext;
   userId?: string | null;
+  onArtifact?: (artifact: StudioArtifact) => void;
 }) {
+  const onArtifactRef = useRef(input.onArtifact);
+  useEffect(() => { onArtifactRef.current = input.onArtifact; });
   const [settings, setSettings] = useState<GlobalAiSettings | null>(null);
   const [chats, setChats] = useState<StoredAiChat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -168,7 +172,7 @@ export function useAiAssistant(input: {
       .filter((message) => message.role === "user" || message.role === "assistant")
       .map((message) => ({
         role: message.role as "user" | "assistant",
-        content: message.content,
+        content: messageTextForHistory(message.content, message.metaJson),
       }));
 
     const userMessage: StoredAiChatMessage = {
@@ -242,10 +246,20 @@ export function useAiAssistant(input: {
 
       const reader = response.body.getReader();
       let finalMessage = "";
+      const artifacts: StudioArtifact[] = [];
 
       for await (const payload of readSseStream(reader)) {
         if (payload.type === "studio_tags_changed" && payload.connectionId === input.connectionId) {
           publishStudioTagsChanged(input.connectionId);
+          continue;
+        }
+        if (payload.type === "artifact") {
+          artifacts.push(payload.artifact);
+          const metaJson = serializeMessageArtifacts(artifacts);
+          setMessages((prev) =>
+            prev.map((message) => (message.id === assistantId ? { ...message, metaJson } : message)),
+          );
+          onArtifactRef.current?.(payload.artifact);
           continue;
         }
         if (payload.type === "step") {
@@ -269,7 +283,7 @@ export function useAiAssistant(input: {
               message.id === assistantId ? { ...message, content: payload.message } : message,
             ),
           );
-          const savedMessages = [...messages.filter((m) => m.id !== assistantId), userMessage, { id: assistantId, chatId, role: "assistant" as const, content: payload.message, timestamp: Date.now() }];
+          const savedMessages = [...messages.filter((m) => m.id !== assistantId), userMessage, { id: assistantId, chatId, role: "assistant" as const, content: payload.message, timestamp: Date.now(), metaJson: artifacts.length > 0 ? serializeMessageArtifacts(artifacts) : null }];
           await saveStudioChatMessages(chatId, input.connectionId, savedMessages.find(m => m.role === "user")?.content.slice(0, 80) || "Chat", savedMessages);
           if (payload.type === "error") break;
           continue;
@@ -330,7 +344,7 @@ export function useAiAssistant(input: {
         }
       }
 
-      if (!finalMessage.trim()) {
+      if (!finalMessage.trim() && artifacts.length === 0) {
         throw new Error("The assistant returned an empty response.");
       }
 

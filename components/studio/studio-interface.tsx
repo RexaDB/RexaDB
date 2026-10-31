@@ -99,7 +99,7 @@ export function StudioInterface({
     existing: [],
     current: null,
   });
-  const [workflowApplying, setWorkflowApplying] = useState(false);
+  const [workflowContextVersion, setWorkflowContextVersion] = useState(0);
   const [aiDashboardTarget, setAiDashboardTarget] = useState<{
     mode: "create" | "edit";
     dashboardId?: string;
@@ -465,21 +465,25 @@ export function StudioInterface({
 
   const handleApplyAiDashboard = useCallback(
     (dashboard: any) => {
-      if (aiDashboardTarget.mode === "edit" && aiDashboardTarget.dashboardId) {
-        const nextName = String(
-          dashboard?.title || dashboard?.name || "",
-        ).trim();
+      const targetId =
+        dashboard?.dashboardId ||
+        (aiDashboardTarget.mode === "edit" ? aiDashboardTarget.dashboardId : null);
+      if (targetId) {
+        const nextName = String(dashboard?.name || "").trim();
         const currentDashboard = studio.dashboards.find(
-          (item: any) => item.id === aiDashboardTarget.dashboardId,
+          (item: any) => item.id === targetId,
         );
-        if (!currentDashboard) return;
+        if (!currentDashboard) {
+          toast.error("Dashboard not found");
+          return;
+        }
         if (nextName) {
-          studio.updateDashboard(aiDashboardTarget.dashboardId, {
+          studio.updateDashboard(targetId, {
             name: nextName,
           });
         }
         studio.applyDashboardWidgetLayout(
-          aiDashboardTarget.dashboardId,
+          targetId,
           mergeDashboardWidgetsFromBlock(
             currentDashboard.widgets || [],
             dashboard,
@@ -574,12 +578,10 @@ export function StudioInterface({
     return () => {
       cancelled = true;
     };
-  }, [isAiSheetOpen, studio.activeTabId, studio.connection.id]);
+  }, [isAiSheetOpen, studio.activeTabId, studio.connection.id, workflowContextVersion]);
 
   const handleApplyAiWorkflow = useCallback(
     async (plan: AgentWorkflowPlan) => {
-      if (workflowApplying) return;
-      setWorkflowApplying(true);
       try {
         if (plan.workflowId) {
           let isExisting = false;
@@ -636,10 +638,10 @@ export function StudioInterface({
           error instanceof Error ? error.message : "Failed to apply workflow",
         );
       } finally {
-        setWorkflowApplying(false);
+        setWorkflowContextVersion((version) => version + 1);
       }
     },
-    [studio, workflowApplying],
+    [studio],
   );
 
   useEffect(() => {
@@ -741,8 +743,6 @@ export function StudioInterface({
   }, [aiActiveChatId]);
 
   const aiChatSheetProps = {
-    dashboardApplyLabel:
-      aiDashboardTarget.mode === "edit" ? "Apply Changes" : "Create Dashboard",
     dashboards: studio.dashboards,
     isOpen: isAiSheetOpen,
     initialPrompt: aiInitialPrompt,
@@ -772,7 +772,6 @@ export function StudioInterface({
     onApplyDashboard: handleApplyAiDashboard,
     workflowContext,
     onApplyWorkflow: handleApplyAiWorkflow,
-    workflowApplyBusy: workflowApplying,
     sleek: studio.activeSleekLayout,
     customAppThemes: studio.customAppThemes,
     setCustomAppThemes: studio.setCustomAppThemes,

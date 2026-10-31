@@ -2360,29 +2360,6 @@ async function resolveAiReq(req: any, res: any) {
 }
 
 /** Build the create_workflow persistence hook for AI tools (null when unlinked). */
-function makePersistWorkflow(connectionId: number | null) {
-  if (!connectionId || Number.isNaN(connectionId)) return undefined;
-  return async (input: { name: string; description?: string }) => {
-    const { client } = await getWorkflowDeps();
-    const now = Date.now();
-    const row = {
-      id: workflowId(),
-      connectionId,
-      name: String(input.name || "Untitled Workflow"),
-      description: input.description || null,
-      nodesJson: "[]",
-      edgesJson: "[]",
-      scheduleEnabled: false,
-      scheduleType: null,
-      scheduleValue: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await client.workflows.create({ data: row as any });
-    return { id: row.id, name: row.name };
-  };
-}
-
 function handleSseError(error: any, label: string, res: any) {
   const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
   console.error(`[${label}] error:`, message);
@@ -2395,6 +2372,29 @@ function handleSseError(error: any, label: string, res: any) {
   } else {
     res.status(500).json({ error: message });
   }
+}
+
+function makePersistWorkflow(connectionId: number | null) {
+  if (!connectionId || Number.isNaN(connectionId)) return undefined;
+  return async (input: { name: string; nodes: unknown[]; edges: unknown[] }) => {
+    const { client } = await getWorkflowDeps();
+    const now = Date.now();
+    const row = {
+      id: workflowId(),
+      connectionId,
+      name: String(input.name || "Untitled Workflow"),
+      description: null,
+      nodesJson: JSON.stringify(input.nodes),
+      edgesJson: JSON.stringify(input.edges),
+      scheduleEnabled: false,
+      scheduleType: null,
+      scheduleValue: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await client.workflows.create({ data: row as any });
+    return { id: row.id, name: row.name };
+  };
 }
 
 function setupSsePiAgent(req: any, res: any) {
@@ -2415,6 +2415,9 @@ function setupSsePiAgent(req: any, res: any) {
         break;
       case "assistant_delta":
         res.write(`data: ${JSON.stringify({ type: "assistant_delta", message: event.message })}\n\n`);
+        break;
+      case "artifact":
+        res.write(`data: ${JSON.stringify({ type: "artifact", artifact: event.artifact })}\n\n`);
         break;
       case "tool_start":
         res.write(`data: ${JSON.stringify({ type: "tool_start", tool: "", command: event.command })}\n\n`);
@@ -2458,7 +2461,7 @@ app.post("/api/agent/chat/stream", async (req, res) => {
       permissionMode: permissionMode || "schema_only",
       connectionString,
       connectionId: resolved.connectionId ?? null,
-      persistWorkflow: makePersistWorkflow(resolved.connectionId ?? null),
+      studioChat: true,
       notifyStudioTagsChanged: () => {
         if (!aborted && resolved.connectionId != null) {
           res.write(`data: ${JSON.stringify({ type: "studio_tags_changed", connectionId: resolved.connectionId })}\n\n`);
@@ -2533,6 +2536,7 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
       model,
       permissionMode: permissionMode || "schema_only",
       connectionString,
+      studioChat: true,
       dbType,
       selectedNamespace: namespace,
       schemaContext,
@@ -2548,12 +2552,18 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
     const { session, dispose } = await createRexaDbPiSession(piInput);
 
     let fullText = "";
+    let dashboard: { name: string; widgets: unknown[] } | null = null;
     try {
       fullText = await streamPiResponse({
         session,
         history: [],
         prompt,
-        emit: emitSse,
+        emit: (event) => {
+          if (event.type === "artifact" && event.artifact.kind === "dashboard") {
+            dashboard = event.artifact.dashboard;
+          }
+          emitSse(event);
+        },
         isAborted: () => aborted,
       });
     } finally {
@@ -2561,9 +2571,9 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
     }
 
     if (!aborted) {
-      const dashboardPlan = extractDashboardPlan(fullText);
-      if (dashboardPlan) {
-        res.write(`data: ${JSON.stringify({ type: "result", message: "Dashboard plan generated.", data: dashboardPlan })}\n\n`);
+      if (dashboard) {
+        const data = { ...(dashboard as { name: string; widgets: unknown[] }), assistantMessage: fullText.trim() };
+        res.write(`data: ${JSON.stringify({ type: "result", message: "Dashboard plan generated.", data })}\n\n`);
       } else {
         res.write(`data: ${JSON.stringify({ type: "assistant", message: fullText })}\n\n`);
       }
@@ -2573,22 +2583,6 @@ app.post("/api/agent/generate-dashboard/stream", async (req, res) => {
     handleSseError(error, "agent/generate-dashboard/stream", res);
   }
 });
-
-function extractDashboardPlan(text: string): { name?: string; widgets?: unknown[]; assistantMessage?: string } | null {
-  const match = text.match(/```dashboard\n?([\s\S]*?)```/);
-  const jsonStr = match?.[1]?.trim();
-  if (!jsonStr) return null;
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return {
-      name: parsed.name || parsed.title,
-      widgets: parsed.widgets,
-      assistantMessage: text.replace(/```dashboard[\s\S]*?```/, "").trim(),
-    };
-  } catch {
-    return null;
-  }
-}
 
 app.post("/api/sql/cancel", (req, res) => {
   res.json({ success: true });

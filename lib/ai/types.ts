@@ -1,4 +1,5 @@
 import type { WorkflowEdge, WorkflowNode } from "@/lib/workflows/types";
+import type { StudioArtifact } from "@/lib/ai/studio-artifacts";
 
 /** Providers pinned in the settings UI and given special-cased resolution. */
 export type KnownAgentProvider = "openai" | "google" | "anthropic" | "openrouter" | "kilo" | "ollama" | "external";
@@ -137,6 +138,7 @@ export type AgentStreamEvent =
   | { type: "assistant_delta"; message: string }
   | { type: "assistant_done"; message: string }
   | { type: "error"; message: string }
+  | { type: "artifact"; artifact: StudioArtifact }
   | { type: "studio_tags_changed"; connectionId: number }
   | { type: "tool_start"; tool: string; command: string }
   | { type: "tool_output"; output: string }
