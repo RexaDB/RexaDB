@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildDatabaseObjectSections,
   databaseObjectKey,
+  databaseObjectTabId,
   isRestorableTab,
   renameRoutineDefinition,
 } from "@/lib/studio/database-objects";
@@ -172,6 +173,19 @@ describe("renameRoutineDefinition", () => {
     expect(renameRoutineDefinition("CREATE FUNCTION public.other()", "f", "f_duplicate")).toBeNull();
     expect(renameRoutineDefinition("", "f", "f_duplicate")).toBeNull();
   });
+});
+
+test("object tab IDs stay unique and free of selector and pane delimiters", () => {
+  const object = (name: string) => ({
+    kind: "function" as const,
+    schema: "public",
+    name,
+    definition: "",
+    metadata: [],
+  });
+  const id = databaseObjectTabId(object('a"b::pane::c'));
+  expect(id).toMatch(/^object-[A-Za-z0-9%._~!*'()-]+$/);
+  expect(id).not.toBe(databaseObjectTabId(object("a")));
 });
 
 test("only drops object tabs that have no object", () => {

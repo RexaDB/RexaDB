@@ -496,7 +496,7 @@ export function EditorHeader({
   React.useEffect(() => {
     if (activeTabId && tabsRef.current) {
       const activeTabElement = tabsRef.current.querySelector(
-        `[data-tab-id="${activeTabId}"]`,
+        `[data-tab-id="${CSS.escape(activeTabId)}"]`,
       );
       if (activeTabElement) {
         activeTabElement.scrollIntoView({

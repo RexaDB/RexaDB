@@ -69,7 +69,7 @@ import { normalizeJsonColumnValue } from "@/lib/studio/data-utils";
 import { isDatabaseTabType, TAB_TYPE_TO_DATABASE_VIEW } from "@/lib/studio/tab-types";
 import { getViewMode, getTabConfig } from "@/lib/studio/tab-registry";
 import { useSidebarDatabaseObjects } from "./use-sidebar-database-objects";
-import { databaseObjectKey, isRestorableTab, type DatabaseObjectDetail } from "@/lib/studio/database-objects";
+import { databaseObjectTabId, isRestorableTab, type DatabaseObjectDetail } from "@/lib/studio/database-objects";
 import { useInitialStudioData } from "./use-initial-studio-data";
 import { useStudioTagSync } from "./use-studio-tag-sync";
 import { useSchemaDataLoader } from "./use-schema-data-loader";
@@ -5941,7 +5941,7 @@ END $$;`.trim();
   }, [openSimpleTab]);
 
   const openDatabaseObjectTab = useCallback((object: DatabaseObjectDetail) => {
-    const tabId = `object-${databaseObjectKey(object)}`;
+    const tabId = databaseObjectTabId(object);
     const newTab = { id: tabId, type: "database-object" as const, name: object.name, databaseObject: object };
     const existing = openTabs.some((tab) => tab.id === tabId);
     // Re-opening refreshes the snapshot so the tab shows the latest definition.

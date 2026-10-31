@@ -245,6 +245,11 @@ export function databaseObjectKey(object: DatabaseObjectDetail) {
   return JSON.stringify([object.kind, object.schema, object.parent ?? "", object.name, object.signature ?? ""]);
 }
 
+/** Encoded so object names can't break selectors or the `::pane::` tab ID suffix. */
+export function databaseObjectTabId(object: DatabaseObjectDetail) {
+  return `object-${encodeURIComponent(databaseObjectKey(object))}`;
+}
+
 /**
  * Object tabs hold a snapshot of the object, which only local storage keeps.
  * Tabs restored without one have nothing to show, so they are left out.
