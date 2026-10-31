@@ -194,6 +194,7 @@ export function useAiAssistant(input: {
     setIsSending(true);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const { signal } = abortRef.current;
 
     try {
       const streamUrl = isExternal ? "/api/agent/acp/stream" : "/api/agent/chat/stream";
@@ -216,7 +217,7 @@ export function useAiAssistant(input: {
           lightDashboardContext: input.dashboardContext || [],
           lightWorkflowContext: input.workflowContext || { existing: [], current: null },
         } satisfies AgentChatRequest),
-        signal: abortRef.current.signal,
+        signal,
       });
 
       if (!response.ok) {
@@ -253,6 +254,8 @@ export function useAiAssistant(input: {
       };
 
       for await (const payload of readSseStream(reader)) {
+        // Events from an already-read chunk still arrive after Stop cancels the fetch.
+        signal.throwIfAborted();
         if (payload.type === "studio_tags_changed" && payload.connectionId === input.connectionId) {
           publishStudioTagsChanged(input.connectionId);
           continue;
