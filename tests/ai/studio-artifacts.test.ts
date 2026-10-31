@@ -2,14 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { streamPiResponse } from "../../lib/ai/pi-agent";
 import { createPiDbTools } from "../../lib/ai/pi-tools";
+import { messageTextForHistory, readMessageArtifacts, serializeMessageArtifacts } from "../../lib/ai/studio-artifacts";
 import {
-  messageTextForHistory,
   prepareAppThemeArtifact,
   prepareDashboardArtifact,
+  prepareEditorThemeArtifact,
   prepareWorkflowArtifact,
-  readMessageArtifacts,
-  serializeMessageArtifacts,
-} from "../../lib/ai/studio-artifacts";
+} from "../../lib/ai/studio-artifact-prepare";
 import { buildDashboardWidgetsFromBlock } from "../../lib/ai/dashboard-plan";
 
 const dashboard = { name: "Sales", widgets: [{ title: "Total", type: "metric" as const, query: "SELECT 1 AS value" }] };
@@ -27,7 +26,28 @@ test("dashboard artifacts reject what the model can fix", () => {
   assert.throws(() => prepareDashboardArtifact(withQuery("DELETE FROM users"), "postgres"), /Total/);
   assert.throws(() => prepareDashboardArtifact(withQuery(undefined), "postgres"), /needs a query/);
   assert.throws(() => prepareDashboardArtifact({ name: "Empty", widgets: [] }, "postgres"), /at least one widget/);
-  assert.doesNotThrow(() => prepareDashboardArtifact(withQuery('{"collection":"users"}'), "mongodb"));
+});
+
+test("dashboard artifacts reject Mongo and Redis writes", () => {
+  const withQuery = (query: string) => ({ ...dashboard, widgets: [{ ...dashboard.widgets[0], query }] });
+  for (const query of [
+    '{"collection":"users"}',
+    'db.users.find({}).limit(5)',
+    'db.users.aggregate([{"$group":{"_id":"$plan"}}])',
+    '{"collection":"users","operation":"count"}',
+  ]) assert.doesNotThrow(() => prepareDashboardArtifact(withQuery(query), "mongodb"), query);
+  for (const query of [
+    'db.users.insertOne({"a":1})',
+    'db.users.deleteMany({})',
+    '{"collection":"users","operation":"insertOne","document":{"a":1}}',
+    '{"collection":"users","operation":"dropCollection"}',
+    '{"collection":"users","operation":"aggregate","pipeline":[{"$out":"copy"}]}',
+    '{"collection":"users","operation":"aggregate","pipeline":[{"$merge":{"into":"copy"}}]}',
+  ]) assert.throws(() => prepareDashboardArtifact(withQuery(query), "mongodb"), /read-only|not allowed/, query);
+  assert.doesNotThrow(() => prepareDashboardArtifact(withQuery("get counter"), "redis"));
+  for (const query of ["SET key value", "del key", "FLUSHALL", '"SET" key value']) {
+    assert.throws(() => prepareDashboardArtifact(withQuery(query), "redis"), /read-only Redis/, query);
+  }
 });
 
 test("workflow artifacts report invalid graphs instead of dropping nodes", () => {
@@ -46,6 +66,14 @@ test("workflow artifacts report invalid graphs instead of dropping nodes", () =>
 test("app theme artifacts avoid taken ids", () => {
   const artifact = prepareAppThemeArtifact({ name: "Ocean", base: "dark", colors: { "--background": "#000000" } }, new Set(["ocean"]));
   assert.equal(artifact.theme.theme.id, "ocean-2");
+});
+
+test("themes created without saved ids never reuse an id", () => {
+  const app = () => prepareAppThemeArtifact({ name: "Ocean", base: "dark", colors: { "--background": "#000000" } }).theme.theme.id;
+  const editor = () => prepareEditorThemeArtifact({ name: "Ocean", themeJson: '{"rules":[]}' }).theme.theme.id;
+  assert.notEqual(app(), app());
+  assert.notEqual(editor(), editor());
+  assert.match(app(), /^ocean-[0-9a-f]{8}$/);
 });
 
 test("artifacts survive storage and stay visible to the model", () => {

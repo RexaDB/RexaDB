@@ -6,11 +6,11 @@ import { getLocalCliProviderId } from "../lib/agents/local-provider";
 import { detectProvider } from "../lib/agents/detect-providers";
 import { readServerProviderCache } from "../lib/agents/provider-cache-server";
 import { runHarness } from "../lib/agents/run-harness";
-import { buildRexaMcpServerConfig } from "../lib/agents/mcp/config";
+import { buildRexaMcpServerConfig, buildStudioToolCommand } from "../lib/agents/mcp/config";
 import { REXADB_PLAN_MODE } from "../lib/agents/app-modes";
 import { materializeAgentSandbox } from "../lib/agents/sandbox-cwd";
 import { buildAgentInstructions } from "../lib/ai/system-prompt";
-import { isStudioArtifact } from "../lib/ai/studio-artifacts";
+import { APP_COLOR_KEYS_DESCRIPTION, isStudioArtifact } from "../lib/ai/studio-artifacts";
 import type { AgentChatRequest, AgentStreamEvent } from "../lib/ai/types";
 
 /** The sidebar's permissions never enable database writes, regardless of CLI defaults. */
@@ -18,16 +18,36 @@ export function localChatMode(permissionMode: unknown) {
   return { ...REXADB_PLAN_MODE, allowSqlRead: permissionMode === "schema_with_data", allowSqlWrite: false };
 }
 
-export function localChatPrompt(input: AgentChatRequest): string {
+/** These launchers ignore MCP, so studio tools run through a shell command instead. */
+const SHELL_STUDIO_TOOL_PROVIDERS = new Set<string>(["pi", "fx"]);
+
+export function studioShellToolPrompt(command: string): string {
+  return [
+    "RexaDB MCP tools are not available in this CLI. Do not look for them.",
+    "Run the Studio tools from the shell instead. Pass the tool name as the last argument and its JSON arguments on stdin:",
+    `${command} <tool> <<'JSON'\n{...}\nJSON`,
+    "A failed call exits non-zero and prints what to fix. Do not call a tool successful unless the command succeeded.",
+    "Arguments:",
+    "create_dashboard: {name, widgets: [{title, type, query, tintColor?, xLabel?, yLabel?, valueFormat?, showChange?, colorByChange?, template?}]}",
+    "update_dashboard: the same plus dashboardId from the dashboard context",
+    "create_workflow: {name, nodes: [{id, type, name, config}], edges: [{id, source, target}]}",
+    "update_workflow: the same plus workflowId",
+    `create_app_theme: {name, base: "light"|"dark", colors: {"--variable": "value"}}. Colors:\n${APP_COLOR_KEYS_DESCRIPTION}`,
+    "create_editor_theme: {name, themeJson} where themeJson is a string of VS Code or Monaco theme JSON",
+  ].join("\n");
+}
+
+export function localChatPrompt(input: AgentChatRequest, options: { studioToolCommand?: string } = {}): string {
   const history = (input.history || []).filter((m) => m.role === "user" || m.role === "assistant");
   return [
     buildAgentInstructions({ ...input, schemaContext: input.lightSchemaContext, permissionMode: input.permissionMode || "schema_only", workflowContext: input.lightWorkflowContext }),
     "Use the RexaDB MCP tools for live database access when available. If a tool is unavailable, explain that limitation; never invent query results.",
+    options.studioToolCommand ? studioShellToolPrompt(options.studioToolCommand) : null,
     `Dashboard context: ${JSON.stringify(input.lightDashboardContext || [])}`,
     // Replay only this RexaDB chat, never a CLI's unrelated last session.
     `Previous conversation (JSON): ${JSON.stringify(history)}`,
     `User request:\n${input.prompt}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export async function handleLocalCliChat(req: Request, res: Response): Promise<void> {
@@ -84,9 +104,11 @@ export async function handleLocalCliChat(req: Request, res: Response): Promise<v
     const mcp = input.connectionString ? buildRexaMcpServerConfig({ connectionString: input.connectionString, dbType: input.dbType, appMode: mode, studioArtifactFile: artifactFile }) : undefined;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
+    const shellTools = SHELL_STUDIO_TOOL_PROVIDERS.has(provider);
     await runHarness(provider, {
-      prompt: localChatPrompt(input), model: input.model, cwd,
+      prompt: localChatPrompt(input, shellTools ? { studioToolCommand: buildStudioToolCommand() } : {}), model: input.model, cwd,
       binaryPath: detected.binaryPath, mode: mode.mapsToProviderMode?.[provider], mcp,
+      env: shellTools ? { REXADB_STUDIO_ARTIFACT_FILE: artifactFile, REXADB_DB_TYPE: input.dbType } : undefined,
     }, (event) => {
       switch (event.type) {
         case "text_delta":

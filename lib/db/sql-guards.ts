@@ -43,6 +43,18 @@ export function ensureReadOnlySql(query: string): void {
   }
 }
 
+const READ_ONLY_REDIS_COMMANDS = new Set([
+  "GET", "MGET", "HGET", "HGETALL", "LRANGE", "SMEMBERS", "ZRANGE",
+  "XRANGE", "TYPE", "TTL", "PTTL", "EXISTS", "KEYS", "SCAN", "PING",
+]);
+
+export function ensureReadOnlyRedisCommand(command: string): void {
+  const name = String(command || "").trim().split(/\s+/)[0]?.toUpperCase() || "";
+  if (!READ_ONLY_REDIS_COMMANDS.has(name)) {
+    throw new Error("Only read-only Redis commands are allowed.");
+  }
+}
+
 export function quoteIdentifier(dbType: string, value: string): string {
   if (dbType === "mysql" || dbType === "clickhouse") return `\`${value.replace(/`/g, "``")}\``;
   if (dbType === "mssql") return `[${value.replace(/]/g, "]]")}]`;

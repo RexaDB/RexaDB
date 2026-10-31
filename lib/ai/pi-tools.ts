@@ -24,13 +24,15 @@ import {
   APP_COLOR_KEYS_DESCRIPTION,
   DASHBOARD_WIDGET_TYPES,
   describeStudioArtifact,
+  type DashboardArtifactInput,
+  type StudioArtifact,
+} from "@/lib/ai/studio-artifacts";
+import {
   prepareAppThemeArtifact,
   prepareDashboardArtifact,
   prepareEditorThemeArtifact,
   prepareWorkflowArtifact,
-  type DashboardArtifactInput,
-  type StudioArtifact,
-} from "@/lib/ai/studio-artifacts";
+} from "@/lib/ai/studio-artifact-prepare";
 import { normalizeWorkflowPlan } from "@/lib/workflows/agent-plan";
 import {
   getGlobalAppThemeSettings,

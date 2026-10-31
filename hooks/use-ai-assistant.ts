@@ -247,6 +247,10 @@ export function useAiAssistant(input: {
       const reader = response.body.getReader();
       let finalMessage = "";
       const artifacts: StudioArtifact[] = [];
+      const persistAssistantMessage = (content: string) => {
+        const savedMessages = [...messages.filter((m) => m.id !== assistantId), userMessage, { id: assistantId, chatId, role: "assistant" as const, content, timestamp: Date.now(), metaJson: artifacts.length > 0 ? serializeMessageArtifacts(artifacts) : null }];
+        return saveStudioChatMessages(chatId, input.connectionId, savedMessages.find(m => m.role === "user")?.content.slice(0, 80) || "Chat", savedMessages);
+      };
 
       for await (const payload of readSseStream(reader)) {
         if (payload.type === "studio_tags_changed" && payload.connectionId === input.connectionId) {
@@ -260,6 +264,8 @@ export function useAiAssistant(input: {
             prev.map((message) => (message.id === assistantId ? { ...message, metaJson } : message)),
           );
           onArtifactRef.current?.(payload.artifact);
+          // Stopping skips the final save, and the created item must stay on record.
+          await persistAssistantMessage(finalMessage);
           continue;
         }
         if (payload.type === "step") {
@@ -283,8 +289,7 @@ export function useAiAssistant(input: {
               message.id === assistantId ? { ...message, content: payload.message } : message,
             ),
           );
-          const savedMessages = [...messages.filter((m) => m.id !== assistantId), userMessage, { id: assistantId, chatId, role: "assistant" as const, content: payload.message, timestamp: Date.now(), metaJson: artifacts.length > 0 ? serializeMessageArtifacts(artifacts) : null }];
-          await saveStudioChatMessages(chatId, input.connectionId, savedMessages.find(m => m.role === "user")?.content.slice(0, 80) || "Chat", savedMessages);
+          await persistAssistantMessage(payload.message);
           if (payload.type === "error") break;
           continue;
         }

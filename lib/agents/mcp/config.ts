@@ -47,6 +47,18 @@ export function buildRexaMcpEnv(input: {
  * ACP / Claude-compatible MCP server descriptor for a single agent turn.
  * Uses `bun` to run the TypeScript entry directly.
  */
+function isCompiledSidecar(): boolean {
+  return /rexadb-server(?:-|\.|$)/i.test(process.execPath.split(/[\\/]/).pop() || "");
+}
+
+/** Shell command for CLIs without MCP; callers append a tool name and pipe its JSON arguments. */
+export function buildStudioToolCommand(cwd = process.cwd()): string {
+  const parts = isCompiledSidecar()
+    ? [process.execPath, "--agent-studio-tool"]
+    : [process.execPath.includes("bun") ? process.execPath : "bun", "run", join(cwd, "lib/agents/mcp/studio-tool-cli.ts")];
+  return parts.map((part) => JSON.stringify(part)).join(" ");
+}
+
 export function buildRexaMcpServerConfig(input: {
   connectionString: string;
   dbType: string;
@@ -58,7 +70,7 @@ export function buildRexaMcpServerConfig(input: {
 }): RexaMcpServerConfig {
   // Compiled desktop sidecars include the MCP entry; no external Bun or .ts
   // sources are available in an installed app.
-  const compiled = /rexadb-server(?:-|\.|$)/i.test(process.execPath.split(/[\\/]/).pop() || "");
+  const compiled = isCompiledSidecar();
   const entry = getRexaMcpEntryPath(input.cwd);
   return {
     name: "rexadb",

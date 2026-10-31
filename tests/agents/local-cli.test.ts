@@ -8,7 +8,7 @@ import { getLocalCliProviderId, localCliModels } from "../../lib/agents/local-pr
 import { getHarnessClient, type HarnessClient } from "../../lib/agents/harness-clients";
 import { runHarness } from "../../lib/agents/run-harness";
 import type { AgentProvider, AgentStreamEvent } from "../../lib/agents/provider-types";
-import { localChatMode, localChatPrompt } from "../../server/local-cli-chat";
+import { localChatMode, localChatPrompt, studioShellToolPrompt } from "../../server/local-cli-chat";
 import { parsePiModels } from "../../lib/agents/list-provider-models";
 import { localCliPath } from "../../lib/agents/cli-path";
 import { delimiter } from "node:path";
@@ -32,6 +32,12 @@ describe("local CLI selection", () => {
   });
   test("offers CLI defaults for adapters without model selection support", () => {
     expect(localCliModels([provider("cursor"), provider("grok-build"), provider("fx")]).every((m) => m.model === "default")).toBe(true);
+  });
+  test("only CLIs without MCP are told to use the shell bridge", () => {
+    const request = { provider: "cli:pi", model: "default", chatId: "one", connectionId: 1, connectionString: "x", dbType: "sqlite", prompt: "go" };
+    expect(localChatPrompt(request)).not.toContain("<tool> <<'JSON'");
+    expect(localChatPrompt(request, { studioToolCommand: "rexa-tool" })).toContain("rexa-tool <tool> <<'JSON'");
+    expect(studioShellToolPrompt("rexa-tool")).toContain("create_editor_theme");
   });
   test("sidebar permission mapping never enables writes", () => {
     expect(localChatMode("schema_only")).toMatchObject({ allowSqlRead: false, allowSqlWrite: false });

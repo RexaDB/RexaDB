@@ -1,10 +1,35 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+test("studio shell bridge records valid calls and reports rejected ones", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rexadb-mcp-test-"));
+  const artifactFile = join(dir, "artifacts.jsonl");
+  const call = (tool: string, input: unknown) => spawnSync(
+    process.execPath,
+    ["run", resolve("lib/agents/mcp/studio-tool-cli.ts"), tool],
+    { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, REXADB_STUDIO_ARTIFACT_FILE: artifactFile, REXADB_DB_TYPE: "redis" } },
+  );
+  try {
+    const widget = { title: "Hits", type: "metric" };
+    const rejected = call("create_dashboard", { name: "Bad", widgets: [{ ...widget, query: "FLUSHALL" }] });
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("read-only Redis");
+    expect(call("constructor", {}).status).toBe(1);
+    expect(existsSync(artifactFile)).toBe(false);
+    const created = call("create_dashboard", { name: "Sales", widgets: [{ ...widget, query: "GET hits" }] });
+    expect(created.status).toBe(0);
+    expect(created.stdout).toContain('Created dashboard "Sales"');
+    expect(JSON.parse(readFileSync(artifactFile, "utf8").trim()).dashboard.name).toBe("Sales");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
 
 const launches = [{ name: "source", command: process.execPath, args: ["run", resolve("lib/agents/mcp/stdio.ts")] }];
 if (process.env.REXADB_TEST_COMPILED_SIDECAR) {

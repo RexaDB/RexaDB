@@ -100,10 +100,6 @@ export function StudioInterface({
     current: null,
   });
   const [workflowContextVersion, setWorkflowContextVersion] = useState(0);
-  const [aiDashboardTarget, setAiDashboardTarget] = useState<{
-    mode: "create" | "edit";
-    dashboardId?: string;
-  }>({ mode: "create" });
   const [globalSqlQuery, setGlobalSqlQuery] = useState("");
   const globalSqlSheetState =
     studio.sqlTabStates?.[studio.globalSqlContextId] ?? null;
@@ -413,10 +409,8 @@ export function StudioInterface({
       if (nextOpen) {
         setIsGlobalSqlSheetOpen(false);
         setAiInitialPrompt(null);
-        setAiDashboardTarget({ mode: "create" });
       } else {
         setAiInitialPrompt(null);
-        setAiDashboardTarget({ mode: "create" });
       }
       return nextOpen;
     });
@@ -427,7 +421,6 @@ export function StudioInterface({
   }, [studio.connection.id]);
 
   const handleEditDashboardWithAi = useCallback((dashboard: any) => {
-    setAiDashboardTarget({ mode: "edit", dashboardId: dashboard?.id });
     setAiInitialPrompt(
       `@${buildDashboardRef(String(dashboard?.name || "dashboard"), String(dashboard?.id || ""))} `,
     );
@@ -465,9 +458,7 @@ export function StudioInterface({
 
   const handleApplyAiDashboard = useCallback(
     (dashboard: any) => {
-      const targetId =
-        dashboard?.dashboardId ||
-        (aiDashboardTarget.mode === "edit" ? aiDashboardTarget.dashboardId : null);
+      const targetId = dashboard?.dashboardId;
       if (targetId) {
         const nextName = String(dashboard?.name || "").trim();
         const currentDashboard = studio.dashboards.find(
@@ -501,7 +492,7 @@ export function StudioInterface({
         buildDashboardWidgetsFromBlock(dashboard),
       );
     },
-    [aiDashboardTarget, studio],
+    [studio],
   );
 
   useEffect(() => {
@@ -755,7 +746,6 @@ export function StudioInterface({
         setIsGlobalSqlSheetOpen(false);
       } else {
         setAiInitialPrompt(null);
-        setAiDashboardTarget({ mode: "create" });
       }
       setIsAiSheetOpen(nextOpen);
     },
@@ -1027,13 +1017,11 @@ export function StudioInterface({
       onSelectChat={(chatId) => {
         setAiInitialChatId(chatId);
         setAiSelectChatToken((t) => t + 1);
-        setAiDashboardTarget({ mode: "create" });
         setIsAiSheetOpen(true);
       }}
       onNewChat={() => {
         setAiInitialChatId(null);
         setAiInitialPrompt(null);
-        setAiDashboardTarget({ mode: "create" });
         setAiStartNewChatToken((token) => token + 1);
         setIsAiSheetOpen(true);
       }}

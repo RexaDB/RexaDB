@@ -405,6 +405,19 @@ function parseMongoShellCommand(input: string): MongoCommand | null {
   return null;
 }
 
+const READ_ONLY_MONGO_OPERATIONS = new Set(["find", "findone", "count", "aggregate", "listcollections", "listdatabases"]);
+
+export function ensureReadOnlyMongoQuery(query: string): void {
+  const command = parseMongoCommand(query);
+  const operation = String(command.operation || "find").toLowerCase();
+  if (!READ_ONLY_MONGO_OPERATIONS.has(operation)) {
+    throw new Error("Only read-only Mongo operations are allowed.");
+  }
+  if (operation === "aggregate" && /"\$(out|merge)"/.test(JSON.stringify(command.pipeline ?? []))) {
+    throw new Error("Aggregations that write with $out or $merge are not allowed.");
+  }
+}
+
 export async function testMongoConnection(connectionString: string) {
   await withMongoClient(connectionString, async (client) => {
     await client.db("admin").command({ ping: 1 });
