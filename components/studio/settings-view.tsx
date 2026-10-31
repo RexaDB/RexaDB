@@ -93,6 +93,7 @@ import {
 } from "@/lib/studio/app-themes";
 import { AiSettingsSection } from "@/components/studio/ai/ai-settings-section";
 import { AiProvidersPage } from "@/components/studio/ai/ai-providers-page";
+import { AppIconSetting } from "@/components/studio/settings/app-icon-setting";
 import { IconThemeSetting } from "@/components/studio/settings/icon-theme-setting";
 import { CustomFontSetting } from "@/components/studio/settings/custom-font-setting";
 import { ThemesSection } from "@/components/studio/settings/themes-section";
@@ -1606,6 +1607,8 @@ export function SettingsView({
                     setCustomIconThemes={setCustomIconThemes}
                   />
                 </div>
+
+                <AppIconSetting />
 
                 <div data-setting-id="zoom">
                   <ZoomSetting value={appZoom} onChange={setAppZoom} />

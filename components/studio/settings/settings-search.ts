@@ -29,6 +29,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: "app-theme", section: "general", title: "App Theme", description: "Choose a built-in theme or add a custom palette for the whole app.", keywords: ["theme", "palette", "color", "custom"] },
   { id: "app-font", section: "general", title: "App Font", description: "Customize the application font family.", keywords: ["font", "typography", "text", "family"] },
   { id: "icon-theme", section: "general", title: "Icon Theme", description: "Choose the icon pack used across the app.", keywords: ["icons", "pack", "lucide", "solar"] },
+  { id: "app-icon", section: "general", title: "App Icon", description: "Change the icon in the Dock or taskbar, or use your own image.", keywords: ["icon", "dock", "taskbar", "logo", "halloween", "mummy", "skeleton", "custom"] },
   { id: "zoom", section: "general", title: "Zoom Level", description: "Scale the whole application UI.", keywords: ["zoom", "scale", "size"] },
   { id: "infinite-table-scrolling", section: "general", title: "Infinite scrolling", description: "Load more table rows as you scroll. Turn off to use page-by-page navigation.", keywords: ["table", "grid", "infinite", "scroll", "pagination", "rows"] },
   { id: "row-spacing", section: "general", title: "Row Spacing", description: "Adjust the vertical spacing between rows in data tables.", keywords: ["rows", "density", "compact", "comfortable", "table", "grid"] },

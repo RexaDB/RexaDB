@@ -1,5 +1,7 @@
 "use client";
 
+import { setAppIcon } from "@/lib/app-icon";
+import { isDesktopRuntime } from "@/lib/desktop";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "@/lib/icon-theme/lucide-react";
@@ -229,6 +231,13 @@ export function DangerZoneSetting() {
       } catch {
         /* best-effort */
       }
+      if (isDesktopRuntime()) {
+        try {
+          await setAppIcon("default");
+        } catch {
+          /* best-effort */
+        }
+      }
 
       clearBrowserStorage();
       await clearIndexedDatabases();
@@ -287,6 +296,7 @@ export function DangerZoneSetting() {
           <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
             <li>Appearance, editor, grid, tab, and behavior preferences</li>
             <li>Custom app, editor, and icon themes</li>
+            <li>App icon</li>
             <li>Keybindings and AI provider settings (including API keys)</li>
             <li>
               Per-connection content: open tabs, dashboards, notes, snippets,

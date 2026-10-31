@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="n" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3c2a1c"/><stop offset="1" stop-color="#1e140c"/></linearGradient>
+<clipPath id="r"><path d="M108 104H308L408 204V306H308V204H200C150 200 108 160 108 104Z"/><path d="M108 204H208V408L108 308Z"/><path d="M210 307H320C370 310 408 350 408 408H310Z"/></clipPath>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#n)"/>
+<g transform="translate(100 100) scale(1.609)">
+<rect x="208" y="204" width="100" height="100" fill="#120b06"/>
+<g clip-path="url(#r)">
+<rect x="90" y="90" width="340" height="340" fill="#efe3c6"/>
+<g fill="none" stroke-linecap="butt">
+<path d="M70 150L450 88M70 215L450 150M70 280L450 218M70 345L450 282M70 410L450 348" stroke="#b9a67e" stroke-width="9"/>
+<path d="M70 184L450 250M70 250L450 316M70 118L450 184M70 316L450 382" stroke="#cfbf9a" stroke-width="6"/>
+</g>
+</g>
+<circle cx="236" cy="254" r="24" fill="#fff"/><circle cx="282" cy="250" r="19" fill="#fff"/>
+<circle cx="243" cy="258" r="11" fill="#111"/><circle cx="276" cy="254" r="9" fill="#111"/>
+<path d="M395 300C410 325 400 345 420 372L404 376C392 350 384 328 382 304Z" fill="#efe3c6"/>
+</g>
+</svg>

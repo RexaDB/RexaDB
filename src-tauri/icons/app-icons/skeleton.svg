@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+<linearGradient id="n" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#23262e"/><stop offset="1" stop-color="#090a0d"/></linearGradient>
+<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbf7ea"/><stop offset="1" stop-color="#d7cfb8"/></linearGradient>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#n)"/>
+<g transform="translate(100 100) scale(1.609)">
+<g fill="url(#b)"><path d="M108 104H308L408 204V306H308V204H200C150 200 108 160 108 104Z"/><path d="M108 204H208V408L108 308Z"/><path d="M210 307H320C370 310 408 350 408 408H310Z"/></g>
+<g fill="#14161b"><rect x="122" y="228" width="72" height="10" rx="5"/><rect x="122" y="252" width="72" height="10" rx="5"/><rect x="122" y="276" width="72" height="10" rx="5"/><rect x="134" y="300" width="60" height="10" rx="5"/></g>
+<path d="M336 138L352 164L340 178L360 204" fill="none" stroke="#14161b" stroke-width="6" stroke-linejoin="round"/>
+<g transform="translate(258 256)">
+<path d="M-62-12C-62-52-32-72 0-72S62-52 62-12C62 12 50 24 38 30V54H-38V30C-50 24-62 12-62-12Z" fill="url(#b)" stroke="#14161b" stroke-width="7"/>
+<ellipse cx="-25" cy="-8" rx="17" ry="19" fill="#14161b"/><ellipse cx="25" cy="-8" rx="17" ry="19" fill="#14161b"/>
+<path d="M0 12L-9 28H9Z" fill="#14161b"/>
+<path d="M-19 36V54M-6 36V54M6 36V54M19 36V54" stroke="#14161b" stroke-width="5"/>
+</g>
+</g>
+</svg>
