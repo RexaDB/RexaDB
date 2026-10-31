@@ -105,6 +105,7 @@ bun build --compile --target=bun-darwin-arm64 server/index.ts \
   --outfile /tmp/rexadb-server-arm64
 bun build --compile --target=bun-darwin-x64 server/index.ts \
   --outfile /tmp/rexadb-server-x64
+bun run scripts/set-macho-uuid.mjs /tmp/rexadb-server-arm64 /tmp/rexadb-server-x64
 lipo -create /tmp/rexadb-server-arm64 /tmp/rexadb-server-x64 \
   -output "src-tauri/binaries/rexadb-server-aarch64-apple-darwin"
 cp "src-tauri/binaries/rexadb-server-aarch64-apple-darwin" \

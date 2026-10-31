@@ -43,6 +43,15 @@ export function shouldUpdateStoredCredentials(
   return hasConnectionSecret({ connectionString: trimmed });
 }
 
+/**
+ * Studio route for a saved connection. Connection ids are timestamps, so they
+ * fall outside the `/studio/[id]` pages prerendered for the desktop build, where
+ * a missing page is served as the home screen.
+ */
+export function studioPathForConnection(id: number): string {
+  return `/studio?id=${id}`;
+}
+
 /** Human-friendly connection name derived from a URL or file path. */
 export function deriveOpenConnectionName(target: string): string {
   const trimmed = target.trim();

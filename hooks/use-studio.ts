@@ -2235,6 +2235,11 @@ export function useStudio({ connection: propConnection, initialUiState }: UseStu
           // because the useEffect might not trigger if selectedSchema state matches currentS
           loadTables(forceRefresh);
         }
+      } else {
+        toast.error("Could not connect to database", {
+          id: "load-schemas-failed",
+          description: res.error || "Unknown error",
+        });
       }
     } finally {
       setFetchingSchemas(false);

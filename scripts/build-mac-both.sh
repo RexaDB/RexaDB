@@ -19,6 +19,7 @@ echo "=== build server arm ==="
 bun run scripts/build-server.mjs
 echo "=== build server intel cross ==="
 bun build --compile --target=bun-darwin-x64 server/index.ts --outfile=src-tauri/binaries/rexadb-server-x86_64-apple-darwin
+bun run scripts/set-macho-uuid.mjs src-tauri/binaries/rexadb-server-x86_64-apple-darwin
 
 echo "=== java bridge jar ==="
 bash resources/java-bridge/build.sh --skip-jlink
