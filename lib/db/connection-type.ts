@@ -8,13 +8,19 @@ export function isPostgresCatalogDbType(dbType: string | null | undefined): bool
   return dbType === "postgres" || dbType === "supabase-mgmt";
 }
 
-/** Functions / procedures / triggers browsers (PG, MSSQL, Oracle). */
+/** Functions / procedures / triggers browsers (PG, MSSQL, MySQL, Oracle). */
 export function supportsRoutineCatalog(dbType: string | null | undefined): boolean {
   return (
     isPostgresCatalogDbType(dbType) ||
     dbType === "mssql" ||
+    dbType === "mysql" ||
     dbType === "oracle"
   );
+}
+
+/** Sequences browser (PG + Oracle). */
+export function supportsSequenceCatalog(dbType: string | null | undefined): boolean {
+  return isPostgresCatalogDbType(dbType) || dbType === "oracle";
 }
 
 /** Indexes browser (PG + Oracle; MSSQL not wired yet). */

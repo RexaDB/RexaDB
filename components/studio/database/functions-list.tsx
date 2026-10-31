@@ -25,6 +25,7 @@ import {
 } from "@/lib/icon-theme/lucide-react";
 import { Input } from "@/components/ui/input";
 import { useEffect, useState, useMemo } from "react";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +51,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MonacoSqlInput } from "@/components/studio/monaco-sql-input";
 import { SqlQueryInput } from "@/components/studio/sql-query-input";
+import { renameRoutineDefinition } from "@/lib/studio/database-objects";
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type {
   CustomEditorTheme,
@@ -69,6 +71,7 @@ interface DatabaseFunction {
   definition: string;
   language: string;
   security_definer?: boolean;
+  isDuplicate?: boolean;
 }
 
 interface FunctionsListProps {
@@ -122,12 +125,15 @@ export function FunctionsList({
 }: FunctionsListProps) {
   const isMssql = dbType === "mssql";
   const isOracle = dbType === "oracle";
-  // Oracle routine SQL differs from the Postgres shapes these controls
-  // emit, so Oracle stays read-only until Oracle-aware actions exist.
-  const readOnlyRoutines = isMssql || isOracle;
+  const isMysql = dbType === "mysql";
+  // Oracle and MySQL routine SQL differs from the Postgres shapes these
+  // controls emit, so they stay read-only until dialect-aware actions exist.
+  const readOnlyRoutines = isMssql || isOracle || isMysql;
   const readOnlyTitle = isOracle
     ? "Routines are read-only for Oracle connections"
-    : "Editing MSSQL routines coming soon";
+    : isMysql
+      ? "Routines are read-only for MySQL connections"
+      : "Editing MSSQL routines coming soon";
   const [search, setSearch] = useState("");
   const [selectedFunction, setSelectedFunction] =
     useState<DatabaseFunction | null>(null);
@@ -313,8 +319,13 @@ export function FunctionsList({
                   title={readOnlyRoutines ? readOnlyTitle : undefined}
                   onClick={() => {
                     if (readOnlyRoutines) return;
-                    const newFn = { ...fn, name: `${fn.name}_duplicate` };
-                    openFunctionViewer(newFn);
+                    const name = `${fn.name}_duplicate`;
+                    const definition = renameRoutineDefinition(fn.definition || "", fn.name, name);
+                    if (definition === null) {
+                      toast.error(`Could not duplicate ${fn.name}: its definition could not be renamed.`);
+                      return;
+                    }
+                    openFunctionViewer({ ...fn, name, definition, isDuplicate: true });
                   }}
                 >
                   <Copy size={14} />
@@ -344,7 +355,8 @@ export function FunctionsList({
 
   const hasDefinitionChanges =
     !!selectedFunction &&
-    definitionDraft !== (selectedFunction.definition || "");
+    (!!selectedFunction.isDuplicate ||
+      definitionDraft !== (selectedFunction.definition || ""));
 
   const handleSaveDefinition = async () => {
     if (!selectedFunction || !hasDefinitionChanges) return;
@@ -360,7 +372,7 @@ export function FunctionsList({
       );
       if (saved) {
         setSelectedFunction((prev) =>
-          prev ? { ...prev, definition: definitionDraft } : prev,
+          prev ? { ...prev, definition: definitionDraft, isDuplicate: false } : prev,
         );
       }
     } finally {
@@ -453,7 +465,7 @@ export function FunctionsList({
               showSearch
             />
           )}
-          {isMssql && uniqueRoutineTypes.length > 1 && (
+          {(isMssql || isMysql) && uniqueRoutineTypes.length > 1 && (
             <SelectFilter
               label="Type"
               options={uniqueRoutineTypes.map((type) => ({
@@ -534,7 +546,9 @@ export function FunctionsList({
                 readOnlyRoutines
                   ? isOracle
                     ? "Oracle procedures, functions and package members in this schema are browsable here; routine writes are read-only for now."
-                    : "SQL Server stored procedures and functions in this schema will appear here."
+                    : isMysql
+                      ? "MySQL stored procedures and functions in this database will appear here."
+                      : "SQL Server stored procedures and functions in this schema will appear here."
                   : "PostgreSQL functions are a set of SQL and procedural commands such as declarations, assignments, loops, or flow-of-control."
               }
             >
@@ -648,7 +662,7 @@ export function FunctionsList({
                   </span>
                 </div>
                 <div className="flex-1 overflow-hidden relative">
-                  {!definitionDraft && isMssql ? (
+                  {!definitionDraft && (isMssql || isMysql) ? (
                     <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
                       <p className="text-sm text-muted-foreground">
                         No permission to view this definition, or the object is encrypted.
@@ -693,7 +707,11 @@ export function FunctionsList({
             <SheetFooter>
               {readOnlyRoutines && (
                 <span className="text-xs text-muted-foreground mr-auto">
-                  {isOracle ? "Oracle routines are read-only in this view." : "MSSQL routines are read-only in this view."}
+                  {isOracle
+                    ? "Oracle routines are read-only in this view."
+                    : isMysql
+                      ? "MySQL routines are read-only in this view."
+                      : "MSSQL routines are read-only in this view."}
                 </span>
               )}
               <Button

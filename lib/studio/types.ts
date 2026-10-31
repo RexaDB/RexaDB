@@ -1,5 +1,6 @@
 import { Connection } from "@/lib/db/schema";
 import type { StudioTabType } from "./tab-registry";
+import type { DatabaseObjectDetail } from "./database-objects";
 
 export interface Snippet {
   id: string;
@@ -89,6 +90,8 @@ export interface StudioInitialTab {
   extensionPanelId?: string;
   /** Snapshot of an `extension-panel` tab's html (falls back to the live registry) */
   extensionPanelHtml?: string;
+  /** Object shown by a `database-object` tab */
+  databaseObject?: DatabaseObjectDetail;
   /** VS Code-style preview tab — temporary until confirmed by double-click, edit, or pin */
   isPreview?: boolean;
 }

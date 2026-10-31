@@ -41,7 +41,15 @@ import {
   supportsIndexCatalog,
   supportsOracleExtraCatalog,
   supportsRoutineCatalog,
+  supportsSequenceCatalog,
 } from "@/lib/db/connection-type";
+import {
+  buildDatabaseObjectSections,
+  databaseObjectKey,
+  type DatabaseObjectDetail,
+  type DatabaseObjectKind,
+  type DatabaseObjectSection,
+} from "@/lib/studio/database-objects";
 import { getConnections } from "@/lib/api/actions-client";
 import type { Connection } from "@/lib/db/schema";
 import { useConfirm } from "@/hooks/use-confirm";
@@ -77,6 +85,9 @@ import {
   Braces,
   CreditCard,
   Globe,
+  Box,
+  Hash,
+  Link2,
   Unlock,
   MoreVertical,
   Eye,
@@ -648,46 +659,84 @@ function SchemaSectionHeader({
   );
 }
 
-/** Expandable row for a schema object (function/trigger/index/enum) with inline detail lines. */
-function SchemaItemRow({
-  icon: Icon,
-  label,
-  detail,
+const DATABASE_OBJECT_ICONS: Record<
+  DatabaseObjectKind,
+  React.ComponentType<{ className?: string }>
+> = {
+  function: FunctionSquare,
+  procedure: FunctionSquare,
+  package: Box,
+  trigger: Workflow,
+  sequence: Hash,
+  enum: Braces,
+  index: Gauge,
+  synonym: Link2,
+  "materialized-view": Layers,
+  "db-link": Globe,
+};
+
+/** Collapsible groups of a schema's non-table objects; rows open their definition. */
+function DatabaseObjectSections({
+  sections,
+  expandedSections,
+  defaultExpanded,
+  forceExpanded,
+  onToggle,
+  onOpen,
+  resetKey,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  detail?: Array<{ term: string; value: string }>;
+  sections: DatabaseObjectSection[];
+  expandedSections: Record<string, boolean>;
+  defaultExpanded: (kind: DatabaseObjectKind) => boolean;
+  forceExpanded: boolean;
+  onToggle: (kind: DatabaseObjectKind, expanded: boolean) => void;
+  onOpen: (object: DatabaseObjectDetail) => void;
+  resetKey: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className={ROW}
-      >
-        <Icon className="size-4 shrink-0" />
-        <span className="truncate">{label}</span>
-        {detail && detail.length > 0 && (
-          <ChevronRight
-            className={cn(
-              "ml-auto size-3 shrink-0 opacity-40 transition-transform",
-              expanded && "rotate-90",
+    <>
+      {sections.map((section) => {
+        const Icon = DATABASE_OBJECT_ICONS[section.kind];
+        const expanded = forceExpanded || (expandedSections[section.kind] ?? defaultExpanded(section.kind));
+        const itemsByKey = new Map(section.items.map((item) => [databaseObjectKey(item), item]));
+        return (
+          <div key={section.kind}>
+            <SchemaSectionHeader
+              label={section.label}
+              icon={Icon}
+              count={section.items.length}
+              expanded={expanded}
+              onToggle={() => onToggle(section.kind, !expanded)}
+            />
+            {expanded && (
+              <div className="space-y-0.5">
+                <MaybeVirtualizedTables
+                  tables={Array.from(itemsByKey.keys())}
+                  keyPrefix={section.kind}
+                  resetKey={resetKey}
+                  maxHeightClass="max-h-64"
+                  renderTable={(key) => {
+                    const item = itemsByKey.get(key)!;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        title={item.signature ? `${item.name}(${item.signature})` : item.name}
+                        onClick={() => onOpen(item)}
+                        className={ROW}
+                      >
+                        <Icon className="size-4 shrink-0" />
+                        <span className="truncate">{item.name}</span>
+                      </button>
+                    );
+                  }}
+                />
+              </div>
             )}
-          />
-        )}
-      </button>
-      {expanded && detail && detail.length > 0 && (
-        <div className="ml-6 mt-0.5 mb-1 space-y-0.5 border-l border-border/40 pl-2 text-xs">
-          {detail.map((d) => (
-            <div key={d.term} className="flex items-start gap-1.5">
-              <span className="shrink-0 text-muted-foreground/60">{d.term}:</span>
-              <span className="min-w-0 truncate text-foreground/80">{d.value}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -1310,10 +1359,6 @@ function TablesPanel({ studio }: { studio: any }) {
   const [schemaMenuOpen, setSchemaMenuOpen] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     tables: true,
-    functions: true,
-    triggers: true,
-    indexes: true,
-    enums: true,
   });
   // Tags-as-folders view state (persisted via studio.sidebarSortMode).
   const tagView = (studio.sidebarSortMode ?? "alphabetical") === "tags";
@@ -1360,28 +1405,22 @@ function TablesPanel({ studio }: { studio: any }) {
   const isPostgres = isPostgresCatalogDbType(studio.dbType);
   const isRoutineDb = supportsRoutineCatalog(studio.dbType);
   const indexCatalog = supportsIndexCatalog(studio.dbType);
-  const qLower = q.toLowerCase();
+  const oracleCatalog = supportsOracleExtraCatalog(studio.dbType);
 
-  const functions: any[] = schemaExplorer && isRoutineDb ? (studio.functions ?? []) : [];
-  const triggers: any[] = schemaExplorer && isRoutineDb ? (studio.triggers ?? []) : [];
-  const indexes: any[] = schemaExplorer && indexCatalog ? (studio.indexes ?? []) : [];
-  const enums: any[] = schemaExplorer && isPostgres ? (studio.enums ?? []) : [];
-
-  const filteredFunctions = qLower
-    ? functions.filter((f) => f.name?.toLowerCase().includes(qLower))
-    : functions;
-  const filteredTriggers = qLower
-    ? triggers.filter((t) => t.name?.toLowerCase().includes(qLower))
-    : triggers;
-  const filteredIndexes = qLower
-    ? indexes.filter((i) => i.name?.toLowerCase().includes(qLower))
-    : indexes;
-  const filteredEnums = (
-    qLower
-      ? enums.filter(
-          (e) => e.schema === selectedSchema && e.name?.toLowerCase().includes(qLower),
-        )
-      : enums.filter((e) => e.schema === selectedSchema)
+  const databaseObjectSections = buildDatabaseObjectSections(
+    {
+      functions: isRoutineDb ? studio.functions : [],
+      triggers: isRoutineDb ? studio.triggers : [],
+      sequences: supportsSequenceCatalog(studio.dbType) ? studio.sequences : [],
+      enums: isPostgres ? studio.enums : [],
+      indexes: indexCatalog ? studio.indexes : [],
+      packages: oracleCatalog ? studio.packages : [],
+      synonyms: oracleCatalog ? studio.synonyms : [],
+      materializedViews: oracleCatalog ? studio.materializedViews : [],
+      dbLinks: oracleCatalog ? studio.dbLinks : [],
+    },
+    selectedSchema,
+    q,
   );
 
   const { isMongo, itemNoun, copyDefinitionLabel, canExportSql } =
@@ -1427,6 +1466,22 @@ function TablesPanel({ studio }: { studio: any }) {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   }
 
+  const objectSections = (
+    <DatabaseObjectSections
+      sections={databaseObjectSections}
+      expandedSections={expandedSections}
+      defaultExpanded={(kind) =>
+        schemaExplorer || kind === "function" || kind === "procedure"
+      }
+      forceExpanded={sidebarQ.length > 0}
+      onToggle={(kind, expanded) =>
+        setExpandedSections((prev) => ({ ...prev, [kind]: expanded }))
+      }
+      onOpen={(object) => studio.openDatabaseObjectTab?.(object)}
+      resetKey={resetKey}
+    />
+  );
+
   // ---- Tags-as-folders derived state ----
   const tagsList: Array<{ name: string; color: string }> = studio.tags ?? [];
   const tableTagsMap: Record<string, string[]> = studio.tableTags ?? {};
@@ -1462,7 +1517,7 @@ function TablesPanel({ studio }: { studio: any }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={
-              schemaExplorer
+              schemaExplorer || databaseObjectSections.length > 0
                 ? "Search..."
                 : isRedis
                   ? "Search keys..."
@@ -1747,7 +1802,8 @@ function TablesPanel({ studio }: { studio: any }) {
       </Dialog>
 
       {!schemaExplorer || !isPostgres ? (
-        tagView ? (
+        <>
+        {tagView ? (
           <div className="min-h-0 flex-1 overflow-y-auto pb-1">
             <TagFoldersList
               tagsList={tagsList}
@@ -1812,7 +1868,13 @@ function TablesPanel({ studio }: { studio: any }) {
             resetKey={resetKey}
             className="min-h-0 flex-1"
           />
-        )
+        )}
+        {databaseObjectSections.length > 0 && (
+          <div className="flex max-h-[45%] shrink-0 flex-col gap-1 overflow-y-auto border-t border-border/50 pt-1">
+            {objectSections}
+          </div>
+        )}
+        </>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-2 pb-1">
@@ -1888,139 +1950,7 @@ function TablesPanel({ studio }: { studio: any }) {
             )}
           </div>
 
-          {/* Functions */}
-          <div>
-            <SchemaSectionHeader
-              label="Functions"
-              icon={FunctionSquare}
-              count={filteredFunctions.length}
-              expanded={expandedSections.functions}
-              onToggle={() => toggleSection("functions")}
-            />
-            {expandedSections.functions && (
-              <div className="space-y-0.5">
-                {filteredFunctions.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    No functions found
-                  </div>
-                ) : (
-                  filteredFunctions.map((f, idx) => (
-                    <SchemaItemRow
-                      key={`func-${f.name}-${idx}`}
-                      icon={FunctionSquare}
-                      label={f.name}
-                      detail={[
-                        ...(f.return_type ? [{ term: "Returns", value: f.return_type }] : []),
-                        ...(f.language ? [{ term: "Language", value: f.language }] : []),
-                      ]}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Triggers */}
-          <div>
-            <SchemaSectionHeader
-              label="Triggers"
-              icon={Workflow}
-              count={filteredTriggers.length}
-              expanded={expandedSections.triggers}
-              onToggle={() => toggleSection("triggers")}
-            />
-            {expandedSections.triggers && (
-              <div className="space-y-0.5">
-                {filteredTriggers.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    No triggers found
-                  </div>
-                ) : (
-                  filteredTriggers.map((t, idx) => (
-                    <SchemaItemRow
-                      key={`trig-${t.name}-${idx}`}
-                      icon={Workflow}
-                      label={t.name}
-                      detail={[
-                        ...(t.table_name ? [{ term: "On", value: t.table_name }] : []),
-                        ...(t.timing || t.event
-                          ? [{ term: "Event", value: `${t.timing ?? ""} ${t.event ?? ""}`.trim() }]
-                          : []),
-                      ]}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Indexes */}
-          <div>
-            <SchemaSectionHeader
-              label="Indexes"
-              icon={Gauge}
-              count={filteredIndexes.length}
-              expanded={expandedSections.indexes}
-              onToggle={() => toggleSection("indexes")}
-            />
-            {expandedSections.indexes && (
-              <div className="space-y-0.5">
-                {filteredIndexes.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    No indexes found
-                  </div>
-                ) : (
-                  filteredIndexes.map((i, idx) => (
-                    <SchemaItemRow
-                      key={`idx-${i.name}-${idx}`}
-                      icon={Gauge}
-                      label={i.name}
-                      detail={[
-                        ...(i.table_name ? [{ term: "On", value: i.table_name }] : []),
-                        { term: "Type", value: i.is_unique ? "UNIQUE" : "INDEX" },
-                        ...(i.columns?.length
-                          ? [{ term: "Columns", value: i.columns.join(", ") }]
-                          : []),
-                      ]}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Enums */}
-          <div>
-            <SchemaSectionHeader
-              label="Enums"
-              icon={Braces}
-              count={filteredEnums.length}
-              expanded={expandedSections.enums}
-              onToggle={() => toggleSection("enums")}
-            />
-            {expandedSections.enums && (
-              <div className="space-y-0.5">
-                {filteredEnums.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    No enums found
-                  </div>
-                ) : (
-                  filteredEnums.map((e, idx) => (
-                    <SchemaItemRow
-                      key={`enum-${e.name}-${idx}`}
-                      icon={Braces}
-                      label={e.name}
-                      detail={
-                        e.values?.length
-                          ? [{ term: "Values", value: e.values.join(", ") }]
-                          : []
-                      }
-                    />
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+          {objectSections}
           </div>
         </div>
       )}
@@ -2324,7 +2254,7 @@ function DatabasePanel({ studio }: { studio: any }) {
     { label: "Triggers", view: "triggers", tabType: "database-triggers", show: routineCatalog },
     { label: "Enums", view: "enums", tabType: "database-enums", show: pgCatalog },
     { label: "Indexes", view: "indexes", tabType: "database-indexes", show: indexCatalog },
-    { label: "Sequences", view: "sequences", tabType: "database-sequences", show: oracleExtra },
+    { label: "Sequences", view: "sequences", tabType: "database-sequences", show: supportsSequenceCatalog(dbType) },
     { label: "Synonyms", view: "synonyms", tabType: "database-synonyms", show: oracleExtra },
     {
       label: "Materialized Views",
