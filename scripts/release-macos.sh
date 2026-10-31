@@ -43,6 +43,7 @@ log "Building server sidecar for x86_64..."
 bun build --compile --target=bun-darwin-x64 \
   server/index.ts \
   --outfile=src-tauri/binaries/rexadb-server-x86_64-apple-darwin
+bun run scripts/set-macho-uuid.mjs src-tauri/binaries/rexadb-server-x86_64-apple-darwin
 
 success "Sidecars built"
 

@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, mkdirSync } from 'fs';
+import { setUniqueMachoUuidInFile } from './set-macho-uuid.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -46,5 +47,7 @@ if (result.status !== 0) {
   console.error(`[build-server] Failed with exit code ${result.status}`);
   process.exit(result.status);
 }
+
+if (platform === 'darwin') setUniqueMachoUuidInFile(outfile);
 
 console.log(`[build-server] OK — ${entry.name}`);
