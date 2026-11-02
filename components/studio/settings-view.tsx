@@ -1393,6 +1393,22 @@ export function SettingsView({
     await checkForUpdates();
   };
 
+  // Shared by the Nix and standalone controls: with automatic checks off it
+  // is the only way to look for a release.
+  const checkUpdatesButton = (
+    <button
+      onClick={handleCheckUpdates}
+      disabled={
+        updateState.checking ||
+        updateState.downloading ||
+        installingUpdate
+      }
+      className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {updateState.checking ? "Checking..." : "Check for Updates"}
+    </button>
+  );
+
   const handleDownloadUpdate = async () => {
     if (!handleDownload) {
       toast.error("Update controls are only available in the desktop app.");
@@ -2831,33 +2847,24 @@ export function SettingsView({
                         </div>
                       );
                     })}
-                    {updateState.releaseUrl ? (
-                      <a
-                        href={updateState.releaseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
-                      >
-                        Release notes
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {checkUpdatesButton}
+                      {updateState.releaseUrl ? (
+                        <a
+                          href={updateState.releaseUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
+                        >
+                          Release notes
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      onClick={handleCheckUpdates}
-                      disabled={
-                        updateState.checking ||
-                        updateState.downloading ||
-                        installingUpdate
-                      }
-                      className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {updateState.checking
-                        ? "Checking..."
-                        : "Check for Updates"}
-                    </button>
+                    {checkUpdatesButton}
                     <button
                       onClick={handleDownloadUpdate}
                       disabled={
