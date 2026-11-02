@@ -14,6 +14,7 @@ import {
 } from "@/lib/desktop";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { isUpdateDismissed, NIX_UPDATE_COMMAND } from "@/lib/app-update";
+import { isAutoUpdateCheckEnabled } from "@/lib/privacy-settings";
 
 const DEBUG = true;
 function debug(...args: unknown[]) {
@@ -221,7 +222,7 @@ export function useAppUpdate() {
 
     if (isDesktopRuntime()) {
       void getAppVersion();
-      void checkForUpdates();
+      if (isAutoUpdateCheckEnabled()) void checkForUpdates();
     }
 
     return () => {

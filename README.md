@@ -197,6 +197,7 @@ command, and links the release notes.
 - Contact: https://www.rexadb.app/contact
 - Sponsor: https://www.rexadb.app/sponsor
 - Privacy: https://www.rexadb.app/privacy
+- Network activity and opt-outs: [docs/network-activity.md](docs/network-activity.md)
 - Discord: https://discord.gg/zPaWuPAwXy
 - X: https://x.com/RexaDB
 - YouTube: https://www.youtube.com/@RexaDB

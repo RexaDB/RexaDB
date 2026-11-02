@@ -111,7 +111,14 @@ import {
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import { NIX_UPDATE_OPTIONS } from "@/lib/app-update";
+import {
+  AUTO_UPDATE_CHECKS_DEFAULT,
+  AUTO_UPDATE_CHECKS_STORAGE_KEY,
+  DIAGNOSTICS_DEFAULT,
+  DIAGNOSTICS_STORAGE_KEY,
+} from "@/lib/privacy-settings";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
@@ -931,6 +938,14 @@ export function SettingsView({
     handleInstall,
     copyNixCommand,
   } = useAppUpdate();
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useLocalStorage<boolean>(
+    DIAGNOSTICS_STORAGE_KEY,
+    DIAGNOSTICS_DEFAULT,
+  );
+  const [autoUpdateChecks, setAutoUpdateChecks] = useLocalStorage<boolean>(
+    AUTO_UPDATE_CHECKS_STORAGE_KEY,
+    AUTO_UPDATE_CHECKS_DEFAULT,
+  );
   const [isEditorThemeDialogOpen, setIsEditorThemeDialogOpen] = useState(false);
   const [themeNameInput, setThemeNameInput] = useState("");
   const [themeJsonInput, setThemeJsonInput] = useState("");
@@ -2749,6 +2764,22 @@ export function SettingsView({
                 onChange={setRlsPolicyTabEditor}
               />
 
+              <SwitchSetting
+                settingId="send-diagnostics"
+                title="Send Diagnostics"
+                description="Upload error reports (message, stack trace, page and app version) to help fix crashes. Off by default; when off, errors are only logged on this device."
+                value={diagnosticsEnabled}
+                onChange={setDiagnosticsEnabled}
+              />
+
+              <SwitchSetting
+                settingId="auto-update-checks"
+                title="Check for Updates Automatically"
+                description="Ask GitHub for the latest release when the app starts. When off, RexaDB only checks when you press Check for Updates."
+                value={autoUpdateChecks}
+                onChange={setAutoUpdateChecks}
+              />
+
               <div data-setting-id="app-updates" className="space-y-2.5">
                 <div className="flex flex-col">
                   <span className="font-medium text-xs">App Updates</span>
@@ -2861,7 +2892,7 @@ export function SettingsView({
                     {entitlementNotice}
                   </p>
                 ) : null}
-                {!updateState.enabled && !updatesExpired ? (
+                {!updateState.enabled && !updatesExpired && autoUpdateChecks ? (
                   <p className="text-xs text-muted-foreground">
                     Automatic updates are not configured for this build.
                   </p>
