@@ -20,7 +20,7 @@ let
     # re-resolves peer/override edges and needs packuments even with a
     # complete lockfile (else ENOTCACHED under --offline).
     fetcherVersion = 2;
-    hash = "sha256-4kVNPmymd5GBe7jY+7MJiT/X8TIGbttHNJYNx1hfAoQ=";
+    hash = "sha256-RdfzuGj/IVShFVvyEEvnKCytmpE/Gte/LMd2HoY+c70=";
   };
 in
 pkgs.stdenv.mkDerivation {
