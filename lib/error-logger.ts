@@ -1,8 +1,7 @@
 "use client";
 
-const API_BASE = typeof window !== "undefined"
-  ? `${window.location.protocol}//${window.location.hostname}:3867`
-  : "http://127.0.0.1:3867";
+import { apiFetch, initApiBase } from "@/lib/api-base";
+import { isDiagnosticsEnabled } from "@/lib/privacy-settings";
 
 export interface ErrorLogPayload {
   errorType: string;
@@ -35,6 +34,11 @@ export async function logAppError(payload: ErrorLogPayload): Promise<void> {
     safe.componentStack = safe.componentStack?.slice(0, maxStack) ?? null;
   }
 
+  if (!isDiagnosticsEnabled()) {
+    await logLocally(safe);
+    return;
+  }
+
   try {
     const { getBackendClient } = await import("@/lib/supabase/backend-client");
     const supabase = await getBackendClient();
@@ -49,14 +53,22 @@ export async function logAppError(payload: ErrorLogPayload): Promise<void> {
       p_os: safe.os,
     });
   } catch {
-    try {
-      await fetch(`${API_BASE}/api/errors/log`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(safe),
-      });
-    } catch {
-      console.error("[error-logger] failed to send error to server", safe.message);
-    }
+    await logLocally(safe);
+  }
+}
+
+/** Write to the sidecar's log on this device; nothing is uploaded. */
+async function logLocally(safe: ErrorLogPayload): Promise<void> {
+  try {
+    // The sidecar moves to another port when 3867 is taken, so ask for its
+    // address instead of assuming it.
+    await initApiBase();
+    await apiFetch("/api/errors/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(safe),
+    });
+  } catch {
+    console.error("[error-logger] failed to send error to server", safe.message);
   }
 }

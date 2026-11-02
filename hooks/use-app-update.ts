@@ -14,6 +14,7 @@ import {
 } from "@/lib/desktop";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { isUpdateDismissed, NIX_UPDATE_COMMAND } from "@/lib/app-update";
+import { isAutoUpdateCheckEnabled } from "@/lib/privacy-settings";
 
 const DEBUG = true;
 function debug(...args: unknown[]) {
@@ -219,9 +220,17 @@ export function useAppUpdate() {
       }
     };
 
+    // Local, unlike the update check: how to update stays visible with
+    // automatic checks off.
+    const loadInstallKind = async () => {
+      const installKind = await getInstallKind();
+      if (mountedRef.current) setUpdateState((prev) => ({ ...prev, installKind }));
+    };
+
     if (isDesktopRuntime()) {
       void getAppVersion();
-      void checkForUpdates();
+      void loadInstallKind();
+      if (isAutoUpdateCheckEnabled()) void checkForUpdates();
     }
 
     return () => {

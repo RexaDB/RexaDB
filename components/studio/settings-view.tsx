@@ -111,7 +111,14 @@ import {
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
+import { usePrivacySwitch } from "@/hooks/use-privacy-switch";
 import { NIX_UPDATE_OPTIONS } from "@/lib/app-update";
+import {
+  AUTO_UPDATE_CHECKS_DEFAULT,
+  AUTO_UPDATE_CHECKS_STORAGE_KEY,
+  DIAGNOSTICS_DEFAULT,
+  DIAGNOSTICS_STORAGE_KEY,
+} from "@/lib/privacy-settings";
 import { pickCommonSettings } from "@/lib/studio/settings-common";
 import { KeybindingsPanel } from "@/components/studio/keybindings-view";
 import { McpSettingsSection } from "@/components/studio/settings/mcp-settings-section";
@@ -931,6 +938,14 @@ export function SettingsView({
     handleInstall,
     copyNixCommand,
   } = useAppUpdate();
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = usePrivacySwitch(
+    DIAGNOSTICS_STORAGE_KEY,
+    DIAGNOSTICS_DEFAULT,
+  );
+  const [autoUpdateChecks, setAutoUpdateChecks] = usePrivacySwitch(
+    AUTO_UPDATE_CHECKS_STORAGE_KEY,
+    AUTO_UPDATE_CHECKS_DEFAULT,
+  );
   const [isEditorThemeDialogOpen, setIsEditorThemeDialogOpen] = useState(false);
   const [themeNameInput, setThemeNameInput] = useState("");
   const [themeJsonInput, setThemeJsonInput] = useState("");
@@ -1377,6 +1392,22 @@ export function SettingsView({
     toast.success("Checking for updates...");
     await checkForUpdates();
   };
+
+  // Shared by the Nix and standalone controls: with automatic checks off it
+  // is the only way to look for a release.
+  const checkUpdatesButton = (
+    <button
+      onClick={handleCheckUpdates}
+      disabled={
+        updateState.checking ||
+        updateState.downloading ||
+        installingUpdate
+      }
+      className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {updateState.checking ? "Checking..." : "Check for Updates"}
+    </button>
+  );
 
   const handleDownloadUpdate = async () => {
     if (!handleDownload) {
@@ -2749,6 +2780,22 @@ export function SettingsView({
                 onChange={setRlsPolicyTabEditor}
               />
 
+              <SwitchSetting
+                settingId="send-diagnostics"
+                title="Send Diagnostics"
+                description="Upload error reports (message, stack trace, page and app version) to help fix crashes. Off by default; when off, errors are only logged on this device."
+                value={diagnosticsEnabled}
+                onChange={setDiagnosticsEnabled}
+              />
+
+              <SwitchSetting
+                settingId="auto-update-checks"
+                title="Check for Updates Automatically"
+                description="Ask GitHub for the latest release when the app starts. When off, RexaDB only checks when you press Check for Updates."
+                value={autoUpdateChecks}
+                onChange={setAutoUpdateChecks}
+              />
+
               <div data-setting-id="app-updates" className="space-y-2.5">
                 <div className="flex flex-col">
                   <span className="font-medium text-xs">App Updates</span>
@@ -2800,33 +2847,24 @@ export function SettingsView({
                         </div>
                       );
                     })}
-                    {updateState.releaseUrl ? (
-                      <a
-                        href={updateState.releaseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
-                      >
-                        Release notes
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    ) : null}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {checkUpdatesButton}
+                      {updateState.releaseUrl ? (
+                        <a
+                          href={updateState.releaseUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-7 items-center gap-1 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60"
+                        >
+                          Release notes
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      onClick={handleCheckUpdates}
-                      disabled={
-                        updateState.checking ||
-                        updateState.downloading ||
-                        installingUpdate
-                      }
-                      className="h-7 rounded-lg border border-border bg-secondary/40 px-2.5 text-xs font-medium text-foreground hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {updateState.checking
-                        ? "Checking..."
-                        : "Check for Updates"}
-                    </button>
+                    {checkUpdatesButton}
                     <button
                       onClick={handleDownloadUpdate}
                       disabled={
@@ -2861,7 +2899,7 @@ export function SettingsView({
                     {entitlementNotice}
                   </p>
                 ) : null}
-                {!updateState.enabled && !updatesExpired ? (
+                {!updateState.enabled && !updatesExpired && autoUpdateChecks ? (
                   <p className="text-xs text-muted-foreground">
                     Automatic updates are not configured for this build.
                   </p>
