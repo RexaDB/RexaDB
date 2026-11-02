@@ -41,6 +41,7 @@ export function SqlQueryInput({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLPreElement | null>(null);
+  const suggestionsDismissedRef = useRef(false);
   const lineCount = useMemo(
     () => Math.max(query.split("\n").length, 1),
     [query],
@@ -191,6 +192,8 @@ export function SqlQueryInput({
   }, [fontSize, query, suggestionRange]);
 
   const refreshSuggestions = () => {
+    // Esc closes the list on keydown; without this the keyup refresh reopens it.
+    if (suggestionsDismissedRef.current) return;
     if (readOnly) {
       setSuggestions([]);
       setSuggestionRange(null);
@@ -324,6 +327,8 @@ export function SqlQueryInput({
     }
 
     if (!aiMode && suggestions.length > 0 && event.key === "Escape") {
+      event.preventDefault();
+      suggestionsDismissedRef.current = true;
       setSuggestions([]);
       setSuggestionRange(null);
       return;
@@ -335,6 +340,9 @@ export function SqlQueryInput({
       event.key === "Enter"
     ) {
       event.preventDefault();
+      // Keep the window-level keybindings from also running the whole query
+      // (Cmd+Enter) or committing pending changes (Cmd+Shift+Enter).
+      event.stopPropagation();
       if (event.shiftKey) {
         onRunSelected();
         return;
@@ -462,10 +470,14 @@ export function SqlQueryInput({
           className="relative z-10 h-full w-full min-w-full resize-none border-0 bg-transparent px-4 py-4 font-mono text-transparent caret-foreground outline-none placeholder:text-muted-foreground/40"
           cols={1}
           onChange={(event) => {
+            suggestionsDismissedRef.current = false;
             onChange(event.target.value);
             requestAnimationFrame(refreshSuggestions);
           }}
-          onClick={refreshSuggestions}
+          onClick={() => {
+            suggestionsDismissedRef.current = false;
+            refreshSuggestions();
+          }}
           onKeyDown={handleKeyDown}
           onKeyUp={refreshSuggestions}
           onScroll={handleScroll}

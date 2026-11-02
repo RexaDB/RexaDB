@@ -80,6 +80,7 @@ export function MonacoSqlInput({
   const onCopyQueryRef = useRef(onCopyQuery);
   const onFormatRef = useRef(onFormat);
   const onRequestAiModeRef = useRef(onRequestAiMode);
+  const onExitAiModeRef = useRef(onExitAiMode);
   const lastPasteRef = useRef<{
     ts: number;
     source: "keydown" | "paste" | "";
@@ -106,10 +107,12 @@ export function MonacoSqlInput({
     onCopyQueryRef.current = onCopyQuery;
     onFormatRef.current = onFormat;
     onRequestAiModeRef.current = onRequestAiMode;
+    onExitAiModeRef.current = onExitAiMode;
   }, [
     aiMode,
     slashAiTrigger,
     onCopyQuery,
+    onExitAiMode,
     onFormat,
     onRequestAiMode,
     onRun,
@@ -373,6 +376,18 @@ export function MonacoSqlInput({
             };
             syncSelection();
             editor.onKeyDown((event: any) => {
+              // Handled here rather than as a keybinding so Escape still
+              // reaches Monaco's own widgets (autocomplete, find, vim).
+              if (
+                event.keyCode === monaco.KeyCode.Escape &&
+                aiModeRef.current &&
+                !queryRef.current.trim()
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                onExitAiModeRef.current?.();
+                return;
+              }
               if (!shouldEnterAiMode()) return;
               if (!aiModeKeybinding) return;
               const nativeEvent = event.browserEvent as
@@ -391,12 +406,28 @@ export function MonacoSqlInput({
               event.stopPropagation();
               onRequestAiModeRef.current?.();
             });
-            editor.addCommand(monaco.KeyCode.Escape, () => {
-              if (!aiModeRef.current || queryRef.current.trim()) return;
-              onExitAiMode?.();
-            });
             editor.onDidChangeCursorSelection(syncSelection);
-            editor.addCommand(
+            // Use addAction, not addCommand: addCommand keybindings are global
+            // and never removed, so the last editor mounted (often a read-only
+            // one with no-op handlers) would swallow the shortcut for all.
+            const addShortcut = (
+              id: string,
+              label: string,
+              keybinding: number,
+              run: () => void,
+            ) => {
+              const action = editor.addAction({
+                id,
+                label,
+                keybindings: [keybinding],
+                keybindingContext: "editorTextFocus",
+                run,
+              });
+              editor.onDidDispose(() => action.dispose());
+            };
+            addShortcut(
+              "rexadb.runQuery",
+              "Run Query",
               monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
               () => {
                 const selection = editor.getSelection?.();
@@ -407,20 +438,29 @@ export function MonacoSqlInput({
                 onRunRef.current();
               },
             );
-            editor.addCommand(
+            addShortcut(
+              "rexadb.runSelectedQuery",
+              "Run Selected Query",
               monaco.KeyMod.CtrlCmd |
                 monaco.KeyMod.Shift |
                 monaco.KeyCode.Enter,
               () => onRunSelectedRef.current(),
             );
-            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () =>
-              onSaveSnippet(),
+            addShortcut(
+              "rexadb.saveSnippet",
+              "Save Snippet",
+              monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+              () => onSaveSnippet(),
             );
-            editor.addCommand(
+            addShortcut(
+              "rexadb.copyQuery",
+              "Copy Query",
               monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyC,
               () => onCopyQueryRef.current?.(),
             );
-            editor.addCommand(
+            addShortcut(
+              "rexadb.formatQuery",
+              "Format Query",
               monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
               () => onFormatRef.current?.(),
             );

@@ -859,9 +859,9 @@ export function SqlEditor({
   };
 
   const handleRunSelected = () => {
-    if (!selectedQuery.trim()) return;
     setExplainPlanResult(null);
-    handleRunQuery(selectedQuery);
+    // Cmd+Shift+Enter with nothing selected falls back to the whole query.
+    handleRunQuery(selectedQuery.trim() ? selectedQuery : undefined);
   };
 
   const [explainPlanResult, setExplainPlanResult] =
