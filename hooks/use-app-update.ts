@@ -220,8 +220,16 @@ export function useAppUpdate() {
       }
     };
 
+    // Local, unlike the update check: how to update stays visible with
+    // automatic checks off.
+    const loadInstallKind = async () => {
+      const installKind = await getInstallKind();
+      if (mountedRef.current) setUpdateState((prev) => ({ ...prev, installKind }));
+    };
+
     if (isDesktopRuntime()) {
       void getAppVersion();
+      void loadInstallKind();
       if (isAutoUpdateCheckEnabled()) void checkForUpdates();
     }
 

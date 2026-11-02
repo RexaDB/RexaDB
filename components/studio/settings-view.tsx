@@ -111,7 +111,7 @@ import {
 import type { SqlEditorEngine } from "@/lib/studio/types";
 import type { CustomIconTheme } from "@/lib/icon-theme/types";
 import { useAppUpdate } from "@/hooks/use-app-update";
-import { useLocalStorage } from "@/hooks/use-local-storage";
+import { usePrivacySwitch } from "@/hooks/use-privacy-switch";
 import { NIX_UPDATE_OPTIONS } from "@/lib/app-update";
 import {
   AUTO_UPDATE_CHECKS_DEFAULT,
@@ -938,11 +938,11 @@ export function SettingsView({
     handleInstall,
     copyNixCommand,
   } = useAppUpdate();
-  const [diagnosticsEnabled, setDiagnosticsEnabled] = useLocalStorage<boolean>(
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = usePrivacySwitch(
     DIAGNOSTICS_STORAGE_KEY,
     DIAGNOSTICS_DEFAULT,
   );
-  const [autoUpdateChecks, setAutoUpdateChecks] = useLocalStorage<boolean>(
+  const [autoUpdateChecks, setAutoUpdateChecks] = usePrivacySwitch(
     AUTO_UPDATE_CHECKS_STORAGE_KEY,
     AUTO_UPDATE_CHECKS_DEFAULT,
   );
