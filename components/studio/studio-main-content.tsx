@@ -35,7 +35,11 @@ import { SpacetimeDbReducerPanel } from "./spacetimedb/reducer-panel";
 import { SpacetimeDbLogViewer } from "./spacetimedb/log-viewer";
 import { SpacetimeDbSchemaViewer } from "./spacetimedb/schema-viewer";
 import { AuthUsersView } from "./auth/auth-users-view";
-import { isNeonDatabaseConnection, isNeonManagementConnection } from "@/lib/studio/neon-management";
+import {
+  getNeonManagementPointer,
+  isNeonDatabaseConnection,
+  isNeonManagementConnection,
+} from "@/lib/studio/neon-management";
 import { AuthSessionsView } from "./auth/auth-sessions-view";
 import { PaymentsPlansView } from "./payments/views/plans-view";
 import { BrowserTab } from "@/components/browser/browser-tab";
@@ -1771,6 +1775,11 @@ export function StudioMainContent({
                     connectionString={currentConnectionString}
                     enabled={authEnabled}
                     neonAuth={neonAuth}
+                    neonPointer={
+                      neonManagement
+                        ? getNeonManagementPointer(studio.connection?.connectionString)
+                        : null
+                    }
                   />
                 )
               ) : paneViewMode === "payments" ? (

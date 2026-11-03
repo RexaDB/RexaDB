@@ -302,6 +302,25 @@ export async function createBucket(
   );
 }
 
+// Neon Auth (Managed Better Auth) user directory for one branch. The API takes
+// no password — the user signs in through the branch's configured providers.
+export async function createAuthUser(
+  profile: string,
+  projectId: string,
+  branchId: string,
+  email: string,
+  name?: string,
+): Promise<{ id: string }> {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Must be a valid email address.");
+  }
+  return neonFetch<{ id: string }>(
+    profile,
+    `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/auth/users`,
+    { method: "POST", body: JSON.stringify(name ? { email, name } : { email }) },
+  );
+}
+
 export async function getConnectionUri(
   profile: string,
   projectId: string,

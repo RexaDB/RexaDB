@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   detectNeonCliEffect,
+  neonAuthUserCreateEffect,
   neonOrgsListEffect,
   neonProfileRemoveEffect,
 } from "@/lib/neon-cli/cli-runner";
@@ -85,6 +86,42 @@ describe("neon-cli Effect APIs", () => {
     );
     expect(result).toEqual({ success: true });
     expect(removeSpy).toHaveBeenCalledWith("wave3-test-profile");
+  });
+
+  test("neonAuthUserCreateEffect forwards the branch and returns the new user id", async () => {
+    const createSpy = spyOn(neonOauthApi, "createAuthUser").mockResolvedValue({ id: "user-1" });
+    spies.push(createSpy);
+
+    const result = await Effect.runPromise(
+      neonAuthUserCreateEffect("default", "proj-1", "br-1", "a@example.com", "Ann"),
+    );
+    expect(result).toEqual({ id: "user-1" });
+    expect(createSpy).toHaveBeenCalledWith("default", "proj-1", "br-1", "a@example.com", "Ann");
+  });
+
+  test("neonAuthUserCreateEffect surfaces API errors as NeonApiError", async () => {
+    const createSpy = spyOn(neonOauthApi, "createAuthUser").mockImplementation(async () => {
+      throw new Error("Neon API 409: user already exists");
+    });
+    spies.push(createSpy);
+
+    const exit = await Effect.runPromiseExit(
+      neonAuthUserCreateEffect("default", "proj-1", "br-1", "a@example.com"),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const err = Cause.findErrorOption(exit.cause);
+      expect(Option.isSome(err) && err.value).toBeInstanceOf(NeonApiError);
+    }
+  });
+
+  test("createAuthUser rejects an invalid email before calling the API", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch");
+    spies.push(fetchSpy);
+    await expect(
+      neonOauthApi.createAuthUser("default", "proj-1", "br-1", "not-an-email"),
+    ).rejects.toThrow("valid email");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("neonOrgsListEffect is an Effect (callable shape)", () => {
