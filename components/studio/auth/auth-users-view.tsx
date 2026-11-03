@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/tooltip";
 import { DeleteConfirmDialog } from "@/components/studio/shared/delete-confirm-dialog";
 import { runQuery } from "@/lib/api/actions-client";
+import type { NeonCliPointer } from "@/lib/neon-cli/pointer";
 import { AuthDataGrid } from "./auth-data-grid";
 import { NeonAuthUsersTable } from "./neon-auth-users-table";
 import { NeonAuthUsersHeader } from "./neon-auth-users-header";
@@ -47,6 +48,7 @@ import {
 } from "./neon-auth-users-messages";
 import { AuthSortDropdown } from "./auth-sort-dropdown";
 import { AuthAddUserDropdown } from "./auth-add-user-dropdown";
+import { NeonCreateUserModal } from "./neon-create-user-modal";
 import { useAuthUsers } from "@/hooks/use-auth-users";
 import { useToggleRowSelection } from "@/hooks/use-selection-utils";
 import {
@@ -62,6 +64,9 @@ interface AuthUsersViewProps {
   connectionString: string;
   enabled: boolean;
   neonAuth?: boolean;
+  /** Set for Neon management connections — the only ones holding an API
+   *  token, which creating Neon Auth users requires. */
+  neonPointer?: NeonCliPointer | null;
 }
 
 interface ColumnDef {
@@ -106,7 +111,7 @@ function isSearchInvalid(search: string, filterColumn: SpecificFilterColumn): bo
   return !PHONE_NUMBER_LEFT_PREFIX_REGEX.test(search);
 }
 
-export function AuthUsersView({ connectionString, enabled, neonAuth = false }: AuthUsersViewProps) {
+export function AuthUsersView({ connectionString, enabled, neonAuth = false, neonPointer = null }: AuthUsersViewProps) {
   const { users, loading, error, refresh } = useAuthUsers(connectionString, enabled, neonAuth);
   const [filterColumn, setFilterColumn] = useState<SpecificFilterColumn>("email");
   const [search, setSearch] = useState("");
@@ -120,6 +125,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [neonCreateOpen, setNeonCreateOpen] = useState(false);
 
   const columns = useMemo(
     () => ALL_COLUMNS.filter((column) => column.name === "UID" || visibleColumns.has(column.name)),
@@ -214,6 +220,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
             loading={loading}
             sort={neonTableSort}
             onSortChange={setNeonTableSort}
+            onAddUser={neonPointer ? () => setNeonCreateOpen(true) : undefined}
             />
           </div>
         </>
@@ -419,6 +426,14 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false }: A
           description="This action cannot be undone. The users will be permanently removed from auth.users and their sessions will be invalidated."
           onConfirm={() => void handleDeleteUsers()}
           loading={deleting}
+        />
+      )}
+      {neonAuth && neonPointer && (
+        <NeonCreateUserModal
+          open={neonCreateOpen}
+          onOpenChange={setNeonCreateOpen}
+          pointer={neonPointer}
+          onCreated={refresh}
         />
       )}
     </div>

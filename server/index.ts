@@ -700,6 +700,19 @@ app.post(
 );
 
 app.post(
+  "/api/neon-cli/auth/users/create",
+  effectJsonHandler((req) =>
+    neonCliRunner.neonAuthUserCreateEffect(
+      String(req.body?.profile ?? ""),
+      String(req.body?.projectId ?? ""),
+      String(req.body?.branchId ?? ""),
+      String(req.body?.email ?? "").trim(),
+      String(req.body?.name ?? "").trim() || undefined,
+    ),
+  ),
+);
+
+app.post(
   "/api/neon-cli/remove-profile",
   // neonProfileRemove already returns `{ success: true }`. effectJsonHandler
   // would pass that through and drop the outer `data` field — wrap explicitly.

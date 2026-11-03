@@ -108,6 +108,16 @@ export function createBucket(
   return post<void>("/buckets/create", { profile, projectId, branchId, name, accessLevel });
 }
 
+export function createAuthUser(
+  profile: string,
+  projectId: string,
+  branchId: string,
+  email: string,
+  name?: string,
+): Promise<{ id: string }> {
+  return post<{ id: string }>("/auth/users/create", { profile, projectId, branchId, email, name });
+}
+
 export function removeProfile(profile: string): Promise<void> {
   return post<void>("/remove-profile", { profile });
 }

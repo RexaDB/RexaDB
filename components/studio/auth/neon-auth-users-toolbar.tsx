@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Search, X } from "@/lib/icon-theme/lucide-react";
+import { RefreshCw, Search, UserPlus, X } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,9 +17,11 @@ interface NeonAuthUsersToolbarProps {
   loading: boolean;
   sort: SortState | null;
   onSortChange: (sort: SortState) => void;
+  /** Omitted when the connection cannot create users (no Neon API token). */
+  onAddUser?: () => void;
 }
 
-export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusChange, onRefresh, loading, sort, onSortChange }: NeonAuthUsersToolbarProps) {
+export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusChange, onRefresh, loading, sort, onSortChange, onAddUser }: NeonAuthUsersToolbarProps) {
   return (
     <div className="flex min-h-7 flex-wrap items-center gap-2">
       <div className="relative flex h-7 w-full max-w-80 min-w-0 flex-none items-center rounded-md border border-border bg-studio-bg">
@@ -36,6 +38,12 @@ export function NeonAuthUsersToolbar({ search, onSearchChange, status, onStatusC
         Refresh
       </Button>
       <NeonAuthUsersSort sort={sort} onSortChange={onSortChange} />
+      {onAddUser && (
+        <Button size="sm" onClick={onAddUser} className="ml-auto h-7 rounded-md px-2.5 text-xs">
+          <UserPlus className="size-3.5" />
+          Add user
+        </Button>
+      )}
     </div>
   );
 }

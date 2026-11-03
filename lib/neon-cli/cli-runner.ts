@@ -24,6 +24,7 @@ import {
   listFunctions,
   listBuckets,
   createBucket,
+  createAuthUser,
   profileList,
   profileRemove,
   updateProfileMeta,
@@ -234,6 +235,15 @@ export const neonBucketCreateEffect = (
   accessLevel: "private" | "public_read",
 ): Effect.Effect<void, NeonCliError> =>
   fromNeonPromise(() => createBucket(profile, projectId, branchId, name, accessLevel));
+
+export const neonAuthUserCreateEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+  email: string,
+  name?: string,
+): Effect.Effect<{ id: string }, NeonCliError> =>
+  fromNeonPromise(() => createAuthUser(profile, projectId, branchId, email, name));
 
 export interface NeonProfile {
   name: string;
