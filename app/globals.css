@@ -1,11 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./supabase-theme.css";
+/* Class names used by @rexadbapp/data-table (node_modules is not scanned by default). */
+@source "../node_modules/@rexadbapp/data-table/dist";
 
 /*
  * Rubber-band/elastic-bounce scroll suppression. Glide's own
  * `overscrollX`/`overscrollY` props (set to 0 in
- * grid-glide/data-grid.tsx) remove Glide's *internal* notion of extra
+ * @rexadbapp/data-table/grid) remove Glide's *internal* notion of extra
  * scrollable space, but the bounce-on-hard-scroll feel is a separate
  * thing: on macOS, Tauri's WKWebView has native rubber-band scrolling at
  * the NSScrollView level (this is a documented, still-open Tauri/wry

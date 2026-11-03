@@ -8,14 +8,7 @@ import { registerCustomMonacoThemes } from "@/lib/studio/editor-themes";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
-export function formatJsonText(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return JSON.stringify(text, null, 2);
-  }
-}
-
+/** Monaco JSON editor in the app's editor theme; the data grid's `CodeEditor`. */
 export function JsonCodeEditor({
   value,
   onChange,

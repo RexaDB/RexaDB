@@ -21,6 +21,7 @@ import { DesktopOpenHandler } from "@/components/desktop-open-handler";
 import { SettingsMigrationGate } from "@/components/gates/settings-migration-gate";
 import { ExtensionProvider } from "@/lib/extensions/react";
 import { CredentialVaultPrompt } from "@/components/providers/credential-vault-prompt";
+import { RexaDataTableProvider } from "@/components/providers/data-table-provider";
 
 // Self-hosted (was next/font/google): identical files, vendored under
 // app/fonts so production builds never touch fonts.googleapis.com.
@@ -81,7 +82,9 @@ export default function RootLayout({
                     <UpdateNotificationProvider>
                     <SettingsSyncProvider>
                       <ExtensionProvider>
+                      <RexaDataTableProvider>
                       {children}
+                      </RexaDataTableProvider>
                       </ExtensionProvider>
                       <Toaster
                         position="bottom-right"

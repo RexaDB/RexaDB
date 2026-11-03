@@ -63,6 +63,7 @@
     "@radix-ui/react-switch": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.7",
     "@radix-ui/react-tooltip": "^1.2.6",
+    "@rexadbapp/data-table": "^0.1.0",
     "@solar-icons/react": "^1.1.1",
     "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-virtual": "^3.14.13",

@@ -49,7 +49,7 @@ import {
 import {
   DataTable,
   type TableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import { SchemaDropdown } from "./database/schema-dropdown";
 import { SelectFilter } from "./database/select-filter";
 import { EmptyStatePresentational } from "./database/empty-state-presentational";

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   DataTable as NotraDataTable,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 
 export function ViewShell({

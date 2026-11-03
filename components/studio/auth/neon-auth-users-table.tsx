@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { DataTable, type SortState, type TableColumn } from "@/components/data-table/components/data-table";
+import { DataTable, type SortState, type TableColumn } from "@rexadbapp/data-table";
 import {
   NeonAuthUserCreated,
   NeonAuthUserId,
