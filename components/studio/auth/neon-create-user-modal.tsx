@@ -55,15 +55,20 @@ export function NeonCreateUserModal({
       );
     } catch (err) {
       toast.error(`Failed to create user: ${err instanceof Error ? err.message : "unknown error"}`);
-      return;
-    } finally {
       setCreating(false);
+      return;
     }
     toast.success(`Successfully created user: ${trimmedEmail}`);
     setEmail("");
     setName("");
-    await onCreated();
-    onOpenChange(false);
+    // Stay busy until the list refresh finishes and the dialog closes, so
+    // nothing typed meanwhile is wiped by the close.
+    try {
+      await onCreated();
+    } finally {
+      onOpenChange(false);
+      setCreating(false);
+    }
   };
 
   return (
@@ -93,6 +98,7 @@ export function NeonCreateUserModal({
                 className="pl-8"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={creating}
                 autoFocus
               />
             </div>
@@ -113,6 +119,7 @@ export function NeonCreateUserModal({
                 className="pl-8"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                disabled={creating}
               />
             </div>
           </div>
