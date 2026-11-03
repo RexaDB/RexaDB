@@ -33,7 +33,7 @@ import { DbTableLink } from "./db-list-layout";
 import {
   DataTable,
   type TableColumn as DataTableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import {
   DropdownMenu,
   DropdownMenuContent,

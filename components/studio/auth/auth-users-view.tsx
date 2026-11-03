@@ -12,7 +12,7 @@ import {
   X,
 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
-import type { SortState } from "@/components/data-table/components/data-table";
+import type { SortState } from "@rexadbapp/data-table";
 import { Input } from "@/components/ui/input";
 import {
   Select,

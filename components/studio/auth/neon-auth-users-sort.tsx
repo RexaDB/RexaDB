@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { SortState } from "@/components/data-table/components/data-table";
+import type { SortState } from "@rexadbapp/data-table";
 
 const options: Array<{ label: string; sort: SortState }> = [
   { label: "Created · newest first", sort: { key: "__created_at_raw", direction: "desc" } },

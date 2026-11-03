@@ -4,7 +4,7 @@ import { RefreshCw, Search, X } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { SortState } from "@/components/data-table/components/data-table";
+import type { SortState } from "@rexadbapp/data-table";
 import type { NeonUserStatusFilter } from "./neon-auth-users-messages";
 import { NeonAuthUsersSort } from "./neon-auth-users-sort";
 

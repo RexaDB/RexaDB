@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import {
   DataTable,
   type TableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import { DbTableLink } from "./db-list-layout";
 import {
   Tooltip,

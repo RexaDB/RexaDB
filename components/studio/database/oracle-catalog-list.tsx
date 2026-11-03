@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import {
   DataTable,
   type TableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import { SchemaDropdown } from "./schema-dropdown";
 import { EmptyStatePresentational } from "./empty-state-presentational";
 import { Skeleton } from "@/components/ui/skeleton";

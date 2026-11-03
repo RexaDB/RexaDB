@@ -23,7 +23,7 @@ import { EmptyStatePresentational } from "@/components/studio/database/empty-sta
 import {
   DataTable,
   type TableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import { useConfirm } from "@/hooks/use-confirm";
 import {
   deleteEdgeSecrets,

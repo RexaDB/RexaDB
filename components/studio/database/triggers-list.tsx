@@ -12,7 +12,7 @@ import {
 import {
   DataTable,
   type TableColumn,
-} from "@/components/data-table/components/data-table";
+} from "@rexadbapp/data-table";
 import {
   Tooltip,
   TooltipContent,
