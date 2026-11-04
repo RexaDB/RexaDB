@@ -26,8 +26,11 @@ export interface ToolbarRealtimeProps {
   schema: string;
   table: string | null;
   tableStructure?: any[];
-  page: number;
-  pageSize: number;
+  /** The grid's applied filter, sort and window, mirrored by the Neon watch. */
+  filter: string;
+  sort: { column: string; direction: "ASC" | "DESC" } | null;
+  limit: number;
+  offset: number;
   refreshCurrentTab: () => void;
 }
 
@@ -62,8 +65,10 @@ function RealtimeControl({
   schema,
   table,
   tableStructure,
-  page,
-  pageSize,
+  filter,
+  sort,
+  limit,
+  offset,
   refreshCurrentTab,
   provider,
 }: ToolbarRealtimeProps & { connectionString: string; table: string; provider: "neon" | "supabase" }) {
@@ -93,8 +98,10 @@ function RealtimeControl({
     schema,
     table,
     primaryKey,
-    limit: pageSize,
-    offset: page * pageSize,
+    filter,
+    sort,
+    limit,
+    offset,
     onChange: refreshCurrentTab,
   });
 
@@ -217,7 +224,7 @@ function RealtimeControl({
             <p className="text-sm font-medium">{provider === "neon" ? "Neon Realtime" : "Supabase Realtime"}</p>
             <p className="mt-1 text-muted-foreground">
               {provider === "neon"
-                ? "Live queries for this branch. The grid watches the rows on the current page."
+                ? "Live queries for this branch. The grid watches the rows it is showing, with its filter and sort."
                 : "Streams inserts, updates and deletes for tables in the supabase_realtime publication."}
             </p>
           </div>

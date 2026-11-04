@@ -767,6 +767,11 @@ app.post("/api/realtime/watch", async (req, res) => {
     schema: String(body.schema ?? ""),
     table: String(body.table ?? ""),
     primaryKey: Array.isArray(body.primaryKey) ? body.primaryKey.map(String) : [],
+    filter: typeof body.filter === "string" ? body.filter : undefined,
+    sort:
+      body.sort && typeof body.sort.column === "string"
+        ? { column: body.sort.column, direction: body.sort.direction === "DESC" ? ("DESC" as const) : ("ASC" as const) }
+        : null,
     limit: Math.min(Math.max(Number(body.limit) || 100, 1), 10_000),
     offset: Math.max(Number(body.offset) || 0, 0),
   };
@@ -787,7 +792,8 @@ app.post("/api/realtime/watch", async (req, res) => {
     }
   };
   const heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
-  req.on("close", () => {
+  // `res`, not `req`: the parsed POST body already fired the request's close.
+  res.on("close", () => {
     closed = true;
     clearInterval(heartbeat);
     stop?.();

@@ -19,7 +19,10 @@ export interface TableWatchRequest {
   schema: string;
   table: string;
   primaryKey: string[];
-  /** Visible window — Neon watches only these rows. */
+  /** The grid's window — Neon watches only these rows, so they must match
+   *  the grid's own WHERE / ORDER BY / LIMIT / OFFSET. */
+  filter?: string;
+  sort?: { column: string; direction: "ASC" | "DESC" } | null;
   limit: number;
   offset: number;
 }

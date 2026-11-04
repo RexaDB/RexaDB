@@ -43,6 +43,22 @@ export async function watchTable(request: TableWatchRequest, emit: Emit): Promis
   );
 }
 
+/** The grid's visible window: its filter and sort, with the primary key as a
+ *  tiebreak so the order is deterministic (live queries require that). */
+export function buildNeonWindowSql(request: TableWatchRequest): string {
+  const sortColumn = request.sort?.column;
+  const order = [
+    ...(sortColumn ? [`${quoteIdent(sortColumn)} ${request.sort!.direction === "DESC" ? "DESC" : "ASC"}`] : []),
+    ...request.primaryKey.filter((column) => column !== sortColumn).map((column) => `${quoteIdent(column)} ASC`),
+  ];
+  const filter = request.filter?.trim();
+  return (
+    `SELECT * FROM ${quoteIdent(request.schema)}.${quoteIdent(request.table)}` +
+    (filter ? ` WHERE ${filter}` : "") +
+    ` ORDER BY ${order.join(", ")} LIMIT $1 OFFSET $2`
+  );
+}
+
 async function watchNeonTable(
   pointer: NonNullable<ReturnType<typeof parseNeonCliConnectionString>>,
   request: TableWatchRequest,
@@ -67,12 +83,7 @@ async function watchNeonTable(
 
   const secret = await getRealtimeSecret(profile, projectId, branchId);
   const realtime = createRealtime({ url: state.invocation_url, secret, db: database });
-  const order = request.primaryKey.map(quoteIdent).join(", ");
-  // Watch the page the grid shows; a deterministic order keeps the window stable.
-  const query = rawSql<Record<string, unknown>>(
-    `SELECT * FROM ${quoteIdent(request.schema)}.${quoteIdent(request.table)} ORDER BY ${order} LIMIT $1 OFFSET $2`,
-    [request.limit, request.offset],
-  );
+  const query = rawSql<Record<string, unknown>>(buildNeonWindowSql(request), [request.limit, request.offset]);
 
   let subscription;
   try {

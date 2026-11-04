@@ -792,8 +792,11 @@ export function StudioMainContent({
       connectionString: connection?.connectionString,
       schema: selectedSchema,
       tableStructure,
-      page,
-      pageSize,
+      filter: filterQuery,
+      sort: sortConfig ?? null,
+      // Infinite scrolling shows every loaded row from the top.
+      limit: studio.infiniteScrolling ? Math.max(pageSize, results?.rows?.length ?? 0) : pageSize,
+      offset: studio.infiniteScrolling ? 0 : page * pageSize,
     },
   };
 
