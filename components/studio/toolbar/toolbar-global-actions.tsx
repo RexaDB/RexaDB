@@ -21,6 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ToolbarPermissionFilter } from "./toolbar-permission-filter";
+import { ToolbarRealtime, type ToolbarRealtimeProps } from "./toolbar-realtime";
 
 interface ToolbarGlobalActionsProps {
   setIsInsertSheetOpen: (open: boolean) => void;
@@ -39,6 +40,8 @@ interface ToolbarGlobalActionsProps {
   supabaseAuthUsers: SupabaseAuthUserOption[];
   loadingPermissionOptions?: boolean;
   connectionString?: string;
+  /** Live updates for Neon / Supabase management connections (active tab only). */
+  realtime?: Omit<ToolbarRealtimeProps, "table" | "refreshCurrentTab">;
 }
 
 const REFRESH_INTERVALS = [
@@ -67,6 +70,7 @@ export function ToolbarGlobalActions({
   supabaseAuthUsers,
   loadingPermissionOptions = false,
   connectionString,
+  realtime,
 }: ToolbarGlobalActionsProps) {
   const [refreshInterval, setRefreshInterval] = useState<number>(0);
   const [rlsPopoverOpen, setRlsPopoverOpen] = useState(false);
@@ -181,6 +185,10 @@ export function ToolbarGlobalActions({
           loading={loadingPermissionOptions}
           dbType={dbType}
         />
+      )}
+
+      {realtime && (
+        <ToolbarRealtime {...realtime} table={selectedTable} refreshCurrentTab={refreshCurrentTab} />
       )}
 
       <div className="flex items-center gap-2">

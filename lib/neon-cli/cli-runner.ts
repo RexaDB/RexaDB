@@ -25,6 +25,11 @@ import {
   listBuckets,
   createBucket,
   createAuthUser,
+  getRealtimeState,
+  enableRealtime,
+  disableRealtime,
+  rotateRealtimeSecret,
+  type NeonRealtimeState,
   profileList,
   profileRemove,
   updateProfileMeta,
@@ -244,6 +249,35 @@ export const neonAuthUserCreateEffect = (
   name?: string,
 ): Effect.Effect<{ id: string }, NeonCliError> =>
   fromNeonPromise(() => createAuthUser(profile, projectId, branchId, email, name));
+
+export const neonRealtimeStateEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Effect.Effect<NeonRealtimeState, NeonCliError> =>
+  fromNeonPromise(() => getRealtimeState(profile, projectId, branchId));
+
+export const neonRealtimeEnableEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+  allowedOrigins?: string[],
+): Effect.Effect<void, NeonCliError> =>
+  fromNeonPromise(() => enableRealtime(profile, projectId, branchId, allowedOrigins));
+
+export const neonRealtimeDisableEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Effect.Effect<void, NeonCliError> =>
+  fromNeonPromise(() => disableRealtime(profile, projectId, branchId));
+
+export const neonRealtimeRotateSecretEffect = (
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Effect.Effect<void, NeonCliError> =>
+  fromNeonPromise(() => rotateRealtimeSecret(profile, projectId, branchId));
 
 export interface NeonProfile {
   name: string;

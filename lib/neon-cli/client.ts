@@ -118,6 +118,29 @@ export function createAuthUser(
   return post<{ id: string }>("/auth/users/create", { profile, projectId, branchId, email, name });
 }
 
+export interface NeonRealtimeState {
+  enabled: boolean;
+  pending: boolean;
+  invocation_url?: string;
+  allowed_origins?: string[];
+}
+
+export function getRealtimeState(profile: string, projectId: string, branchId: string): Promise<NeonRealtimeState> {
+  return post<NeonRealtimeState>("/realtime", { profile, projectId, branchId });
+}
+
+export function enableRealtime(profile: string, projectId: string, branchId: string): Promise<void> {
+  return post<void>("/realtime/enable", { profile, projectId, branchId });
+}
+
+export function disableRealtime(profile: string, projectId: string, branchId: string): Promise<void> {
+  return post<void>("/realtime/disable", { profile, projectId, branchId });
+}
+
+export function rotateRealtimeSecret(profile: string, projectId: string, branchId: string): Promise<void> {
+  return post<void>("/realtime/rotate-secret", { profile, projectId, branchId });
+}
+
 export function removeProfile(profile: string): Promise<void> {
   return post<void>("/remove-profile", { profile });
 }

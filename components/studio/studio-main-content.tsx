@@ -788,6 +788,13 @@ export function StudioMainContent({
     onShowAllColumns: showAllColumns,
     connectionString: currentConnectionString,
     connectionId: connection?.id ?? null,
+    realtime: {
+      connectionString: connection?.connectionString,
+      schema: selectedSchema,
+      tableStructure,
+      page,
+      pageSize,
+    },
   };
 
   const tableGridProps = {
