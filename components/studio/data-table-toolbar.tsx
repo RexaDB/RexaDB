@@ -1,5 +1,5 @@
 import { getLocalCliProviderId } from "@/lib/agents/local-provider";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { toast } from "sonner";
 
 // components
@@ -91,6 +91,7 @@ interface DataTableToolbarProps {
   tableStructure?: any[];
   connectionString?: string;
   connectionId?: number | null;
+  realtime?: ComponentProps<typeof ToolbarGlobalActions>["realtime"];
 }
 
 // ─── Quick filters: `column op value` typed straight into search ───
@@ -420,6 +421,7 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       supabaseAuthUsers={props.supabaseAuthUsers}
       loadingPermissionOptions={props.loadingPermissionOptions}
       connectionString={props.connectionString}
+      realtime={props.realtime}
     />
   );
 

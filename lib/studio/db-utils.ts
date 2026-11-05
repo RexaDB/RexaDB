@@ -1,6 +1,8 @@
 import { detectConnectionDbType, getMongoDatabaseFromConnectionString } from "@/lib/db/connection-type";
 import { getRedisDbLabel, updateRedisConnectionStringDatabase } from "@/lib/db/redis-utils";
 import { normalizePgConnectionString } from "@/lib/db/pg-connection";
+import { buildNeonCliConnectionString, parseNeonCliConnectionString } from "@/lib/neon-cli/pointer";
+
 function getDbNameFromUrl(urlStr: string): string | null {
   try {
     const url = new URL(urlStr);
@@ -115,6 +117,9 @@ export function getDatabaseFromConnectionString(connectionString: string) {
 
 export function updateConnectionStringDatabase(connectionString: string, newDatabase: string) {
   if (connectionString.startsWith("workspace:")) return connectionString;
+  // neon-cli:// keeps project/branch/database in the path; swap only the database.
+  const neonPointer = parseNeonCliConnectionString(connectionString);
+  if (neonPointer) return buildNeonCliConnectionString({ ...neonPointer, database: newDatabase });
   const dbType = detectConnectionDbType(connectionString);
   if (dbType === "sqlite" || dbType === "trino" || dbType === "spacetimedb" || dbType === "supabase-mgmt") {
     return connectionString;

@@ -87,6 +87,7 @@ import { createRexaDbPiSession, streamPiResponse, type PiAgentInput, type PiSseE
 import { getAgentSandboxCwd } from "../lib/agents/sandbox-cwd";
 import { ensureEnrichedPath } from "../lib/system/shell-path";
 import * as neonCliRunner from "../lib/neon-cli/cli-runner";
+import * as tableWatch from "../lib/realtime/table-watch";
 import {
   lockCredentialCacheEffect,
   putCredentialCacheEntryEffect,
@@ -711,6 +712,108 @@ app.post(
     ),
   ),
 );
+
+function neonBranchArgs(req: any): [string, string, string] {
+  return [
+    String(req.body?.profile ?? ""),
+    String(req.body?.projectId ?? ""),
+    String(req.body?.branchId ?? ""),
+  ];
+}
+
+app.post(
+  "/api/neon-cli/realtime",
+  effectJsonHandler((req) => neonCliRunner.neonRealtimeStateEffect(...neonBranchArgs(req))),
+);
+
+app.post(
+  "/api/neon-cli/realtime/enable",
+  effectJsonHandler((req) => neonCliRunner.neonRealtimeEnableEffect(...neonBranchArgs(req))),
+);
+
+app.post(
+  "/api/neon-cli/realtime/disable",
+  effectJsonHandler((req) => neonCliRunner.neonRealtimeDisableEffect(...neonBranchArgs(req))),
+);
+
+app.post(
+  "/api/neon-cli/realtime/rotate-secret",
+  effectJsonHandler((req) => neonCliRunner.neonRealtimeRotateSecretEffect(...neonBranchArgs(req))),
+);
+
+// Supabase Realtime: which tables stream postgres_changes is controlled by
+// the supabase_realtime publication, so these run SQL, not the mgmt config API.
+app.post("/api/realtime/supabase/table", async (req, res) => {
+  try {
+    const { connectionString, schema, table, published, fullReplicaIdentity } = req.body ?? {};
+    const data =
+      published === undefined && fullReplicaIdentity === undefined
+        ? await tableWatch.getSupabaseTableRealtimeStatus(String(connectionString), String(schema), String(table))
+        : await tableWatch.setSupabaseTableRealtime(String(connectionString), String(schema), String(table), {
+            published: typeof published === "boolean" ? published : undefined,
+            fullReplicaIdentity: typeof fullReplicaIdentity === "boolean" ? fullReplicaIdentity : undefined,
+          });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// SSE: streams committed changes on one table until the client disconnects.
+app.post("/api/realtime/watch", async (req, res) => {
+  const body = req.body ?? {};
+  const request = {
+    connectionString: String(body.connectionString ?? ""),
+    schema: String(body.schema ?? ""),
+    table: String(body.table ?? ""),
+    primaryKey: Array.isArray(body.primaryKey) ? body.primaryKey.map(String) : [],
+    filter: typeof body.filter === "string" ? body.filter : undefined,
+    sort:
+      body.sort && typeof body.sort.column === "string"
+        ? { column: body.sort.column, direction: body.sort.direction === "DESC" ? ("DESC" as const) : ("ASC" as const) }
+        : null,
+    limit: Math.min(Math.max(Number(body.limit) || 100, 1), 10_000),
+    offset: Math.max(Number(body.offset) || 0, 0),
+  };
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  let closed = false;
+  let stop: (() => void) | null = null;
+  const send = (event: Record<string, unknown>) => {
+    if (closed) return;
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      // client gone
+    }
+  };
+  const heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
+  // `res`, not `req`: the parsed POST body already fired the request's close.
+  res.on("close", () => {
+    closed = true;
+    clearInterval(heartbeat);
+    stop?.();
+  });
+  send({ type: "status", status: "connecting" });
+  try {
+    const stopWatch = await tableWatch.watchTable(request, send);
+    if (closed) stopWatch();
+    else stop = stopWatch;
+  } catch (error) {
+    send({
+      type: "error",
+      message: error instanceof Error ? error.message : String(error),
+      code: error instanceof tableWatch.TableWatchError ? error.code : undefined,
+    });
+    clearInterval(heartbeat);
+    closed = true;
+    res.end();
+  }
+});
 
 app.post(
   "/api/neon-cli/remove-profile",

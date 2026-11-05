@@ -28,6 +28,13 @@ test("updateConnectionStringDatabase updates db names", () => {
   );
 });
 
+test("updateConnectionStringDatabase keeps a neon-cli pointer's project and branch", () => {
+  assert.equal(
+    updateConnectionStringDatabase("neon-cli://default/proj-1/br-1/neondb?role=owner", "analytics"),
+    "neon-cli://default/proj-1/br-1/analytics?role=owner"
+  );
+});
+
 test("getDefaultNewTableColumns returns defaults", () => {
   assert.equal(getDefaultNewTableColumns("sqlite")[0].name, "id");
   assert.equal(getDefaultNewTableColumns("mssql")[0].type, "INT");

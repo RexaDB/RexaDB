@@ -163,10 +163,7 @@ async function neonFetch<T>(
           },
           signal: init?.signal ?? AbortSignal.timeout(30_000),
         });
-        if (retry.ok) {
-          if (retry.status === 204) return undefined as T;
-          return (await retry.json()) as T;
-        }
+        if (retry.ok) return readJsonBody<T>(retry);
         if (retry.status === 403) {
           const retryText = await retry.text().catch(() => retry.statusText);
           throw new Error(`Neon API 403 (not permitted): ${retryText.slice(0, 300)}`);
@@ -194,8 +191,14 @@ async function neonFetch<T>(
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`Neon API ${res.status}: ${text.slice(0, 300)}`);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return readJsonBody<T>(res);
+}
+
+// 204s and async 202 "queued" responses (Realtime enable/disable) may carry
+// no body at all.
+async function readJsonBody<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export async function getCurrentUser(profile: string): Promise<NeonUser> {
@@ -319,6 +322,73 @@ export async function createAuthUser(
     `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/auth/users`,
     { method: "POST", body: JSON.stringify(name ? { email, name } : { email }) },
   );
+}
+
+// Realtime (live queries) for one branch. Provisioning, disabling and secret
+// rotation are asynchronous — poll getRealtimeState until `pending` is false.
+export interface NeonRealtimeState {
+  enabled: boolean;
+  pending: boolean;
+  invocation_url?: string;
+  allowed_origins?: string[];
+}
+
+function realtimePath(projectId: string, branchId: string, suffix = ""): string {
+  return `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/realtime${suffix}`;
+}
+
+export async function getRealtimeState(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<NeonRealtimeState> {
+  return neonFetch<NeonRealtimeState>(profile, realtimePath(projectId, branchId));
+}
+
+/** Enabling permanently sets wal_level=logical for the whole project and
+ *  restarts every compute on every branch. */
+export async function enableRealtime(
+  profile: string,
+  projectId: string,
+  branchId: string,
+  allowedOrigins?: string[],
+): Promise<void> {
+  await neonFetch<unknown>(profile, realtimePath(projectId, branchId), {
+    method: "POST",
+    body: JSON.stringify(allowedOrigins ? { allowed_origins: allowedOrigins } : {}),
+  });
+}
+
+export async function disableRealtime(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<void> {
+  await neonFetch<unknown>(profile, realtimePath(projectId, branchId), { method: "DELETE" });
+}
+
+export async function rotateRealtimeSecret(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<void> {
+  await neonFetch<unknown>(profile, realtimePath(projectId, branchId, "/rotate_secret"), {
+    method: "POST",
+  });
+}
+
+/** Server-only: the key live queries are sealed with. Never send it to the
+ *  webview. 404 while Realtime is disabled or not yet provisioned. */
+export async function getRealtimeSecret(
+  profile: string,
+  projectId: string,
+  branchId: string,
+): Promise<string> {
+  const res = await neonFetch<{ secret: string }>(
+    profile,
+    realtimePath(projectId, branchId, "/secret"),
+  );
+  return res.secret;
 }
 
 export async function getConnectionUri(

@@ -788,6 +788,16 @@ export function StudioMainContent({
     onShowAllColumns: showAllColumns,
     connectionString: currentConnectionString,
     connectionId: connection?.id ?? null,
+    realtime: {
+      connectionString: connection?.connectionString,
+      schema: selectedSchema,
+      tableStructure,
+      filter: filterQuery,
+      sort: sortConfig ?? null,
+      // Infinite scrolling shows every loaded row from the top.
+      limit: studio.infiniteScrolling ? Math.max(pageSize, results?.rows?.length ?? 0) : pageSize,
+      offset: studio.infiniteScrolling ? 0 : page * pageSize,
+    },
   };
 
   const tableGridProps = {

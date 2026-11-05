@@ -1402,12 +1402,20 @@ function TablesPanel({ studio }: { studio: any }) {
   );
 
   const schemaExplorer = Boolean(studio.schemaExplorer);
+  const databaseExplorer = Boolean(studio.databaseExplorer);
   const isPostgres = isPostgresCatalogDbType(studio.dbType);
+  // A Postgres server can host several databases; switching rewrites the
+  // connection string, so only plain postgres connections can do it.
+  const databases: string[] = studio.databases ?? [];
+  const currentDatabase: string = studio.currentDatabase || "";
+  const showDatabasePicker = databaseExplorer && studio.dbType === "postgres";
   const isRoutineDb = supportsRoutineCatalog(studio.dbType);
   const indexCatalog = supportsIndexCatalog(studio.dbType);
   const oracleCatalog = supportsOracleExtraCatalog(studio.dbType);
 
-  const databaseObjectSections = buildDatabaseObjectSections(
+  // Functions / triggers / indexes etc. belong to Schema Explorer only; the
+  // plain Tables explorer lists tables and views.
+  const databaseObjectSections = !schemaExplorer && !databaseExplorer ? [] : buildDatabaseObjectSections(
     {
       functions: isRoutineDb ? studio.functions : [],
       triggers: isRoutineDb ? studio.triggers : [],
@@ -1576,6 +1584,52 @@ function TablesPanel({ studio }: { studio: any }) {
           </button>
         )}
       </div>
+      {showDatabasePicker && (
+        <div className="mb-1 flex shrink-0 items-center">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/70 bg-white/[0.04] px-2 text-left text-xs text-muted-foreground transition-colors",
+                  "hover:bg-white/[0.06] hover:text-foreground",
+                  "outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "data-[state=open]:bg-white/[0.06] data-[state=open]:text-foreground",
+                )}
+              >
+                <span className="shrink-0 text-muted-foreground/70">database</span>
+                <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                  {currentDatabase || "Select…"}
+                </span>
+                <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto border-border bg-[var(--shell-content-bg)]"
+            >
+              {databases.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No databases
+                </div>
+              ) : (
+                databases.map((d) => (
+                  <DropdownMenuItem
+                    key={d}
+                    className="gap-2 text-xs"
+                    onSelect={() => void studio.handleDatabaseChange?.(d)}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{d}</span>
+                    {currentDatabase === d ? (
+                      <Check className="size-3.5 shrink-0 text-muted-foreground" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       {/* Schema picker + new-table action under the search bar. */}
       <div className="mb-1 flex shrink-0 items-center gap-1">
         <DropdownMenu open={schemaMenuOpen} onOpenChange={setSchemaMenuOpen}>
