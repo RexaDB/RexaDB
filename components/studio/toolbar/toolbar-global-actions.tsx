@@ -41,7 +41,7 @@ interface ToolbarGlobalActionsProps {
   loadingPermissionOptions?: boolean;
   connectionString?: string;
   /** Live updates for Neon / Supabase management connections (active tab only). */
-  realtime?: Omit<ToolbarRealtimeProps, "table" | "refreshCurrentTab">;
+  realtime?: Omit<ToolbarRealtimeProps, "table" | "rlsEnabled" | "refreshCurrentTab">;
 }
 
 const REFRESH_INTERVALS = [
@@ -188,7 +188,7 @@ export function ToolbarGlobalActions({
       )}
 
       {realtime && (
-        <ToolbarRealtime {...realtime} table={selectedTable} refreshCurrentTab={refreshCurrentTab} />
+        <ToolbarRealtime {...realtime} table={selectedTable} rlsEnabled={rlsEnabled} refreshCurrentTab={refreshCurrentTab} />
       )}
 
       <div className="flex items-center gap-2">

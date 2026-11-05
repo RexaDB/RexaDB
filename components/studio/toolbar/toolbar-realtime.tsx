@@ -26,6 +26,8 @@ export interface ToolbarRealtimeProps {
   schema: string;
   table: string | null;
   tableStructure?: any[];
+  /** Row-level security on the table; Neon's Realtime beta rejects such tables. */
+  rlsEnabled?: boolean;
   /** The grid's applied filter, sort and window, mirrored by the Neon watch. */
   filter: string;
   sort: { column: string; direction: "ASC" | "DESC" } | null;
@@ -35,6 +37,9 @@ export interface ToolbarRealtimeProps {
 }
 
 const POLL_MS = 3000;
+
+const NEON_RLS_UNSUPPORTED =
+  "Neon Realtime (beta) doesn't support tables with row-level security yet. Use Auto-refresh instead.";
 
 const STATUS_LABEL: Record<TableRealtimeStatus, string> = {
   off: "Off",
@@ -65,6 +70,7 @@ function RealtimeControl({
   schema,
   table,
   tableStructure,
+  rlsEnabled,
   filter,
   sort,
   limit,
@@ -203,6 +209,12 @@ function RealtimeControl({
   const neonReady = Boolean(neonState?.enabled && !neonState.pending);
   const canGoLive = provider === "supabase" ? Boolean(supabaseState?.published) : neonReady;
   const noPk = provider === "neon" && primaryKey.length === 0;
+  const neonRls = provider === "neon" && rlsEnabled === true;
+  const liveBlockedReason = neonRls
+    ? NEON_RLS_UNSUPPORTED
+    : noPk
+      ? "Needs a primary key"
+      : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -293,10 +305,10 @@ function RealtimeControl({
             <span>
               <span className="block">Live updates</span>
               <span className="text-muted-foreground">
-                {noPk ? "Needs a primary key" : `Refresh the grid on change · ${STATUS_LABEL[status]}`}
+                {liveBlockedReason ?? `Refresh the grid on change · ${STATUS_LABEL[status]}`}
               </span>
             </span>
-            <Switch checked={live} disabled={!live && (!canGoLive || noPk)} onCheckedChange={setLive} />
+            <Switch checked={live} disabled={!live && (!canGoLive || liveBlockedReason !== null)} onCheckedChange={setLive} />
           </label>
 
           {error && (
