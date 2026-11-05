@@ -128,6 +128,10 @@ struct SidecarState {
     /// delayed restart act only while their generation is still current, so a
     /// late `Terminated` cannot clobber a replacement or restart a stopped one.
     generation: Mutex<u64>,
+    /// Generation of the last child whose `Terminated` event arrived, recorded
+    /// even when that generation is stale. Lets a failed stop tell an exited
+    /// child (process check unavailable) from one that is still running.
+    last_terminated: Mutex<Option<u64>>,
 }
 
 /// Database targets passed via `rexadb open <database-url-or-file-path>`.
@@ -523,16 +527,25 @@ fn stop_sidecar(state: &SidecarState) -> Result<(), String> {
     let Some(child) = child else {
         return Ok(());
     };
-    kill_sidecar_tree(child).map_err(|(error, child)| {
-        let _suspended = state.suspended.lock().unwrap();
-        let mut current = state.generation.lock().unwrap();
-        if *current == generation + 1 {
-            *current = generation;
-            *state.ready.lock().unwrap() = was_ready;
-            *state.child.lock().unwrap() = Some(child);
+    match kill_sidecar_tree(child) {
+        Ok(()) => Ok(()),
+        Err((error, child)) => {
+            let _suspended = state.suspended.lock().unwrap();
+            // Held while restoring, so the child's handler either recorded its
+            // exit before this check or sees the restored generation after it.
+            let mut current = state.generation.lock().unwrap();
+            if *state.last_terminated.lock().unwrap() == Some(generation) {
+                // The process is gone even though the check could not confirm it.
+                return Ok(());
+            }
+            if *current == generation + 1 {
+                *current = generation;
+                *state.ready.lock().unwrap() = was_ready;
+                *state.child.lock().unwrap() = Some(child);
+            }
+            Err(error)
         }
-        error
-    })
+    }
 }
 
 /// Called right before the updater installs. Only Windows needs it: there the
@@ -557,16 +570,11 @@ fn resume_sidecar(app: tauri::AppHandle) {
         let state = app.state::<SidecarState>();
         let mut suspended = state.suspended.lock().unwrap();
         *suspended = false;
-        // The tracked server may have exited after its handler stopped
-        // listening (stale generation); drop it so a fresh one can start.
-        #[cfg(windows)]
-        {
-            let mut child = state.child.lock().unwrap();
-            if let Some(pid) = child.as_ref().map(|c| c.pid()) {
-                if matches!(windows_pid_alive(pid), Ok(false)) {
-                    child.take();
-                }
-            }
+        // A tracked server whose exit was already recorded is gone; drop it so
+        // a fresh one can start.
+        let generation = *state.generation.lock().unwrap();
+        if *state.last_terminated.lock().unwrap() == Some(generation) {
+            state.child.lock().unwrap().take();
         }
     }
     spawn_sidecar(&app);
@@ -1099,6 +1107,7 @@ impl SidecarState {
             last_exit_code: Mutex::new(None),
             suspended: Mutex::new(false),
             generation: Mutex::new(0),
+            last_terminated: Mutex::new(None),
         }
     }
 }
@@ -1185,6 +1194,9 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     rust_log(&format!("sidecar terminated: code={:?} signal={:?}", status.code, status.signal));
                     let exit_info = format!("\n[sidecar] Terminated: code={:?} signal={:?}\n", status.code, status.signal);
                     app_handle.state::<SidecarState>().log.lock().unwrap().push_str(&exit_info);
+                    // Recorded before the generation check: a stop that could
+                    // not confirm the kill reads it to avoid restoring a dead child.
+                    *app_handle.state::<SidecarState>().last_terminated.lock().unwrap() = Some(generation);
                     if !is_current(&app_handle) {
                         // Stopped on purpose, or already replaced.
                         break;
