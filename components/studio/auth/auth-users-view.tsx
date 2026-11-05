@@ -209,7 +209,7 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false, neo
     <div className={`flex flex-col min-h-0 h-full ${neonAuth ? "bg-background" : ""}`}>
       {neonAuth ? (
         <>
-          <NeonAuthUsersHeader />
+          <NeonAuthUsersHeader onAddUser={neonPointer ? () => setNeonCreateOpen(true) : undefined} />
           <div className="px-5 pb-3 md:px-6">
             <NeonAuthUsersToolbar
             search={search}
@@ -220,7 +220,6 @@ export function AuthUsersView({ connectionString, enabled, neonAuth = false, neo
             loading={loading}
             sort={neonTableSort}
             onSortChange={setNeonTableSort}
-            onAddUser={neonPointer ? () => setNeonCreateOpen(true) : undefined}
             />
           </div>
         </>
