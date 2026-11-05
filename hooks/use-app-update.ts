@@ -330,8 +330,10 @@ export function useAppUpdate() {
       });
 
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("stop_sidecar_for_update");
       try {
+        // Rejects unless the sidecar is confirmed gone; never install over a
+        // possibly locked rexadb-server.exe.
+        await invoke("stop_sidecar_for_update");
         await update.install();
       } catch (installError) {
         await invoke("resume_sidecar").catch(() => {});
