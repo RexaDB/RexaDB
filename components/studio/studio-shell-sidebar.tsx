@@ -1414,8 +1414,8 @@ function TablesPanel({ studio }: { studio: any }) {
   const oracleCatalog = supportsOracleExtraCatalog(studio.dbType);
 
   // Functions / triggers / indexes etc. belong to Schema Explorer only; the
-  // plain Tables explorer lists tables and views.
-  const databaseObjectSections = !schemaExplorer && !databaseExplorer ? [] : buildDatabaseObjectSections(
+  // Tables and Database Explorer sidebars list tables and views.
+  const databaseObjectSections = !schemaExplorer ? [] : buildDatabaseObjectSections(
     {
       functions: isRoutineDb ? studio.functions : [],
       triggers: isRoutineDb ? studio.triggers : [],
