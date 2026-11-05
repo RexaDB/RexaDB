@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Activity, Loader2 } from "@/lib/icon-theme/lucide-react";
+import { Activity, AlertTriangle, Loader2 } from "@/lib/icon-theme/lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -26,6 +26,8 @@ export interface ToolbarRealtimeProps {
   schema: string;
   table: string | null;
   tableStructure?: any[];
+  /** Row-level security on the table; Neon's Realtime beta rejects such tables. */
+  rlsEnabled?: boolean;
   /** The grid's applied filter, sort and window, mirrored by the Neon watch. */
   filter: string;
   sort: { column: string; direction: "ASC" | "DESC" } | null;
@@ -35,6 +37,8 @@ export interface ToolbarRealtimeProps {
 }
 
 const POLL_MS = 3000;
+
+const NEON_RLS_UNSUPPORTED = "Not available: this table has row-level security";
 
 const STATUS_LABEL: Record<TableRealtimeStatus, string> = {
   off: "Off",
@@ -65,6 +69,7 @@ function RealtimeControl({
   schema,
   table,
   tableStructure,
+  rlsEnabled,
   filter,
   sort,
   limit,
@@ -203,6 +208,14 @@ function RealtimeControl({
   const neonReady = Boolean(neonState?.enabled && !neonState.pending);
   const canGoLive = provider === "supabase" ? Boolean(supabaseState?.published) : neonReady;
   const noPk = provider === "neon" && primaryKey.length === 0;
+  // Known up front from the table's RLS flag, or learned from the rejection.
+  const neonRls =
+    provider === "neon" && (rlsEnabled === true || /row-level security/i.test(error?.message ?? ""));
+  const liveBlockedReason = neonRls
+    ? NEON_RLS_UNSUPPORTED
+    : noPk
+      ? "Needs a primary key"
+      : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -211,7 +224,13 @@ function RealtimeControl({
           variant="outline"
           size="sm"
           className="font-normal dark:border-white/15 dark:bg-white/[0.02]"
-          title={error ? error.message : `Realtime: ${STATUS_LABEL[status]}`}
+          title={
+            neonRls
+              ? "Neon Realtime does not support tables with row-level security yet."
+              : error
+                ? error.message
+                : `Realtime: ${STATUS_LABEL[status]}`
+          }
         >
           <span className={cn("size-1.5 rounded-full", STATUS_DOT[status])} />
           <Activity className="w-3.5 h-3.5" />
@@ -228,6 +247,23 @@ function RealtimeControl({
                 : "Streams inserts, updates and deletes for tables in the supabase_realtime publication."}
             </p>
           </div>
+
+          {neonRls && (
+            <div
+              role="alert"
+              className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-300"
+            >
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-medium">Neon doesn&apos;t support row-level security in Realtime</p>
+                <p className="text-amber-700/90 dark:text-amber-300/90">
+                  &quot;{table}&quot; has RLS enabled, and Neon Realtime (beta) rejects live queries on RLS tables.
+                  Live updates can&apos;t run here until Neon adds support. Use Auto-refresh, or disable RLS on this
+                  table if nothing relies on its policies.
+                </p>
+              </div>
+            </div>
+          )}
 
           {settingsError && <p className="break-words text-destructive">{settingsError}</p>}
 
@@ -293,13 +329,13 @@ function RealtimeControl({
             <span>
               <span className="block">Live updates</span>
               <span className="text-muted-foreground">
-                {noPk ? "Needs a primary key" : `Refresh the grid on change · ${STATUS_LABEL[status]}`}
+                {liveBlockedReason ?? `Refresh the grid on change · ${STATUS_LABEL[status]}`}
               </span>
             </span>
-            <Switch checked={live} disabled={!live && (!canGoLive || noPk)} onCheckedChange={setLive} />
+            <Switch checked={live} disabled={!live && (!canGoLive || liveBlockedReason !== null)} onCheckedChange={setLive} />
           </label>
 
-          {error && (
+          {error && !neonRls && (
             <div className="flex items-start justify-between gap-2">
               <p className="min-w-0 break-words text-destructive">{error.message}</p>
               <Button size="sm" variant="ghost" className="h-6 shrink-0 px-2 text-xs" onClick={retry}>

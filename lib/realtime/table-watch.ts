@@ -82,7 +82,10 @@ async function watchNeonTable(
   }
 
   const secret = await getRealtimeSecret(profile, projectId, branchId);
-  const realtime = createRealtime({ url: state.invocation_url, secret, db: database });
+  // debugMode returns Postgres' own error instead of a bare "upstream
+  // rejected". It is meant for development because it exposes schema details
+  // to clients; here the only client is the database owner's own studio.
+  const realtime = createRealtime({ url: state.invocation_url, secret, db: database, debugMode: true });
   const query = rawSql<Record<string, unknown>>(buildNeonWindowSql(request), [request.limit, request.offset]);
 
   let subscription;
@@ -90,10 +93,10 @@ async function watchNeonTable(
     subscription = await realtime.subscribe(query, { materialize: false });
   } catch (error) {
     realtime.close();
-    throw error;
+    throw new Error(describeLiveQueryError(error));
   }
   subscription.onStateChange((s) => {
-    if (s.status === "error") emit({ type: "error", message: s.error.message });
+    if (s.status === "error") emit({ type: "error", message: describeLiveQueryError(s.error) });
     else emit({ type: "status", status: s.status });
   });
   subscription.onUpdate((update) => {
@@ -105,6 +108,22 @@ async function watchNeonTable(
     subscription.unsubscribe();
     realtime.close();
   };
+}
+
+/** The SDK's message plus its error code and SQLSTATE, which say whether
+ *  Postgres rejected the query (e.g. 42501 permission, 42P01 missing table). */
+export function describeLiveQueryError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  // The beta rejects any query touching a table with row-level security.
+  if (/row security/i.test(error.message)) {
+    return "Neon Realtime (beta) doesn't support tables with row-level security yet. Disable RLS on this table or use Auto-refresh.";
+  }
+  const { code, sqlState } = error as Error & { code?: unknown; sqlState?: unknown };
+  const details = [
+    typeof code === "string" && code ? code : null,
+    typeof sqlState === "string" && sqlState ? `SQLSTATE ${sqlState}` : null,
+  ].filter(Boolean);
+  return details.length ? `${error.message} (${details.join(", ")})` : error.message;
 }
 
 /** True when the table is in the publication Supabase Realtime reads from. */
