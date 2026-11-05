@@ -447,65 +447,92 @@ fn get_sidecar_log(state: tauri::State<SidecarState>) -> String {
     state.log.lock().unwrap().clone()
 }
 
+/// Whether a Windows process is still running. Errors when that cannot be
+/// determined, so callers never mistake "unknown" for "gone".
+#[cfg(windows)]
+fn windows_pid_alive(pid: u32) -> Result<bool, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let out = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Could not check whether the RexaDB server stopped: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("Could not check whether the RexaDB server stopped (tasklist exited with {}).", out.status));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
+}
+
 /// Kills the sidecar and every process it started, and waits for them to exit.
 /// On Windows the updater runs the installer and then calls
 /// `std::process::exit`, which skips `RunEvent::Exit`; a still-running
 /// rexadb-server.exe keeps its image locked and the installer cannot replace it.
+/// Without a confirmed exit, the child is handed back so the caller can keep
+/// tracking it.
 #[cfg(windows)]
-fn kill_sidecar_tree(child: tauri_plugin_shell::process::CommandChild) -> Result<(), String> {
+fn kill_sidecar_tree(
+    child: tauri_plugin_shell::process::CommandChild,
+) -> Result<(), (String, tauri_plugin_shell::process::CommandChild)> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let pid = child.pid();
-    let killed = Command::new("taskkill")
+    let _ = Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false);
-    if !killed {
-        let _ = child.kill();
-    }
+        .status();
     // TerminateProcess returns before the process is gone; wait (bounded) until
-    // it no longer shows up so its executable is unlocked. Anything short of a
-    // confirmed exit is an error: installing over a locked exe fails anyway.
-    let filter = format!("PID eq {pid}");
+    // it no longer shows up so its executable is unlocked.
     for _ in 0..50 {
-        let out = Command::new("tasklist")
-            .args(["/FI", &filter, "/NH"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map_err(|e| format!("Could not check whether the RexaDB server stopped: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("Could not check whether the RexaDB server stopped (tasklist exited with {}).", out.status));
+        match windows_pid_alive(pid) {
+            Ok(false) => return Ok(()),
+            Ok(true) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(error) => return Err((error, child)),
         }
-        if !String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()) {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    Err(format!("The RexaDB server (pid {pid}) is still running. Close it in Task Manager, then retry the update."))
+    Err((
+        format!("The RexaDB server (pid {pid}) is still running. Close it in Task Manager, then retry the update."),
+        child,
+    ))
 }
 
 #[cfg(not(windows))]
-fn kill_sidecar_tree(child: tauri_plugin_shell::process::CommandChild) -> Result<(), String> {
-    child.kill().map_err(|e| e.to_string())
+fn kill_sidecar_tree(
+    child: tauri_plugin_shell::process::CommandChild,
+) -> Result<(), (String, tauri_plugin_shell::process::CommandChild)> {
+    let _ = child.kill();
+    Ok(())
 }
 
 /// Stops the sidecar for good (until `resume_sidecar`): no restart that is
 /// already scheduled, and no late event from the old child, can start another.
+/// If the child cannot be confirmed gone it stays the tracked, current server,
+/// so a resume reuses it instead of starting a second one beside it.
 fn stop_sidecar(state: &SidecarState) -> Result<(), String> {
-    let child = {
+    let (child, generation, was_ready) = {
         let mut suspended = state.suspended.lock().unwrap();
         *suspended = true;
-        *state.generation.lock().unwrap() += 1;
-        *state.ready.lock().unwrap() = false;
-        state.child.lock().unwrap().take()
+        let mut current = state.generation.lock().unwrap();
+        let generation = *current;
+        *current += 1;
+        let was_ready = std::mem::replace(&mut *state.ready.lock().unwrap(), false);
+        (state.child.lock().unwrap().take(), generation, was_ready)
     };
-    match child {
-        Some(child) => kill_sidecar_tree(child),
-        None => Ok(()),
-    }
+    let Some(child) = child else {
+        return Ok(());
+    };
+    kill_sidecar_tree(child).map_err(|(error, child)| {
+        let _suspended = state.suspended.lock().unwrap();
+        let mut current = state.generation.lock().unwrap();
+        if *current == generation + 1 {
+            *current = generation;
+            *state.ready.lock().unwrap() = was_ready;
+            *state.child.lock().unwrap() = Some(child);
+        }
+        error
+    })
 }
 
 /// Called right before the updater installs. Only Windows needs it: there the
@@ -521,10 +548,27 @@ async fn stop_sidecar_for_update(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 
-/// Undoes `stop_sidecar_for_update` when the stop or the install fails.
+/// Undoes `stop_sidecar_for_update` when the stop or the install fails. A
+/// server that survived a failed stop is still tracked and keeps serving;
+/// a new one starts only when none is running.
 #[tauri::command]
 fn resume_sidecar(app: tauri::AppHandle) {
-    *app.state::<SidecarState>().suspended.lock().unwrap() = false;
+    {
+        let state = app.state::<SidecarState>();
+        let mut suspended = state.suspended.lock().unwrap();
+        *suspended = false;
+        // The tracked server may have exited after its handler stopped
+        // listening (stale generation); drop it so a fresh one can start.
+        #[cfg(windows)]
+        {
+            let mut child = state.child.lock().unwrap();
+            if let Some(pid) = child.as_ref().map(|c| c.pid()) {
+                if matches!(windows_pid_alive(pid), Ok(false)) {
+                    child.take();
+                }
+            }
+        }
+    }
     spawn_sidecar(&app);
 }
 
