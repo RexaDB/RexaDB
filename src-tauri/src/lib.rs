@@ -121,6 +121,17 @@ struct SidecarState {
     log: Mutex<String>,
     restart_count: Mutex<u32>,
     last_exit_code: Mutex<Option<i32>>,
+    /// Set while the app is exiting or an update is installing. Held while a
+    /// child is spawned and stored, so a stop never races a start.
+    suspended: Mutex<bool>,
+    /// Bumped by every spawn and stop. A child's event handler and its
+    /// delayed restart act only while their generation is still current, so a
+    /// late `Terminated` cannot clobber a replacement or restart a stopped one.
+    generation: Mutex<u64>,
+    /// Generation of the last child whose `Terminated` event arrived, recorded
+    /// even when that generation is stale. Lets a failed stop tell an exited
+    /// child (process check unavailable) from one that is still running.
+    last_terminated: Mutex<Option<u64>>,
 }
 
 /// Database targets passed via `rexadb open <database-url-or-file-path>`.
@@ -438,6 +449,135 @@ fn get_sidecar_status(state: tauri::State<SidecarState>) -> SidecarStatus {
 #[tauri::command]
 fn get_sidecar_log(state: tauri::State<SidecarState>) -> String {
     state.log.lock().unwrap().clone()
+}
+
+/// Whether a Windows process is still running. Errors when that cannot be
+/// determined, so callers never mistake "unknown" for "gone".
+#[cfg(windows)]
+fn windows_pid_alive(pid: u32) -> Result<bool, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let out = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Could not check whether the RexaDB server stopped: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("Could not check whether the RexaDB server stopped (tasklist exited with {}).", out.status));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
+}
+
+/// Kills the sidecar and every process it started, and waits for them to exit.
+/// On Windows the updater runs the installer and then calls
+/// `std::process::exit`, which skips `RunEvent::Exit`; a still-running
+/// rexadb-server.exe keeps its image locked and the installer cannot replace it.
+/// Without a confirmed exit, the child is handed back so the caller can keep
+/// tracking it.
+#[cfg(windows)]
+fn kill_sidecar_tree(
+    child: tauri_plugin_shell::process::CommandChild,
+) -> Result<(), (String, tauri_plugin_shell::process::CommandChild)> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let pid = child.pid();
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+    // TerminateProcess returns before the process is gone; wait (bounded) until
+    // it no longer shows up so its executable is unlocked.
+    for _ in 0..50 {
+        match windows_pid_alive(pid) {
+            Ok(false) => return Ok(()),
+            Ok(true) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(error) => return Err((error, child)),
+        }
+    }
+    Err((
+        format!("The RexaDB server (pid {pid}) is still running. Close it in Task Manager, then retry the update."),
+        child,
+    ))
+}
+
+#[cfg(not(windows))]
+fn kill_sidecar_tree(
+    child: tauri_plugin_shell::process::CommandChild,
+) -> Result<(), (String, tauri_plugin_shell::process::CommandChild)> {
+    let _ = child.kill();
+    Ok(())
+}
+
+/// Stops the sidecar for good (until `resume_sidecar`): no restart that is
+/// already scheduled, and no late event from the old child, can start another.
+/// If the child cannot be confirmed gone it stays the tracked, current server,
+/// so a resume reuses it instead of starting a second one beside it.
+fn stop_sidecar(state: &SidecarState) -> Result<(), String> {
+    let (child, generation, was_ready) = {
+        let mut suspended = state.suspended.lock().unwrap();
+        *suspended = true;
+        let mut current = state.generation.lock().unwrap();
+        let generation = *current;
+        *current += 1;
+        let was_ready = std::mem::replace(&mut *state.ready.lock().unwrap(), false);
+        (state.child.lock().unwrap().take(), generation, was_ready)
+    };
+    let Some(child) = child else {
+        return Ok(());
+    };
+    match kill_sidecar_tree(child) {
+        Ok(()) => Ok(()),
+        Err((error, child)) => {
+            let _suspended = state.suspended.lock().unwrap();
+            // Held while restoring, so the child's handler either recorded its
+            // exit before this check or sees the restored generation after it.
+            let mut current = state.generation.lock().unwrap();
+            if *state.last_terminated.lock().unwrap() == Some(generation) {
+                // The process is gone even though the check could not confirm it.
+                return Ok(());
+            }
+            if *current == generation + 1 {
+                *current = generation;
+                *state.ready.lock().unwrap() = was_ready;
+                *state.child.lock().unwrap() = Some(child);
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Called right before the updater installs. Only Windows needs it: there the
+/// installer replaces rexadb-server.exe while the app exits, whereas macOS and
+/// Linux swap the bundle and keep running until relaunch.
+#[tauri::command]
+async fn stop_sidecar_for_update(app: tauri::AppHandle) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || stop_sidecar(&app.state::<SidecarState>()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Undoes `stop_sidecar_for_update` when the stop or the install fails. A
+/// server that survived a failed stop is still tracked and keeps serving;
+/// a new one starts only when none is running.
+#[tauri::command]
+fn resume_sidecar(app: tauri::AppHandle) {
+    {
+        let state = app.state::<SidecarState>();
+        let mut suspended = state.suspended.lock().unwrap();
+        *suspended = false;
+        // A tracked server whose exit was already recorded is gone; drop it so
+        // a fresh one can start.
+        let generation = *state.generation.lock().unwrap();
+        if *state.last_terminated.lock().unwrap() == Some(generation) {
+            state.child.lock().unwrap().take();
+        }
+    }
+    spawn_sidecar(&app);
 }
 
 #[tauri::command]
@@ -965,6 +1105,9 @@ impl SidecarState {
             log: Mutex::new(String::new()),
             restart_count: Mutex::new(0),
             last_exit_code: Mutex::new(None),
+            suspended: Mutex::new(false),
+            generation: Mutex::new(0),
+            last_terminated: Mutex::new(None),
         }
     }
 }
@@ -983,11 +1126,20 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
     let data_dir = get_app_data_dir(app);
     let jdbc_drivers_dir = get_jdbc_drivers_dir(app);
     let resource_dir = app.path().resource_dir().ok();
-    {
-        let state = app.state::<SidecarState>();
-        *state.port.lock().unwrap() = 3867;
-        *state.ready.lock().unwrap() = false;
+    let state = app.state::<SidecarState>();
+    // Held until the child is stored: the suspended check and the start are
+    // one step, so stop_sidecar either prevents this spawn or kills its child.
+    let suspended = state.suspended.lock().unwrap();
+    if *suspended || state.child.lock().unwrap().is_some() {
+        return;
     }
+    let generation = {
+        let mut current = state.generation.lock().unwrap();
+        *current += 1;
+        *current
+    };
+    *state.port.lock().unwrap() = 3867;
+    *state.ready.lock().unwrap() = false;
     let sidecar_command = if cfg!(debug_assertions) {
         // In dev, run the TypeScript entrypoint with the same Bun runtime used
         // by `bun run tauri:dev`. This avoids launching a stale or locally
@@ -1014,11 +1166,15 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
         .spawn()
         .expect("failed to spawn sidecar");
 
-    *app.state::<SidecarState>().child.lock().unwrap() = Some(child);
-    *app.state::<SidecarState>().restart_count.lock().unwrap() += 1;
+    *state.child.lock().unwrap() = Some(child);
+    *state.restart_count.lock().unwrap() += 1;
+    drop(suspended);
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Shared state belongs to whichever child is current; an old child's
+        // late events must not touch a replacement's state.
+        let is_current = |app: &tauri::AppHandle| *app.state::<SidecarState>().generation.lock().unwrap() == generation;
         let mut buf = String::new();
         loop {
             match rx.recv().await {
@@ -1026,7 +1182,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     let text = String::from_utf8_lossy(&data);
                     buf.push_str(&text);
                     app_handle.state::<SidecarState>().log.lock().unwrap().push_str(&text);
-                    if !*app_handle.state::<SidecarState>().ready.lock().unwrap() {
+                    if is_current(&app_handle) && !*app_handle.state::<SidecarState>().ready.lock().unwrap() {
                         if let Some(port) = extract_port(&buf) {
                             let state = app_handle.state::<SidecarState>();
                             *state.port.lock().unwrap() = port;
@@ -1036,16 +1192,28 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                 }
                 Some(CommandEvent::Terminated(status)) => {
                     rust_log(&format!("sidecar terminated: code={:?} signal={:?}", status.code, status.signal));
-                    let state = app_handle.state::<SidecarState>();
-                    *state.ready.lock().unwrap() = false;
-                    *state.last_exit_code.lock().unwrap() = status.code;
                     let exit_info = format!("\n[sidecar] Terminated: code={:?} signal={:?}\n", status.code, status.signal);
-                    state.log.lock().unwrap().push_str(&exit_info);
-                    let _ = state.child.lock().unwrap().take();
-                    drop(state);
+                    app_handle.state::<SidecarState>().log.lock().unwrap().push_str(&exit_info);
+                    // Recorded before the generation check: a stop that could
+                    // not confirm the kill reads it to avoid restoring a dead child.
+                    *app_handle.state::<SidecarState>().last_terminated.lock().unwrap() = Some(generation);
+                    if !is_current(&app_handle) {
+                        // Stopped on purpose, or already replaced.
+                        break;
+                    }
+                    {
+                        let state = app_handle.state::<SidecarState>();
+                        *state.ready.lock().unwrap() = false;
+                        *state.last_exit_code.lock().unwrap() = status.code;
+                        let _ = state.child.lock().unwrap().take();
+                    }
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        spawn_sidecar(&app_handle);
+                        // A stop or another spawn during the wait cancels this
+                        // restart; spawn_sidecar re-checks `suspended` itself.
+                        if *app_handle.state::<SidecarState>().generation.lock().unwrap() == generation {
+                            spawn_sidecar(&app_handle);
+                        }
                     });
                     break;
                 }
@@ -1157,6 +1325,8 @@ pub fn run() {
             is_sidecar_ready,
             get_sidecar_status,
             get_sidecar_log,
+            stop_sidecar_for_update,
+            resume_sidecar,
             local_studio_status,
             local_studio_recover,
             local_studio_start,
@@ -1206,8 +1376,8 @@ pub fn run() {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::Exit => {
             if let Some(state) = app_handle.try_state::<SidecarState>() {
-                if let Some(child) = state.child.lock().unwrap().take() {
-                    let _ = child.kill();
+                if let Err(error) = stop_sidecar(&state) {
+                    rust_log(&format!("sidecar stop on exit: {error}"));
                 }
             }
         }
