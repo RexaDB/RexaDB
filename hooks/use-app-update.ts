@@ -303,7 +303,10 @@ export function useAppUpdate() {
       let contentLength = 0;
       let downloaded = 0;
 
-      await update.downloadAndInstall((event) => {
+      // Download first, then stop the sidecar, then install: on Windows the
+      // installer replaces rexadb-server.exe and the app exits without
+      // running its exit hooks, so a live sidecar would keep the file locked.
+      await update.download((event) => {
         switch (event.event) {
           case "Started":
             contentLength = event.data.contentLength ?? 0;
@@ -325,6 +328,15 @@ export function useAppUpdate() {
             break;
         }
       });
+
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("stop_sidecar_for_update");
+      try {
+        await update.install();
+      } catch (installError) {
+        await invoke("resume_sidecar").catch(() => {});
+        throw installError;
+      }
 
       return true;
     } catch (e) {

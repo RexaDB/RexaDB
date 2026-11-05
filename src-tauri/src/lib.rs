@@ -121,6 +121,9 @@ struct SidecarState {
     log: Mutex<String>,
     restart_count: Mutex<u32>,
     last_exit_code: Mutex<Option<i32>>,
+    /// Set while the app is exiting or an update is installing, so a killed
+    /// sidecar is not respawned.
+    suspended: Mutex<bool>,
 }
 
 /// Database targets passed via `rexadb open <database-url-or-file-path>`.
@@ -438,6 +441,82 @@ fn get_sidecar_status(state: tauri::State<SidecarState>) -> SidecarStatus {
 #[tauri::command]
 fn get_sidecar_log(state: tauri::State<SidecarState>) -> String {
     state.log.lock().unwrap().clone()
+}
+
+/// Kills the sidecar and every process it started, and waits for them to exit.
+/// On Windows the updater runs the installer and then calls
+/// `std::process::exit`, which skips `RunEvent::Exit`; a still-running
+/// rexadb-server.exe keeps its image locked and the installer cannot replace it.
+#[cfg(windows)]
+fn kill_sidecar_tree(child: tauri_plugin_shell::process::CommandChild) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let pid = child.pid();
+    let killed = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !killed {
+        let _ = child.kill();
+    }
+    // TerminateProcess returns before the process is gone; wait (bounded) until
+    // it no longer shows up so its executable is unlocked.
+    let filter = format!("PID eq {pid}");
+    for _ in 0..50 {
+        let alive = Command::new("tasklist")
+            .args(["/FI", &filter, "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
+            .unwrap_or(false);
+        if !alive {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    rust_log(&format!("sidecar pid {pid} still running after kill"));
+}
+
+#[cfg(not(windows))]
+fn kill_sidecar_tree(child: tauri_plugin_shell::process::CommandChild) {
+    let _ = child.kill();
+}
+
+fn stop_sidecar(state: &SidecarState) {
+    *state.suspended.lock().unwrap() = true;
+    *state.ready.lock().unwrap() = false;
+    let child = state.child.lock().unwrap().take();
+    if let Some(child) = child {
+        kill_sidecar_tree(child);
+    }
+}
+
+/// Called right before the updater installs. Only Windows needs it: there the
+/// installer replaces rexadb-server.exe while the app exits, whereas macOS and
+/// Linux swap the bundle and keep running until relaunch.
+#[tauri::command]
+async fn stop_sidecar_for_update(app: tauri::AppHandle) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || stop_sidecar(&app.state::<SidecarState>()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Undoes `stop_sidecar_for_update` when the install fails.
+#[tauri::command]
+fn resume_sidecar(app: tauri::AppHandle) {
+    let state = app.state::<SidecarState>();
+    *state.suspended.lock().unwrap() = false;
+    let running = state.child.lock().unwrap().is_some();
+    drop(state);
+    if !running {
+        spawn_sidecar(&app);
+    }
 }
 
 #[tauri::command]
@@ -965,6 +1044,7 @@ impl SidecarState {
             log: Mutex::new(String::new()),
             restart_count: Mutex::new(0),
             last_exit_code: Mutex::new(None),
+            suspended: Mutex::new(false),
         }
     }
 }
@@ -1042,7 +1122,11 @@ fn spawn_sidecar(app: &tauri::AppHandle) {
                     let exit_info = format!("\n[sidecar] Terminated: code={:?} signal={:?}\n", status.code, status.signal);
                     state.log.lock().unwrap().push_str(&exit_info);
                     let _ = state.child.lock().unwrap().take();
+                    let suspended = *state.suspended.lock().unwrap();
                     drop(state);
+                    if suspended {
+                        break;
+                    }
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         spawn_sidecar(&app_handle);
@@ -1157,6 +1241,8 @@ pub fn run() {
             is_sidecar_ready,
             get_sidecar_status,
             get_sidecar_log,
+            stop_sidecar_for_update,
+            resume_sidecar,
             local_studio_status,
             local_studio_recover,
             local_studio_start,
@@ -1206,9 +1292,7 @@ pub fn run() {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::Exit => {
             if let Some(state) = app_handle.try_state::<SidecarState>() {
-                if let Some(child) = state.child.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
+                stop_sidecar(&state);
             }
         }
         // macOS delivers URLs for the schemes registered in Info.plist
