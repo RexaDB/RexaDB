@@ -46,6 +46,17 @@ import type {
 /** The search field's flex basis (16rem), and its floor while rows are selected. */
 const SEARCH_MIN_WIDTH = 256;
 const SEARCH_MIN_WIDTH_SELECTING = 96;
+/** Width of the focused-search hint buttons. */
+const HINT_WIDTH = 264;
+
+/**
+ * Where the hint buttons sit after the typed text, or null when the input is
+ * too narrow to show them without covering the text it holds.
+ */
+function hintPosition(inputWidth: number, textEnd: number): number | null {
+  if (inputWidth < HINT_WIDTH + 64) return null;
+  return Math.max(0, Math.min(textEnd, inputWidth - HINT_WIDTH));
+}
 
 interface DataTableToolbarProps {
   selectedRows: Set<number>;
@@ -662,8 +673,7 @@ function UnifiedSearchBar({
     const input = inputRef.current;
     const measure = measureRef.current;
     if (!input || !measure) return;
-    const end = measure.scrollWidth + 8;
-    const next = Math.max(0, Math.min(end, input.clientWidth - 264));
+    const next = hintPosition(input.clientWidth, measure.scrollWidth + 8);
     setHintLeft((prev) => (prev === next ? prev : next));
   });
 
@@ -834,9 +844,10 @@ function UnifiedSearchBar({
           <div
             style={{ flexBasis: searchMinWidth }}
             className={cn(
-              "relative h-12 min-w-0 grow items-center",
-              // Full size keeps its room; with rows selected it may shrink.
-              searchMinWidth < SEARCH_MIN_WIDTH ? "shrink" : "shrink-0",
+              // Shrinks only once actions are already overflowing (the fit
+              // reserves the basis), so on panes too narrow for even that,
+              // the scope chip and "more" button stay reachable.
+              "relative h-12 min-w-24 shrink grow items-center",
               searchHidden ? "hidden" : "flex",
             )}
           >
@@ -853,7 +864,7 @@ function UnifiedSearchBar({
                 const measure = measureRef.current;
                 if (!input || !measure) return;
                 const end = measure.scrollWidth - input.scrollLeft + 8;
-                setHintLeft(Math.max(0, Math.min(end, input.clientWidth - 264)));
+                setHintLeft(hintPosition(input.clientWidth, end));
               }}
               onBlur={() => {
                 window.setTimeout(() => {
