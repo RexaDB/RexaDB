@@ -386,6 +386,8 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   const { selectedRows } = props;
 
   const [aiBusy, setAiBusy] = useState<boolean>(false);
+  // Expanded: the row shows every toolbar action in place of the search field.
+  const [actionsExpanded, setActionsExpanded] = useState(false);
 
   const columnList = props.tableStructure?.length
     ? props.tableStructure.map((c: any) => ({
@@ -528,9 +530,12 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       connectionString={props.connectionString}
       aiBusy={aiBusy}
       setAiBusy={setAiBusy}
+      searchHidden={actionsExpanded}
     >
       <ToolbarLayout
         items={toolbarItems}
+        expanded={actionsExpanded}
+        onExpandedChange={setActionsExpanded}
         connectionString={props.connectionString}
         leadingContent={
           <div className={selectedRows.size > 0 ? "flex min-w-0 max-w-full flex-wrap items-center gap-2" : "hidden"}>
@@ -578,6 +583,7 @@ function UnifiedSearchBar({
   connectionString,
   aiBusy,
   setAiBusy,
+  searchHidden = false,
   children,
 }: {
   globalSearchQuery: string;
@@ -602,6 +608,8 @@ function UnifiedSearchBar({
   connectionString?: string;
   aiBusy: boolean;
   setAiBusy: (busy: boolean) => void;
+  /** The toolbar actions are expanded over the search field. */
+  searchHidden?: boolean;
   children: ReactNode;
 }) {
   const columns = tableColumns.map((c) => c.name);
@@ -806,7 +814,7 @@ function UnifiedSearchBar({
           }}
           className="flex min-h-12 min-w-0 flex-1 cursor-text flex-wrap items-center gap-x-2 bg-background"
         >
-          <div className="relative flex h-12 min-w-0 flex-[1_0_16rem] items-center">
+          <div className={cn("relative h-12 min-w-0 flex-[1_0_16rem] items-center", searchHidden ? "hidden" : "flex")}>
             <input
               ref={inputRef}
               value={globalSearchQuery}
@@ -878,7 +886,8 @@ function UnifiedSearchBar({
             )}
           </div>
 
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 py-1.5">
+          <div className={cn("flex min-w-0 max-w-full flex-wrap items-center gap-1 py-1.5", searchHidden && "grow")}>
+            {!searchHidden && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -914,6 +923,7 @@ function UnifiedSearchBar({
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
             {children}
           </div>
         </div>
