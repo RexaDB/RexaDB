@@ -43,6 +43,10 @@ import type {
   TablePermissionContext,
 } from "@/lib/studio/table-permissions";
 
+/** The search field's flex basis (16rem), and its floor while rows are selected. */
+const SEARCH_MIN_WIDTH = 256;
+const SEARCH_MIN_WIDTH_SELECTING = 96;
+
 interface DataTableToolbarProps {
   selectedRows: Set<number>;
   setSelectedRows: (rows: Set<number>) => void;
@@ -388,6 +392,8 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   const [aiBusy, setAiBusy] = useState<boolean>(false);
   // Expanded: the row shows every toolbar action in place of the search field.
   const [actionsExpanded, setActionsExpanded] = useState(false);
+  // With rows selected the selection bar needs the room, so search may shrink.
+  const searchMinWidth = selectedRows.size > 0 ? SEARCH_MIN_WIDTH_SELECTING : SEARCH_MIN_WIDTH;
 
   const columnList = props.tableStructure?.length
     ? props.tableStructure.map((c: any) => ({
@@ -531,11 +537,13 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       aiBusy={aiBusy}
       setAiBusy={setAiBusy}
       searchHidden={actionsExpanded}
+      searchMinWidth={searchMinWidth}
     >
       <ToolbarLayout
         items={toolbarItems}
         expanded={actionsExpanded}
         onExpandedChange={setActionsExpanded}
+        searchMinWidth={searchMinWidth}
         connectionString={props.connectionString}
         leadingContent={
           <div className={selectedRows.size > 0 ? "flex min-w-0 max-w-full flex-wrap items-center gap-2" : "hidden"}>
@@ -584,6 +592,7 @@ function UnifiedSearchBar({
   aiBusy,
   setAiBusy,
   searchHidden = false,
+  searchMinWidth,
   children,
 }: {
   globalSearchQuery: string;
@@ -610,10 +619,18 @@ function UnifiedSearchBar({
   setAiBusy: (busy: boolean) => void;
   /** The toolbar actions are expanded over the search field. */
   searchHidden?: boolean;
+  searchMinWidth: number;
   children: ReactNode;
 }) {
   const columns = tableColumns.map((c) => c.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Returning from the expanded actions: the "back to search" button just
+  // unmounted, so hand focus to the field it revealed.
+  const wasSearchHidden = useRef(searchHidden);
+  useEffect(() => {
+    if (wasSearchHidden.current && !searchHidden) inputRef.current?.focus();
+    wasSearchHidden.current = searchHidden;
+  }, [searchHidden]);
   // Live mirrors so async AI responses merge against current state instead
   // of the stale closure captured when the request started.
   const filterQueryRef = useRef(filterQuery);
@@ -812,9 +829,17 @@ function UnifiedSearchBar({
             }
             inputRef.current?.focus();
           }}
-          className="flex min-h-12 min-w-0 flex-1 cursor-text flex-wrap items-center gap-x-2 bg-background"
+          className="flex min-h-12 min-w-0 flex-1 cursor-text flex-nowrap items-center gap-x-2 bg-background"
         >
-          <div className={cn("relative h-12 min-w-0 flex-[1_0_16rem] items-center", searchHidden ? "hidden" : "flex")}>
+          <div
+            style={{ flexBasis: searchMinWidth }}
+            className={cn(
+              "relative h-12 min-w-0 grow items-center",
+              // Full size keeps its room; with rows selected it may shrink.
+              searchMinWidth < SEARCH_MIN_WIDTH ? "shrink" : "shrink-0",
+              searchHidden ? "hidden" : "flex",
+            )}
+          >
             <input
               ref={inputRef}
               value={globalSearchQuery}

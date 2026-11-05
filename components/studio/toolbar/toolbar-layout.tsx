@@ -13,8 +13,6 @@ import { cn } from "@/lib/utils";
 
 type Item = { id: string; label: string; content: React.ReactNode };
 
-/** The search field's flex basis (16rem): the room actions must leave it. */
-const SEARCH_MIN_WIDTH = 256;
 /** The "more" button plus its gap, reserved when not every item fits. */
 const MORE_BUTTON_WIDTH = 44;
 const GAP = 8;
@@ -59,12 +57,15 @@ export function ToolbarLayout({
   leadingContent,
   expanded,
   onExpandedChange,
+  searchMinWidth,
 }: {
   items: Item[];
   connectionString?: string;
   leadingContent?: React.ReactNode;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  /** Room the search field keeps beside the actions (its flex basis). */
+  searchMinWidth: number;
 }) {
   const key = React.useMemo(() => storageKey(connectionString), [connectionString]);
   const [hidden, setHidden] = React.useState<string[]>([]);
@@ -116,7 +117,7 @@ export function ToolbarLayout({
         : 0;
       const leadWidth = leadElement()?.offsetWidth ?? 0;
       const lead = leadWidth ? leadWidth + GAP : 0;
-      const available = bar.clientWidth - SEARCH_MIN_WIDTH - GAP - scope - lead;
+      const available = bar.clientWidth - searchMinWidth - GAP - scope - lead;
       const next = countFittingItems(ids.map((id) => widths.current.get(id) ?? 0), available);
       setVisibleCount((prev) => (prev === next ? prev : next));
     };
@@ -127,7 +128,7 @@ export function ToolbarLayout({
     if (leadChild) observer.observe(leadChild);
     for (const element of itemRefs.current.values()) observer.observe(element);
     return () => observer.disconnect();
-  }, [idsKey, expanded]);
+  }, [idsKey, expanded, searchMinWidth]);
 
   const overflowing = !expanded && visibleCount < visibleItems.length;
 
@@ -167,7 +168,10 @@ export function ToolbarLayout({
                 else itemRefs.current.delete(item.id);
               }}
               className={cn(
-                "flex shrink-0 items-center gap-2",
+                "flex items-center gap-2",
+                // Expanded, a group wider than the pane (the global actions)
+                // wraps its own buttons instead of running off the edge.
+                expanded ? "min-w-0 max-w-full flex-wrap" : "shrink-0",
                 !expanded && index >= visibleCount && "hidden",
               )}
             >
