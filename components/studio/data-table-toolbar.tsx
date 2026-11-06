@@ -43,6 +43,21 @@ import type {
   TablePermissionContext,
 } from "@/lib/studio/table-permissions";
 
+/** The search field's flex basis (16rem), and its floor while rows are selected. */
+const SEARCH_MIN_WIDTH = 256;
+const SEARCH_MIN_WIDTH_SELECTING = 96;
+/** Width of the focused-search hint buttons. */
+const HINT_WIDTH = 264;
+
+/**
+ * Where the hint buttons sit after the typed text, or null when the input is
+ * too narrow to show them without covering the text it holds.
+ */
+function hintPosition(inputWidth: number, textEnd: number): number | null {
+  if (inputWidth < HINT_WIDTH + 64) return null;
+  return Math.max(0, Math.min(textEnd, inputWidth - HINT_WIDTH));
+}
+
 interface DataTableToolbarProps {
   selectedRows: Set<number>;
   setSelectedRows: (rows: Set<number>) => void;
@@ -386,6 +401,10 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
   const { selectedRows } = props;
 
   const [aiBusy, setAiBusy] = useState<boolean>(false);
+  // Expanded: the row shows every toolbar action in place of the search field.
+  const [actionsExpanded, setActionsExpanded] = useState(false);
+  // With rows selected the selection bar needs the room, so search may shrink.
+  const searchMinWidth = selectedRows.size > 0 ? SEARCH_MIN_WIDTH_SELECTING : SEARCH_MIN_WIDTH;
 
   const columnList = props.tableStructure?.length
     ? props.tableStructure.map((c: any) => ({
@@ -528,9 +547,14 @@ export function DataTableToolbar(props: DataTableToolbarProps) {
       connectionString={props.connectionString}
       aiBusy={aiBusy}
       setAiBusy={setAiBusy}
+      searchHidden={actionsExpanded}
+      searchMinWidth={searchMinWidth}
     >
       <ToolbarLayout
         items={toolbarItems}
+        expanded={actionsExpanded}
+        onExpandedChange={setActionsExpanded}
+        searchMinWidth={searchMinWidth}
         connectionString={props.connectionString}
         leadingContent={
           <div className={selectedRows.size > 0 ? "flex min-w-0 max-w-full flex-wrap items-center gap-2" : "hidden"}>
@@ -578,6 +602,8 @@ function UnifiedSearchBar({
   connectionString,
   aiBusy,
   setAiBusy,
+  searchHidden = false,
+  searchMinWidth,
   children,
 }: {
   globalSearchQuery: string;
@@ -602,10 +628,20 @@ function UnifiedSearchBar({
   connectionString?: string;
   aiBusy: boolean;
   setAiBusy: (busy: boolean) => void;
+  /** The toolbar actions are expanded over the search field. */
+  searchHidden?: boolean;
+  searchMinWidth: number;
   children: ReactNode;
 }) {
   const columns = tableColumns.map((c) => c.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Returning from the expanded actions: the "back to search" button just
+  // unmounted, so hand focus to the field it revealed.
+  const wasSearchHidden = useRef(searchHidden);
+  useEffect(() => {
+    if (wasSearchHidden.current && !searchHidden) inputRef.current?.focus();
+    wasSearchHidden.current = searchHidden;
+  }, [searchHidden]);
   // Live mirrors so async AI responses merge against current state instead
   // of the stale closure captured when the request started.
   const filterQueryRef = useRef(filterQuery);
@@ -637,8 +673,7 @@ function UnifiedSearchBar({
     const input = inputRef.current;
     const measure = measureRef.current;
     if (!input || !measure) return;
-    const end = measure.scrollWidth + 8;
-    const next = Math.max(0, Math.min(end, input.clientWidth - 264));
+    const next = hintPosition(input.clientWidth, measure.scrollWidth + 8);
     setHintLeft((prev) => (prev === next ? prev : next));
   });
 
@@ -804,9 +839,18 @@ function UnifiedSearchBar({
             }
             inputRef.current?.focus();
           }}
-          className="flex min-h-12 min-w-0 flex-1 cursor-text flex-wrap items-center gap-x-2 bg-background"
+          className="flex min-h-12 min-w-0 flex-1 cursor-text flex-nowrap items-center gap-x-2 bg-background"
         >
-          <div className="relative flex h-12 min-w-0 flex-[1_0_16rem] items-center">
+          <div
+            style={{ flexBasis: searchMinWidth }}
+            className={cn(
+              // Shrinks only once actions are already overflowing (the fit
+              // reserves the basis), so on panes too narrow for even that,
+              // the scope chip and "more" button stay reachable.
+              "relative h-12 min-w-24 shrink grow items-center",
+              searchHidden ? "hidden" : "flex",
+            )}
+          >
             <input
               ref={inputRef}
               value={globalSearchQuery}
@@ -820,7 +864,7 @@ function UnifiedSearchBar({
                 const measure = measureRef.current;
                 if (!input || !measure) return;
                 const end = measure.scrollWidth - input.scrollLeft + 8;
-                setHintLeft(Math.max(0, Math.min(end, input.clientWidth - 264)));
+                setHintLeft(hintPosition(input.clientWidth, end));
               }}
               onBlur={() => {
                 window.setTimeout(() => {
@@ -878,7 +922,8 @@ function UnifiedSearchBar({
             )}
           </div>
 
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 py-1.5">
+          <div className={cn("flex min-w-0 max-w-full flex-wrap items-center gap-1 py-1.5", searchHidden && "grow")}>
+            {!searchHidden && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -914,6 +959,7 @@ function UnifiedSearchBar({
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
             {children}
           </div>
         </div>
