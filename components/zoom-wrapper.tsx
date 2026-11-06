@@ -7,8 +7,8 @@ import {
 } from "@/hooks/use-global-studio-settings";
 
 /** Last applied zoom, mirrored locally so a relaunch starts at it instead of
- *  100% while settings load. */
-const ZOOM_CACHE_KEY = "rexadb-app-zoom";
+ *  100% while settings load. The rexa-db- prefix lets "Reset Everything" clear it. */
+const ZOOM_CACHE_KEY = "rexa-db-app-zoom";
 
 let appliedZoom: number | null = null;
 
