@@ -845,12 +845,16 @@ export function useGlobalStudioSettings(persist = false) {
     document.documentElement.dataset.buttonStyle = buttonStyle;
   }, [buttonStyle]);
 
+  // Only a loaded instance knows the real zoom. Every consumer mounts with the
+  // default 100, so broadcasting before load snapped the whole window back to
+  // 100% whenever one mounted (opening a table) — and stuck there when that
+  // instance's load was skipped behind an in-flight save.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !isLoaded) return;
     window.dispatchEvent(
       new CustomEvent(ZOOM_UPDATED_EVENT, { detail: { zoom: appZoom } }),
     );
-  }, [appZoom]);
+  }, [appZoom, isLoaded]);
 
   return {
     appZoom,
