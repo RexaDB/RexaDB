@@ -1,0 +1,24 @@
+[package]
+name = "rexa-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexadb"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+rexa-store.workspace = true
+rexa-drivers.workspace = true
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "runtime_shaders"] }
+gpui-kit-assets = "=0.9.1"
+rust-embed = "8"
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+url.workspace = true

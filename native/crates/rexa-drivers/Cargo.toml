@@ -1,0 +1,20 @@
+[package]
+name = "rexa-drivers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+url.workspace = true
+async-trait = "0.1"
+tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+mysql_async = { version = "0.36", default-features = false, features = ["minimal", "native-tls-tls"] }
+dirs = "6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

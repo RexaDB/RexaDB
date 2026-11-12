@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="20" fill="#F3F4F6"/>
+  <rect x="20" y="28" width="88" height="72" rx="12" fill="#CC2927"/>
+  <text x="64" y="74" text-anchor="middle" font-size="28" font-family="Arial, Helvetica, sans-serif" font-weight="700" fill="#FFFFFF">MSSQL</text>
+</svg>
