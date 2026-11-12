@@ -1,5 +1,5 @@
 use crate::results::ResultsDelegate;
-use crate::runtime;
+use rexa_core::runtime;
 use gpui::{
     actions, div, prelude::*, px, App, Context, Entity, KeyBinding, SharedString, Window,
 };
@@ -54,7 +54,6 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        init(cx);
         let (connections, store_error) = match Store::open().and_then(|s| s.connections()) {
             Ok(list) => (list, None),
             Err(err) => (Vec::new(), Some(format!("{err:#}").into())),

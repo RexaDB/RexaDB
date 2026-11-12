@@ -1,29 +1,81 @@
-mod app;
-mod assets;
-mod connections;
-mod images;
-mod providers;
-mod results;
-mod runtime;
-mod theme;
-mod tracked_text;
-mod workspace;
+//! RexaDB native: window setup and route → screen dispatch. All screens come
+//! from feature crates via `rexa_core::Registry`.
 
-use gpui::{point, px, size, App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
+use gpui::{
+    div, point, prelude::*, px, size, AnyView, App, AppContext, Bounds, Context, Subscription,
+    TitlebarOptions, Window, WindowBounds, WindowOptions,
+};
 use gpui_component::Root;
+use rexa_core::{navigator, Registry, Route, RouteChanged};
+use rexa_ui::ActiveTokens;
+
+struct AppRoot {
+    route: Route,
+    view: Option<AnyView>,
+    _nav: Subscription,
+}
+
+impl AppRoot {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let nav = navigator(cx);
+        let sub = cx.subscribe_in(&nav, window, |this, nav, _: &RouteChanged, window, cx| {
+            this.route = nav.read(cx).route.clone();
+            this.view = Registry::build_screen(&this.route, window, cx);
+            cx.notify();
+        });
+        let route = nav.read(cx).route.clone();
+        let view = Registry::build_screen(&route, window, cx);
+        Self { route, view, _nav: sub }
+    }
+}
+
+impl Render for AppRoot {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.tokens();
+        div()
+            .size_full()
+            .bg(t.studio_bg)
+            .text_color(t.foreground)
+            .font_family(rexa_ui::SANS)
+            .children(self.view.clone())
+            .when(self.view.is_none(), |el| {
+                el.flex().items_center().justify_center().child(format!("No screen registered for {:?}", self.route))
+            })
+    }
+}
 
 fn main() {
-    runtime::init();
-    let app = gpui_platform::application().with_assets(assets::Assets);
+    rexa_core::runtime::init();
+    let app = gpui_platform::application().with_assets(rexa_ui::assets::Assets);
     app.run(|cx: &mut App| {
-        gpui_component::init(cx);
+        rexa_ui::init(cx);
         let (theme_id, custom) = rexa_store::Store::open()
             .map(|s| (s.setting("app_theme_id").ok().flatten(), s.setting("custom_app_themes").ok().flatten()))
             .unwrap_or_default();
-        theme::install(theme::load(theme_id.as_deref(), custom.as_deref()), cx);
+        rexa_ui::theme::install(rexa_ui::theme::load(theme_id.as_deref(), custom.as_deref()), cx);
+
+        rexa_core::init(cx);
+        rexa_connections::init(cx);
+        rexa_studio::init(cx);
+        rexa_grid::init(cx);
+        rexa_sql::init(cx);
+        rexa_schema::init(cx);
+        rexa_settings::init(cx);
+        rexa_ai::init(cx);
+        rexa_features::init(cx);
+        rexa_providers::init(cx);
+
+        // Dev aid: REXA_ROUTE=studio:<id> opens a route directly.
+        if let Ok(r) = std::env::var("REXA_ROUTE") {
+            if let Some(id) = r.strip_prefix("studio:").and_then(|i| i.parse().ok()) {
+                rexa_core::navigate(Route::Studio(id), cx);
+            } else if let Some(screen) = r.strip_prefix("screen:") {
+                rexa_core::navigate(Route::ConnectionScreen(screen.into()), cx);
+            }
+        }
 
         // tauri.conf.json: 1200×800, min 800×600, overlay title bar, traffic lights at (14, 21).
-        // REXA_WINDOW_SIZE=WxH overrides the size (used to compare against the old app).
+        // REXA_WINDOW_SIZE=WxH overrides the size (for side-by-side comparison with the old app).
         let (w, h) = std::env::var("REXA_WINDOW_SIZE")
             .ok()
             .and_then(|v| v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))))
@@ -41,7 +93,7 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let root = cx.new(|cx| app::AppRoot::new(window, cx));
+                let root = cx.new(|cx| AppRoot::new(window, cx));
                 cx.new(|cx| Root::new(root, window, cx))
             },
         )

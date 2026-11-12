@@ -10,15 +10,18 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-tokio.workspace = true
-rexa-store.workspace = true
-rexa-drivers.workspace = true
 gpui = { package = "gpui-pre", version = "=0.3.12" }
-gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+gpui-component = "0.9.1"
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "runtime_shaders"] }
-gpui-kit-assets = "=0.9.1"
-rust-embed = "8"
-serde.workspace = true
-serde_json.workspace = true
-base64 = "0.22"
-url.workspace = true
+rexa-store.workspace = true
+rexa-ui = { path = "../rexa-ui" }
+rexa-core = { path = "../rexa-core" }
+rexa-connections = { path = "../rexa-connections" }
+rexa-studio = { path = "../rexa-studio" }
+rexa-grid = { path = "../rexa-grid" }
+rexa-sql = { path = "../rexa-sql" }
+rexa-schema = { path = "../rexa-schema" }
+rexa-settings = { path = "../rexa-settings" }
+rexa-ai = { path = "../rexa-ai" }
+rexa-features = { path = "../rexa-features" }
+rexa-providers = { path = "../rexa-providers" }

@@ -1,0 +1,15 @@
+[package]
+name = "rexa-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+gpui-kit-assets = "=0.9.1"
+rust-embed = "8"
+base64 = "0.22"

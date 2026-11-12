@@ -348,3 +348,21 @@ mod tests {
         assert_eq!(t.radius, 10.);
     }
 }
+
+/// A Tailwind v4 palette color by name, e.g. `tw("emerald-400")`, `tw("white")`.
+pub fn tw(name: &str) -> Hsla {
+    use std::sync::OnceLock;
+    static PALETTE: OnceLock<HashMap<String, String>> = OnceLock::new();
+    let palette = PALETTE.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../assets/tailwind-colors.json")).unwrap()
+    });
+    palette
+        .get(name)
+        .and_then(|v| parse_color(v))
+        .unwrap_or_else(|| panic!("unknown tailwind color {name}"))
+}
+
+/// `white/[0.07]` etc.
+pub fn white(alpha: f32) -> Hsla {
+    gpui::hsla(0., 0., 1., alpha)
+}

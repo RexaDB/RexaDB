@@ -2,23 +2,18 @@
 //! branch of components/connections/connection-manager.tsx, embedded the way
 //! connections-page.tsx does (36px drag bar, inset rounded panel).
 
-use crate::images;
 use crate::providers;
-use crate::tracked_text;
-use crate::theme::{with_alpha, ActiveTokens, Tokens, MONO};
+use rexa_ui::theme::{with_alpha, ActiveTokens, Tokens, MONO};
+use rexa_ui::{images, tracked_text};
 use gpui::{
-    div, img, prelude::*, px, svg, App, Context, EventEmitter, FontWeight, Hsla, Image, MouseButton,
+    div, img, prelude::*, px, svg, App, Context, FontWeight, Hsla, Image, MouseButton,
     ObjectFit, SharedString, Window,
 };
 use gpui_component::Icon;
-use gpui_kit_assets::IconName;
+use rexa_ui::IconName;
 use rexa_store::{SavedConnection, Store, TagDef, WebStore};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-pub enum ConnectionsEvent {
-    Open(SavedConnection),
-}
 
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy {
@@ -44,8 +39,6 @@ pub struct ConnectionsScreen {
     view_mode: ViewMode,
     error: Option<SharedString>,
 }
-
-impl EventEmitter<ConnectionsEvent> for ConnectionsScreen {}
 
 impl ConnectionsScreen {
     pub fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
@@ -78,7 +71,7 @@ impl ConnectionsScreen {
                 self.connections = connections;
                 self.tags = tags
                     .into_iter()
-                    .filter_map(|TagDef { name, color }| Some((name, crate::theme::parse_color(&color)?)))
+                    .filter_map(|TagDef { name, color }| Some((name, rexa_ui::parse_color(&color)?)))
                     .collect();
             }
             Err(err) => self.error = Some(format!("{err:#}").into()),
@@ -324,7 +317,7 @@ impl ConnectionsScreen {
     fn render_tag(&self, name: &str) -> impl IntoElement {
         // ConnectionTagBadge: h-4.5 rounded-full px-2 text-[10px] font-medium,
         // color tone, bg tone/0x1a, inset 1px ring tone/0x33.
-        let tone = self.tags.get(name).copied().unwrap_or_else(|| crate::theme::parse_color("#71717a").unwrap());
+        let tone = self.tags.get(name).copied().unwrap_or_else(|| rexa_ui::parse_color("#71717a").unwrap());
         div()
             .flex()
             .flex_shrink_0()
@@ -346,7 +339,7 @@ impl ConnectionsScreen {
     fn render_card(&self, conn: &SavedConnection, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let provider = providers::provider_of(conn);
         let label = providers::card(&provider).map(|c| c.label);
-        let open = conn.clone();
+        let open = conn.id;
 
         let mut name_row = div().flex().items_center().gap_2().child(
             // h3 text-sm font-medium truncate max-w-[120px]
@@ -415,7 +408,7 @@ impl ConnectionsScreen {
             .hover(|s| s.bg(t.studio_row_hover).border_color(t.studio_border))
             .p_4()
             .cursor_pointer()
-            .on_click(cx.listener(move |_, _, _, cx| cx.emit(ConnectionsEvent::Open(open.clone()))))
+            .on_click(cx.listener(move |_, _, _, cx| rexa_core::navigate(rexa_core::Route::Studio(open), cx)))
             .child(
                 div()
                     .flex()
@@ -458,7 +451,7 @@ impl ConnectionsScreen {
 
     fn render_list_row(&self, conn: &SavedConnection, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         let provider = providers::provider_of(conn);
-        let open = conn.clone();
+        let open = conn.id;
         div()
             .id(SharedString::from(format!("row-{}", conn.id)))
             .flex()
@@ -470,7 +463,7 @@ impl ConnectionsScreen {
             .border_color(t.border)
             .hover(|s| s.bg(t.studio_row_hover))
             .cursor_pointer()
-            .on_click(cx.listener(move |_, _, _, cx| cx.emit(ConnectionsEvent::Open(open.clone()))))
+            .on_click(cx.listener(move |_, _, _, cx| rexa_core::navigate(rexa_core::Route::Studio(open), cx)))
             .child(self.render_logo(conn, &provider, 20., t))
             .child(
                 div().flex_1().min_w_0().flex().items_center().gap_2()

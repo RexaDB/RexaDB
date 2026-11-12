@@ -1,0 +1,18 @@
+[package]
+name = "rexa-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+rexa-ui = { path = "../rexa-ui" }
+rexa-core = { path = "../rexa-core" }
+rexa-store.workspace = true
+rexa-drivers.workspace = true

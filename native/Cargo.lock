@@ -5492,22 +5492,72 @@ dependencies = [
 ]
 
 [[package]]
-name = "rexa-app"
+name = "rexa-ai"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "gpui-component",
- "gpui-kit-assets",
  "gpui-pre",
- "gpui-pre-platform",
+ "rexa-core",
  "rexa-drivers",
  "rexa-store",
- "rust-embed",
+ "rexa-ui",
  "serde",
  "serde_json",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "rexa-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "rexa-ai",
+ "rexa-connections",
+ "rexa-core",
+ "rexa-features",
+ "rexa-grid",
+ "rexa-providers",
+ "rexa-schema",
+ "rexa-settings",
+ "rexa-sql",
+ "rexa-store",
+ "rexa-studio",
+ "rexa-ui",
+]
+
+[[package]]
+name = "rexa-connections"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-pre",
+ "rexa-drivers",
+ "rexa-store",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -5527,6 +5577,108 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexa-features"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-grid"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-providers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-schema"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-sql"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "rexa-store"
 version = "0.1.0"
 dependencies = [
@@ -5541,6 +5693,37 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "zeroize",
+]
+
+[[package]]
+name = "rexa-studio"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-component",
+ "gpui-pre",
+ "rexa-core",
+ "rexa-drivers",
+ "rexa-store",
+ "rexa-ui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "rexa-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "gpui-component",
+ "gpui-kit-assets",
+ "gpui-pre",
+ "rust-embed",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
