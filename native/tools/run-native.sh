@@ -1,10 +1,16 @@
 #!/bin/zsh
 # tools/run-native.sh <out.png> [REXA_ROUTE] — build, launch at the reference size, capture its window, quit.
+# Works with a shared CARGO_TARGET_DIR: the binary is copied out right after building so a
+# parallel build in another worktree can't swap it underneath us.
 set -e
 here=${0:A:h}; root=${here:h}
+target=${CARGO_TARGET_DIR:-$root/target}
 cargo build -q -p rexa-app --manifest-path $root/Cargo.toml
-REXA_ROUTE=${2:-} REXA_WINDOW_SIZE=${REXA_WINDOW_SIZE:-1470x864} $root/target/debug/rexadb &
+bin=$(mktemp -t rexadb).bin
+cp $target/debug/rexadb $bin
+REXA_ROUTE=${2:-} REXA_WINDOW_SIZE=${REXA_WINDOW_SIZE:-1470x864} $bin &
 pid=$!
 sleep ${REXA_SHOT_DELAY:-5}
 $here/shot.sh $pid "$1" || true
 kill $pid 2>/dev/null || true
+rm -f $bin
