@@ -12,10 +12,12 @@ pub mod input;
 pub mod kbd;
 pub mod menu;
 pub mod overlays;
+pub mod popover;
 pub mod popup;
 pub mod separator;
 pub mod theme;
 pub mod toast;
+pub mod tooltip;
 pub mod tracked_text;
 pub mod tw;
 
@@ -30,7 +32,9 @@ pub use overlays::{
     AlertDialog, AlertDialogSize, ConfirmOptions, Dialog, OverlayId, Sheet,
 };
 pub use popup::{Align, Side};
+pub use popover::{Popover, PopoverCtl};
 pub use toast::{Toast, ToastKind};
+pub use tooltip::Tooltip;
 pub use separator::Separator;
 pub use theme::{parse_color, tw, white, with_alpha, ActiveTokens, Tokens, MONO, SANS};
 pub use tracked_text::{tight, TrackedText};

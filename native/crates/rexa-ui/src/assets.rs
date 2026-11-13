@@ -10,6 +10,7 @@ use std::borrow::Cow;
 #[include = "providers/*"]
 #[include = "brand/*"]
 #[include = "sonner/*"]
+#[include = "ui/*"]
 struct Embedded;
 
 pub struct Assets;

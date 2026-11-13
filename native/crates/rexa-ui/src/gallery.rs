@@ -6,7 +6,7 @@
 use crate::menu::{self, Menu, MenuItem, MenuStyle};
 use crate::{
     ActiveTokens, AlertDialog, Button, ButtonSize, ConfirmOptions, Dialog, DropdownMenu, IconName,
-    Sheet, Side, Toast, Tw,
+    Popover, Sheet, Side, Toast, Tooltip, Tw,
 };
 use gpui::{div, prelude::*, px, AnyElement, App, Context, FontWeight, SharedString, Window};
 
@@ -25,8 +25,34 @@ impl Gallery {
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers)]
     }
+}
+
+fn popovers(_: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let t = cx.tokens().clone();
+    let icon_btn = |id: &'static str, icon: IconName| Button::new(id).ghost().size(ButtonSize::IconSm).icon(icon);
+    row()
+        .pt_10()
+        .pb_10()
+        .gap_16()
+        .child(Tooltip::new("Refresh schema").force_open().child(icon_btn("tt1", IconName::RefreshCw)))
+        .child(Tooltip::new("Run query").kbd("⌘↵").force_open().child(icon_btn("tt2", IconName::Play)))
+        .child(Tooltip::studio("New SQL query").force_open().child(icon_btn("tt3", IconName::Plus)))
+        .child(Tooltip::new("Hover me").child(Button::new("tt4").outline().size(ButtonSize::Sm).label("Live tooltip")))
+        .child(
+            Popover::new("pop-demo")
+                .trigger(Button::new("pop-t").outline().size(ButtonSize::Sm).label("Open popover"))
+                .content(move |_, _, _| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().tw_text_sm().font_weight(FontWeight::MEDIUM).child("Dimensions"))
+                        .child(div().tw_text_sm().text_color(t.muted_foreground).child("Set the dimensions for the layer."))
+                }),
+        )
+        .into_any_element()
 }
 
 pub fn open_demo(what: &str, cx: &mut App) {
