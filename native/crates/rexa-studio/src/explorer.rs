@@ -390,7 +390,7 @@ impl Studio {
                     this.expanded_tags.insert(k.clone(), !cur);
                     cx.notify();
                 }))
-                .child(ico.el(16., color.unwrap_or_default()))
+                .child(ico.el(16., color.unwrap_or(t.muted_foreground)))
                 .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name.to_string()))
         };
         let children = |this: &Studio, tables: Vec<TableRef>, empty: &str, cx: &mut Context<Studio>| {
