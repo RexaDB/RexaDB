@@ -196,6 +196,7 @@ impl Render for OverlayLayer {
             let keys = div()
                 .id(("overlay-focus", id))
                 .track_focus(&focus)
+                .when(matches!(kind, Kind::Sheet(_)), |d| d.size_full())
                 .on_key_down(move |e, _, cx| {
                     if e.keystroke.key == "escape" {
                         close_overlay(id, cx);
