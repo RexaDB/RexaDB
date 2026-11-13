@@ -5,6 +5,8 @@
 mod placeholder;
 mod results;
 pub mod split_layout;
+pub mod icons;
+pub mod tabs;
 
 use gpui::{App, AppContext};
 use rexa_core::{Registry, Route};
