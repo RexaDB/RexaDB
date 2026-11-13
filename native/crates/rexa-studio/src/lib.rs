@@ -4,6 +4,7 @@
 
 mod placeholder;
 mod results;
+pub mod split_layout;
 
 use gpui::{App, AppContext};
 use rexa_core::{Registry, Route};
