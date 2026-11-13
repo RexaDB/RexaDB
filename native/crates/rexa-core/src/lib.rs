@@ -164,6 +164,25 @@ pub enum StudioEvent {
     OpenTab(TabSpec),
     CloseTab(TabSpec),
     SchemaChanged,
+    /// A tab reports unsaved edits (dirty dot in the tab strip, "N unsaved" in the status bar).
+    MarkDirty { tab: TabSpec, dirty: bool },
+    /// Rename a tab's title (e.g. a saved snippet name).
+    RenameTab { tab: TabSpec, title: String },
+    /// A SQL tab's text changed; the shell persists it with the tab (`open_tabs.query`).
+    QueryChanged { id: String, sql: String },
+    /// Shell → tab: a keybinding action meant for the active tab, by its
+    /// keybindings.json type ("RUN_ACTIVE_QUERY", "STOP_ACTIVE_QUERY",
+    /// "REFRESH_CURRENT_TAB", "COMMIT_PENDING_CHANGES", "FORMAT_QUERY",
+    /// "COPY_QUERY", "OPEN_INSERT_SHEET"). Tab views subscribe to the bus and
+    /// act when `tab` is theirs.
+    TabCommand { tab: TabSpec, command: String },
+    /// Open the settings modal at a section ("general", "ai", …).
+    OpenSettings { section: Option<String> },
+}
+
+/// Emit any studio event on the bus.
+pub fn emit_studio(event: StudioEvent, cx: &mut App) {
+    studio_bus(cx).update(cx, |_, cx| cx.emit(event));
 }
 
 pub struct StudioBus;
