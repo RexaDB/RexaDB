@@ -285,7 +285,10 @@ pub(crate) fn render_toaster(window: &mut Window, cx: &mut App) -> Option<AnyEle
         return None;
     }
     let t = cx.tokens().clone();
-    let _ = window;
+    // Heights are measured during paint; draw once more when a toast is new.
+    if s.read(cx).toasts.iter().any(|l| l.height.get().size.height <= px(1.)) {
+        window.request_animation_frame();
+    }
     let expanded = s.read(cx).expanded;
     let card = t.card;
     let (success, error, warning, info) = (
@@ -317,6 +320,7 @@ pub(crate) fn render_toaster(window: &mut Window, cx: &mut App) -> Option<AnyEle
         };
         let h = heights[i];
         let visible = i < VISIBLE;
+        let base = if visible { 1. } else { 0. };
         let (bottom, w, card_h, show_content) = if expanded {
             let b = offset;
             offset += h + GAP;
@@ -417,14 +421,14 @@ pub(crate) fn render_toaster(window: &mut Window, cx: &mut App) -> Option<AnyEle
             let elapsed = at.elapsed().as_secs_f32() / EXIT.as_secs_f32();
             let _ = elapsed;
             el.with_animation(("toast-out", id), gpui::Animation::new(EXIT), move |d, v| {
-                d.opacity(1. - v).mb(px(-card_h * if i == 0 { 1. } else { 0.4 } * v))
+                d.opacity(base * (1. - v)).mb(px(-card_h * if i == 0 { 1. } else { 0.4 } * v))
             })
             .into_any_element()
         } else {
             el.with_animation(
                 ("toast-in", generation),
                 gpui::Animation::new(Duration::from_millis(400)).with_easing(popup::css_ease),
-                move |d, v| d.opacity(v).mb(px(-card_h * (1. - v))),
+                move |d, v| d.opacity(base * v).mb(px(-card_h * (1. - v))),
             )
             .into_any_element()
         };
