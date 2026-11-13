@@ -9,6 +9,7 @@ pub mod icons;
 pub mod tabs;
 pub mod keybindings;
 pub mod persistence;
+pub mod catalog;
 
 use gpui::{App, AppContext};
 use rexa_core::{Registry, Route};
