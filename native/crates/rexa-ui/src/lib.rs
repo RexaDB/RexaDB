@@ -7,6 +7,7 @@ pub mod assets;
 pub mod badge;
 pub mod button;
 pub mod controls;
+pub mod disclosure;
 pub mod display;
 pub mod gallery;
 pub mod images;
@@ -17,6 +18,7 @@ pub mod overlays;
 pub mod popover;
 pub mod popup;
 pub mod select;
+pub mod scroll_area;
 pub mod separator;
 pub mod theme;
 pub mod toast;
@@ -40,6 +42,8 @@ pub use overlays::{
 };
 pub use popup::{Align, Side};
 pub use popover::{Popover, PopoverCtl};
+pub use disclosure::{tabs_content, Accordion, Collapsible, Tabs};
+pub use scroll_area::ScrollArea;
 pub use select::{Combobox, MultiSelect, Select, SelectEntry, SelectOption};
 pub use display::{
     avatar_group, skeleton, Alert, Avatar, AvatarSize, Card, FallbackAvatar, Progress, Spinner, Table,

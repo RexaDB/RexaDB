@@ -7,7 +7,7 @@ use crate::menu::{self, Menu, MenuItem, MenuStyle};
 use crate::{
     ActiveTokens, AlertDialog, Button, ButtonSize, ConfirmOptions, Dialog, DropdownMenu, IconName,
     avatar_group, skeleton, square_check, Alert, Avatar, AvatarSize, Card, Checkbox, Combobox, FallbackAvatar,
-    MultiSelect, Progress, Select, SelectOption, Spinner, Table, InputGroup, Label, PasswordInput, Popover, Sheet, Side, Switch, TextArea, Toast,
+    tabs_content, Accordion, Collapsible, MultiSelect, Progress, ScrollArea, Select, Tabs, SelectOption, Spinner, Table, InputGroup, Label, PasswordInput, Popover, Sheet, Side, Switch, TextArea, Toast,
     Tooltip, Tw,
 };
 use gpui::{div, prelude::*, px, AnyElement, App, AppContext, Context, Entity, FontWeight, SharedString, Window};
@@ -25,6 +25,7 @@ pub struct Gallery {
     sel2: Option<SharedString>,
     combo: Option<SharedString>,
     multi: Vec<SharedString>,
+    tab: usize,
 }
 
 type Section = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> AnyElement;
@@ -46,11 +47,12 @@ impl Gallery {
             sel2: Some("sqlite".into()),
             combo: None,
             multi: vec!["users".into()],
+            tab: 0,
         }
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display), ("layout", layout)]
     }
 }
 
@@ -174,6 +176,52 @@ fn display(_: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyEle
                     .row(["INV003", "Unpaid", "$350.00"].map(|s| s.into_any_element()))
                     .caption("A list of your recent invoices."),
             ),
+        )
+        .into_any_element()
+}
+
+fn layout(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let t = cx.tokens().clone();
+    let this = cx.entity();
+    let list = |n: usize| (0..n).map(|i| div().px_3().py_1().tw_text_sm().child(format!("public.table_{i:02}"))).collect::<Vec<_>>();
+    row()
+        .child(
+            div()
+                .w(px(320.))
+                .child(Tabs::new("tabs").w_full().tab("Account").tab("Password").disabled_tab("Billing").selected(g.tab).on_change(
+                    move |i, _, cx| this.update(cx, |g, cx| {
+                        g.tab = i;
+                        cx.notify();
+                    }),
+                ))
+                .child(tabs_content(div().tw_text_sm().text_color(t.muted_foreground).child(format!("Tab {} content", g.tab)))),
+        )
+        .child(
+            div().w(px(320.)).child(
+                Accordion::new("acc")
+                    .default_open([0])
+                    .item("Is it accessible?", "Yes. It adheres to the WAI-ARIA design pattern.")
+                    .item("Is it styled?", "Yes. It comes with default styles.")
+                    .item("Is it animated?", "Yes. It's animated by default."),
+            ),
+        )
+        .child(
+            div().w(px(200.)).child(
+                Collapsible::new("col")
+                    .default_open(true)
+                    .trigger(|open| {
+                        div().flex().items_center().gap_2().tw_text_sm().child(
+                            gpui_component::Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4(),
+                        ).child("Tables")
+                    })
+                    .content(div().pl_6().flex().flex_col().children(list(3))),
+            ),
+        )
+        .child(
+            ScrollArea::radix("sa-radix").w(px(200.)).h(px(180.)).border_1().border_color(t.border).tw_rounded_lg().children(list(30)),
+        )
+        .child(
+            ScrollArea::native("sa-native").w(px(200.)).h(px(180.)).border_1().border_color(t.border).tw_rounded_lg().children(list(30)),
         )
         .into_any_element()
 }
