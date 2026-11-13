@@ -288,7 +288,7 @@ impl RenderOnce for Button {
 }
 
 /// Composite a translucent white sheen over `base` (the raised gradient, averaged).
-fn overlay(base: Hsla, alpha: f32) -> Hsla {
+pub(crate) fn overlay(base: Hsla, alpha: f32) -> Hsla {
     let b: gpui::Rgba = base.into();
     let mix = |c: f32| c + (1. - c) * alpha;
     if b.a == 0. {

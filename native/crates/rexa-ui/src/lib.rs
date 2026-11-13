@@ -7,6 +7,7 @@ pub mod assets;
 pub mod badge;
 pub mod button;
 pub mod controls;
+pub mod display;
 pub mod gallery;
 pub mod images;
 pub mod input;
@@ -15,6 +16,7 @@ pub mod menu;
 pub mod overlays;
 pub mod popover;
 pub mod popup;
+pub mod select;
 pub mod separator;
 pub mod theme;
 pub mod toast;
@@ -38,6 +40,10 @@ pub use overlays::{
 };
 pub use popup::{Align, Side};
 pub use popover::{Popover, PopoverCtl};
+pub use select::{Combobox, MultiSelect, Select, SelectEntry, SelectOption};
+pub use display::{
+    avatar_group, skeleton, Alert, Avatar, AvatarSize, Card, FallbackAvatar, Progress, Spinner, Table,
+};
 pub use toast::{Toast, ToastKind};
 pub use tooltip::Tooltip;
 pub use separator::Separator;
