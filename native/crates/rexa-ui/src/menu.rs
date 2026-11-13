@@ -56,6 +56,9 @@ pub struct MenuItem {
     kind: Kind,
     keep_open: bool,
     on_select: Option<Handler>,
+    text_xs: bool,
+    gap: Option<f32>,
+    color: Option<gpui::Hsla>,
 }
 
 impl MenuItem {
@@ -72,6 +75,9 @@ impl MenuItem {
             kind: Kind::Plain,
             keep_open: false,
             on_select: None,
+            text_xs: false,
+            gap: None,
+            color: None,
         }
     }
     /// `DropdownMenuCheckboxItem`
@@ -120,6 +126,21 @@ impl MenuItem {
         self.keep_open = true;
         self
     }
+    /// `className="text-xs"`
+    pub fn text_xs(mut self) -> Self {
+        self.text_xs = true;
+        self
+    }
+    /// `className="gap-2"` etc.
+    pub fn gap(mut self, g: f32) -> Self {
+        self.gap = Some(g);
+        self
+    }
+    /// `className="text-destructive"` (not the variant: highlight still turns it accent-foreground).
+    pub fn text_color(mut self, c: gpui::Hsla) -> Self {
+        self.color = Some(c);
+        self
+    }
     pub fn on_select(mut self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
         self
@@ -141,11 +162,14 @@ pub struct Menu {
     min_w: Option<f32>,
     w: Option<f32>,
     max_h: Option<f32>,
+    bg: Option<gpui::Hsla>,
+    ring: Option<gpui::Hsla>,
+    separator: Option<gpui::Hsla>,
 }
 
 impl Menu {
     pub fn new(style: MenuStyle) -> Self {
-        Self { entries: Vec::new(), style, min_w: None, w: None, max_h: None }
+        Self { entries: Vec::new(), style, min_w: None, w: None, max_h: None, bg: None, ring: None, separator: None }
     }
     pub fn item(mut self, item: MenuItem) -> Self {
         self.entries.push(Entry::Item(item));
@@ -199,6 +223,21 @@ impl Menu {
     }
     pub fn max_h(mut self, h: f32) -> Self {
         self.max_h = Some(h);
+        self
+    }
+    /// `className="bg-popover"` etc.
+    pub fn bg(mut self, c: gpui::Hsla) -> Self {
+        self.bg = Some(c);
+        self
+    }
+    /// `border-studio-border` (the ring colour).
+    pub fn ring_color(mut self, c: gpui::Hsla) -> Self {
+        self.ring = Some(c);
+        self
+    }
+    /// `DropdownMenuSeparator className="bg-…"` for every separator.
+    pub fn separator_color(mut self, c: gpui::Hsla) -> Self {
+        self.separator = Some(c);
         self
     }
     pub fn is_empty(&self) -> bool {
@@ -308,7 +347,7 @@ fn render_row(
     let active = highlighted || sub_open;
     let fg = t.var_or("--popover-foreground", t.foreground);
     let accent_fg = t.accent_foreground;
-    let text = if item.destructive { t.destructive } else if active { accent_fg } else { fg };
+    let text = if item.destructive { t.destructive } else if active { accent_fg } else { item.color.unwrap_or(fg) };
     let context = style == MenuStyle::Context;
 
     let mut row = div()
@@ -331,6 +370,12 @@ fn render_row(
     };
     if item.inset && !context {
         row = row.pl_7();
+    }
+    if item.text_xs {
+        row = row.tw_text_xs();
+    }
+    if let Some(g) = item.gap {
+        row = row.gap(px(g));
     }
     if active {
         row = row.bg(highlight_bg(t, style, item.kind, item.destructive));
@@ -482,7 +527,7 @@ fn render_panel(
             }
             Entry::Separator => {
                 nav_items.push(NavItem { selectable: false, sub: false, handler: None, keep_open: false, sub_first: None });
-                children.push(div().h(px(1.)).my_1().mx(px(-4.)).bg(t.border).into_any_element());
+                children.push(div().h(px(1.)).my_1().mx(px(-4.)).bg(menu.separator.unwrap_or(t.border)).into_any_element());
             }
             Entry::Custom(el) => {
                 nav_items.push(NavItem { selectable: false, sub: false, handler: None, keep_open: false, sub_first: None });
@@ -507,9 +552,9 @@ fn render_panel(
         .when_some(menu.max_h, |d, h| d.max_h(px(h)))
         .p_1()
         .tw_rounded_lg()
-        .bg(t.menu_bg())
+        .bg(menu.bg.unwrap_or(t.menu_bg()))
         .text_color(t.var_or("--popover-foreground", t.foreground))
-        .shadow(popup::with_ring(shadows, t.border))
+        .shadow(popup::with_ring(shadows, menu.ring.unwrap_or(t.border)))
         .overflow_y_scroll()
         .occlude()
         .children(children);
@@ -635,6 +680,7 @@ pub struct DropdownMenu {
     side_offset: f32,
     align_offset: f32,
     full_width: bool,
+    open_on_mount: bool,
 }
 
 impl DropdownMenu {
@@ -648,6 +694,7 @@ impl DropdownMenu {
             side_offset: 4.,
             align_offset: 0.,
             full_width: false,
+            open_on_mount: false,
         }
     }
     pub fn trigger(mut self, el: impl IntoElement + 'static) -> Self {
@@ -679,6 +726,11 @@ impl DropdownMenu {
         self.align_offset = o;
         self
     }
+    /// Open on first render (gallery previews).
+    pub fn open_on_mount(mut self) -> Self {
+        self.open_on_mount = true;
+        self
+    }
     pub fn w_full(mut self) -> Self {
         self.full_width = true;
         self
@@ -688,6 +740,9 @@ impl DropdownMenu {
 impl RenderOnce for DropdownMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = PopupState::keyed(self.id.clone(), window, cx);
+        if self.open_on_mount && state.read(cx).generation == 0 {
+            state.update(cx, |s, cx| s.show(window, cx));
+        }
         let open = state.read(cx).open;
         let trigger_bounds = state.read(cx).trigger.clone();
         let st = state.clone();

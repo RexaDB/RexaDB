@@ -27,6 +27,7 @@ pub struct Gallery {
     multi: Vec<SharedString>,
     tab: usize,
     date: Option<crate::Date>,
+    sidebar_collapsed: bool,
 }
 
 type Section = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> AnyElement;
@@ -50,11 +51,12 @@ impl Gallery {
             multi: vec!["users".into()],
             tab: 0,
             date: Some(crate::Date::new(2026, 11, 13)),
+            sidebar_collapsed: false,
         }
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display), ("layout", layout), ("pickers", pickers)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display), ("layout", layout), ("pickers", pickers), ("sidebar", sidebar)]
     }
 }
 
@@ -261,6 +263,64 @@ fn pickers(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyEle
                             )),
                     ),
                 ),
+        )
+        .into_any_element()
+}
+
+fn sidebar(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    use crate::sidebar::*;
+    let collapsed = g.sidebar_collapsed;
+    let this = cx.entity();
+    let open = std::env::var("REXA_GALLERY_OPEN").ok();
+    let tables = ["users", "orders", "products"];
+    row()
+        .child(
+            div().h(px(420.)).flex().relative().child(
+                crate::Sidebar::new()
+                    .collapsed(collapsed)
+                    .width(240.)
+                    .child(sidebar_header().child(
+                        SidebarMenuButton::new("sb-ws").size(SidebarButtonSize::Lg).collapsed(collapsed).icon(IconName::Database).label("rexadb_dev"),
+                    ))
+                    .child(
+                        sidebar_content("sb-content")
+                            .child(
+                                sidebar_group()
+                                    .child(sidebar_group_label("Tables", collapsed, cx))
+                                    .child(sidebar_group_action("sb-add", IconName::Plus, cx))
+                                    .child(sidebar_menu().children(tables.iter().enumerate().map(|(i, n)| {
+                                        SidebarMenuButton::new(("sb-t", i))
+                                            .collapsed(collapsed)
+                                            .icon(IconName::Table)
+                                            .label(*n)
+                                            .active(i == 0)
+                                            .badge(format!("{}", (i + 1) * 12))
+                                    }))),
+                            )
+                            .child(sidebar_separator(cx))
+                            .child(
+                                sidebar_group().child(sidebar_group_label("Views", collapsed, cx)).child(
+                                    sidebar_menu()
+                                        .child(SidebarMenuButton::new("sb-v").collapsed(collapsed).icon(IconName::Eye).label("active_users"))
+                                        .child(sidebar_menu_sub(cx).child(sidebar_menu_sub_button("sb-sub1", "by_region", true, false, cx)).child(sidebar_menu_sub_button("sb-sub2", "by_plan", false, false, cx)))
+                                        .child(sidebar_menu_skeleton("sb-sk", true, 70., cx)),
+                                ),
+                            ),
+                    )
+                    .child(sidebar_footer().child(SidebarMenuButton::new("sb-set").size(SidebarButtonSize::Sm).collapsed(collapsed).icon(IconName::Settings).label("Settings"))),
+            ),
+        )
+        .child(sidebar_trigger("sb-trigger", move |_, cx| this.update(cx, |g, cx| {
+            g.sidebar_collapsed = !g.sidebar_collapsed;
+            cx.notify();
+        })))
+        .child(
+            div().w(px(420.)).flex().justify_end().child(
+                crate::UserAvatarDropdown::new("uad", "flaxo")
+                    .user(Some("flaxodotdev@gmail.com"))
+                    .plan("pro")
+                    .when(open.as_deref() == Some("user-menu"), |u| u.open_on_mount()),
+            ),
         )
         .into_any_element()
 }

@@ -22,11 +22,13 @@ pub mod popup;
 pub mod select;
 pub mod scroll_area;
 pub mod separator;
+pub mod sidebar;
 pub mod theme;
 pub mod toast;
 pub mod tooltip;
 pub mod tracked_text;
 pub mod tw;
+pub mod user_avatar_dropdown;
 
 pub use badge::{Badge, BadgeVariant};
 pub use button::{Button, ButtonSize, ButtonVariant};
@@ -58,6 +60,8 @@ pub use separator::Separator;
 pub use theme::{parse_color, tw, white, with_alpha, ActiveTokens, Tokens, MONO, SANS};
 pub use tracked_text::{tight, TrackedText};
 pub use tw::Tw;
+pub use user_avatar_dropdown::UserAvatarDropdown;
+pub use sidebar::{SidebarButtonSize, SidebarMenuButton, Sidebar, SidebarVariant};
 
 /// Overlay widgets not yet re-implemented pixel-exact. Use them through these
 /// paths so swapping in a custom implementation later is a one-place change.
