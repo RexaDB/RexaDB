@@ -20,6 +20,11 @@ pub fn tight(text: impl Into<SharedString>) -> TrackedText {
     TrackedText { text: text.into(), em: -0.025 }
 }
 
+/// Text with `letter-spacing: <em>em` (`tracking-widest` = 0.1, `tracking-wide` = 0.025).
+pub fn tracked(text: impl Into<SharedString>, em: f32) -> TrackedText {
+    TrackedText { text: text.into(), em }
+}
+
 impl IntoElement for TrackedText {
     type Element = Self;
     fn into_element(self) -> Self {

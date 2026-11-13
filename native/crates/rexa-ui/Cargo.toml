@@ -13,3 +13,6 @@ gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
 gpui-kit-assets = "=0.9.1"
 rust-embed = "8"
 base64 = "0.22"
+gpui-base = "=0.9.1"
+futures = "0.3"
+rexa-core = { path = "../rexa-core" }

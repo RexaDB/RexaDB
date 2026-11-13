@@ -55,6 +55,16 @@ impl Tokens {
         parse_color(&self.resolve(name)?)
     }
 
+    /// `var(name, fallback)`.
+    pub fn var_or(&self, name: &str, fallback: Hsla) -> Hsla {
+        self.var(name).unwrap_or(fallback)
+    }
+
+    /// `--menu-bg` falling back to `--popover` (menus: `bg-[var(--menu-bg,var(--popover))]`).
+    pub fn menu_bg(&self) -> Hsla {
+        self.var_or("--menu-bg", self.popover)
+    }
+
     fn resolve(&self, name: &str) -> Option<String> {
         let mut value = self.vars.get(name)?.trim().to_string();
         for _ in 0..8 {
@@ -65,10 +75,16 @@ impl Tokens {
                 Some((v, f)) => (v.trim(), Some(f.trim())),
                 None => (inner.trim(), None),
             };
+            // `--color-*` are Tailwind's palette (`var(--color-emerald-500)`).
+            let palette = || {
+                let name = var.strip_prefix("--color-")?;
+                palette().get(name).cloned()
+            };
             let replacement = self
                 .vars
                 .get(var)
                 .cloned()
+                .or_else(palette)
                 .or_else(|| fallback.map(str::to_string))?;
             value.replace_range(start..=end, &replacement);
         }
@@ -351,15 +367,28 @@ mod tests {
 
 /// A Tailwind v4 palette color by name, e.g. `tw("emerald-400")`, `tw("white")`.
 pub fn tw(name: &str) -> Hsla {
-    use std::sync::OnceLock;
-    static PALETTE: OnceLock<HashMap<String, String>> = OnceLock::new();
-    let palette = PALETTE.get_or_init(|| {
-        serde_json::from_str(include_str!("../../../assets/tailwind-colors.json")).unwrap()
-    });
-    palette
+    palette()
         .get(name)
         .and_then(|v| parse_color(v))
         .unwrap_or_else(|| panic!("unknown tailwind color {name}"))
+}
+
+fn palette() -> &'static HashMap<String, String> {
+    use std::sync::OnceLock;
+    static PALETTE: OnceLock<HashMap<String, String>> = OnceLock::new();
+    PALETTE.get_or_init(|| serde_json::from_str(include_str!("../../../assets/tailwind-colors.json")).unwrap())
+}
+
+/// CSS `color-mix(in srgb, a p%, b)`.
+pub fn mix(a: Hsla, p: f32, b: Hsla) -> Hsla {
+    let (x, y): (Rgba, Rgba) = (a.into(), b.into());
+    let q = 1. - p;
+    let alpha = x.a * p + y.a * q;
+    if alpha == 0. {
+        return gpui::transparent_black();
+    }
+    let ch = |cx: f32, cy: f32| (cx * x.a * p + cy * y.a * q) / alpha;
+    Rgba { r: ch(x.r, y.r), g: ch(x.g, y.g), b: ch(x.b, y.b), a: alpha }.into()
 }
 
 /// `white/[0.07]` etc.

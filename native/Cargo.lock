@@ -5719,9 +5719,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "futures",
+ "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
  "gpui-pre",
+ "rexa-core",
  "rust-embed",
  "serde",
  "serde_json",
