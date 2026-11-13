@@ -221,6 +221,7 @@ impl Studio {
                     }
                     anyhow::Ok(format!("CREATE TABLE {qualified} (\n{}\n);", lines.join(",\n")))
                 }
+                other => anyhow::bail!("Copy as CREATE TABLE is not supported for {other} connections yet."),
             }
         });
         cx.spawn(async move |_, cx| {

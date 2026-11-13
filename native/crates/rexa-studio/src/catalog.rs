@@ -15,6 +15,7 @@ pub fn db_type(connection_type: &str, kind: Kind) -> &'static str {
             Kind::Postgres => "postgres",
             Kind::MySql => "mysql",
             Kind::Sqlite => "sqlite",
+            other => other.as_str(),
         },
     }
 }
@@ -280,6 +281,7 @@ pub async fn load_objects(driver: Arc<dyn Driver>, schema: String) -> Result<Vec
                 }
             }
         }
+        _ => {}
     }
     Ok(out)
 }
@@ -303,6 +305,7 @@ pub async fn current_database(driver: Arc<dyn Driver>) -> String {
         Kind::Postgres => "SELECT current_database()",
         Kind::MySql => "SELECT DATABASE()",
         Kind::Sqlite => return "main".into(),
+        _ => return String::new(),
     };
     driver
         .execute(sql, 1)
