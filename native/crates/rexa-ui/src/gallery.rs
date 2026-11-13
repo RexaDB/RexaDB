@@ -26,6 +26,7 @@ pub struct Gallery {
     combo: Option<SharedString>,
     multi: Vec<SharedString>,
     tab: usize,
+    date: Option<crate::Date>,
 }
 
 type Section = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> AnyElement;
@@ -48,11 +49,12 @@ impl Gallery {
             combo: None,
             multi: vec!["users".into()],
             tab: 0,
+            date: Some(crate::Date::new(2026, 11, 13)),
         }
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display), ("layout", layout)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display), ("layout", layout), ("pickers", pickers)]
     }
 }
 
@@ -226,6 +228,43 @@ fn layout(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElem
         .into_any_element()
 }
 
+fn pickers(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let t = cx.tokens().clone();
+    let this = cx.entity();
+    row()
+        .child(
+            div().border_1().border_color(t.border).tw_rounded_lg().child(
+                crate::Calendar::new("cal")
+                    .selected(g.date)
+                    .default_month(crate::Date::new(2026, 11, 1))
+                    .on_select(move |d, _, cx| this.update(cx, |g, cx| {
+                        g.date = Some(d);
+                        cx.notify();
+                    })),
+            ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .w(px(520.))
+                .child(crate::CommandSearchBar::new("csb").on_click(|_, cx| open_demo("command", cx)))
+                .child(crate::CommandSearchBar::new("csb2").sleek(true))
+                .child(
+                    div().h(px(260.)).border_1().border_color(t.border).tw_rounded_lg().overflow_hidden().child(
+                        crate::Command::new("inline-cmd")
+                            .autofocus(false)
+                            .placeholder("Search tables…")
+                            .group(crate::CommandGroup::new("Tables").items(
+                                ["users", "orders", "order_items", "products"].map(|n| crate::CommandItem::new(n).icon(IconName::Table)),
+                            )),
+                    ),
+                ),
+        )
+        .into_any_element()
+}
+
 fn controls(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
     let this = cx.entity();
     let (sw, ck) = (g.switch_on, g.check_on);
@@ -325,6 +364,20 @@ pub fn open_demo(what: &str, cx: &mut App) {
                     .description("public.users · id = 42")
                     .child(div().px_4().text_color(t.muted_foreground).child("Sheet body"))
                     .footer(Button::new("s-save").label("Save changes"))
+            });
+        }
+        "command" => {
+            crate::open_command_dialog(cx, "palette", |_, _| {
+                vec![
+                    crate::CommandGroup::new("Suggestions")
+                        .item(crate::CommandItem::new("New SQL query").icon(IconName::Plus).shortcut("⌘N"))
+                        .item(crate::CommandItem::new("Open table").icon(IconName::Table).shortcut("⌘O"))
+                        .item(crate::CommandItem::new("Toggle sidebar").icon(IconName::PanelLeft).shortcut("⌘B")),
+                    crate::CommandGroup::new("Settings")
+                        .separator_before()
+                        .item(crate::CommandItem::new("Profile").icon(IconName::User).shortcut("⌘P"))
+                        .item(crate::CommandItem::new("Settings").icon(IconName::Settings).shortcut("⌘,")),
+                ]
             });
         }
         "toasts" => {

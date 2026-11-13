@@ -6,6 +6,8 @@
 pub mod assets;
 pub mod badge;
 pub mod button;
+pub mod calendar;
+pub mod command;
 pub mod controls;
 pub mod disclosure;
 pub mod display;
@@ -42,6 +44,8 @@ pub use overlays::{
 };
 pub use popup::{Align, Side};
 pub use popover::{Popover, PopoverCtl};
+pub use calendar::{Calendar, Date};
+pub use command::{open_command_dialog, open_command_dialog_with, Command, CommandGroup, CommandItem, CommandSearchBar};
 pub use disclosure::{tabs_content, Accordion, Collapsible, Tabs};
 pub use scroll_area::ScrollArea;
 pub use select::{Combobox, MultiSelect, Select, SelectEntry, SelectOption};
