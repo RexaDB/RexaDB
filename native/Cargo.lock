@@ -5706,6 +5706,7 @@ dependencies = [
  "rexa-drivers",
  "rexa-store",
  "rexa-ui",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",

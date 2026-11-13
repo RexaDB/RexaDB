@@ -20,8 +20,10 @@ impl Ico {
         }
     }
 
+    /// A transparent `color` (e.g. `Hsla::default()`) inherits the parent's text color.
     pub fn el(self, size: f32, color: Hsla) -> Svg {
-        svg().path(self.path()).size(px(size)).flex_shrink_0().text_color(color)
+        let s = svg().path(self.path()).size(px(size)).flex_shrink_0();
+        if color.a == 0. { s } else { s.text_color(color) }
     }
 }
 
