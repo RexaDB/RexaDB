@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod badge;
 pub mod button;
+pub mod gallery;
 pub mod images;
 pub mod input;
 pub mod kbd;
@@ -63,4 +64,11 @@ pub fn init(cx: &mut gpui::App) {
     gpui_component::init(cx);
     // Registered after gpui-component so our modal layer / toaster draw above its layers.
     gpui_base::Root::register_plugin::<overlays::OverlayLayer>(cx, overlays::OverlayLayer::new);
+    rexa_core::Registry::screen(cx, "rexa-ui", |route, window, cx| match route {
+        rexa_core::Route::ConnectionScreen(s) if s == "ui-gallery" => {
+            use gpui::AppContext;
+            Some(cx.new(|cx| gallery::Gallery::new(window, cx)).into())
+        }
+        _ => None,
+    });
 }

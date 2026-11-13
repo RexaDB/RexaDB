@@ -789,3 +789,24 @@ impl RenderOnce for ContextMenu {
         el
     }
 }
+
+/// Render a menu panel inline (not floating) with row `highlighted` lit —
+/// for the ui gallery and visual diffs.
+pub fn preview(
+    id: impl Into<ElementId>,
+    style: MenuStyle,
+    highlighted: Option<usize>,
+    f: impl Fn(Menu, &mut Window, &mut App) -> Menu + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let id: ElementId = id.into();
+    let level = window.use_keyed_state(popup::sub_id(&id, "preview"), cx, move |_, _| {
+        let mut l = MenuLevel::new();
+        l.highlighted = highlighted;
+        l
+    });
+    let ctx = Rc::new(Ctx { close: Rc::new(|_, _| {}), nav: Rc::new(RefCell::new(Vec::new())), id: id.clone() });
+    let menu = f(Menu::new(style), window, cx);
+    render_panel(menu, &level, false, &ctx, popup::sub_id(&id, "anim"), window, cx).into_any_element()
+}
