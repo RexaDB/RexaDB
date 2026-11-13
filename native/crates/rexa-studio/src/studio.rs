@@ -158,7 +158,9 @@ impl Studio {
         let ids: Vec<String> = ui.tabs.iter().map(|t| t.id.clone()).collect();
         split = split.normalize(&ids, ui.active_tab_id.as_deref());
 
-        let search = cx.new(|cx| gpui_component::input::InputState::new(window, cx).placeholder("Search tables..."));
+        let settings = persistence::global_settings();
+        let search_placeholder = if settings.schema_explorer { "Search..." } else if db_type == "redis" { "Search keys..." } else { "Search tables..." };
+        let search = cx.new(|cx| gpui_component::input::InputState::new(window, cx).placeholder(search_placeholder));
         let tag_input = cx.new(|cx| gpui_component::input::InputState::new(window, cx).placeholder("New tag name…"));
         let mut subs = Vec::new();
         subs.push(cx.subscribe(&search, |_, _, _: &gpui_component::input::InputEvent, cx| cx.notify()));
@@ -230,7 +232,7 @@ impl Studio {
             command_menu: None,
             dialog: None,
             keybindings: keybindings::load(),
-            settings: persistence::global_settings(),
+            settings,
             save_task: None,
             dev_scenario: None,
             _subs: subs,

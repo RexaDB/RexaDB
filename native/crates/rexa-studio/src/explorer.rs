@@ -674,6 +674,49 @@ impl Studio {
                 }),
         );
 
+        // Schema Explorer on Postgres: one scroll with a collapsible "Tables" section
+        // followed by the object sections (no virtualization below 400 rows).
+        if self.settings.schema_explorer && matches!(self.db_type, "postgres" | "supabase-mgmt") {
+            let expanded = *self.expanded_sections.get("tables").unwrap_or(&true);
+            let mut scroll = div().id("schema-explorer").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().pb_1();
+            let mut tables_section = div().flex().flex_col().child(
+                div()
+                    .id("section-tables")
+                    .flex()
+                    .w_full()
+                    .items_center()
+                    .gap(px(6.))
+                    .tw_rounded_md()
+                    .px_1()
+                    .py_1()
+                    .tw_text_xs()
+                    .text_color(with_alpha(t.muted_foreground, 0.8))
+                    .cursor_pointer()
+                    .hover(move |st| st.text_color(t.foreground))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.expanded_sections.insert("tables".into(), !expanded);
+                        cx.notify();
+                    }))
+                    .child(icons::S_RIGHT.el(12., t.muted_foreground).when(expanded, |s| s.with_transformation(gpui::Transformation::rotate(gpui::radians(std::f32::consts::FRAC_PI_2)))))
+                    .child(icons::S_TABLE.el(14., t.muted_foreground))
+                    .child("Tables")
+                    .child(div().text_color(with_alpha(t.muted_foreground, 0.5)).child(format!("({})", filtered.len()))),
+            );
+            if expanded {
+                if tag_view {
+                    tables_section = tables_section.child(self.render_tag_folders(&filtered, cx));
+                } else if filtered.is_empty() {
+                    tables_section = tables_section.child(div().px_2().py(px(6.)).tw_text_xs().text_color(t.muted_foreground).child("No tables found"));
+                } else {
+                    for tb in &filtered {
+                        tables_section = tables_section.child(div().pb(px(2.)).child(self.render_table_row(tb, cx)));
+                    }
+                }
+            }
+            scroll = scroll.child(tables_section).children(self.render_object_sections(&query, cx));
+            return col.child(scroll).into_any_element();
+        }
+
         // List
         if tag_view {
             col = col.child(div().id("tag-folders").flex_1().min_h_0().overflow_y_scroll().pb_1().child(self.render_tag_folders(&filtered, cx)));
