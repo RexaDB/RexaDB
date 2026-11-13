@@ -9,6 +9,7 @@ use std::borrow::Cow;
 #[folder = "../../assets"]
 #[include = "providers/*"]
 #[include = "brand/*"]
+#[include = "sonner/*"]
 struct Embedded;
 
 pub struct Assets;

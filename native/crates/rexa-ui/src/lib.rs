@@ -10,9 +10,11 @@ pub mod images;
 pub mod input;
 pub mod kbd;
 pub mod menu;
+pub mod overlays;
 pub mod popup;
 pub mod separator;
 pub mod theme;
+pub mod toast;
 pub mod tracked_text;
 pub mod tw;
 
@@ -22,7 +24,12 @@ pub use gpui_kit_assets::IconName;
 pub use input::TextInput;
 pub use kbd::Kbd;
 pub use menu::{ContextMenu, DropdownMenu, Menu, MenuItem, MenuStyle};
+pub use overlays::{
+    close_all_overlays, close_overlay, close_top, confirm, open_alert_dialog, open_dialog, open_sheet,
+    AlertDialog, AlertDialogSize, ConfirmOptions, Dialog, OverlayId, Sheet,
+};
 pub use popup::{Align, Side};
+pub use toast::{Toast, ToastKind};
 pub use separator::Separator;
 pub use theme::{parse_color, tw, white, with_alpha, ActiveTokens, Tokens, MONO, SANS};
 pub use tracked_text::{tight, TrackedText};
@@ -54,4 +61,6 @@ pub mod widgets {
 /// Call once at startup (after `gpui_component::init`).
 pub fn init(cx: &mut gpui::App) {
     gpui_component::init(cx);
+    // Registered after gpui-component so our modal layer / toaster draw above its layers.
+    gpui_base::Root::register_plugin::<overlays::OverlayLayer>(cx, overlays::OverlayLayer::new);
 }

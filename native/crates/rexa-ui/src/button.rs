@@ -48,6 +48,7 @@ pub struct Button {
     full_width: bool,
     on_click: Option<ClickHandler>,
     children: Vec<AnyElement>,
+    colors: Option<(Hsla, Hsla, Hsla)>,
 }
 
 impl Button {
@@ -64,6 +65,7 @@ impl Button {
             full_width: false,
             on_click: None,
             children: Vec::new(),
+            colors: None,
         }
     }
     pub fn variant(mut self, v: ButtonVariant) -> Self {
@@ -116,6 +118,11 @@ impl Button {
     }
     pub fn child(mut self, c: impl IntoElement) -> Self {
         self.children.push(c.into_any_element());
+        self
+    }
+    /// Class overrides like `bg-red-600 text-white hover:bg-red-500 border-transparent`.
+    pub fn colors(mut self, bg: Hsla, hover_bg: Hsla, fg: Hsla) -> Self {
+        self.colors = Some((bg, hover_bg, fg));
         self
     }
     pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
@@ -203,6 +210,10 @@ impl RenderOnce for Button {
                 medium: false,
                 raised: false,
             },
+        };
+        let look = match self.colors {
+            Some((bg, hover_bg, fg)) => Look { bg, hover_bg, fg, hover_fg: fg, border: clear, ..look },
+            None => look,
         };
         // .rexa-raised (dark): white/20 border, a ~5% white sheen and a 1px drop shadow.
         let raised = look.raised && dark;
