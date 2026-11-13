@@ -99,21 +99,21 @@ impl Studio {
                     .cursor_pointer()
                     .when(ai_open, |d| d.bg(white(0.08)).text_color(t.foreground))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_ai(cx)))
-                    .child(Self::status_icon(icons::lucide("sparkles"), gpui::Hsla::default()))
+                    .child(Self::status_icon(icons::lucide("sparkles"), fg))
                     .child("Ask AI"),
             )
             .child(
                 self.status_item("agents", cx)
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| this.open_simple("agents", cx)))
-                    .child(Self::status_icon(icons::lucide("bot"), gpui::Hsla::default()))
+                    .child(Self::status_icon(icons::lucide("bot"), fg))
                     .child("Agents"),
             )
             .child(
                 self.status_item("history", cx)
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| this.open_simple("history", cx)))
-                    .child(Self::status_icon(icons::lucide("clock"), gpui::Hsla::default())),
+                    .child(Self::status_icon(icons::lucide("clock"), fg)),
             )
             .child(
                 self.status_item("schema-cache", cx)
@@ -128,7 +128,7 @@ impl Studio {
                         this.threads_open = !this.threads_open;
                         cx.notify();
                     }))
-                    .child(Self::status_icon(icons::lucide("messages-square"), gpui::Hsla::default()))
+                    .child(Self::status_icon(icons::lucide("messages-square"), fg))
                     .child("Threads"),
             );
 

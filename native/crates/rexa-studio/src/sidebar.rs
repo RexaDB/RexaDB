@@ -138,7 +138,7 @@ impl Studio {
         self.sidebar_row(format!("row-{key}"), menu_open, cx)
             .group(group.clone())
             .on_click(cx.listener(move |this, _, _, cx| open(this, cx)))
-            .child(icon.el(16., gpui::Hsla::default()))
+            .child(icon.el(16., t.muted_foreground))
             .child(Self::row_label(label))
             .child(
                 div()
@@ -160,13 +160,13 @@ impl Studio {
                         }
                         this.open_menu(menu_id.clone(), e.position, 160., items, cx);
                     }))
-                    .child(icons::lucide("ellipsis").el(14., gpui::Hsla::default())),
+                    .child(icons::lucide("ellipsis").el(14., t.muted_foreground)),
             )
             .into_any_element()
     }
 
     fn new_row(&self, id: &str, label: &str, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
-        self.sidebar_row(id.to_string(), false, cx).child(icons::lucide("plus").el(16., gpui::Hsla::default())).child(label.to_string())
+        self.sidebar_row(id.to_string(), false, cx).child(icons::lucide("plus").el(16., cx.tokens().muted_foreground)).child(label.to_string())
     }
 
     pub fn reload_lists(&mut self, cx: &mut Context<Self>) {
@@ -282,7 +282,7 @@ impl Studio {
             col = col.child(
                 self.sidebar_row(format!("db-view-{view}"), active_view.as_deref() == Some(view), cx)
                     .on_click(cx.listener(move |this, _, _, cx| this.open_database_tab(view, cx)))
-                    .child(icon.el(16., gpui::Hsla::default()))
+                    .child(icon.el(16., cx.tokens().muted_foreground))
                     .child(label.to_string()),
             );
         }
@@ -296,7 +296,7 @@ impl Studio {
             col = col.child(
                 self.sidebar_row(format!("simple-{kind}"), active.as_deref() == Some(kind), cx)
                     .on_click(cx.listener(move |this, _, _, cx| this.open_simple(kind, cx)))
-                    .child(icon.el(16., gpui::Hsla::default()))
+                    .child(icon.el(16., cx.tokens().muted_foreground))
                     .child(label),
             );
         }
@@ -318,7 +318,7 @@ impl Studio {
                         tab.extra.insert("workflowId".into(), o.id.clone().into());
                         this.open_tab(tab, false, cx);
                     }))
-                    .child(icons::S_WORKFLOW.el(16., gpui::Hsla::default()))
+                    .child(icons::S_WORKFLOW.el(16., cx.tokens().muted_foreground))
                     .child(Self::row_label(w.name)),
             );
         }

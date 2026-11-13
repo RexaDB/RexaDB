@@ -262,7 +262,7 @@ impl Studio {
                 let items = this.table_menu(&n2, &s2);
                 this.open_menu(format!("ctx:table-{}.{}", s2, n2), e.position, 160., items, cx);
             }))
-            .child(icon.el(16., gpui::Hsla::default()))
+            .child(icon.el(16., t.muted_foreground))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(table.name.clone()))
             .child(
                 div()
@@ -284,7 +284,7 @@ impl Studio {
                         let items = this.table_menu(&n3, &s3);
                         this.open_menu(format!("dd:table-{}.{}", s3, n3), gpui::point(e.position.x - px(150.), e.position.y + px(12.)), 160., items, cx);
                     }))
-                    .child(icons::lucide("ellipsis-vertical").el(14., gpui::Hsla::default())),
+                    .child(icons::lucide("ellipsis-vertical").el(14., t.muted_foreground)),
             )
             .into_any_element()
     }
@@ -322,7 +322,7 @@ impl Studio {
                     .text_color(t.foreground)
                     .child(if value.is_empty() { "Select…".to_string() } else { value.to_string() }),
             )
-            .child(icons::S_DOWN.el(14., gpui::Hsla::default()).opacity(0.5))
+            .child(icons::S_DOWN.el(14., t.muted_foreground).opacity(0.5))
     }
 
     fn square_button(&self, id: &'static str, ico: icons::Ico, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
@@ -341,7 +341,7 @@ impl Studio {
             .text_color(t.muted_foreground)
             .cursor_pointer()
             .hover(move |s| s.bg(white(0.06)).text_color(t.foreground))
-            .child(ico.el(14., gpui::Hsla::default()))
+            .child(ico.el(14., t.muted_foreground))
     }
 
     fn filter_menu(&self) -> Vec<MenuEntry> {
@@ -417,7 +417,7 @@ impl Studio {
                     .text_color(t.muted_foreground)
                     .hover(move |s| s.bg(white(0.05)).text_color(t.foreground))
                     .on_click(cx.listener(|this, _, w, cx| this.open_tag_manager(w, cx)))
-                    .child(icons::lucide("tag").el(16., gpui::Hsla::default()).opacity(0.6))
+                    .child(icons::lucide("tag").el(16., t.muted_foreground).opacity(0.6))
                     .child("No tags yet — create one"),
             );
         }
@@ -484,8 +484,8 @@ impl Studio {
                         this.expanded_sections.insert(k.clone(), !cur);
                         cx.notify();
                     }))
-                    .child(icons::S_RIGHT.el(12., gpui::Hsla::default()).when(expanded, |s| s.with_transformation(gpui::Transformation::rotate(gpui::radians(std::f32::consts::FRAC_PI_2)))))
-                    .child(icons::lucide(s.kind.icon()).el(14., gpui::Hsla::default()))
+                    .child(icons::S_RIGHT.el(12., t.muted_foreground).when(expanded, |s| s.with_transformation(gpui::Transformation::rotate(gpui::radians(std::f32::consts::FRAC_PI_2)))))
+                    .child(icons::lucide(s.kind.icon()).el(14., t.muted_foreground))
                     .child(s.kind.section_label())
                     .child(div().text_color(with_alpha(t.muted_foreground, 0.5)).child(format!("({})", s.items.len()))),
             );
@@ -495,7 +495,7 @@ impl Studio {
                     col = col.child(
                         self.sidebar_row(format!("obj-{}", o.key()), false, cx)
                             .on_click(cx.listener(move |this, _, _, cx| this.open_object_tab(&obj, cx)))
-                            .child(icons::lucide(o.kind.icon()).el(16., gpui::Hsla::default()))
+                            .child(icons::lucide(o.kind.icon()).el(16., t.muted_foreground))
                             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(o.name.clone())),
                     );
                 }
@@ -529,7 +529,7 @@ impl Studio {
                 let items = this.filter_menu();
                 this.open_menu("dd:tables-filter", gpui::point(e.position.x - px(180.), e.position.y + px(14.)), 200., items, cx);
             }))
-            .child(icons::lucide("list-filter").el(14., gpui::Hsla::default()))
+            .child(icons::lucide("list-filter").el(14., t.muted_foreground))
             .when(filters_active, |d| d.child(div().absolute().right_1().top_1().size(px(6.)).rounded_full().bg(t.primary)));
         let search = TextInput::new(&self.search)
             .h(32.)
@@ -655,7 +655,7 @@ impl Studio {
                             .cursor_pointer()
                             .hover(move |s| s.text_color(t.foreground))
                             .on_click(cx.listener(|this, _, w, cx| this.open_tag_manager(w, cx)))
-                            .child(icons::lucide("plus").el(14., gpui::Hsla::default()))
+                            .child(icons::lucide("plus").el(14., t.muted_foreground))
                             .when(self.sidebar_width >= 240., |d| d.child("New Tag")),
                     )
                 })

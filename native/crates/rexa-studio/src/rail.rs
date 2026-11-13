@@ -111,7 +111,7 @@ impl Studio {
                                 .hover(move |s| s.border_color(with_alpha(t.border, 0.7)).bg(with_alpha(t.muted, 0.2)).text_color(t.foreground))
                         }
                     })
-                    .child(icon.el(20., gpui::Hsla::default()).text_color(if active { neutral300 } else { t.muted_foreground })),
+                    .child(icon.el(20., t.muted_foreground).text_color(if active { neutral300 } else { t.muted_foreground })),
             )
     }
 

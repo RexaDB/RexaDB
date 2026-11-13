@@ -115,7 +115,7 @@ impl Studio {
                         .text_color(with_alpha(t.muted_foreground, 0.7))
                         .hover(move |s| s.text_color(t.foreground).bg(rexa_ui::white(0.06)))
                         .on_click(cx.listener(move |this, _, _, cx| this.close_pane(&pane, cx)))
-                        .child(crate::icons::lucide("x").el(14., gpui::Hsla::default()))
+                        .child(crate::icons::lucide("x").el(14., t.muted_foreground))
                         .child("Close split"),
                 )
             }))

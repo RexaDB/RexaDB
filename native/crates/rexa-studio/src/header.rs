@@ -204,7 +204,7 @@ impl Studio {
             .hover(move |s| s.text_color(t.foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| this.toggle_command_menu(window, cx)))
-            .child(icons::lucide("search").el(12., gpui::Hsla::default()))
+            .child(icons::lucide("search").el(12., t.muted_foreground))
             .child(div().flex_1().min_w_0().child("Search"))
             .child(
                 div()

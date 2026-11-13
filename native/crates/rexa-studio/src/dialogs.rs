@@ -190,7 +190,7 @@ impl Studio {
                                     .text_color(t.muted_foreground)
                                     .hover(move |s| s.bg(rexa_ui::white(0.1)).text_color(t.destructive))
                                     .on_click(cx.listener(move |this, _, _, cx| this.remove_tag(&n, cx)))
-                                    .child(crate::icons::lucide("x").el(14., gpui::Hsla::default())),
+                                    .child(crate::icons::lucide("x").el(14., t.muted_foreground)),
                             ),
                     );
                 }

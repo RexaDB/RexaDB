@@ -99,7 +99,7 @@ impl Studio {
                     this.reorder_tab(&d.id, &id, cx);
                 }
             }))
-            .child(tabs::tab_icon(&tab.kind).el(16., gpui::Hsla::default()).text_color(if active { t.foreground } else { t.muted_foreground }))
+            .child(tabs::tab_icon(&tab.kind).el(16., t.muted_foreground).text_color(if active { t.foreground } else { t.muted_foreground }))
             .when(show_dirty && tab.is_dirty(), |d| d.child(div().size(px(6.)).flex_shrink_0().rounded_full().bg(with_alpha(t.foreground, 0.7))))
             .child(
                 div()
@@ -121,8 +121,7 @@ impl Studio {
                         .justify_center()
                         .size_4()
                         .rounded(px(4.))
-                        .hover(|s| s.bg(white(0.1)))
-                        .map(|d| if active { d.opacity(0.7).hover(|s| s.opacity(1.)) } else { d.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)) })
+                        .map(|d| if active { d.opacity(0.7).hover(|s| s.opacity(1.).bg(white(0.1))) } else { d.opacity(0.).hover(|s| s.bg(white(0.1))).group_hover(group.clone(), |s| s.opacity(1.)) })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             this.close_tab(&id_close, cx);
@@ -167,7 +166,7 @@ impl Studio {
             .cursor_pointer()
             .text_color(t.muted_foreground)
             .hover(move |s| s.bg(hover).text_color(t.foreground))
-            .child(ico.el(size, gpui::Hsla::default()))
+            .child(ico.el(size, t.muted_foreground))
     }
 
     /// AppHeader (Modern UI: h-9 p-1 border-b, tabs + "+" + split controls).

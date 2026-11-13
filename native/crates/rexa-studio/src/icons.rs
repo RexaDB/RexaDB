@@ -15,7 +15,7 @@ pub enum Ico {
 impl Ico {
     pub fn path(self) -> String {
         match self {
-            Ico::Solar(n) => format!("brand/solar/{n}.svg"),
+            Ico::Solar(n) => format!("brand/solar-{n}.svg"),
             Ico::Lucide(n) => format!("icons/{n}.svg"),
         }
     }
