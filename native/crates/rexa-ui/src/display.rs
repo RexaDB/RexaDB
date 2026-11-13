@@ -59,8 +59,9 @@ impl RenderOnce for Spinner {
 // ---- Skeleton ------------------------------------------------------------------------
 
 /// `animate-pulse rounded-md bg-muted` (2s cubic-bezier(.4,0,.6,1), opacity 1 → .5 → 1).
-pub fn skeleton(id: impl Into<ElementId>, cx: &App) -> gpui::AnimationElement<gpui::Div> {
-    div()
+/// `style` sizes it, e.g. `|d| d.h_4().w(px(200.))`.
+pub fn skeleton(id: impl Into<ElementId>, style: impl FnOnce(gpui::Div) -> gpui::Div, cx: &App) -> gpui::AnimationElement<gpui::Div> {
+    style(div())
         .tw_rounded_md()
         .bg(cx.tokens().muted)
         .with_animation(id, gpui::Animation::new(Duration::from_secs(2)).repeat(), |d, t| {
@@ -279,7 +280,7 @@ impl FallbackAvatar {
 
 impl RenderOnce for FallbackAvatar {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        img(fallback_avatar_image(&self.name, self.size)).size(px(self.size)).rounded_full()
+        img(fallback_avatar_image(&self.name, self.size)).flex_shrink_0().size(px(self.size)).rounded_full()
     }
 }
 

@@ -6,7 +6,8 @@
 use crate::menu::{self, Menu, MenuItem, MenuStyle};
 use crate::{
     ActiveTokens, AlertDialog, Button, ButtonSize, ConfirmOptions, Dialog, DropdownMenu, IconName,
-    square_check, Checkbox, InputGroup, Label, PasswordInput, Popover, Sheet, Side, Switch, TextArea, Toast,
+    avatar_group, skeleton, square_check, Alert, Avatar, AvatarSize, Card, Checkbox, Combobox, FallbackAvatar,
+    MultiSelect, Progress, Select, SelectOption, Spinner, Table, InputGroup, Label, PasswordInput, Popover, Sheet, Side, Switch, TextArea, Toast,
     Tooltip, Tw,
 };
 use gpui::{div, prelude::*, px, AnyElement, App, AppContext, Context, Entity, FontWeight, SharedString, Window};
@@ -20,6 +21,10 @@ pub struct Gallery {
     password: Entity<InputState>,
     search: Entity<InputState>,
     textarea: Entity<TextareaState>,
+    sel1: Option<SharedString>,
+    sel2: Option<SharedString>,
+    combo: Option<SharedString>,
+    multi: Vec<SharedString>,
 }
 
 type Section = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> AnyElement;
@@ -37,12 +42,140 @@ impl Gallery {
             password: cx.new(|cx| InputState::new(window, cx).masked(true).default_value("hunter2")),
             search: cx.new(|cx| InputState::new(window, cx).placeholder("Search tables…")),
             textarea: cx.new(|cx| TextareaState::new(window, cx).placeholder("Notes…")),
+            sel1: Some("postgresql".into()),
+            sel2: Some("sqlite".into()),
+            combo: None,
+            multi: vec!["users".into()],
         }
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls), ("selects", selects), ("display", display)]
     }
+}
+
+fn db_options() -> Vec<SelectOption> {
+    ["PostgreSQL", "MySQL", "SQLite", "MongoDB", "Redis", "ClickHouse", "DuckDB", "Microsoft SQL Server"]
+        .into_iter()
+        .map(|n| SelectOption::new(n.to_lowercase(), n))
+        .collect()
+}
+
+fn selects(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let this = cx.entity();
+    let set = move |field: fn(&mut Gallery) -> &mut Option<SharedString>| {
+        let this = this.clone();
+        move |v: SharedString, _: &mut Window, cx: &mut App| {
+            this.update(cx, |g, cx| {
+                *field(g) = Some(v);
+                cx.notify();
+            })
+        }
+    };
+    let open = std::env::var("REXA_GALLERY_OPEN").ok();
+    let multi_this = cx.entity();
+    row()
+        .h(px(420.))
+        .child(
+            Select::new("sel1")
+                .w(px(180.))
+                .placeholder("Select a database")
+                .options(db_options())
+                .value(g.sel1.clone())
+                .on_change(set(|g| &mut g.sel1))
+                .when(open.as_deref() == Some("select"), |s| s.open_on_mount()),
+        )
+        .child(
+            Select::with_search("sel2")
+                .w(px(180.))
+                .small()
+                .placeholder("Item-aligned")
+                .options(db_options().into_iter().take(4))
+                .value(g.sel2.clone())
+                .on_change(set(|g| &mut g.sel2))
+                .when(open.as_deref() == Some("select-aligned"), |s| s.open_on_mount()),
+        )
+        .child(
+            div().w(px(220.)).child(
+                Combobox::searchable("cb")
+                    .placeholder("Select provider")
+                    .options(db_options())
+                    .value(g.combo.clone())
+                    .on_change(set(|g| &mut g.combo))
+                    .when(open.as_deref() == Some("combobox"), |s| s.open_on_mount()),
+            ),
+        )
+        .child(
+            div().w(px(240.)).child(
+                MultiSelect::new("ms")
+                    .options(["users", "orders", "products", "invoices"].map(SelectOption::simple))
+                    .selected(g.multi.iter().cloned())
+                    .on_change(move |next, _, cx| multi_this.update(cx, |g, cx| {
+                        g.multi = next.into_iter().collect();
+                        cx.notify();
+                    })),
+            ),
+        )
+        .into_any_element()
+}
+
+fn display(_: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let t = cx.tokens().clone();
+    row()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .w(px(240.))
+                .child(skeleton("sk1", |d| d.h_4().w(px(200.)), cx))
+                .child(skeleton("sk2", |d| d.h_4().w(px(150.)), cx))
+                .child(Progress::new(62.))
+                .child(div().flex().gap_2().items_center().child(Spinner::new(16.)).child(div().tw_text_xs().text_color(t.muted_foreground).child("Loading…")))
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .items_center()
+                        .child(Avatar::new().size(AvatarSize::Sm).fallback("JD"))
+                        .child(Avatar::new().fallback("AB"))
+                        .child(Avatar::new().size(AvatarSize::Lg).fallback_el(FallbackAvatar::new("flaxo", 40.)))
+                        .child(FallbackAvatar::new("RexaDB", 32.))
+                        .child(FallbackAvatar::new("postgres", 32.))
+                        .child(avatar_group([Avatar::new().fallback("A"), Avatar::new().fallback("B")], Some("+3".into()), cx)),
+                ),
+        )
+        .child(
+            div().w(px(320.)).child(
+                Card::new()
+                    .title("Connection")
+                    .description("Last used 2 hours ago")
+                    .action(Button::new("card-act").ghost().size(ButtonSize::IconSm).icon(IconName::Ellipsis))
+                    .child(div().text_color(t.muted_foreground).child("postgres://localhost:5432/app"))
+                    .footer(Button::new("card-open").size(ButtonSize::Sm).label("Open")),
+            ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .w(px(360.))
+                .child(Alert::new().title("Heads up!").description("You can add components to your app using the CLI."))
+                .child(Alert::new().destructive().title("Error").description("Your session has expired. Please log in again.")),
+        )
+        .child(
+            div().w(px(360.)).child(
+                Table::new("tbl")
+                    .columns([Some(80.), None, Some(80.)])
+                    .header(["Invoice", "Status", "Amount"].map(|s| s.into_any_element()))
+                    .row(["INV001", "Paid", "$250.00"].map(|s| s.into_any_element()))
+                    .selected_row(["INV002", "Pending", "$150.00"].map(|s| s.into_any_element()))
+                    .row(["INV003", "Unpaid", "$350.00"].map(|s| s.into_any_element()))
+                    .caption("A list of your recent invoices."),
+            ),
+        )
+        .into_any_element()
 }
 
 fn controls(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {

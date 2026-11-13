@@ -19,7 +19,7 @@ use gpui::{
     MouseButton, Pixels, Point, SharedString, Window,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_component::Icon;
+use gpui_component::{Icon, Sizable, Size};
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -166,6 +166,7 @@ pub struct Select {
     disabled: bool,
     wide_items: bool,
     content_w: Option<f32>,
+    open_on_mount: bool,
 }
 
 impl Select {
@@ -185,6 +186,7 @@ impl Select {
             disabled: false,
             wide_items: false,
             content_w: None,
+            open_on_mount: false,
         }
     }
     /// select-with-search.tsx: threshold 10, "Search...", items `py-1.5 pl-2.5 pr-7`.
@@ -243,6 +245,11 @@ impl Select {
         self
     }
     /// Fixed content width (`className="w-…"` on SelectContent).
+    /// Open on first render (gallery previews).
+    pub fn open_on_mount(mut self) -> Self {
+        self.open_on_mount = true;
+        self
+    }
     pub fn content_w(mut self, w: f32) -> Self {
         self.content_w = Some(w);
         self
@@ -264,6 +271,9 @@ impl RenderOnce for Select {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = cx.tokens().clone();
         let state = PopupState::keyed(self.id.clone(), window, cx);
+        if self.open_on_mount && state.read(cx).generation == 0 {
+            state.update(cx, |s, cx| s.show(window, cx));
+        }
         let picker = picker_state(&self.id, self.search_placeholder.clone(), window, cx);
         let (open, bounds, generation) = {
             let s = state.read(cx);
@@ -445,8 +455,8 @@ impl RenderOnce for Select {
                 // border-b px-2 py-1; input h-5 text-xs placeholder:text-muted-foreground/70
                 d.child(
                     div().flex_shrink_0().px_2().py_1().border_b_1().border_color(t.border).child(
-                        div().h_5().mx(px(-crate::controls::INPUT_PX)).tw_text_xs().child(
-                            Input::new(&picker.read(cx).query).appearance(false).h(px(20.)),
+                        div().h_5().mx(px(-4.)).child(
+                            Input::new(&picker.read(cx).query).appearance(false).with_size(Size::XSmall).h(px(20.)),
                         ),
                     ),
                 )
@@ -495,6 +505,7 @@ pub struct Combobox {
     on_change: Option<OnChange>,
     trigger: Option<AnyElement>,
     list_max_h: f32,
+    open_on_mount: bool,
 }
 
 impl Combobox {
@@ -510,6 +521,7 @@ impl Combobox {
             on_change: None,
             trigger: None,
             list_max_h: 224.,
+            open_on_mount: false,
         }
     }
     /// searchable-select.tsx (`searchThreshold` default 0, "No options found.").
@@ -540,6 +552,11 @@ impl Combobox {
         self.search_threshold = n;
         self
     }
+    /// Open on first render (gallery previews).
+    pub fn open_on_mount(mut self) -> Self {
+        self.open_on_mount = true;
+        self
+    }
     /// Custom trigger instead of the searchable-select one.
     pub fn trigger(mut self, el: impl IntoElement) -> Self {
         self.trigger = Some(el.into_any_element());
@@ -555,6 +572,9 @@ impl RenderOnce for Combobox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = cx.tokens().clone();
         let state = PopupState::keyed(self.id.clone(), window, cx);
+        if self.open_on_mount && state.read(cx).generation == 0 {
+            state.update(cx, |s, cx| s.show(window, cx));
+        }
         let picker = picker_state(&self.id, self.search_placeholder.clone(), window, cx);
         let (open, bounds, generation) = {
             let s = state.read(cx);
@@ -580,10 +600,10 @@ impl RenderOnce for Combobox {
                 .child(
                     div().flex().items_center().gap_2().min_w_0().children(selected.as_ref().and_then(option_leading)).child(match &selected {
                         Some(o) => div().child(o.label.clone()),
-                        None => div().text_color(t.muted_foreground).child(self.placeholder.clone()),
+                        None => div().child(self.placeholder.clone()),
                     }),
                 )
-                .child(Icon::new(IconName::ChevronsUpDown).size_4().text_color(t.muted_foreground))
+                // ComboboxTrigger has no chevron; ComboboxValue's placeholder isn't muted.
                 .into_any_element()
         });
         let trigger = div()
@@ -694,7 +714,7 @@ impl RenderOnce for Combobox {
                         .border_b_1()
                         .border_color(with_alpha(t.border, 0.4))
                         .tw_text_xs()
-                        .child(div().flex_1().mx(px(-crate::controls::INPUT_PX)).child(Input::new(&picker.read(cx).query).appearance(false))),
+                        .child(div().flex_1().mx(px(-4.)).child(Input::new(&picker.read(cx).query).appearance(false).with_size(Size::XSmall))),
                 )
             })
             .when(empty, |d| {
