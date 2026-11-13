@@ -7,6 +7,7 @@ mod results;
 pub mod split_layout;
 pub mod icons;
 pub mod tabs;
+pub mod keybindings;
 
 use gpui::{App, AppContext};
 use rexa_core::{Registry, Route};
