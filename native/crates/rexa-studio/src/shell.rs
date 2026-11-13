@@ -293,8 +293,58 @@ impl Studio {
     }
 }
 
+impl Studio {
+    /// Dev aid for screenshots: REXA_STUDIO_DEV=command-menu | split | tags | table-menu | open-table | settings,
+    /// comma-separated.
+    fn run_dev(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.fetching_tables || self.dev_scenario.is_none() {
+            return;
+        }
+        let scenario = self.dev_scenario.take().unwrap_or_default();
+        for step in scenario.split(',') {
+            match step {
+                "command-menu" => self.toggle_command_menu(window, cx),
+                "open-table" => {
+                    if let Some(t) = self.tables.iter().find(|t| !t.is_view).map(|t| t.name.clone()) {
+                        self.open_table(&t, None, cx);
+                    }
+                }
+                "split" => {
+                    self.create_split(cx);
+                    self.open_sql_editor(None, None, Some("SELECT 1".into()), cx);
+                }
+                "tags" => {
+                    self.add_tag("core", "#38bdf8", cx);
+                    if let (Some(s), Some(t)) = (self.selected_schema.clone(), self.tables.first().map(|t| t.name.clone())) {
+                        if !self.table_tags.contains_key(&format!("{s}.{t}")) {
+                            self.toggle_table_tag(&s, &t, "core", cx);
+                        }
+                    }
+                    self.set_sort_mode("tags", cx);
+                }
+                "table-menu" => {
+                    if let (Some(s), Some(t)) = (self.selected_schema.clone(), self.tables.get(1).map(|t| t.name.clone())) {
+                        let items = self.table_menu(&t, &s);
+                        self.open_menu("ctx:dev", gpui::point(px(200.), px(300.)), 160., items, cx);
+                        if let Some(m) = self.menu.as_mut() {
+                            m.open_sub = Some(5);
+                        }
+                    }
+                }
+                "settings" => self.open_settings(None, window, cx),
+                "panels" => {
+                    self.panel_open = true;
+                    self.ai_open = true;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 impl Render for Studio {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.run_dev(window, cx);
         let body = match &self.phase {
             Phase::Loading => self.render_loading(cx),
             Phase::Error(e) => {

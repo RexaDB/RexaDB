@@ -131,6 +131,8 @@ pub struct Studio {
     pub keybindings: Keybindings,
     pub settings: GlobalStudioSettings,
     save_task: Option<Task<()>>,
+    /// Dev aid: REXA_STUDIO_DEV=<scenario> (see shell.rs `run_dev`).
+    pub dev_scenario: Option<String>,
     _subs: Vec<Subscription>,
 }
 
@@ -230,6 +232,7 @@ impl Studio {
             keybindings: keybindings::load(),
             settings: persistence::global_settings(),
             save_task: None,
+            dev_scenario: None,
             _subs: subs,
         };
         match connection {
@@ -292,6 +295,7 @@ impl Studio {
                     if let Some(s) = pick {
                         this.set_selected_schema(s, cx);
                     }
+                    this.dev_scenario = std::env::var("REXA_STUDIO_DEV").ok();
                 }
                 cx.notify();
             })
