@@ -64,7 +64,7 @@ impl RenderOnce for TextInput {
             .when(self.disabled, |s| s.opacity(0.5))
             .children(self.prefix)
             .child(
-                div().flex_1().min_w_0().child(
+                div().flex_1().min_w_0().mx(px(-crate::controls::INPUT_PX)).child(
                     Input::new(&self.state).appearance(false).disabled(self.disabled),
                 ),
             )

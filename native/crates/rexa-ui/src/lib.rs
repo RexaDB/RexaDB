@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod badge;
 pub mod button;
+pub mod controls;
 pub mod gallery;
 pub mod images;
 pub mod input;
@@ -23,6 +24,10 @@ pub mod tw;
 
 pub use badge::{Badge, BadgeVariant};
 pub use button::{Button, ButtonSize, ButtonVariant};
+pub use controls::{
+    input_group_button, input_group_text, square_check, AddonAlign, Checkbox, InputGroup, Label, PasswordInput, Switch,
+    TextArea,
+};
 pub use gpui_kit_assets::IconName;
 pub use input::TextInput;
 pub use kbd::Kbd;

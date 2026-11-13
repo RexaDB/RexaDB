@@ -6,30 +6,82 @@
 use crate::menu::{self, Menu, MenuItem, MenuStyle};
 use crate::{
     ActiveTokens, AlertDialog, Button, ButtonSize, ConfirmOptions, Dialog, DropdownMenu, IconName,
-    Popover, Sheet, Side, Toast, Tooltip, Tw,
+    square_check, Checkbox, InputGroup, Label, PasswordInput, Popover, Sheet, Side, Switch, TextArea, Toast,
+    Tooltip, Tw,
 };
-use gpui::{div, prelude::*, px, AnyElement, App, Context, FontWeight, SharedString, Window};
+use gpui::{div, prelude::*, px, AnyElement, App, AppContext, Context, Entity, FontWeight, SharedString, Window};
+use gpui_component::input::{InputState, TextareaState};
 
 pub struct Gallery {
     only: Option<String>,
+    switch_on: bool,
+    check_on: bool,
+    input: Entity<InputState>,
+    password: Entity<InputState>,
+    search: Entity<InputState>,
+    textarea: Entity<TextareaState>,
 }
 
-type Section = fn(&mut Window, &mut Context<Gallery>) -> AnyElement;
+type Section = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> AnyElement;
 
 impl Gallery {
-    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         if let Ok(what) = std::env::var("REXA_GALLERY_OPEN") {
             cx.defer(move |cx| open_demo(&what, cx));
         }
-        Self { only: std::env::var("REXA_GALLERY").ok() }
+        Self {
+            only: std::env::var("REXA_GALLERY").ok(),
+            switch_on: true,
+            check_on: true,
+            input: cx.new(|cx| InputState::new(window, cx).placeholder("postgres://localhost:5432/db")),
+            password: cx.new(|cx| InputState::new(window, cx).masked(true).default_value("hunter2")),
+            search: cx.new(|cx| InputState::new(window, cx).placeholder("Search tables…")),
+            textarea: cx.new(|cx| TextareaState::new(window, cx).placeholder("Notes…")),
+        }
     }
 
     fn sections() -> Vec<(&'static str, Section)> {
-        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers)]
+        vec![("menus", menus), ("overlays", overlays), ("popovers", popovers), ("controls", controls)]
     }
 }
 
-fn popovers(_: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+fn controls(g: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    let this = cx.entity();
+    let (sw, ck) = (g.switch_on, g.check_on);
+    let col = || div().flex().flex_col().gap_3().w(px(280.));
+    row()
+        .child(
+            col()
+                .child(Label::new("Auto-refresh").child({
+                    let this = this.clone();
+                    Switch::new("sw1").checked(sw).on_change(move |v, _, cx| this.update(cx, |g, cx| {
+                        g.switch_on = v;
+                        cx.notify();
+                    }))
+                }))
+                .child(Label::new("Off").child(Switch::new("sw2")))
+                .child(Label::new("Disabled").disabled(true).child(Switch::new("sw3").checked(true).disabled(true)))
+                .child(Label::new("Remember me").child({
+                    let this = this.clone();
+                    Checkbox::new("cb1").checked(ck).on_change(move |v, _, cx| this.update(cx, |g, cx| {
+                        g.check_on = v;
+                        cx.notify();
+                    }))
+                }))
+                .child(Label::new("Unchecked").child(Checkbox::new("cb2")))
+                .child(div().flex().gap_2().child(square_check(true, cx)).child(square_check(false, cx))),
+        )
+        .child(
+            col()
+                .child(crate::TextInput::new(&g.input))
+                .child(PasswordInput::new("pw", &g.password))
+                .child(InputGroup::new(&g.search).start(gpui_component::Icon::new(IconName::Search).size_4()).end(crate::Kbd::new("⌘K")))
+                .child(TextArea::new(&g.textarea)),
+        )
+        .into_any_element()
+}
+
+fn popovers(_: &mut Gallery, _: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
     let t = cx.tokens().clone();
     let icon_btn = |id: &'static str, icon: IconName| Button::new(id).ghost().size(ButtonSize::IconSm).icon(icon);
     row()
@@ -146,7 +198,7 @@ fn context_menu(m: Menu, _: &mut Window, _: &mut App) -> Menu {
         .item(MenuItem::new("Drop table").icon(IconName::Trash).destructive())
 }
 
-fn menus(window: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+fn menus(_: &mut Gallery, window: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
     row()
         .child(menu::preview("pv-dropdown", MenuStyle::Dropdown, Some(1), sample_menu, window, cx))
         .child(menu::preview("pv-dropdown-destr", MenuStyle::Dropdown, Some(12), sample_menu, window, cx))
@@ -184,7 +236,7 @@ fn menus(window: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
         .into_any_element()
 }
 
-fn overlays(_: &mut Window, _: &mut Context<Gallery>) -> AnyElement {
+fn overlays(_: &mut Gallery, _: &mut Window, _: &mut Context<Gallery>) -> AnyElement {
     let btn = |id: &'static str, label: &'static str, what: &'static str| {
         Button::new(id).outline().size(ButtonSize::Sm).label(label).on_click(move |_, _, cx| open_demo(what, cx))
     };
@@ -213,7 +265,8 @@ impl Render for Gallery {
             if self.only.as_deref().is_some_and(|o| o != name) {
                 continue;
             }
-            body = body.child(div().flex().flex_col().gap_3().child(heading(name, cx)).child(f(window, cx)));
+            let content = f(self, window, cx);
+            body = body.child(div().flex().flex_col().gap_3().child(heading(name, cx)).child(content));
         }
         div()
             .id("ui-gallery")
