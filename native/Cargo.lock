@@ -5535,6 +5535,9 @@ name = "rexa-connections"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
+ "dirs 6.0.0",
+ "futures",
  "gpui-component",
  "gpui-pre",
  "rexa-core",
@@ -5545,6 +5548,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]

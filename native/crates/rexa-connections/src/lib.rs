@@ -1,6 +1,7 @@
 //! Port of components/connections/* (and lib/connections): the Connections
 //! home, new/edit connection flows, provider account screens.
 
+pub mod fields;
 pub mod home;
 pub mod providers;
 

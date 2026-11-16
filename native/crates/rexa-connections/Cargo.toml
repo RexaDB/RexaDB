@@ -16,3 +16,7 @@ rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
+base64 = "0.22"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
