@@ -63,9 +63,13 @@ pub use tw::Tw;
 pub use user_avatar_dropdown::UserAvatarDropdown;
 pub use sidebar::{SidebarButtonSize, SidebarMenuButton, Sidebar, SidebarVariant};
 
-/// Overlay widgets not yet re-implemented pixel-exact. Use them through these
-/// paths so swapping in a custom implementation later is a one-place change.
-/// Their colors already follow the tokens via `theme::install`.
+/// Legacy gpui-component re-exports, kept so existing code keeps compiling.
+/// New code should use the pixel-exact ports at the crate root instead:
+/// `DropdownMenu`/`ContextMenu`/`Menu` (menus), `open_dialog`/`open_alert_dialog`/
+/// `open_sheet`/`confirm` (dialogs), `Toast` (notifications), `Popover`,
+/// `Select`/`Combobox`/`MultiSelect`, `Tooltip`, `Switch`, `Checkbox`, `Tabs`,
+/// `TextArea`, `InputGroup`, `ScrollArea` … (see `screen:ui-gallery`).
+/// The new modules are also reachable under these paths as `overlay::rexa`.
 pub mod overlay {
     pub use gpui_component::dialog;
     pub use gpui_component::menu;
@@ -74,6 +78,16 @@ pub mod overlay {
     pub use gpui_component::select;
     pub use gpui_component::tooltip;
     pub use gpui_component::WindowExt;
+    /// The rexa-ui ports of the same overlays.
+    pub mod rexa {
+        pub use crate::command::*;
+        pub use crate::menu::*;
+        pub use crate::overlays::*;
+        pub use crate::popover::*;
+        pub use crate::select::*;
+        pub use crate::toast::{self, Toast, ToastKind};
+        pub use crate::tooltip::*;
+    }
 }
 
 pub mod widgets {
