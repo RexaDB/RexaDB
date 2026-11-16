@@ -50,7 +50,15 @@ sibling feature crates; they talk through `rexa-core` (`navigate`,
    `tracking-tight` → `rexa_ui::tight("…")`. Monospace = `rexa_ui::MONO` (Menlo — what the old app really renders).
 5. Radius: `--radius` = 10px → `tw_rounded_sm/md/lg/xl` = 6/8/10/14.
 6. Icons: the old app uses lucide-react; `Icon::new(IconName::X)` has the full Lucide set (same SVGs). Provider logos: `img("providers/<file>")` (copied from `public/providers`). Multi-color SVGs must use `img()`, single-color use `svg().path()`.
-7. Use `rexa_ui` primitives (`Button`, `Badge`, `Kbd`, `TextInput`, `Separator`, …) for anything that exists in `components/ui`. Overlays not yet re-implemented are re-exported in `rexa_ui::overlay` / `rexa_ui::widgets` — use them through those paths.
+7. Use `rexa_ui` primitives for anything in `components/ui` — all are ported and exported from the crate root:
+   `Button`, `Badge`, `Kbd`, `TextInput`, `TextArea`, `PasswordInput`, `InputGroup`, `Label`, `Switch`, `Checkbox`,
+   `Select`/`Select::with_search`/`Combobox::searchable`/`MultiSelect`, `DropdownMenu`/`MenuItem`, `ContextMenu`,
+   `open_dialog`/`Dialog`, `open_alert_dialog`, `open_sheet`/`Sheet`, `confirm(..).await`, `toast::success/error`/`Toast`,
+   `Popover`, `Tooltip`(`::studio`), `Tabs`, `Accordion`, `Collapsible`, `ScrollArea::{radix,native}`, `Skeleton`, `Progress`,
+   `Spinner`, `Avatar`, `FallbackAvatar`, `Card`, `Alert`, `Table`, `Calendar`, `Command`/`open_command_dialog`,
+   `CommandSearchBar`, `Sidebar*`, `UserAvatarDropdown`, `Separator`. See them all: `tools/run-native.sh out.png screen:ui-gallery`.
+   The legacy `rexa_ui::overlay::*` / `rexa_ui::widgets::*` paths are raw gpui-component — don't use them in new code
+   (only `widgets::{Editor, EditorState, InputState}` for text state).
 8. Watch for CSS behaviour GPUI doesn't have and emulate it explicitly (document it in a comment): inline-block line boxes, `truncate`, `max-w-*`, hover/group-hover, `backdrop-blur`, radial gradients.
 9. Behaviour matters as much as pixels: keyboard shortcuts (`../keybindings.json`, `lib/*/keybindings*`), context menus, empty/loading/error states, toasts, confirmations.
 
