@@ -18,7 +18,7 @@ use crate::view::{GridColumn, TableEditor};
 use gpui::{
     canvas, div, fill, point, prelude::*, px, size, App, Bounds, ClipboardItem, Context, ContentMask, Corners,
     CursorStyle, Edges, FontStyle, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Rgba, ScrollWheelEvent, SharedString, TextAlign, TextRun, TransformationMatrix,
+    MouseUpEvent, Pixels, Point, Rgba, ScrollEvent, SharedString, TextAlign, TextRun, TransformationMatrix,
     Window,
 };
 use rexa_ui::{tw, with_alpha, ActiveTokens, Tokens, Tw};
@@ -201,7 +201,7 @@ impl TableEditor {
     }
 
     fn geometry(&self) -> Geometry {
-        let Some(data) = &self.data else { return Geometry::default() };
+        let Some(data) = &self.data else { return Geometry { row_h: self.row_height(), ..Geometry::default() } };
         let mut cols = Vec::new();
         let mut x = 0.;
         for (vi, ix) in self.visible_columns().into_iter().enumerate() {
@@ -465,7 +465,7 @@ impl TableEditor {
         }
     }
 
-    fn on_grid_scroll(&mut self, ev: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_grid_scroll(&mut self, ev: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let d = ev.delta.pixel_delta(px(self.row_height()));
         let before = self.grid.scroll;
         self.grid.scroll.x -= f32::from(d.x);
@@ -968,7 +968,7 @@ impl TableEditor {
             .on_mouse_move(cx.listener(Self::on_grid_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_grid_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_grid_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_grid_scroll))
+            .on_scroll(cx.listener(Self::on_grid_scroll))
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                 if !*hovered {
                     this.grid.hover_cell = None;

@@ -10,7 +10,7 @@ use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Select, SelectOption, 
 pub fn can_advance_fast_page(page: usize, page_size: usize, record_count: usize, total: Option<u64>) -> bool {
     match total {
         None => record_count == page_size,
-        Some(t) => ((page + 1) * page_size) as u64 < t,
+        Some(t) => (((page + 1) * page_size) as u64) < t,
     }
 }
 

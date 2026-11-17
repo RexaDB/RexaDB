@@ -134,6 +134,8 @@ pub struct TableEditor {
     pub(crate) table: TableRef,
     pub(crate) settings: GridSettings,
     pub(crate) focus: FocusHandle,
+    pub(crate) editor_focus: FocusHandle,
+    pub(crate) sheet_text: Option<Entity<gpui_component::input::TextareaState>>,
 
     pub(crate) structure: Vec<ColumnDetail>,
     pub(crate) foreign_keys: Vec<ForeignKey>,
@@ -188,6 +190,7 @@ impl TableEditor {
         subs.push(cx.subscribe_in(&search_input, window, Self::on_search_event));
         subs.push(cx.subscribe_in(&rexa_core::studio_bus(cx), window, Self::on_bus));
         let hidden = settings::load_hidden_columns(session.connection.id, &schema, &table);
+        let (schema_name, table_name) = (schema.clone(), table.clone());
         let mut this = TableEditor {
             driver,
             kind,
@@ -195,6 +198,8 @@ impl TableEditor {
             table: TableRef::new(schema, table),
             settings: GridSettings::load(),
             focus: cx.focus_handle(),
+            editor_focus: cx.focus_handle(),
+            sheet_text: None,
             structure: Vec::new(),
             foreign_keys: Vec::new(),
             enums: Vec::new(),
@@ -207,7 +212,7 @@ impl TableEditor {
             has_more: false,
             loading_more: false,
             load_more_error: None,
-            filter_query: String::new(),
+            filter_query: crate::pending_filters::take(&schema_name, &table_name).unwrap_or_default(),
             sort: None,
             page: 0,
             page_size: 100,
@@ -233,6 +238,7 @@ impl TableEditor {
             session,
             _subs: subs,
         };
+        this.load_toolbar_prefs();
         this.load_structure(cx);
         this.refresh(cx);
         this
@@ -251,6 +257,14 @@ impl TableEditor {
     }
 
     fn on_bus(&mut self, _: &Entity<rexa_core::StudioBus>, ev: &StudioEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let StudioEvent::OpenTab(spec) = ev {
+            if *spec == self.spec {
+                if let Some(f) = crate::pending_filters::take(&self.table.schema, &self.table.name) {
+                    self.apply_filter_sort(f, self.sort.clone(), cx);
+                }
+            }
+            return;
+        }
         if let StudioEvent::TabCommand { tab, command } = ev {
             if *tab != self.spec {
                 return;
