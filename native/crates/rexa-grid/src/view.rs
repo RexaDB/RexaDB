@@ -11,7 +11,7 @@ use crate::grid::GridState;
 use crate::settings::{self, GridSettings};
 use gpui::{
     div, prelude::*, px, App, ClipboardItem, Context, Entity, FocusHandle, SharedString, Subscription, Task,
-    WeakEntity, Window,
+    Window,
 };
 use rexa_core::{runtime, Session, StudioEvent, TabSpec};
 use rexa_drivers::{
@@ -244,10 +244,6 @@ impl TableEditor {
         this.load_structure(cx);
         this.refresh(cx);
         this
-    }
-
-    pub(crate) fn weak(cx: &Context<Self>) -> WeakEntity<Self> {
-        cx.entity().downgrade()
     }
 
     pub fn connection_id(&self) -> i64 {

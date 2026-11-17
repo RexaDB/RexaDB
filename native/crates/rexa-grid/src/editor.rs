@@ -9,7 +9,7 @@ use crate::view::{SheetKind, TableEditor};
 use gpui::{div, prelude::*, px, AnyElement, Context, Entity, FontWeight, KeyDownEvent, SharedString, Window};
 use gpui_component::input::TextareaState;
 use rexa_ui::widgets::InputState;
-use rexa_ui::{tw, ActiveTokens, IconName, Kbd, Tw};
+use rexa_ui::{tw, ActiveTokens, IconName, Tw};
 
 const INLINE_TYPED_OPTIONS_MAX: usize = 8;
 
@@ -17,6 +17,7 @@ pub enum EditorInput {
     Text(Entity<TextareaState>),
     Date(Entity<InputState>),
     /// Options + the highlighted one.
+    #[allow(dead_code)]
     Typed { options: Vec<String>, active: usize, is_enum: bool },
 }
 

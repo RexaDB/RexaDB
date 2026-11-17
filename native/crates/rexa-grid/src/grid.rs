@@ -77,7 +77,7 @@ impl Selection {
 
 #[derive(Debug, Clone, Copy)]
 enum Drag {
-    Select { anchor: (usize, usize), additive: bool },
+    Select { anchor: (usize, usize), #[allow(dead_code)] additive: bool },
     Resize { col: usize, start_x: f32, start_w: f32 },
     Markers { from: usize },
 }
@@ -465,7 +465,7 @@ impl TableEditor {
         }
     }
 
-    fn on_grid_scroll(&mut self, ev: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_grid_scroll(&mut self, ev: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
         let d = ev.delta.pixel_delta(px(self.row_height()));
         let before = self.grid.scroll;
         self.grid.scroll.x -= f32::from(d.x);
@@ -473,7 +473,9 @@ impl TableEditor {
         self.clamp_scroll();
         if self.grid.scroll != before {
             self.grid.last_scroll = Some(Instant::now());
-            self.grid.editor = None;
+            if self.grid.editor.is_some() {
+                self.commit_editor(window, cx);
+            }
             self.fk_preview = None;
             self.maybe_load_more(cx);
             cx.notify();
@@ -941,7 +943,6 @@ impl TableEditor {
         let theme = GridTheme::from_tokens(&tokens);
         let frame = Rc::new(self.build_frame(&theme, cx));
         let bounds_cell = self.grid.bounds.clone();
-        let entity = cx.entity().downgrade();
         let focused = self.focus.is_focused(window);
         let _ = focused;
         let cursor = if matches!(self.grid.drag, Some(Drag::Resize { .. })) {

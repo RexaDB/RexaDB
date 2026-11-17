@@ -8,7 +8,7 @@
 use crate::cells;
 use crate::view::{SheetKind, TableEditor};
 use gpui::{div, prelude::*, px, AnyElement, Bounds, Context, Entity, FontWeight, Hsla, Pixels, Rgba, SharedString, Window};
-use gpui_component::input::TextareaState;
+
 use rexa_core::runtime;
 use rexa_drivers::{QueryResult, TableRef};
 use rexa_ui::widgets::InputState;

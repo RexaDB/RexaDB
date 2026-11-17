@@ -38,6 +38,7 @@ pub enum NestedOwner {
     SortAdd,
 }
 
+#[allow(dead_code)]
 pub struct FilterPanel {
     pub rules: Vec<(DraftRule, Entity<InputState>)>,
     pub custom_where: Entity<InputState>,
