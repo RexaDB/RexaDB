@@ -5540,6 +5540,8 @@ dependencies = [
  "futures",
  "gpui-component",
  "gpui-pre",
+ "gpui-pre-reqwest",
+ "image",
  "rexa-core",
  "rexa-drivers",
  "rexa-store",

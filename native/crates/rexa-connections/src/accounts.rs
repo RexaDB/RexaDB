@@ -1,0 +1,980 @@
+//! Port of the provider account screens and their stores/clients:
+//! components/{supabase,spacetimedb,neon,planetscale}/*-account-screen.tsx,
+//! components/shared/provider-accounts/* (header, empty state, account chips,
+//! list toolbar, resource rows), the *-login-dialog.tsx dialogs, and
+//! lib/{supabase-mgmt,spacetimedb-mgmt,neon-cli,neon-oauth,planetscale}
+//! (token stores, list APIs, `register*` importers, connection-string builders).
+//!
+//! Accounts live where the old app kept them (localStorage keys below); they
+//! are read from `app_settings` first, then migrated from WebKit localStorage.
+
+use crate::fields::encode_component;
+use crate::widgets::{self, FieldInput};
+use gpui::{div, img, prelude::*, px, svg, AnyElement, App, Context, Entity, EventEmitter, FontWeight, SharedString, Window};
+use gpui_component::input::InputState;
+use gpui_component::Icon;
+use rexa_store::{ConnectionDraft, Store, WebStore};
+use rexa_ui::theme::{with_alpha, Tokens};
+use rexa_ui::{toast, ActiveTokens, Button, ButtonSize, IconName, Tw, MONO};
+use serde_json::Value;
+
+/// lib/planetscale/auth.ts
+pub const PLANETSCALE_LOGIN_ENABLED: bool = true;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountKind {
+    Supabase,
+    SpacetimeDb,
+    Neon,
+    Planetscale,
+}
+
+impl AccountKind {
+    pub fn from_screen(s: &str) -> Option<Self> {
+        Some(match s {
+            "supabase" => Self::Supabase,
+            "spacetimedb-account" | "spacetimedb" => Self::SpacetimeDb,
+            "neon-cli" | "neon" => Self::Neon,
+            "planetscale-account" | "planetscale" => Self::Planetscale,
+            _ => return None,
+        })
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Supabase => "rexadb-supabase-mgmt-accounts",
+            Self::SpacetimeDb => "rexadb-spacetimedb-mgmt-accounts",
+            Self::Neon => "rexadb-neon-cli-profiles",
+            Self::Planetscale => "rexadb-planetscale-accounts",
+        }
+    }
+    fn title(self) -> &'static str {
+        match self {
+            Self::Supabase => "Supabase",
+            Self::SpacetimeDb => "SpacetimeDB",
+            Self::Neon => "Neon",
+            Self::Planetscale => "PlanetScale",
+        }
+    }
+    fn description(self) -> &'static str {
+        match self {
+            Self::Supabase => "Browse, connect, and import your Supabase projects.",
+            Self::SpacetimeDb => "Browse, connect, and import your SpacetimeDB databases.",
+            Self::Neon => "Browse and connect your Neon projects, branches and databases.",
+            Self::Planetscale => "Browse and connect your PlanetScale databases and branches.",
+        }
+    }
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Supabase | Self::Neon => "projects",
+            _ => "databases",
+        }
+    }
+}
+
+pub fn logo(kind: AccountKind, size: f32, cx: &App) -> AnyElement {
+    match kind {
+        AccountKind::Supabase => img("brand/supabase.svg").size(px(size * 0.78)).into_any_element(),
+        AccountKind::Neon => img("brand/neon.svg").size(px(size * 0.72)).into_any_element(),
+        AccountKind::SpacetimeDb => svg().path("brand/spacetimedb.svg").size(px(size)).text_color(cx.tokens().foreground).into_any_element(),
+        AccountKind::Planetscale => img("providers/planetscale.png").size(px(size)).into_any_element(),
+    }
+}
+
+/// Raw account objects for `kind` (app_settings first, then localStorage).
+pub fn load_accounts(kind: AccountKind) -> Vec<Value> {
+    let from_settings = Store::open().ok().and_then(|s| s.setting(kind.key()).ok().flatten());
+    let raw = from_settings.or_else(|| WebStore::open()?.get(kind.key()).ok().flatten());
+    let mut list: Vec<Value> = raw.and_then(|r| serde_json::from_str::<Value>(&r).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    // filterSortLocalAccounts: drop token-less entries, oldest first.
+    list.retain(|a| match kind {
+        AccountKind::Neon => a.get("profileName").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
+        AccountKind::Planetscale => a.get("accessToken").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
+        _ => a.get("token").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
+    });
+    list.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
+    list
+}
+
+fn save_accounts(kind: AccountKind, list: &[Value]) {
+    if let Ok(s) = Store::open() {
+        s.set_setting(kind.key(), &Value::Array(list.to_vec()).to_string()).ok();
+    }
+}
+
+fn s<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
+    v.get(k).and_then(Value::as_str).filter(|s| !s.is_empty())
+}
+
+fn account_label(kind: AccountKind, a: &Value) -> String {
+    match kind {
+        AccountKind::Supabase => s(a, "email").or(s(a, "name")).unwrap_or("Supabase account").into(),
+        AccountKind::Planetscale => s(a, "email").or(s(a, "name")).unwrap_or("PlanetScale account").into(),
+        AccountKind::Neon => s(a, "label").or(s(a, "profileName")).unwrap_or("Neon account").into(),
+        AccountKind::SpacetimeDb => s(a, "identity").map(|i| format!("{}…", &i[..i.len().min(8)])).unwrap_or("SpacetimeDB account".into()),
+    }
+}
+
+/// Header-button titles and new-select subtitles.
+#[derive(Clone, Default)]
+pub struct AccountSummary {
+    pub supabase: Vec<String>,
+    pub spacetimedb: Vec<String>,
+    pub neon: Vec<String>,
+    pub planetscale: Vec<String>,
+}
+
+impl AccountSummary {
+    pub fn load() -> Self {
+        let labels = |k| load_accounts(k).iter().map(|a| account_label(k, a)).collect();
+        Self {
+            supabase: labels(AccountKind::Supabase),
+            spacetimedb: labels(AccountKind::SpacetimeDb),
+            neon: labels(AccountKind::Neon),
+            planetscale: labels(AccountKind::Planetscale),
+        }
+    }
+    pub fn title(&self, kind: AccountKind) -> String {
+        let list = match kind {
+            AccountKind::Supabase => &self.supabase,
+            AccountKind::SpacetimeDb => &self.spacetimedb,
+            AccountKind::Neon => &self.neon,
+            AccountKind::Planetscale => &self.planetscale,
+        };
+        match list.len() {
+            1 if kind == AccountKind::SpacetimeDb => "SpacetimeDB — 1 account".into(),
+            1 => format!("{} — {}", kind.title(), list[0]),
+            n => format!("{} — {n} accounts", kind.title()),
+        }
+    }
+    pub fn neon_label(&self) -> Option<String> {
+        self.neon.first().cloned()
+    }
+}
+
+pub enum AccountsEvent {
+    Back,
+    Changed,
+}
+
+#[derive(Clone)]
+enum Connect {
+    Ready { name: String, cs: String, kind: &'static str, key: String },
+    Neon { profile: String, project_id: String, project: String },
+    Planetscale { org: String, database: String, kind: String },
+}
+
+#[derive(Clone)]
+struct Resource {
+    group: String,
+    title: String,
+    subtitle: String,
+    status: Option<(String, bool)>,
+    connect: Connect,
+    external: Option<String>,
+}
+
+pub struct AccountsScreen {
+    kind: AccountKind,
+    accounts: Vec<Value>,
+    active: Option<usize>,
+    existing: Vec<String>,
+    search: Entity<InputState>,
+    resources: Vec<Resource>,
+    loading: bool,
+    error: Option<String>,
+    importing: bool,
+    connecting: Option<String>,
+    _sub: gpui::Subscription,
+}
+
+impl EventEmitter<AccountsEvent> for AccountsScreen {}
+
+impl AccountsScreen {
+    pub fn new(kind: AccountKind, existing: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let placeholder = format!("Search {}...", kind.noun());
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        let sub = cx.observe(&search, |_, _, cx| cx.notify());
+        let accounts = load_accounts(kind);
+        let mut this = Self {
+            kind,
+            active: (!accounts.is_empty()).then_some(0),
+            accounts,
+            existing,
+            search,
+            resources: Vec::new(),
+            loading: false,
+            error: None,
+            importing: false,
+            connecting: None,
+            _sub: sub,
+        };
+        this.load(cx);
+        this
+    }
+
+    fn active_account(&self) -> Option<Value> {
+        self.active.and_then(|i| self.accounts.get(i).cloned())
+    }
+
+    fn load(&mut self, cx: &mut Context<Self>) {
+        let Some(account) = self.active_account() else {
+            self.resources.clear();
+            return;
+        };
+        self.loading = true;
+        self.error = None;
+        cx.notify();
+        let kind = self.kind;
+        let task = rexa_core::runtime::spawn(async move { list_resources(kind, &account).await });
+        cx.spawn(async move |this, cx| {
+            let res = task.await;
+            this.update(cx, |this, cx| {
+                this.loading = false;
+                match res {
+                    Ok(r) => this.resources = r,
+                    Err(e) => {
+                        this.resources.clear();
+                        this.error = Some(format!("{e:#}"));
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn is_connected(&self, key: &str) -> bool {
+        self.existing.iter().any(|cs| connection_key(self.kind, cs).as_deref() == Some(key))
+    }
+
+    fn create(&mut self, name: &str, cs: &str, kind: &str) -> bool {
+        let ok = Store::open()
+            .and_then(|s| s.create_connection(ConnectionDraft { name: Some(name.into()), connection_string: Some(cs.into()), connection_type: Some(kind.into()), ..Default::default() }))
+            .is_ok();
+        if ok {
+            self.existing.push(cs.into());
+        }
+        ok
+    }
+
+    fn connect(&mut self, r: Resource, cx: &mut Context<Self>) {
+        match r.connect.clone() {
+            Connect::Ready { name, cs, kind, key } => {
+                if self.is_connected(&key) {
+                    return;
+                }
+                if self.create(&name, &cs, kind) {
+                    toast::success(format!("Connected to {name}"), cx);
+                    cx.emit(AccountsEvent::Changed);
+                } else {
+                    toast::error("Failed to create connection.", cx);
+                }
+                cx.notify();
+            }
+            other => {
+                let Some(account) = self.active_account() else { return };
+                self.connecting = Some(r.title.clone());
+                cx.notify();
+                let task = rexa_core::runtime::spawn(async move { resolve_connect(&other, &account).await });
+                cx.spawn(async move |this, cx| {
+                    let res = task.await;
+                    this.update(cx, |this, cx| {
+                        this.connecting = None;
+                        match res {
+                            Ok((name, cs, kind)) => {
+                                if this.existing.iter().any(|e| *e == cs) {
+                                    toast::info("This database and role are already connected.", cx);
+                                } else if this.create(&name, &cs, kind) {
+                                    toast::success(format!("Connected to {name}"), cx);
+                                    cx.emit(AccountsEvent::Changed);
+                                } else {
+                                    toast::error("Failed to create connection.", cx);
+                                }
+                            }
+                            Err(e) => {
+                                toast::error(format!("{e:#}"), cx);
+                            }
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+        }
+    }
+
+    /// `registerActiveSupabaseProjects` / `registerSpacetimeDbDatabases`.
+    fn import_all(&mut self, cx: &mut Context<Self>) {
+        self.importing = true;
+        let (mut imported, mut already, mut failed) = (0, 0, 0);
+        let mut nameless = 0;
+        for r in self.resources.clone() {
+            if let Connect::Ready { name, cs, kind, key } = &r.connect {
+                if self.kind == AccountKind::Supabase && !r.status.as_ref().is_some_and(|(_, active)| *active || r.status.as_ref().unwrap().0 == "Starting") {
+                    continue;
+                }
+                if name.is_empty() {
+                    nameless += 1;
+                    continue;
+                }
+                if self.is_connected(key) {
+                    already += 1;
+                } else if self.create(name, cs, kind) {
+                    imported += 1;
+                } else {
+                    failed += 1;
+                }
+            }
+        }
+        self.importing = false;
+        let (noun, active) = if self.kind == AccountKind::Supabase { ("projects", "active ") } else { ("databases", "") };
+        let total = imported + already + if self.kind == AccountKind::SpacetimeDb { nameless } else { 0 };
+        if imported > 0 {
+            toast::success(format!("Imported {imported} of {total} {active}{noun}"), cx);
+            cx.emit(AccountsEvent::Changed);
+        } else if already > 0 {
+            toast::info(format!("All {active}{noun} are already connected."), cx);
+        } else if failed > 0 {
+            toast::error(format!("Failed to import {noun}."), cx);
+        } else {
+            toast::info(format!("No {active}{noun} to import."), cx);
+        }
+        cx.notify();
+    }
+
+    fn remove_account(&mut self, i: usize, cx: &mut Context<Self>) {
+        if i >= self.accounts.len() {
+            return;
+        }
+        self.accounts.remove(i);
+        save_accounts(self.kind, &self.accounts);
+        self.active = (!self.accounts.is_empty()).then_some(0);
+        cx.emit(AccountsEvent::Changed);
+        self.load(cx);
+        cx.notify();
+    }
+
+    fn open_login(&mut self, cx: &mut Context<Self>) {
+        let kind = self.kind;
+        rexa_ui::open_dialog(cx, move |_, cx| {
+            let t = cx.tokens().clone();
+            let (title, desc, body, action) = match kind {
+                AccountKind::Supabase => (
+                    "Connect Supabase Account",
+                    "Log in to your Supabase account to browse and connect your projects.",
+                    "This opens the Supabase dashboard in your browser. You'll get a verification code to paste back here.",
+                    "Log in to Supabase",
+                ),
+                AccountKind::SpacetimeDb => (
+                    "Connect SpacetimeDB Account",
+                    "Log in with GitHub to link your SpacetimeDB identity and browse your databases.",
+                    "",
+                    "Log in to SpacetimeDB",
+                ),
+                AccountKind::Neon => (
+                    "Sign in to Neon",
+                    "Opens Neon in your browser. Once you authorize, you will be brought back here automatically — no CLI install needed.",
+                    "",
+                    "Sign in to Neon",
+                ),
+                AccountKind::Planetscale => (
+                    "Connect PlanetScale Account",
+                    "Log in to PlanetScale in your browser to browse and connect your databases.",
+                    "",
+                    "Log in to PlanetScale",
+                ),
+            };
+            rexa_ui::Dialog::new()
+                .max_w(384.)
+                .title(title)
+                .description(desc)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .pt_2()
+                        .when(!body.is_empty(), |d| d.child(div().tw_text_xs().text_color(t.muted_foreground).child(body)))
+                        .child(Button::new("login-start").size(ButtonSize::Lg).w_full().label(action).on_click(move |_, _, cx| {
+                            // The browser sign-in flows (Supabase device code + ECDH, SpacetimeDB/GitHub,
+                            // Neon PKCE, PlanetScale OAuth) are not ported yet.
+                            toast::info("Sign-in from the native app isn't available yet. Sign in once in the RexaDB desktop app; the account appears here.", cx);
+                            rexa_ui::close_top(cx);
+                        })),
+                )
+        });
+    }
+
+    // ---- rendering ---------------------------------------------------------------------
+
+    fn header(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .mb_5()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .id("acct-back")
+                            .flex()
+                            .h_8()
+                            .flex_shrink_0()
+                            .items_center()
+                            .gap(px(6.))
+                            .tw_rounded_lg()
+                            .px_2()
+                            .tw_text_sm()
+                            .text_color(t.muted_foreground)
+                            .cursor_pointer()
+                            .hover(|s| s.bg(with_alpha(t.muted, 0.6)).text_color(t.foreground))
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::Back)))
+                            .child(Icon::new(IconName::ArrowLeft).size_4())
+                            .child("Back"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .size(px(44.))
+                            .flex_shrink_0()
+                            .items_center()
+                            .justify_center()
+                            .tw_rounded_xl()
+                            .border_1()
+                            .border_color(t.studio_border)
+                            .bg(with_alpha(t.studio_bg, 0.6))
+                            .child(logo(self.kind, 22., cx)),
+                    )
+                    .child(
+                        div()
+                            .child(div().text_size(px(15.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).child(rexa_ui::tight(self.kind.title())))
+                            .child(div().tw_text_xs().text_color(t.muted_foreground).child(self.kind.description())),
+                    ),
+            )
+    }
+
+    fn empty_state(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let (title, desc, action) = match self.kind {
+            AccountKind::Supabase => ("No Supabase account linked", "Log in with your Supabase (supabase.com) account to browse your projects and connect them here.", "Log in to Supabase"),
+            AccountKind::SpacetimeDb => ("No SpacetimeDB account linked", "Log in with your SpacetimeDB account to browse your databases and connect them here.", "Log in to SpacetimeDB"),
+            AccountKind::Neon => ("No Neon account linked", "Sign in with your Neon account to browse your projects and connect them here.", "Sign in to Neon"),
+            AccountKind::Planetscale => ("No PlanetScale account linked", "Log in with your PlanetScale account to browse your databases and connect them here.", "Log in to PlanetScale"),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .rounded(px(16.))
+            .border_1()
+            .border_dashed()
+            .border_color(with_alpha(t.studio_border, 0.6))
+            .bg(with_alpha(t.studio_bg, 0.4))
+            .px_6()
+            .py_16()
+            .child(
+                div()
+                    .mb_4()
+                    .flex()
+                    .size_16()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(16.))
+                    .border_1()
+                    .border_color(t.studio_border)
+                    .bg(with_alpha(t.studio_bg, 0.6))
+                    .child(logo(self.kind, 22., cx)),
+            )
+            .child(div().tw_text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+            .child(div().mt(px(6.)).max_w(px(384.)).text_center().tw_text_xs().line_height(px(19.5)).text_color(t.muted_foreground).child(desc))
+            .child(div().mt_5().child(Button::new("acct-empty-login").size(ButtonSize::Lg).icon(IconName::Plus).label(action).on_click(cx.listener(|this, _, _, cx| this.open_login(cx)))))
+    }
+
+    fn chips(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut row = div().mb_5().flex().flex_wrap().items_center().gap_2();
+        for (i, a) in self.accounts.iter().enumerate() {
+            let active = self.active == Some(i);
+            let label = account_label(self.kind, a);
+            let initial = label.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or("?".into());
+            let gid = SharedString::from(format!("chip-{i}"));
+            row = row.child(
+                div()
+                    .id(gid.clone())
+                    .group(gid.clone())
+                    .flex()
+                    .h_8()
+                    .items_center()
+                    .gap_2()
+                    .rounded_full()
+                    .border_1()
+                    .pl(px(6.))
+                    .pr_3()
+                    .tw_text_xs()
+                    .cursor_pointer()
+                    .when(active, |d| d.border_color(with_alpha(t.primary, 0.5)).bg(with_alpha(t.primary, 0.1)).text_color(t.foreground))
+                    .when(!active, |d| {
+                        d.border_color(with_alpha(t.studio_border, 0.6))
+                            .bg(with_alpha(t.studio_bg, 0.6))
+                            .text_color(t.muted_foreground)
+                            .hover(|s| s.border_color(t.studio_border).text_color(t.foreground))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.active = Some(i);
+                        this.load(cx);
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .size_5()
+                            .flex_shrink_0()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .tw_text_10()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .when(active, |d| d.bg(with_alpha(t.primary, 0.2)).text_color(t.primary))
+                            .when(!active, |d| d.bg(with_alpha(t.muted, 0.7)).text_color(t.muted_foreground))
+                            .child(initial),
+                    )
+                    .child(div().max_w(px(256.)).overflow_hidden().text_ellipsis().whitespace_nowrap().font_weight(FontWeight::MEDIUM).child(label))
+                    .child(
+                        div()
+                            .id(("chip-rm", i))
+                            .mr(px(-4.))
+                            .flex()
+                            .size_4()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .text_color(with_alpha(t.muted_foreground, 0.7))
+                            .opacity(0.)
+                            .group_hover(gid, |s| s.opacity(1.))
+                            .hover(|s| s.bg(with_alpha(t.destructive, 0.15)).text_color(t.destructive))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.remove_account(i, cx);
+                            }))
+                            .child(Icon::new(IconName::X).size(px(10.))),
+                    ),
+            );
+        }
+        row.child(
+            div()
+                .id("chip-add")
+                .flex()
+                .h_8()
+                .items_center()
+                .gap(px(6.))
+                .rounded_full()
+                .border_1()
+                .border_dashed()
+                .border_color(with_alpha(t.studio_border, 0.7))
+                .px_3()
+                .tw_text_xs()
+                .text_color(t.muted_foreground)
+                .cursor_pointer()
+                .hover(|s| s.border_color(t.studio_border).text_color(t.foreground))
+                .on_click(cx.listener(|this, _, _, cx| this.open_login(cx)))
+                .child(Icon::new(IconName::Plus).size_3())
+                .child(format!("Add {} account", self.kind.title())),
+        )
+    }
+
+    fn resource_row(&self, i: usize, r: &Resource, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let key = match &r.connect {
+            Connect::Ready { key, .. } => Some(key.clone()),
+            _ => None,
+        };
+        let connected = key.as_deref().is_some_and(|k| self.is_connected(k));
+        let pill = |text: String, primary: bool| {
+            div()
+                .flex_shrink_0()
+                .rounded_full()
+                .border_1()
+                .px_2()
+                .py(px(2.))
+                .tw_text_10()
+                .font_weight(FontWeight::MEDIUM)
+                .when(primary, |d| d.border_color(with_alpha(t.primary, 0.2)).bg(with_alpha(t.primary, 0.1)).text_color(t.primary))
+                .when(!primary, |d| d.border_color(with_alpha(t.studio_border, 0.6)).bg(with_alpha(t.muted, 0.4)).text_color(t.muted_foreground))
+                .child(text)
+        };
+        let mut trailing = div().flex().items_center().gap_2();
+        if let Some((label, active)) = &r.status {
+            trailing = trailing.child(pill(label.clone(), *active));
+        }
+        let busy = self.connecting.as_deref() == Some(r.title.as_str());
+        trailing = if connected {
+            trailing.child(pill("Connected".into(), true))
+        } else {
+            let res = r.clone();
+            trailing.child(
+                Button::new(("res-connect", i))
+                    .size(ButtonSize::Xs)
+                    .disabled(busy)
+                    .label(if busy { "Connecting…" } else { "Connect" })
+                    .on_click(cx.listener(move |this, _, _, cx| this.connect(res.clone(), cx))),
+            )
+        };
+        if let Some(url) = r.external.clone() {
+            trailing = trailing.child(Button::new(("res-ext", i)).ghost().size(ButtonSize::IconSm).icon(IconName::ExternalLink).on_click(move |_, _, cx| cx.open_url(&url)));
+        }
+        div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .tw_rounded_lg()
+            .px(px(10.))
+            .py(px(10.))
+            .child(
+                div()
+                    .flex()
+                    .size_8()
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .tw_rounded_lg()
+                    .bg(with_alpha(t.muted, 0.6))
+                    .child(Icon::new(IconName::Database).size_4().text_color(t.muted_foreground)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().tw_text_sm().font_weight(FontWeight::MEDIUM).child(r.title.clone()))
+                    .child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().tw_text_xs().text_color(t.muted_foreground).child(r.subtitle.clone())),
+            )
+            .child(trailing)
+    }
+}
+
+impl Render for AccountsScreen {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.tokens().clone();
+        let mut page = div().mx_auto().w_full().max_w(px(1024.)).px_6().py_6().child(self.header(&t, cx));
+        if self.accounts.is_empty() {
+            page = page.child(self.empty_state(&t, cx));
+        } else {
+            let q = widgets::value(&self.search, cx).to_lowercase();
+            let filtered: Vec<(usize, Resource)> = self
+                .resources
+                .iter()
+                .cloned()
+                .enumerate()
+                .filter(|(_, r)| q.is_empty() || r.title.to_lowercase().contains(&q) || r.subtitle.to_lowercase().contains(&q) || r.group.to_lowercase().contains(&q))
+                .collect();
+            let can_import = matches!(self.kind, AccountKind::Supabase | AccountKind::SpacetimeDb);
+            let toolbar = div().border_b_1().border_color(with_alpha(t.studio_border, 0.5)).px_4().py_3().child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .relative()
+                            .min_w(px(160.))
+                            .flex_1()
+                            .child(FieldInput::new(&self.search).h(32.).pl(32.))
+                            .child(div().absolute().left(px(10.)).top(px(9.)).child(Icon::new(IconName::Search).size(px(14.)).text_color(t.muted_foreground))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_shrink_0()
+                            .items_center()
+                            .gap(px(6.))
+                            .child(Button::new("acct-refresh").ghost().size(ButtonSize::Sm).icon(IconName::RefreshCw).disabled(self.loading).on_click(cx.listener(|this, _, _, cx| this.load(cx))))
+                            .when(can_import, |d| {
+                                d.child(
+                                    Button::new("acct-import")
+                                        .size(ButtonSize::Sm)
+                                        .icon(IconName::Download)
+                                        .disabled(self.importing || self.active.is_none())
+                                        .label(if self.importing {
+                                            "Importing...".to_string()
+                                        } else if self.kind == AccountKind::Supabase {
+                                            "Import all active".into()
+                                        } else {
+                                            "Import all".into()
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| this.import_all(cx))),
+                                )
+                            }),
+                    ),
+            );
+            let body: AnyElement = if self.loading {
+                div().flex().items_center().justify_center().py_12().child(rexa_ui::Spinner::new(20.)).into_any_element()
+            } else if let Some(e) = &self.error {
+                div()
+                    .m_2()
+                    .tw_rounded_lg()
+                    .border_1()
+                    .border_color(with_alpha(t.destructive, 0.3))
+                    .bg(with_alpha(t.destructive, 0.05))
+                    .p_4()
+                    .text_center()
+                    .child(div().tw_text_sm().font_weight(FontWeight::MEDIUM).text_color(t.destructive).child(format!("Failed to load {}", self.kind.noun())))
+                    .child(div().mt_1().tw_text_xs().text_color(t.muted_foreground).font_family(MONO).child(e.clone()))
+                    .child(div().mt_2().tw_text_xs().text_color(t.muted_foreground).child("This account's token may have expired. Switch accounts or remove this account and log in again."))
+                    .into_any_element()
+            } else {
+                let mut groups: Vec<(String, Vec<(usize, Resource)>)> = Vec::new();
+                for (i, r) in filtered.iter().cloned() {
+                    match groups.iter_mut().find(|(g, _)| *g == r.group) {
+                        Some((_, list)) => list.push((i, r)),
+                        None => groups.push((r.group.clone(), vec![(i, r)])),
+                    }
+                }
+                let mut col = div().flex().flex_col().gap_3();
+                for (g, list) in groups {
+                    let mut rows = div().flex().flex_col().gap(px(2.));
+                    for (i, r) in list {
+                        rows = rows.child(self.resource_row(i, &r, &t, cx));
+                    }
+                    col = col.child(
+                        div()
+                            .when(!g.is_empty(), |d| {
+                                d.child(div().mb_1().px(px(10.)).pt_1().tw_text_10().font_weight(FontWeight::SEMIBOLD).text_color(t.muted_foreground).child(rexa_ui::tracked_text::tracked(g.to_uppercase(), 0.05)))
+                            })
+                            .child(rows),
+                    );
+                }
+                if filtered.is_empty() {
+                    col = col.child(div().py_8().text_center().tw_text_sm().text_color(t.muted_foreground).child(if self.resources.is_empty() {
+                        format!("No {} found.", self.kind.noun())
+                    } else {
+                        format!("No {} match your search.", self.kind.noun())
+                    }));
+                }
+                col.into_any_element()
+            };
+            page = page.child(self.chips(&t, cx)).child(
+                div()
+                    .overflow_hidden()
+                    .tw_rounded_xl()
+                    .border_1()
+                    .border_color(with_alpha(t.studio_border, 0.6))
+                    .bg(with_alpha(t.studio_bg, 0.4))
+                    .child(toolbar)
+                    .child(div().p_2().child(body)),
+            );
+        }
+        div().id("accounts-scroll").size_full().overflow_y_scroll().child(page)
+    }
+}
+
+// ---- API clients ---------------------------------------------------------------------
+
+fn connection_key(kind: AccountKind, cs: &str) -> Option<String> {
+    let t = cs.trim();
+    match kind {
+        // parseProjectRef: supabase-mgmt://<ref>
+        AccountKind::Supabase => t.strip_prefix("supabase-mgmt://").map(|r| r.split(['/', '?']).next().unwrap_or("").to_string()),
+        // parseSpacetimeDbConnection: host/database (lowercased)
+        AccountKind::SpacetimeDb => {
+            let rest = t.strip_prefix("spacetimedbs://").or_else(|| t.strip_prefix("spacetimedb://"))?;
+            let rest = rest.split('?').next()?;
+            let (host, db) = rest.split_once('/')?;
+            Some(format!("{host}/{}", crate::fields::decode_component(db)).to_lowercase())
+        }
+        _ => Some(t.to_string()),
+    }
+}
+
+fn normalize_stdb_host(host: Option<&str>) -> String {
+    let h = host.unwrap_or("").trim();
+    let h = h.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("wss://").trim_start_matches("ws://").trim_end_matches('/');
+    if h.is_empty() { "maincloud.spacetimedb.com".into() } else { h.into() }
+}
+
+/// `buildSpacetimeDbConnectionString`.
+fn stdb_connection_string(host: &str, database: &str, token: &str) -> String {
+    let raw = host.trim();
+    let wants_https = raw.to_lowercase().starts_with("https://");
+    let wants_http = raw.to_lowercase().starts_with("http://");
+    let clean = normalize_stdb_host(Some(raw));
+    let proto = if wants_https || (!wants_http && clean.to_lowercase().ends_with(".spacetimedb.com")) { "spacetimedbs" } else { "spacetimedb" };
+    format!("{proto}://{clean}/{}?token={}", encode_component(database.trim().trim_start_matches('/')), encode_component(token))
+}
+
+/// `decodeSpacetimeDbIdentity`: the JWT `hex_identity` / `sub` claim.
+fn stdb_identity(token: &str) -> Option<String> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("hex_identity").or_else(|| v.get("sub")).and_then(Value::as_str).map(str::to_string)
+}
+
+fn neon_token(profile: &str) -> anyhow::Result<String> {
+    let file = if profile == "DEFAULT" { "credentials.json".to_string() } else { format!("credentials.{profile}.json") };
+    let dir = std::env::var("NEON_CONFIG_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".config").join("neon"));
+    let raw = std::fs::read_to_string(dir.join(file)).map_err(|_| anyhow::anyhow!("Neon credentials for \"{profile}\" were not found. Reconnect the account."))?;
+    let v: Value = serde_json::from_str(&raw)?;
+    v.get("access_token").and_then(Value::as_str).map(str::to_string).ok_or_else(|| anyhow::anyhow!("Neon credentials are invalid. Reconnect the account."))
+}
+
+const NEON_API: &str = "https://console.neon.tech/api/v2";
+
+async fn list_resources(kind: AccountKind, account: &Value) -> anyhow::Result<Vec<Resource>> {
+    let arr = |v: &Value, k: &str| v.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
+    let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    match kind {
+        AccountKind::Supabase => {
+            let token = s(account, "token").unwrap_or("").to_string();
+            let projects = crate::http::get_json("https://api.supabase.com/v1/projects", &token).await?;
+            let orgs = crate::http::get_json("https://api.supabase.com/v1/organizations", &token).await.unwrap_or(Value::Null);
+            let org_name = |id: &str| orgs.as_array().and_then(|o| o.iter().find(|x| x.get("id").and_then(Value::as_str) == Some(id))).map(|o| st(o, "name")).unwrap_or("Unknown".into());
+            Ok(projects
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|p| {
+                    let (r, status) = (st(p, "ref"), st(p, "status"));
+                    let label = match status.as_str() {
+                        "ACTIVE_HEALTHY" | "ACTIVE" => ("Active".to_string(), true),
+                        "PAUSED" => ("Paused".into(), false),
+                        "COMING_UP" => ("Starting".into(), false),
+                        s => (s.replace('_', " "), false),
+                    };
+                    Resource {
+                        group: org_name(&st(p, "organization_id")),
+                        title: st(p, "name"),
+                        subtitle: format!("{r} · {}", st(p, "region")),
+                        status: Some(label),
+                        connect: Connect::Ready {
+                            name: st(p, "name"),
+                            cs: format!("supabase-mgmt://{r}?token={}", encode_component(&token)),
+                            kind: "supabase-mgmt",
+                            key: r.clone(),
+                        },
+                        external: Some(format!("https://supabase.com/dashboard/project/{r}/settings/database")),
+                    }
+                })
+                .collect())
+        }
+        AccountKind::SpacetimeDb => {
+            let token = s(account, "token").unwrap_or("").to_string();
+            let host = normalize_stdb_host(s(account, "host"));
+            let identity = stdb_identity(&token).ok_or_else(|| anyhow::anyhow!("Invalid SpacetimeDB token: no identity claim"))?;
+            let ids = crate::http::get_json(&format!("https://{host}/v1/identity/{}/databases", encode_component(&identity)), &token).await?;
+            let mut out = Vec::new();
+            for id in arr(&ids, "identities") {
+                let Some(id) = id.as_str().map(|s| s.trim_start_matches("0x").to_lowercase()) else { continue };
+                let names = crate::http::get_json(&format!("https://{host}/v1/database/{id}/names"), &token).await.map(|v| arr(&v, "names")).unwrap_or_default();
+                let name = names.first().and_then(Value::as_str).unwrap_or("").to_string();
+                out.push(Resource {
+                    group: String::new(),
+                    title: if name.is_empty() { format!("{}…", &id[..id.len().min(12)]) } else { name.clone() },
+                    subtitle: format!("{host} · {}…", &id[..id.len().min(16)]),
+                    status: None,
+                    connect: Connect::Ready { name: name.clone(), cs: stdb_connection_string(&host, &name, &token), kind: "spacetimedb", key: format!("{host}/{name}").to_lowercase() },
+                    external: None,
+                });
+            }
+            Ok(out)
+        }
+        AccountKind::Neon => {
+            let profile = s(account, "profileName").unwrap_or("DEFAULT").to_string();
+            let token = neon_token(&profile)?;
+            let orgs = crate::http::get_json(&format!("{NEON_API}/users/me/organizations"), &token).await.map(|v| arr(&v, "organizations")).unwrap_or_default();
+            let mut out = Vec::new();
+            let scopes: Vec<(String, String)> = if orgs.is_empty() { vec![(String::new(), String::new())] } else { orgs.iter().map(|o| (st(o, "id"), st(o, "name"))).collect() };
+            for (org_id, org_name) in scopes {
+                let url = if org_id.is_empty() { format!("{NEON_API}/projects") } else { format!("{NEON_API}/projects?org_id={}", encode_component(&org_id)) };
+                let projects = crate::http::get_json(&url, &token).await?;
+                for p in arr(&projects, "projects") {
+                    out.push(Resource {
+                        group: org_name.clone(),
+                        title: st(&p, "name"),
+                        subtitle: format!("{} · {}", st(&p, "id"), st(&p, "region_id")),
+                        status: None,
+                        connect: Connect::Neon { profile: profile.clone(), project_id: st(&p, "id"), project: st(&p, "name") },
+                        external: Some(format!("https://console.neon.tech/app/projects/{}", st(&p, "id"))),
+                    });
+                }
+            }
+            Ok(out)
+        }
+        AccountKind::Planetscale => {
+            let token = s(account, "accessToken").unwrap_or("").to_string();
+            let orgs = crate::http::get_json("https://api.planetscale.com/v1/organizations", &token).await?;
+            let mut out = Vec::new();
+            for o in arr(&orgs, "data") {
+                let org = st(&o, "name");
+                let dbs = crate::http::get_json(&format!("https://api.planetscale.com/v1/organizations/{}/databases", encode_component(&org)), &token).await?;
+                for d in arr(&dbs, "data") {
+                    let region = d.get("region").and_then(|r| r.get("display_name")).and_then(Value::as_str).unwrap_or("").to_string();
+                    out.push(Resource {
+                        group: org.clone(),
+                        title: st(&d, "name"),
+                        subtitle: format!("{} · {region}", if st(&d, "kind").to_lowercase().contains("postgres") { "PostgreSQL" } else { "Vitess (MySQL)" }),
+                        status: Some((st(&d, "state").replace('_', " "), st(&d, "state") == "ready")),
+                        connect: Connect::Planetscale { org: org.clone(), database: st(&d, "name"), kind: st(&d, "kind") },
+                        external: Some(format!("https://app.planetscale.com/{org}/{}", st(&d, "name"))),
+                    });
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// Neon: default branch → first database + owner role → `neon-cli://` pointer.
+/// PlanetScale: production branch → mint an admin password → mysql/postgres URL.
+async fn resolve_connect(c: &Connect, account: &Value) -> anyhow::Result<(String, String, &'static str)> {
+    let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    match c {
+        Connect::Neon { profile, project_id, project } => {
+            let token = neon_token(profile)?;
+            let branches = crate::http::get_json(&format!("{NEON_API}/projects/{project_id}/branches"), &token).await?;
+            let list = branches.get("branches").and_then(Value::as_array).cloned().unwrap_or_default();
+            let branch = list.iter().find(|b| b.get("default").and_then(Value::as_bool) == Some(true)).or(list.first()).cloned().ok_or_else(|| anyhow::anyhow!("This project has no branches."))?;
+            let bid = st(&branch, "id");
+            let dbs = crate::http::get_json(&format!("{NEON_API}/projects/{project_id}/branches/{bid}/databases"), &token).await?;
+            let db = dbs.get("databases").and_then(Value::as_array).and_then(|d| d.first().cloned()).ok_or_else(|| anyhow::anyhow!("This branch has no databases."))?;
+            let (dname, role) = (st(&db, "name"), st(&db, "owner_name"));
+            let cs = format!(
+                "neon-cli://{}/{}/{}/{}?role={}",
+                encode_component(profile),
+                encode_component(project_id),
+                encode_component(&bid),
+                encode_component(&dname),
+                encode_component(&role)
+            );
+            let name = if branch.get("default").and_then(Value::as_bool) == Some(true) {
+                format!("{project} / {dname} ({role})")
+            } else {
+                format!("{project} ({}) / {dname} ({role})", st(&branch, "name"))
+            };
+            Ok((name, cs, "neon"))
+        }
+        Connect::Planetscale { org, database, kind } => {
+            let token = account.get("accessToken").and_then(Value::as_str).unwrap_or("").to_string();
+            let base = format!("https://api.planetscale.com/v1/organizations/{}/databases/{}", encode_component(org), encode_component(database));
+            let branches = crate::http::get_json(&format!("{base}/branches"), &token).await?;
+            let list = branches.get("data").and_then(Value::as_array).cloned().unwrap_or_default();
+            let branch = list.iter().find(|b| b.get("production").and_then(Value::as_bool) == Some(true)).or(list.first()).cloned().ok_or_else(|| anyhow::anyhow!("This database has no branches."))?;
+            let bname = st(&branch, "name");
+            let pw = crate::http::post_json(&format!("{base}/branches/{}/passwords", encode_component(&bname)), &token, serde_json::json!({ "name": "rexadb", "role": "admin" })).await?;
+            let (host, user, pass) = (st(&pw, "access_host_url"), encode_component(&st(&pw, "username")), encode_component(&st(&pw, "plain_text")));
+            let cs = if kind.to_lowercase().contains("postgres") {
+                format!("postgresql://{user}:{pass}@{host}:5432/{database}?sslmode=require")
+            } else {
+                format!("mysql://{user}:{pass}@{host}:3306/{database}?ssl=true")
+            };
+            let production = branch.get("production").and_then(Value::as_bool) == Some(true);
+            Ok((if production { database.clone() } else { format!("{database} ({bname})") }, cs, "planetscale"))
+        }
+        Connect::Ready { name, cs, kind, .. } => Ok((name.clone(), cs.clone(), kind)),
+    }
+}
