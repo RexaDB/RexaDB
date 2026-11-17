@@ -45,7 +45,7 @@ pub mod value;
 mod http;
 mod ssh;
 
-// mod clickhouse;
+mod clickhouse;
 // mod duckdb;
 // mod federated;
 // mod jdbc;
@@ -58,11 +58,11 @@ mod oracle;
 mod pgcat;
 mod postgres;
 mod redis;
-// mod spacetimedb;
+mod spacetimedb;
 mod sqlite;
 mod sqlite_remote;
-// mod supabase_mgmt;
-// mod trino;
+mod supabase_mgmt;
+mod trino;
 
 pub use catalog::*;
 pub use detect::{detect_provider, Provider};
@@ -747,6 +747,10 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::Postgres => Arc::new(postgres::PostgresDriver::connect(connection_string, opts).await?),
         Kind::MySql => Arc::new(mysql::MySqlDriver::connect(connection_string, opts).await?),
         Kind::Sqlite => sqlite::open_any(connection_string, opts).await?,
+        Kind::ClickHouse => Arc::new(clickhouse::ClickHouseDriver::connect(connection_string).await?),
+        Kind::Trino => Arc::new(trino::TrinoDriver::connect(connection_string).await?),
+        Kind::SpacetimeDb => Arc::new(spacetimedb::SpacetimeDriver::connect(connection_string).await?),
+        Kind::SupabaseMgmt => Arc::new(supabase_mgmt::SupabaseMgmtDriver::connect(connection_string).await?),
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }
