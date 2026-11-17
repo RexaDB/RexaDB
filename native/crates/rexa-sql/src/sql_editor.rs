@@ -125,6 +125,7 @@ pub struct SqlEditor {
     folders: Vec<Folder>,
     latest_version_query: Option<String>,
     // ---- settings ----
+    #[allow(dead_code)]
     settings: EditorSettings,
     format_settings: FormatSettings,
     result_tabs_enabled: bool,
@@ -276,6 +277,11 @@ impl SqlEditor {
     }
 
     // ---- query text --------------------------------------------------------------
+
+    /// `setQuery` from outside (snippet browser, panels).
+    pub fn set_query_text(&mut self, q: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_query(q, window, cx);
+    }
 
     fn set_query(&mut self, q: String, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |i, cx| i.set_value(&q, window, cx));
