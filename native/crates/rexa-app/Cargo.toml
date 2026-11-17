@@ -8,12 +8,19 @@ license.workspace = true
 name = "rexadb"
 path = "src/main.rs"
 
+[features]
+# Embedded DuckDB (large C++ build). Release builds enable it for parity with the
+# original: `cargo build --release -p rexa-app --features duckdb`. Without it,
+# DuckDB connections use the `duckdb` CLI.
+duckdb = ["rexa-drivers/duckdb"]
+
 [dependencies]
 anyhow.workspace = true
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-component = "0.9.1"
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "runtime_shaders"] }
 rexa-store.workspace = true
+rexa-drivers.workspace = true
 rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
 rexa-connections = { path = "../rexa-connections" }

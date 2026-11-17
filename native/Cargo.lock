@@ -6431,6 +6431,7 @@ dependencies = [
  "rexa-ai",
  "rexa-connections",
  "rexa-core",
+ "rexa-drivers",
  "rexa-features",
  "rexa-grid",
  "rexa-providers",

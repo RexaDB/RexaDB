@@ -62,6 +62,12 @@ sibling feature crates; they talk through `rexa-core` (`navigate`,
 8. Watch for CSS behaviour GPUI doesn't have and emulate it explicitly (document it in a comment): inline-block line boxes, `truncate`, `max-w-*`, hover/group-hover, `backdrop-blur`, radial gradients.
 9. Behaviour matters as much as pixels: keyboard shortcuts (`../keybindings.json`, `lib/*/keybindings*`), context menus, empty/loading/error states, toasts, confirmations.
 
+## Disk space
+
+The shared target dir lives on a nearly full disk. Before each build, check `df -h ~`; if under
+10 GB is free, stop and report instead of building. Never enable the `duckdb` feature in dev builds
+(it adds tens of GB of C++ build output); it is for release builds only.
+
 ## Data
 
 - Persisted state lives where the old app keeps it: `rexa_store::Store` (`sqlite.db` tables like
