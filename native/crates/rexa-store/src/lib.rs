@@ -113,9 +113,10 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// `last_active` is unix seconds, like the old app writes it.
     pub fn touch_connection(&self, id: i64) -> Result<()> {
         self.db
-            .execute("UPDATE connections SET last_active = ?1 WHERE id = ?2", (now_millis(), id))?;
+            .execute("UPDATE connections SET last_active = ?1 WHERE id = ?2", (now_millis() / 1000, id))?;
         Ok(())
     }
 
