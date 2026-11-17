@@ -3,7 +3,11 @@ import CoreGraphics
 import Foundation
 // Usage: winid <pid>  -> CGWindowID of that process's largest on-screen normal window
 let pid = Int(CommandLine.arguments[1])!
-let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
+// Prefer on-screen windows; fall back to all windows (e.g. the app opened on another Space).
+var list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
+if !list.contains(where: { ($0[kCGWindowOwnerPID as String] as? Int) == pid }) {
+    list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
+}
 var best: (Int, Double)? = nil
 for w in list {
     guard (w[kCGWindowOwnerPID as String] as? Int) == pid, (w[kCGWindowLayer as String] as? Int) == 0,
