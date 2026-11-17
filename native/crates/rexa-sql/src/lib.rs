@@ -2,6 +2,7 @@
 
 pub mod editor_theme;
 pub mod export;
+pub mod format;
 pub mod store;
 pub mod highlight;
 pub mod monarch_words;
