@@ -41,14 +41,14 @@ pub mod split;
 pub mod types;
 pub mod value;
 
-// mod bridge;
+mod bridge;
 mod http;
 mod ssh;
 
 mod clickhouse;
 // mod duckdb;
 // mod federated;
-// mod jdbc;
+mod jdbc;
 // #[cfg(feature = "mongodb")]
 // mod mongo;
 // #[cfg(feature = "mssql")]
@@ -103,14 +103,6 @@ impl Cell {
 
     pub fn is_null(&self) -> bool {
         matches!(self, Cell::Null)
-    }
-
-    pub(crate) fn text(s: impl Into<String>) -> Cell {
-        Cell::Text(s.into())
-    }
-
-    pub(crate) fn opt(s: Option<impl Into<String>>) -> Cell {
-        s.map_or(Cell::Null, |s| Cell::Text(s.into()))
     }
 }
 
@@ -752,6 +744,8 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::SpacetimeDb => Arc::new(spacetimedb::SpacetimeDriver::connect(connection_string).await?),
         Kind::SupabaseMgmt => Arc::new(supabase_mgmt::SupabaseMgmtDriver::connect(connection_string).await?),
         Kind::Redis => Arc::new(redis::RedisDriver::connect(connection_string).await?),
+        Kind::Jdbc => Arc::new(jdbc::JdbcDriver::connect(connection_string).await?),
+        Kind::Oracle => Arc::new(oracle::OracleDriver::connect(connection_string).await?),
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }

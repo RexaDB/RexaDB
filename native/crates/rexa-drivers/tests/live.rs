@@ -215,6 +215,39 @@ async fn sqlite_file() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// JDBC via the Java bridge: needs `REXADB_BRIDGE_JAR` and
+/// `REXA_TEST_PG_JDBC_JAR` (a PostgreSQL JDBC driver jar); talks to the local
+/// `rexa_drivers_test` database.
+#[tokio::test]
+async fn jdbc_bridge_postgres() {
+    let (Ok(_), Ok(jar)) = (std::env::var("REXADB_BRIDGE_JAR"), std::env::var("REXA_TEST_PG_JDBC_JAR")) else {
+        eprintln!("skipping: REXADB_BRIDGE_JAR / REXA_TEST_PG_JDBC_JAR not set");
+        return;
+    };
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut u = url::Url::parse("jdbc://").unwrap();
+    u.query_pairs_mut()
+        .append_pair("jdbcUrl", "jdbc:postgresql://localhost:5432/rexa_drivers_test")
+        .append_pair("driverClass", "org.postgresql.Driver")
+        .append_pair("jarPaths", &jar)
+        .append_pair("username", &user)
+        .append_pair("password", "");
+    let d = connect_detect("jdbc", u.as_str()).await.unwrap();
+    d.execute("DROP TABLE IF EXISTS rexa_live_jdbc", 1).await.unwrap();
+    d.execute("CREATE TABLE rexa_live_jdbc (id int PRIMARY KEY, name text)", 1).await.unwrap();
+    d.execute("INSERT INTO rexa_live_jdbc VALUES (1, 'a'), (2, NULL)", 1).await.unwrap();
+    let r = d.execute("SELECT id, name FROM rexa_live_jdbc ORDER BY id", 10).await.unwrap();
+    assert_eq!(r.columns, vec!["id", "name"]);
+    assert_eq!(r.rows[1], vec![Cell::Text("2".into()), Cell::Null]);
+    assert!(d.schemas().await.unwrap().contains(&"public".to_string()));
+    let t = d.tables("public").await.unwrap();
+    assert!(t.iter().any(|t| t.name == "rexa_live_jdbc"));
+    let st = d.table_structure(&TableRef::new("public", "rexa_live_jdbc")).await.unwrap();
+    assert_eq!(st.len(), 2);
+    assert!(d.execute("SELECT nope", 1).await.is_err());
+    d.execute("DROP TABLE rexa_live_jdbc", 1).await.unwrap();
+}
+
 /// Spawns a private `redis-server` (no persistence) when one is installed.
 #[tokio::test]
 async fn redis_private_server() {
