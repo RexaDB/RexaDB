@@ -327,7 +327,7 @@ impl Render for MonacoSqlInput {
                         // from `left`; Monaco's content starts 26px in for two digits
                         // (16px numbers + 10px decorations); the engine reserves three
                         // digits + 6px, so pull the gutter left to land the text there.
-                        paddings: gpui::Edges { top: px(16.), bottom: px(16.), left: px(0.), right: px(0.) },
+                        paddings: gpui::Edges { top: px(16.), bottom: px(16.), left: px(-10.), right: px(0.) },
                     })
                     .when(empty && !self.placeholder.is_empty(), |el| {
                         // pointer-events-none absolute inset-y-0 left-[12px] right-0 z-10 px-4 py-4

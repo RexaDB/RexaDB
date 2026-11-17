@@ -26,7 +26,19 @@ impl DevSqlScreen {
                         let spec = match which {
                             "history" => TabSpec::View { view: "history".into(), params: serde_json::Value::Null },
                             "panel" => TabSpec::View { view: "sql-sheet".into(), params: serde_json::json!({}) },
-                            _ => TabSpec::Query { id: "sql-new-dev".into(), title: "Query".into(), sql: String::new() },
+                            _ => {
+                                // REXA_DEV_SQL preloads the editor; REXA_DEV_RUN=1 runs it.
+                                let sql = std::env::var("REXA_DEV_SQL").unwrap_or_default();
+                                let editor = cx.new(|cx| {
+                                    crate::sql_editor::SqlEditor::new(session, "sql-new-dev".into(), "Query".into(), sql, window, cx)
+                                });
+                                if std::env::var("REXA_DEV_RUN").is_ok() {
+                                    editor.update(cx, |e, cx| e.handle_run_query(None, cx));
+                                }
+                                this.view = Some(editor.into());
+                                cx.notify();
+                                return;
+                            }
                         };
                         this.view = rexa_core::Registry::build_tab(&spec, session, window, cx);
                     }
