@@ -46,7 +46,7 @@ mod http;
 mod ssh;
 
 mod clickhouse;
-// mod duckdb;
+mod duckdb;
 // mod federated;
 mod jdbc;
 #[cfg(feature = "mongodb")]
@@ -756,6 +756,7 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::MsSql => Arc::new(mssql::MsSqlDriver::connect(connection_string).await?),
         #[cfg(feature = "mongodb")]
         Kind::MongoDb => Arc::new(mongo::MongoDriver::connect(connection_string).await?),
+        Kind::DuckDb => duckdb::open(connection_string).await?,
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }
