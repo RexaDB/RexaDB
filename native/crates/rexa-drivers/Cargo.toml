@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["mongodb", "mssql"]
+default = ["mongodb", "mssql", "duckdb"]
 # MongoDB via the official driver (pure Rust, rustls).
 mongodb = ["dep:mongodb"]
 # SQL Server via tiberius.

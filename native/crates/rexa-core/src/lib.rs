@@ -199,6 +199,17 @@ pub fn open_tab(spec: TabSpec, cx: &mut App) {
 }
 
 pub fn init(cx: &mut App) {
+    // Federated connections reference other saved connections by id.
+    rexa_drivers::set_federated_resolver(|id| {
+        let store = rexa_store::Store::open().ok()?;
+        let saved = store.connections().ok()?.into_iter().find(|c| c.id == id)?;
+        let creds = rexa_store::resolve_credentials(&saved, None).ok()?;
+        Some(rexa_drivers::ResolvedConnection {
+            connection_type: saved.kind.clone(),
+            connection_string: creds.connection_string,
+            name: saved.name,
+        })
+    });
     let nav = cx.new(|_| Navigator { route: Route::Connections, history: Vec::new() });
     cx.set_global(NavigatorGlobal(nav));
     let bus = cx.new(|_| StudioBus);
