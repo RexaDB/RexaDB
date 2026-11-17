@@ -6447,8 +6447,13 @@ name = "rexa-connections"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
+ "dirs 6.0.0",
+ "futures",
  "gpui-component",
  "gpui-pre",
+ "gpui-pre-reqwest",
+ "image",
  "rexa-core",
  "rexa-drivers",
  "rexa-store",
@@ -6457,6 +6462,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -6617,6 +6623,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "uuid",
  "zeroize",
 ]
 

@@ -1,10 +1,16 @@
 //! Access to the RexaDB app database (`sqlite.db`) shared with the existing
 //! desktop app, plus credential resolution (system keychain / encrypted vault).
 
+mod connection_writes;
 mod credentials;
 mod paths;
 mod webstore;
 
+pub use connection_writes::{
+    delete_credential, has_connection_secret, now_secs, protect_payload, read_bundle,
+    redacted_target_for_comparison, strip_connection_secrets, ConnectionDraft, ConnectionRow,
+    CredentialBundle, CredentialStorageMode,
+};
 pub use credentials::{resolve_credentials, ResolvedCredentials, Vault};
 pub use paths::app_data_dir;
 pub use webstore::WebStore;
