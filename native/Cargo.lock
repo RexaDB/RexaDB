@@ -6529,6 +6529,8 @@ name = "rexa-grid"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "futures",
  "gpui-component",
  "gpui-pre",
  "rexa-core",
