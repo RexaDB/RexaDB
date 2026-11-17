@@ -214,3 +214,36 @@ async fn sqlite_file() {
     assert!(ro.execute("INSERT INTO t(x) VALUES (1)", 1).await.is_err());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Spawns a private `redis-server` (no persistence) when one is installed.
+#[tokio::test]
+async fn redis_private_server() {
+    let port = 46379u16;
+    let Ok(mut child) = std::process::Command::new("redis-server")
+        .args(["--port", &port.to_string(), "--save", "", "--appendonly", "no", "--requirepass", "pw"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+    else {
+        eprintln!("skipping: redis-server not installed");
+        return;
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let cs = format!("redis://:pw@127.0.0.1:{port}/2");
+    let d = connect_detect("", &cs).await.unwrap();
+    assert_eq!(d.kind(), Kind::Redis);
+    d.ping().await.unwrap();
+    d.execute("SET \"my key\" 'hello world'", 1).await.unwrap();
+    d.execute("HSET h a 1 b 2", 1).await.unwrap();
+    d.execute("EXPIRE h 100", 1).await.unwrap();
+    let r = d.execute("GET \"my key\"", 10).await.unwrap();
+    assert_eq!((r.columns.clone(), r.rows[0][0].clone()), (vec!["result".to_string()], Cell::Text("hello world".into())));
+    assert_eq!(d.execute("HGETALL h", 10).await.unwrap().rows.len(), 4);
+    let keys = d.redis_keys("*", 0, None).await.unwrap();
+    let h = keys.iter().find(|k| k.key == "h").unwrap();
+    assert_eq!((h.r#type.as_str(), h.size), ("hash", Some(2)));
+    assert!(h.ttl_seconds.unwrap() > 0);
+    assert!(d.redis_keys("*", 10, Some("db0")).await.unwrap().is_empty());
+    assert_eq!(d.databases().await.unwrap().len(), 16);
+    assert!(d.execute("NOPE", 1).await.is_err());
+    let _ = child.kill();
+}

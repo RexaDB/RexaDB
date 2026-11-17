@@ -751,6 +751,7 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::Trino => Arc::new(trino::TrinoDriver::connect(connection_string).await?),
         Kind::SpacetimeDb => Arc::new(spacetimedb::SpacetimeDriver::connect(connection_string).await?),
         Kind::SupabaseMgmt => Arc::new(supabase_mgmt::SupabaseMgmtDriver::connect(connection_string).await?),
+        Kind::Redis => Arc::new(redis::RedisDriver::connect(connection_string).await?),
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }
