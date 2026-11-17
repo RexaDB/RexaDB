@@ -7,7 +7,7 @@ license.workspace = true
 [features]
 default = ["mongodb", "mssql"]
 # MongoDB via the official driver (pure Rust, rustls).
-mongodb = ["dep:mongodb", "dep:bson"]
+mongodb = ["dep:mongodb"]
 # SQL Server via tiberius.
 mssql = ["dep:tiberius", "dep:tokio-util", "dep:chrono"]
 # Embedded DuckDB (compiles the bundled C++ amalgamation — slow, ~1 GB of
@@ -38,7 +38,6 @@ tiberius = { version = "0.12", default-features = false, features = ["tds73", "n
 chrono = { version = "0.4", optional = true }
 tokio-util = { version = "0.7", features = ["compat"], optional = true }
 mongodb = { version = "3", optional = true }
-bson = { version = "2", optional = true }
 duckdb = { version = "1", features = ["bundled"], optional = true }
 
 [dev-dependencies]

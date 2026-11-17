@@ -49,8 +49,8 @@ mod clickhouse;
 // mod duckdb;
 // mod federated;
 mod jdbc;
-// #[cfg(feature = "mongodb")]
-// mod mongo;
+#[cfg(feature = "mongodb")]
+mod mongo;
 #[cfg(feature = "mssql")]
 mod mssql;
 mod mysql;
@@ -65,6 +65,12 @@ mod supabase_mgmt;
 mod trino;
 
 pub use catalog::*;
+pub use detect::{database_name, mongo_database};
+pub use jdbc::{build_jdbc_connection_string, parse_jdbc_connection_string, JdbcConfig};
+pub use oracle::{build_net_connect_string as oracle_net_connect_string, build_oracle_connection_string, parse_oracle_connection_string, OracleParts};
+pub use redis::{format_ttl_human, key_command as redis_key_command, split_args as redis_split_args};
+pub use sqlite::SqliteDriver;
+pub use supabase_mgmt::build_connection_string as build_supabase_mgmt_connection_string;
 pub use detect::{detect_provider, Provider};
 pub use dialect::Dialect;
 pub use grid::{FilterOperator, FilterRule, SortConfig, SortDirection, TableFilter, TableQuery};
@@ -748,6 +754,8 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::Oracle => Arc::new(oracle::OracleDriver::connect(connection_string).await?),
         #[cfg(feature = "mssql")]
         Kind::MsSql => Arc::new(mssql::MsSqlDriver::connect(connection_string).await?),
+        #[cfg(feature = "mongodb")]
+        Kind::MongoDb => Arc::new(mongo::MongoDriver::connect(connection_string).await?),
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }

@@ -6485,7 +6485,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
- "bson",
  "chrono",
  "dirs 6.0.0",
  "duckdb",
