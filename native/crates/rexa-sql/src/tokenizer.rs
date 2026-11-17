@@ -230,7 +230,7 @@ pub fn tokenize(text: &str) -> Vec<(Range<usize>, Token)> {
     let s = text.as_bytes();
     let w = words();
     let mut out: Vec<(Range<usize>, Token)> = Vec::new();
-    let mut push = |range: Range<usize>, tok: Token, out: &mut Vec<(Range<usize>, Token)>| {
+    let push = |range: Range<usize>, tok: Token, out: &mut Vec<(Range<usize>, Token)>| {
         if range.is_empty() {
             return;
         }

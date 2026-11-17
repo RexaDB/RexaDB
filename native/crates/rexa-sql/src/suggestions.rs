@@ -259,7 +259,7 @@ fn alias_map<'a>(before: &str, entries: &'a [SchemaEntry], db: &str) -> Vec<(Str
         format!(r"(?i)\b(?:from|join|update|into)\s+({IDENT})(?:\.({IDENT}))?(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?")
     });
     let mut map: Vec<(String, &SchemaEntry)> = Vec::new();
-    let mut set = |k: String, e: &'a SchemaEntry, map: &mut Vec<(String, &'a SchemaEntry)>| {
+    let set = |k: String, e: &'a SchemaEntry, map: &mut Vec<(String, &'a SchemaEntry)>| {
         if let Some(slot) = map.iter_mut().find(|(key, _)| *key == k) {
             slot.1 = e;
         } else {
