@@ -215,6 +215,32 @@ async fn sqlite_file() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Embedded DuckDB (only with `--features duckdb`).
+#[cfg(feature = "duckdb")]
+#[tokio::test]
+async fn duckdb_embedded() {
+    let d = connect_detect("", "duckdb://:memory:").await.unwrap();
+    assert_eq!(d.kind(), Kind::DuckDb);
+    d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR, at TIMESTAMP, d DATE, x DECIMAL(10,2))", 1).await.unwrap();
+    d.insert_rows(
+        &TableRef::new("main", "t"),
+        &[vec![("id".into(), Value::Int(1)), ("name".into(), "a".into()), ("at".into(), "2024-01-02 03:04:05".into()), ("d".into(), "2024-02-29".into()), ("x".into(), Value::Raw("1.50".into()))]],
+    )
+    .await
+    .unwrap();
+    let r = d.execute("SELECT * FROM t", 10).await.unwrap();
+    assert_eq!(r.columns, vec!["id", "name", "at", "d", "x"]);
+    assert_eq!(r.rows[0][2], Cell::Text("2024-01-02 03:04:05".into()));
+    assert_eq!(r.rows[0][3], Cell::Text("2024-02-29".into()));
+    assert_eq!(r.rows[0][4], Cell::Text("1.50".into()));
+    assert!(d.schemas().await.unwrap().contains(&"main".to_string()));
+    let t = TableRef::new("main", "t");
+    assert_eq!(d.primary_key(&t).await.unwrap(), vec!["id"]);
+    assert_eq!(d.table_structure(&t).await.unwrap().len(), 5);
+    d.update_rows(&t, &[RowUpdate { r#where: vec![("id".into(), Value::Int(1))], set: vec![("name".into(), "b".into())] }]).await.unwrap();
+    assert_eq!(d.delete_rows(&t, &[vec![("id".into(), Value::Int(1))]]).await.unwrap(), 1);
+}
+
 /// JDBC via the Java bridge: needs `REXADB_BRIDGE_JAR` and
 /// `REXA_TEST_PG_JDBC_JAR` (a PostgreSQL JDBC driver jar); talks to the local
 /// `rexa_drivers_test` database.

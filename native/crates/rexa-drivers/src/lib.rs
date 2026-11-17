@@ -47,7 +47,7 @@ mod ssh;
 
 mod clickhouse;
 mod duckdb;
-// mod federated;
+mod federated;
 mod jdbc;
 #[cfg(feature = "mongodb")]
 mod mongo;
@@ -66,6 +66,9 @@ mod trino;
 
 pub use catalog::*;
 pub use detect::{database_name, mongo_database};
+pub use federated::{
+    build_federated_connection_string, parse_federated_connection_string, set_federated_resolver, FederatedSource, ResolvedConnection,
+};
 pub use jdbc::{build_jdbc_connection_string, parse_jdbc_connection_string, JdbcConfig};
 pub use oracle::{build_net_connect_string as oracle_net_connect_string, build_oracle_connection_string, parse_oracle_connection_string, OracleParts};
 pub use redis::{format_ttl_human, key_command as redis_key_command, split_args as redis_split_args};
@@ -757,7 +760,11 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         #[cfg(feature = "mongodb")]
         Kind::MongoDb => Arc::new(mongo::MongoDriver::connect(connection_string).await?),
         Kind::DuckDb => duckdb::open(connection_string).await?,
-        other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
+        Kind::Federated => Arc::new(federated::FederatedDriver::connect(connection_string).await?),
+        #[cfg(not(feature = "mssql"))]
+        Kind::MsSql => bail!("This build of RexaDB was compiled without SQL Server support."),
+        #[cfg(not(feature = "mongodb"))]
+        Kind::MongoDb => bail!("This build of RexaDB was compiled without MongoDB support."),
     })
 }
 
