@@ -6486,6 +6486,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bson",
+ "chrono",
  "dirs 6.0.0",
  "duckdb",
  "futures-util",
@@ -7930,6 +7931,8 @@ dependencies = [
  "pretty-hex",
  "rust_decimal",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]

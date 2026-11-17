@@ -51,8 +51,8 @@ mod clickhouse;
 mod jdbc;
 // #[cfg(feature = "mongodb")]
 // mod mongo;
-// #[cfg(feature = "mssql")]
-// mod mssql;
+#[cfg(feature = "mssql")]
+mod mssql;
 mod mysql;
 mod oracle;
 mod pgcat;
@@ -746,6 +746,8 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
         Kind::Redis => Arc::new(redis::RedisDriver::connect(connection_string).await?),
         Kind::Jdbc => Arc::new(jdbc::JdbcDriver::connect(connection_string).await?),
         Kind::Oracle => Arc::new(oracle::OracleDriver::connect(connection_string).await?),
+        #[cfg(feature = "mssql")]
+        Kind::MsSql => Arc::new(mssql::MsSqlDriver::connect(connection_string).await?),
         other => bail!("`{}` connections are not supported by the native app yet.", other.as_str()),
     })
 }
