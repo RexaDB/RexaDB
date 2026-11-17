@@ -221,15 +221,15 @@ async fn sqlite_file() {
 async fn duckdb_embedded() {
     let d = connect_detect("", "duckdb://:memory:").await.unwrap();
     assert_eq!(d.kind(), Kind::DuckDb);
-    d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR, at TIMESTAMP, d DATE, x DECIMAL(10,2))", 1).await.unwrap();
+    d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR, ts TIMESTAMP, d DATE, x DECIMAL(10,2))", 1).await.unwrap();
     d.insert_rows(
         &TableRef::new("main", "t"),
-        &[vec![("id".into(), Value::Int(1)), ("name".into(), "a".into()), ("at".into(), "2024-01-02 03:04:05".into()), ("d".into(), "2024-02-29".into()), ("x".into(), Value::Raw("1.50".into()))]],
+        &[vec![("id".into(), Value::Int(1)), ("name".into(), "a".into()), ("ts".into(), "2024-01-02 03:04:05".into()), ("d".into(), "2024-02-29".into()), ("x".into(), Value::Raw("1.50".into()))]],
     )
     .await
     .unwrap();
     let r = d.execute("SELECT * FROM t", 10).await.unwrap();
-    assert_eq!(r.columns, vec!["id", "name", "at", "d", "x"]);
+    assert_eq!(r.columns, vec!["id", "name", "ts", "d", "x"]);
     assert_eq!(r.rows[0][2], Cell::Text("2024-01-02 03:04:05".into()));
     assert_eq!(r.rows[0][3], Cell::Text("2024-02-29".into()));
     assert_eq!(r.rows[0][4], Cell::Text("1.50".into()));

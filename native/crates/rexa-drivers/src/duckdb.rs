@@ -136,6 +136,13 @@ mod embedded {
     }
 
     pub(super) fn run(conn: &::duckdb::Connection, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let head = sql.trim_start().trim_start_matches('(').split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        let reads = matches!(head.as_str(), "select" | "with" | "show" | "describe" | "explain" | "pragma" | "from" | "values" | "summarize" | "table" | "call")
+            || sql.to_ascii_lowercase().contains("returning");
+        if !reads {
+            let n = conn.execute(sql, [])?;
+            return Ok(QueryResult { affected: Some(n as u64), ..Default::default() });
+        }
         let mut stmt = conn.prepare(sql)?;
         let mut rows = stmt.query([])?;
         let mut out = QueryResult::default();
