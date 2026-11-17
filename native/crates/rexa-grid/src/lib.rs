@@ -5,6 +5,7 @@
 //! COMMIT_PENDING_CHANGES, OPEN_INSERT_SHEET, TOGGLE_PENDING_CHANGES_PANEL).
 
 pub mod cells;
+mod debug;
 mod editor;
 pub mod filters;
 mod footer;

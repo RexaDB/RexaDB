@@ -2,9 +2,9 @@
 //! `infinite-scrolling-footer.tsx` and `lib/paging.ts#canAdvanceFastPage`.
 
 use crate::view::TableEditor;
-use gpui::{div, prelude::*, px, Context, FontWeight, Window};
+use gpui::{div, prelude::*, px, Context, FontWeight, SharedString, Window};
 use rexa_ui::widgets::InputState;
-use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Select, SelectOption, TextInput, Tw};
+use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, SelectOption, TextInput, Tw};
 
 /// `canAdvanceFastPage`.
 pub fn can_advance_fast_page(page: usize, page_size: usize, record_count: usize, total: Option<u64>) -> bool {
@@ -25,7 +25,7 @@ fn plural(n: u64) -> &'static str {
 impl TableEditor {
     pub(crate) fn render_footer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.infinite() {
-            self.render_infinite_footer(cx).into_any_element()
+            self.render_infinite_footer(window, cx).into_any_element()
         } else {
             self.render_pagination_footer(window, cx).into_any_element()
         }
@@ -87,31 +87,7 @@ impl TableEditor {
                     .child(TextInput::new(&input).h(28.)),
             ),
             None => size_ctl.child(
-                Select::new("page-size")
-                    .small()
-                    .w(px(96.))
-                    .options(self.page_size_options("rows").into_iter().chain([SelectOption::new("custom", "Custom...")]))
-                    .value(Some(self.page_size.to_string()))
-                    .on_change({
-                        let this = cx.entity().downgrade();
-                        move |v, window, cx| {
-                            this.update(cx, |this, cx| {
-                                if v.as_ref() == "custom" {
-                                    let current = this.page_size.to_string();
-                                    let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
-                                    input.update(cx, |s, cx| {
-                                        s.focus(window, cx);
-                                        s.select_all(window, cx);
-                                    });
-                                    this.toolbar.custom_page_size = Some(input);
-                                    cx.notify();
-                                } else if let Ok(n) = v.parse::<usize>() {
-                                    this.set_page_size(n, cx);
-                                }
-                            })
-                            .ok();
-                        }
-                    }),
+                self.page_size_menu("page-size", "rows", Some(96.), true, false, window, cx),
             ),
         };
         let icon_btn = |id: &'static str, icon: IconName, disabled: bool| {
@@ -161,6 +137,69 @@ impl TableEditor {
             )
     }
 
+    /// shadcn `SelectTrigger` (`h-7 rounded border-border/70 bg-background text-xs`) + its list.
+    #[allow(clippy::too_many_arguments)]
+    fn page_size_menu(&mut self, id: &'static str, suffix: &'static str, w: Option<f32>, custom: bool, disabled: bool, _window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let t = cx.tokens().clone();
+        let options = self.page_size_options(suffix);
+        let current = self.page_size;
+        let this = cx.entity().downgrade();
+        let trigger = div()
+            .id(SharedString::from(format!("{id}-trigger")))
+            .h_7()
+            .when_some(w, |d, w| d.w(px(w)))
+            .px_2()
+            .gap_1()
+            .flex()
+            .items_center()
+            .justify_between()
+            .rounded(px(4.))
+            .border_1()
+            .border_color(rexa_ui::with_alpha(t.border, 0.7))
+            .bg(t.background)
+            .tw_text_xs()
+            .whitespace_nowrap()
+            .when(disabled, |d| d.opacity(0.5))
+            .child(format!("{current} {suffix}"))
+            .child(gpui_component::Icon::new(IconName::ChevronDown).size_4().text_color(rexa_ui::with_alpha(t.muted_foreground, 0.5)));
+        if disabled {
+            return trigger.into_any_element();
+        }
+        rexa_ui::DropdownMenu::new(id)
+            .side(rexa_ui::Side::Top)
+            .align(rexa_ui::Align::Start)
+            .trigger(trigger)
+            .menu(move |m, _, _| {
+                let mut m = m;
+                for o in &options {
+                    let (this, v) = (this.clone(), o.value.clone());
+                    m = m.item(rexa_ui::MenuItem::radio(o.label.clone(), o.value.as_ref() == current.to_string()).text_xs().on_select(move |_, cx| {
+                        if let Ok(n) = v.parse::<usize>() {
+                            this.update(cx, |this, cx| this.set_page_size(n, cx)).ok();
+                        }
+                    }));
+                }
+                if custom {
+                    let this = this.clone();
+                    m = m.item(rexa_ui::MenuItem::new("Custom...").text_xs().on_select(move |window, cx| {
+                        this.update(cx, |this, cx| {
+                            let current = this.page_size.to_string();
+                            let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+                            input.update(cx, |s, cx| {
+                                s.focus(window, cx);
+                                s.select_all(window, cx);
+                            });
+                            this.toolbar.custom_page_size = Some(input);
+                            cx.notify();
+                        })
+                        .ok();
+                    }));
+                }
+                m
+            })
+            .into_any_element()
+    }
+
     fn submit_custom_page_size(&mut self, cx: &mut gpui::Context<Self>) {
         if let Some(input) = self.toolbar.custom_page_size.take() {
             if let Ok(n) = input.read(cx).value().trim().parse::<usize>() {
@@ -172,7 +211,7 @@ impl TableEditor {
         cx.notify();
     }
 
-    fn render_infinite_footer(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_infinite_footer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.tokens().clone();
         let records = self.data.as_ref().map_or(0, |d| d.rows.len());
         let status = if self.loading {
@@ -210,19 +249,7 @@ impl TableEditor {
                         Some(c) => format!("{records} of {c} rows loaded"),
                     }))
                     .child(
-                        Select::new("batch-size")
-                            .small()
-                            .options(self.page_size_options("rows per batch"))
-                            .value(Some(self.page_size.to_string()))
-                            .disabled(busy)
-                            .on_change({
-                                let this = cx.entity().downgrade();
-                                move |v, _, cx| {
-                                    if let Ok(n) = v.parse::<usize>() {
-                                        this.update(cx, |this, cx| this.set_page_size(n, cx)).ok();
-                                    }
-                                }
-                            }),
+                        self.page_size_menu("batch-size", "rows per batch", None, false, busy, window, cx),
                     ),
             )
             .child(

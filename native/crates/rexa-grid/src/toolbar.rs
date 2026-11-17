@@ -206,7 +206,7 @@ impl TableEditor {
     }
 
     /// `prepareDialog`.
-    fn open_filter_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_filter_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.toolbar.filter_panel.take().is_some() {
             cx.notify();
             return;
@@ -296,7 +296,7 @@ impl TableEditor {
 
     // ---- sort panel -------------------------------------------------------------------------------
 
-    fn open_sort_panel(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_sort_panel(&mut self, cx: &mut Context<Self>) {
         if self.toolbar.sort_panel.take().is_some() {
             cx.notify();
             return;

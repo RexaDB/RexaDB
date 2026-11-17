@@ -730,7 +730,7 @@ impl TableEditor {
     }
 
     /// Header chevron menu (`onHeaderClicked` menu zone).
-    fn open_header_menu(&mut self, ix: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(crate) fn open_header_menu(&mut self, ix: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
         let col = self.data.as_ref().unwrap().columns[ix].clone();
         let dt = if col.data_type.is_empty() { "text".to_string() } else { col.data_type.clone() };
         let (asc, desc) = cells::sort_labels(&dt);
@@ -751,7 +751,7 @@ impl TableEditor {
     }
 
     /// `onCellContextMenu`.
-    fn open_cell_menu(&mut self, vc: usize, row: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(crate) fn open_cell_menu(&mut self, vc: usize, row: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
         let vis = self.visible_columns();
         let Some(&ix) = vis.get(vc) else { return };
         // Right-click selects the cell unless it is inside the current selection.
@@ -1077,6 +1077,7 @@ impl TableEditor {
                         selected,
                         pending,
                         pending_delete,
+                        row_selected: self.selected_rows.contains(&r),
                         bold: col.is_pk,
                         fk_button: col.is_fk && value.is_some(),
                         fk_hovered: self.grid.hover_fk_button == Some((vi, r)),
@@ -1151,6 +1152,7 @@ struct FrameCell {
     selected: bool,
     pending: bool,
     pending_delete: bool,
+    row_selected: bool,
     search_match: bool,
     bold: bool,
     fk_button: bool,
@@ -1368,9 +1370,11 @@ fn paint_frame(f: &Frame, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut 
 fn paint_cell(c: &FrameCell, cell: Bounds<Pixels>, th: &GridTheme, _dark: bool, window: &mut Window, cx: &mut App) {
     let (x, y, w, h) = (f32::from(cell.origin.x), f32::from(cell.origin.y), f32::from(cell.size.width), f32::from(cell.size.height));
     // Background layers (row hover < column hover < cell hover < search < pending).
-    if c.selected {
+    if c.selected || c.row_selected {
+        // Glide tints the cells of checked rows with accentLight too.
         window.paint_quad(fill(cell, th.selection));
-    } else {
+    }
+    if !c.selected {
         if c.row_hovered {
             window.paint_quad(fill(cell, th.row_hover));
         }

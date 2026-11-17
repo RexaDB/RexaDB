@@ -175,6 +175,7 @@ pub struct TableEditor {
     pub(crate) fk_preview: Option<crate::sheets::FkPreview>,
     pub(crate) auto_refresh_ms: u64,
     auto_refresh_task: Option<Task<()>>,
+    debug_ran: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -235,6 +236,7 @@ impl TableEditor {
             fk_preview: None,
             auto_refresh_ms: 0,
             auto_refresh_task: None,
+            debug_ran: false,
             session,
             _subs: subs,
         };
@@ -1351,6 +1353,10 @@ impl Render for TableEditor {
         let t = cx.tokens().clone();
         let show_banner = self.settings.show_pending_changes_banner && (self.pending_count() > 0 || !self.pending_actions.is_empty());
         let loading = self.loading || self.fetching_structure;
+        if !self.debug_ran && self.data.is_some() && !loading {
+            self.debug_ran = true;
+            cx.defer_in(window, |this, window, cx| this.run_debug_commands(window, cx));
+        }
         div()
             .relative()
             .flex_1()
