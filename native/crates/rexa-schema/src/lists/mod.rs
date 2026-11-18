@@ -7,6 +7,7 @@ pub mod catalog_list;
 pub mod enums;
 pub mod extensions;
 pub mod indexes;
+pub mod triggers;
 
 use crate::common;
 use crate::data_table::TableState;
@@ -159,6 +160,7 @@ pub fn build(
             };
             cx.new(|cx| CatalogList::new(k, spec, session, schema, window, cx)).into()
         }
+        "triggers" => cx.new(|cx| triggers::TriggersList::new(spec, session, schema, window, cx)).into(),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })
