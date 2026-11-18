@@ -3,6 +3,7 @@
 //! schema filter (`selectedSchema`), the search box, sort/page state, and
 //! reloads on `SchemaChanged` / `REFRESH_CURRENT_TAB`.
 
+pub mod catalog_list;
 pub mod enums;
 pub mod extensions;
 pub mod indexes;
@@ -147,6 +148,17 @@ pub fn build(
     Some(match view {
         "indexes" => cx.new(|cx| indexes::IndexesList::new(spec, session, schema, window, cx)).into(),
         "extensions" => cx.new(|cx| extensions::ExtensionsList::new(spec, session, schema, window, cx)).into(),
+        "packages" | "sequences" | "synonyms" | "db-links" | "materialized-views" => {
+            use catalog_list::{CatalogKind as K, CatalogList};
+            let k = match view {
+                "packages" => K::Packages,
+                "sequences" => K::Sequences,
+                "synonyms" => K::Synonyms,
+                "db-links" => K::DbLinks,
+                _ => K::MaterializedViews,
+            };
+            cx.new(|cx| CatalogList::new(k, spec, session, schema, window, cx)).into()
+        }
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })
