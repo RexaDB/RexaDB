@@ -7,6 +7,7 @@
 //! - [`Sessions`]: open database connections, shared by every studio tab.
 
 pub mod runtime;
+pub mod update;
 
 use anyhow::Result;
 use gpui::{AnyView, App, AppContext, Context, Entity, EventEmitter, Global, Window};

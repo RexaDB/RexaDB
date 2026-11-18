@@ -36,7 +36,7 @@ impl Render for AppRoot {
             .size_full()
             .bg(t.studio_bg)
             .text_color(t.foreground)
-            .font_family(rexa_ui::SANS)
+            .font_family(rexa_ui::app_font::family(cx))
             .children(self.view.clone())
             .when(self.view.is_none(), |el| {
                 el.flex().items_center().justify_center().child(format!("No screen registered for {:?}", self.route))

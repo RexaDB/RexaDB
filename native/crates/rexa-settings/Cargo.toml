@@ -16,3 +16,9 @@ rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+
+[dev-dependencies]
+rusqlite = { workspace = true }

@@ -4,6 +4,7 @@
 mod connection_writes;
 mod credentials;
 mod paths;
+mod settings_admin;
 mod webstore;
 
 pub use connection_writes::{

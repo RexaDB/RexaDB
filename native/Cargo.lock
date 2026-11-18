@@ -6583,16 +6583,20 @@ name = "rexa-settings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs 6.0.0",
  "gpui-component",
  "gpui-pre",
+ "reqwest",
  "rexa-core",
  "rexa-drivers",
  "rexa-store",
  "rexa-ui",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]

@@ -74,23 +74,9 @@ impl Render for DraggedConnection {
     }
 }
 
-/// `ConnectionsUpdatePill` input (useAppUpdateContext). The native app has no
-/// updater wired yet, so this stays disabled and the pill renders nothing.
-#[derive(Clone, Default)]
-pub struct UpdateState {
-    pub enabled: bool,
-    pub checking: bool,
-    pub downloading: bool,
-    pub update_available: bool,
-    pub update_downloaded: bool,
-    pub latest_version: Option<String>,
-    pub progress_percent: Option<u32>,
-    pub nix: bool,
-    pub dismissed: bool,
-    pub updates_expired: bool,
-}
-
-impl gpui::Global for UpdateState {}
+/// `ConnectionsUpdatePill` input (useAppUpdateContext). Lives in rexa-core so
+/// the update checker in rexa-settings can set it.
+pub use rexa_core::update::UpdateState;
 
 pub struct ConnectionsScreen {
     pub(crate) focus: FocusHandle,

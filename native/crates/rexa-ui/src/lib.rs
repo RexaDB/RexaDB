@@ -3,6 +3,7 @@
 //! from these (plus raw `div()` styled with tokens), never from
 //! gpui-component directly, so the look stays consistent and fixable in one place.
 
+pub mod app_font;
 pub mod assets;
 pub mod badge;
 pub mod button;
