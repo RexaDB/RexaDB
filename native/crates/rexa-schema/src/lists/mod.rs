@@ -6,6 +6,7 @@
 pub mod catalog_list;
 pub mod enums;
 pub mod extensions;
+pub mod functions;
 pub mod indexes;
 pub mod triggers;
 
@@ -161,6 +162,7 @@ pub fn build(
             cx.new(|cx| CatalogList::new(k, spec, session, schema, window, cx)).into()
         }
         "triggers" => cx.new(|cx| triggers::TriggersList::new(spec, session, schema, window, cx)).into(),
+        "functions" => cx.new(|cx| functions::FunctionsList::new(spec, session, schema, window, cx)).into(),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })
