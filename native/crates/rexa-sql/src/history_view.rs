@@ -610,7 +610,9 @@ mod tests {
 
     #[test]
     fn table_names() {
-        assert_eq!(extract_table_name("SELECT * FROM \"public\".\"users\" LIMIT 1"), "public.users");
+        // Same as the TS regex: a quoted segment stops at its closing quote.
+        assert_eq!(extract_table_name("SELECT * FROM \"public\".\"users\" LIMIT 1"), "public");
+        assert_eq!(extract_table_name("select * from public.users"), "public.users");
         assert_eq!(extract_table_name("update accounts set x = 1"), "accounts");
         assert_eq!(extract_table_name("select 1"), "-");
     }
