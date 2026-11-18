@@ -553,12 +553,24 @@ impl SqlEditor {
                     this.loading = false;
                     this.active_query_id = None;
                     this._tick = None;
+                    this.maybe_request_approval(cx);
                     cx.notify();
                 }
             })
             .ok();
         })
         .detach();
+    }
+
+    /// sql-editor.tsx's approval effect: a "Read & Request" error on a
+    /// workspace connection opens `RequestQueryApprovalDialog` with the query.
+    fn maybe_request_approval(&mut self, cx: &mut Context<Self>) {
+        let Some(ws) = crate::approval::workspace_connection_id(&self.session.connection.connection_string) else { return };
+        if !self.error.as_deref().is_some_and(crate::approval::is_read_and_request_error) {
+            return;
+        }
+        let name = self.session.connection.connection_string.clone();
+        crate::approval::open_request_approval_dialog(ws, name, self.query.clone(), Vec::new(), cx);
     }
 
     /// Auto-save (`autoSaveQueries`) and schema refresh after DDL.

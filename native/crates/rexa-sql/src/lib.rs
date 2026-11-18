@@ -10,6 +10,7 @@
 //! (`screen:dev-sql:<connection id>`).
 
 pub mod ai;
+pub mod approval;
 pub mod completion;
 mod dev;
 pub mod editor_theme;
