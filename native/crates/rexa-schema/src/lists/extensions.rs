@@ -76,8 +76,9 @@ impl ExtensionsList {
     fn toggle(&mut self, name: String, install: bool, cx: &mut Context<Self>) {
         self.toggling = Some(name.clone());
         cx.notify();
-        let sql = rexa_drivers::ddl::toggle_extension(&name, install);
-        let msg = if install { format!("Extension \"{name}\" installed") } else { format!("Extension \"{name}\" uninstalled") };
+        // handleToggleExtension (no CASCADE, unlike ddl::toggle_extension).
+        let sql = if install { format!("CREATE EXTENSION IF NOT EXISTS {};", actions::dq(&name)) } else { format!("DROP EXTENSION IF EXISTS {};", actions::dq(&name)) };
+        let msg = if install { "Extension installed".to_string() } else { "Extension uninstalled".to_string() };
         let this = cx.entity().downgrade();
         actions::run(&self.base.session, sql, msg, "Failed to toggle extension", cx, move |_, cx| {
             this.update(cx, |v, cx| {

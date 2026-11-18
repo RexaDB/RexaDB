@@ -42,6 +42,10 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
     match spec {
         TabSpec::View { view, params } => {
             let schema = str_param(params, "schema");
+            if view == "rls-policy-edit" {
+                let spec = spec.clone();
+                return Some(cx.new(|cx| lists::rls::RlsPolicyEditorView::new(spec, params, session, window, cx)).into());
+            }
             let v = view.strip_prefix("database-")?;
             lists::build(v, spec, schema, params, session, window, cx)
         }

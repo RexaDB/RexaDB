@@ -9,6 +9,7 @@ pub mod enums;
 pub mod extensions;
 pub mod functions;
 pub mod indexes;
+pub mod rls;
 pub mod triggers;
 
 use crate::common;
@@ -166,6 +167,7 @@ pub fn build(
         "functions" => cx.new(|cx| functions::FunctionsList::new(spec, session, schema, window, cx)).into(),
         "sessions" => cx.new(|cx| activity::ActivityList::new(activity::ActivityKind::Sessions, spec, session, window, cx)).into(),
         "locks" => cx.new(|cx| activity::ActivityList::new(activity::ActivityKind::Locks, spec, session, window, cx)).into(),
+        "rls-policies" => cx.new(|cx| rls::RlsPoliciesList::new(spec, session, schema, window, cx)).into(),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })
