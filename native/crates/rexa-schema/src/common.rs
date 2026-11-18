@@ -306,3 +306,29 @@ pub fn db_type(session: &Session) -> &'static str {
         _ => kind(session).as_str(),
     }
 }
+
+/// `handleTableClick(table, schema)`.
+pub fn open_table(schema: &str, table: &str, cx: &mut App) {
+    rexa_core::open_tab(rexa_core::TabSpec::Table { schema: schema.into(), table: table.into() }, cx);
+}
+
+/// Open a SQL tab with a fixed id/title (the "View definition" actions).
+pub fn open_sql(id: impl Into<String>, title: impl Into<String>, sql: impl Into<String>, cx: &mut App) {
+    rexa_core::open_tab(rexa_core::TabSpec::Query { id: id.into(), title: title.into(), sql: sql.into() }, cx);
+}
+
+/// Like `rexa_ui::popup::bounds_tracker`, but refreshes the window when the
+/// parent's size changes (for layouts computed from the measured width).
+pub fn width_tracker(cell: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>) -> impl IntoElement {
+    gpui::canvas(
+        move |bounds, window, _| {
+            if cell.get().size != bounds.size {
+                window.refresh();
+            }
+            cell.set(bounds);
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0()
+}

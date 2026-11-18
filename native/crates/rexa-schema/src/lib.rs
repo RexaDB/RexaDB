@@ -23,6 +23,7 @@ pub mod common;
 pub mod data_table;
 pub mod lists;
 pub mod prefill;
+pub mod sheet;
 
 
 use gpui::{AnyView, App, AppContext, Window};

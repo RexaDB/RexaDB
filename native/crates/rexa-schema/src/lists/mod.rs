@@ -4,6 +4,8 @@
 //! reloads on `SchemaChanged` / `REFRESH_CURRENT_TAB`.
 
 pub mod enums;
+pub mod extensions;
+pub mod indexes;
 
 use crate::common;
 use crate::data_table::TableState;
@@ -143,6 +145,8 @@ pub fn build(
 ) -> Option<AnyView> {
     let spec = spec.clone();
     Some(match view {
+        "indexes" => cx.new(|cx| indexes::IndexesList::new(spec, session, schema, window, cx)).into(),
+        "extensions" => cx.new(|cx| extensions::ExtensionsList::new(spec, session, schema, window, cx)).into(),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })

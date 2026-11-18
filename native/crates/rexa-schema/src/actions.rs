@@ -29,7 +29,7 @@ pub fn query(session: &Arc<Session>, sql: String) -> impl std::future::Future<Ou
     runtime::spawn(async move { d.execute(&sql, rexa_drivers::DEFAULT_ROW_LIMIT).await })
 }
 
-/// `runCreateAction`: run, toast success (or error), then `on_success`.
+/// `runCreateAction`: run, toast success (skipped when empty) or the error, then `on_done`.
 pub fn run(
     session: &Arc<Session>,
     sql: String,
@@ -44,7 +44,9 @@ pub fn run(
         let ok = r.is_ok();
         cx.update(|cx| match r {
             Ok(()) => {
-                Toast::success(success).show(cx);
+                if !success.is_empty() {
+                    Toast::success(success).show(cx);
+                }
                 emit_studio(StudioEvent::SchemaChanged, cx);
             }
             Err(e) => {
