@@ -18,9 +18,11 @@ pub mod keybindings;
 pub mod mcp;
 pub mod model;
 pub mod persist;
+pub mod profile;
 pub mod rows;
 pub mod search;
 pub mod security;
+pub mod startup;
 pub mod theme_creator;
 pub mod theme_util;
 pub mod themes;
@@ -44,18 +46,22 @@ pub fn init(cx: &mut App) {
     model::apply_app_font(&font, cx);
     app_icon::apply_saved();
     update::init(cx);
+    startup::init(cx);
 
     Registry::tab(cx, "rexa-settings", |spec, _session, window, cx| match spec {
         // "profile" / "agent" sections map to their pages; everything else is a settings section.
         TabSpec::Settings { section } => Some(match section.as_str() {
             "keybindings" => view::build("keybindings", window, cx).into(),
             "agent" => view::build("ai", window, cx).into(),
+            "profile" => cx.new(|_| profile::ProfileSettingsView::new(false)).into(),
             s => view::build(s, window, cx).into(),
         }),
         _ => None,
     });
     Registry::screen(cx, "rexa-settings", |route, window, cx| match route {
         Route::ConnectionScreen(s) if s == "settings" => Some(cx.new(|cx| screen::SettingsScreen::new(window, cx)).into()),
+        Route::ConnectionScreen(s) if s == "profile" => Some(cx.new(|_| profile::ProfileSettingsView::new(true)).into()),
+        Route::Auth => Some(cx.new(|cx| profile::AuthPage::new(window, cx)).into()),
         _ => None,
     });
 }

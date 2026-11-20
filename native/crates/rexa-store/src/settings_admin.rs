@@ -27,6 +27,19 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// activateLocalUserProfile: clearAllUsers + upsert `{id: "local", name, is_local: 1}`.
+    pub fn activate_local_user(&self, name: &str) -> Result<()> {
+        if !self.has_table("users")? {
+            return Ok(());
+        }
+        self.db.execute("DELETE FROM users", [])?;
+        self.db.execute(
+            "INSERT INTO users (id, email, name, created_at, is_local, supabase_id) VALUES ('local', NULL, ?1, ?2, 1, NULL)",
+            (name, now_millis()),
+        )?;
+        Ok(())
+    }
+
     /// `user_ai_settings.settings_json` for `user_id = 'global'` (getGlobalAiSettings).
     pub fn global_ai_settings_json(&self) -> Result<Option<String>> {
         if !self.has_table("user_ai_settings")? {
