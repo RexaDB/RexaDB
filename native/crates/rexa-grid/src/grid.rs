@@ -324,7 +324,16 @@ impl TableEditor {
             if let Some(ci) = Self::col_at(&g, p.x) {
                 let c = g.cols[ci].clone();
                 let Some(ix) = c.data_ix else {
-                    Rexa::toast_add_column(cx);
+                    // The "+" header: add-column-sheet.tsx (ported in rexa-schema).
+                    let target = rexa_schema::ColumnSheetTarget {
+                        session: self.session.clone(),
+                        schema: self.table.schema.clone(),
+                        table: self.table.name.clone(),
+                    };
+                    let this = cx.entity().downgrade();
+                    rexa_schema::open_add_column_sheet(target, move |cx| {
+                        this.update(cx, |v, cx| v.refresh(cx)).ok();
+                    }, cx);
                     return;
                 };
                 let name = self.data.as_ref().unwrap().columns[ix].name.clone();
@@ -1107,14 +1116,6 @@ impl TableEditor {
             scrollbar_visible,
             dark: cx.tokens().dark,
         }
-    }
-}
-
-/// Placeholder type used to route the add-column click (sheet not ported yet).
-struct Rexa;
-impl Rexa {
-    fn toast_add_column(cx: &mut App) {
-        rexa_ui::Toast::info("Adding columns from the grid isn't available in the native app yet.").show(cx);
     }
 }
 

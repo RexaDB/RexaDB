@@ -14,6 +14,8 @@ gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
 rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
+# open_add_column_sheet (the grid's "+" header).
+rexa-schema = { path = "../rexa-schema" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
