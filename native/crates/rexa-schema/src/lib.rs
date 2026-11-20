@@ -22,6 +22,7 @@ pub mod actions;
 pub mod column_sheet;
 pub mod column_types;
 pub mod common;
+pub mod compare;
 pub mod create;
 pub mod data_table;
 pub mod erd;
@@ -38,6 +39,10 @@ use std::sync::Arc;
 
 pub fn init(cx: &mut App) {
     Registry::tab(cx, "rexa-schema", build_tab);
+    Registry::screen(cx, "rexa-schema", |route, window, cx| match route {
+        rexa_core::Route::ConnectionScreen(s) if s == "compare" => Some(compare::build(window, cx)),
+        _ => None,
+    });
 }
 
 fn str_param(params: &serde_json::Value, key: &str) -> Option<String> {
