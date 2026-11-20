@@ -332,3 +332,16 @@ pub fn width_tracker(cell: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels
     .absolute()
     .inset_0()
 }
+
+/// `uid()`: a short random base-36 id.
+pub fn short_id() -> String {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let mut x = n.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (n >> 29);
+    (0..7)
+        .map(|_| {
+            let c = (x % 36) as u32;
+            x /= 36;
+            std::char::from_digit(c, 36).unwrap_or('0')
+        })
+        .collect()
+}

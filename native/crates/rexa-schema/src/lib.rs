@@ -25,6 +25,7 @@ pub mod common;
 pub mod create;
 pub mod data_table;
 pub mod lists;
+pub mod object_view;
 pub mod prefill;
 pub mod sheet;
 
@@ -46,6 +47,9 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
     match spec {
         TabSpec::View { view, params } => {
             let schema = str_param(params, "schema");
+            if view == "database-object" {
+                return Some(object_view::build(params, window, cx));
+            }
             if view == "rls-policy-edit" {
                 let spec = spec.clone();
                 return Some(cx.new(|cx| lists::rls::RlsPolicyEditorView::new(spec, params, session, window, cx)).into());
