@@ -21,6 +21,7 @@
 pub mod actions;
 pub mod column_sheet;
 pub mod column_types;
+pub mod catalog_view;
 pub mod common;
 pub mod compare;
 pub mod create;

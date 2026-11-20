@@ -169,6 +169,7 @@ pub fn build(
         "locks" => cx.new(|cx| activity::ActivityList::new(activity::ActivityKind::Locks, spec, session, window, cx)).into(),
         "rls-policies" => cx.new(|cx| rls::RlsPoliciesList::new(spec, session, schema, window, cx)).into(),
         "schema" => crate::erd::build(&spec, schema, session, cx),
+        "catalog" => cx.new(|cx| crate::catalog_view::DataCatalogView::new(spec, session, schema, window, cx)).into(),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })

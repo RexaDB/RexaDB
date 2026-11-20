@@ -411,7 +411,7 @@ pub fn build_catalog_entries(tables: &[CatalogSourceTable], scope: &DictionarySc
                         schema: t.schema.clone(),
                         table: t.table.clone(),
                         column: c.column_name.clone(),
-                        data_type: c.display_type().to_string(),
+                        data_type: c.data_type.clone(),
                         is_nullable: c.is_nullable,
                         is_primary: c.is_primary_key,
                         is_foreign_key: c.is_foreign_key,
