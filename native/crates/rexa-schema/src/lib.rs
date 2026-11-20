@@ -19,6 +19,7 @@
 //!   edit/duplicate trigger).
 
 pub mod actions;
+pub mod column_sheet;
 pub mod column_types;
 pub mod common;
 pub mod create;
@@ -27,6 +28,7 @@ pub mod lists;
 pub mod prefill;
 pub mod sheet;
 
+pub use column_sheet::{open_add_column_sheet, open_edit_column_sheet, ColumnSheetTarget};
 
 use gpui::{AnyView, App, AppContext, Window};
 use rexa_core::{Registry, Session, TabSpec};
