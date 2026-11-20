@@ -6536,6 +6536,7 @@ dependencies = [
  "gpui-pre",
  "rexa-core",
  "rexa-drivers",
+ "rexa-schema",
  "rexa-store",
  "rexa-ui",
  "serde",
