@@ -25,6 +25,7 @@ pub mod common;
 pub mod compare;
 pub mod create;
 pub mod data_table;
+pub mod dictionary;
 pub mod erd;
 pub mod lists;
 pub mod object_view;
