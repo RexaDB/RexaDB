@@ -168,6 +168,7 @@ pub fn build(
         "sessions" => cx.new(|cx| activity::ActivityList::new(activity::ActivityKind::Sessions, spec, session, window, cx)).into(),
         "locks" => cx.new(|cx| activity::ActivityList::new(activity::ActivityKind::Locks, spec, session, window, cx)).into(),
         "rls-policies" => cx.new(|cx| rls::RlsPoliciesList::new(spec, session, schema, window, cx)).into(),
+        "schema" => crate::erd::build(&spec, schema, session, cx),
         "enums" => cx.new(|cx| enums::EnumsList::new(spec, session, schema, window, cx)).into(),
         _ => return None,
     })

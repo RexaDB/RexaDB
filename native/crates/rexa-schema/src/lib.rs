@@ -24,6 +24,7 @@ pub mod column_types;
 pub mod common;
 pub mod create;
 pub mod data_table;
+pub mod erd;
 pub mod lists;
 pub mod object_view;
 pub mod prefill;
@@ -57,6 +58,7 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
             let v = view.strip_prefix("database-")?;
             lists::build(v, spec, schema, params, session, window, cx)
         }
+        TabSpec::Erd { schema } => Some(erd::build(spec, Some(schema.clone()), session, cx)),
         TabSpec::Create { object, schema } => create::build(object, schema.clone(), spec, session, window, cx),
         _ => None,
     }
