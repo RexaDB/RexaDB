@@ -112,7 +112,9 @@ pub fn format_ttl_human(seconds: i64) -> String {
 
 /// `getRedisKeyCommand`: the command that shows a key's value.
 pub fn key_command(key: &str, ty: &str) -> String {
-    let k = if key.contains(' ') { format!("\"{}\"", key.replace('"', "\\\"")) } else { key.to_string() };
+    // split_args consumes backslash escapes and both quote styles. Always
+    // quote and escape the key so quotes, slashes and whitespace round-trip.
+    let k = format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"));
     match ty {
         "string" => format!("GET {k}"),
         "hash" => format!("HGETALL {k}"),

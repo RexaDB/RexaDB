@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
 #[derive(Clone)]
-struct Widget { id: String, title: String, sql: String, result: Option<QueryResult>, error: Option<String> }
+struct Widget { id: String, title: String, sql: String, raw: Value, result: Option<QueryResult>, error: Option<String> }
 
 pub struct Dashboard {
     session: Arc<Session>,
@@ -48,7 +48,7 @@ fn parse_widgets(value: &Value) -> Vec<Widget> {
     value.get("widgets").and_then(Value::as_array).into_iter().flatten().map(|w| Widget {
         id: w.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
         title: w.get("title").and_then(Value::as_str).unwrap_or("Query").to_string(),
-        sql: w.get("sql").and_then(Value::as_str).unwrap_or("SELECT 1").to_string(), result: None, error: None,
+        sql: w.get("query").or_else(||w.get("sql")).and_then(Value::as_str).or_else(||w.pointer("/config_json/query").and_then(Value::as_str)).unwrap_or("SELECT 1").to_string(), raw:w.clone(), result: None, error: None,
     }).collect()
 }
 /// Dashboard widgets are read-only. Require exactly one SELECT statement;
@@ -73,19 +73,22 @@ fn validate_read_query(sql:&str)->Result<String,String>{
 }
 impl Dashboard {
     fn new(params: &Value, session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let dashboard_id = params.get("id").and_then(Value::as_str).unwrap_or("dashboard-default").strip_prefix("dashboard-").unwrap_or("dashboard-default").to_string();
+        let raw_id=params.get("baseId").or_else(||params.get("id")).and_then(Value::as_str).unwrap_or("dashboard-default");
+        let raw_id=raw_id.split("::pane::").next().unwrap_or(raw_id);
+        let dashboard_id = raw_id.strip_prefix("dashboard-").unwrap_or(raw_id).to_string();
         let mut all = load_dashboards(session.connection.id);
         let item = all.iter().find(|d| d.get("id").and_then(Value::as_str) == Some(&dashboard_id)).cloned();
         let title_value = item.as_ref().and_then(|d| d.get("name")).and_then(Value::as_str).unwrap_or("Untitled dashboard").to_string();
         let title = cx.new(|cx| InputState::new(window, cx).default_value(title_value));
-        let widget_title = cx.new(|cx| InputState::new(window, cx).placeholder("Widget title"));
-        let widget_sql = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 14).default_value("SELECT 1"));
         let mut widgets = item.as_ref().map(parse_widgets).unwrap_or_default();
+        let first_widget=widgets.first();
+        let widget_title = cx.new(|cx| InputState::new(window, cx).placeholder("Widget title").default_value(first_widget.map(|w|w.title.clone()).unwrap_or_default()));
+        let widget_sql = cx.new(|cx| TextareaState::new(window, cx).auto_grow(4, 14).default_value(first_widget.map(|w|w.sql.clone()).unwrap_or_else(||"SELECT 1".into())));
         if item.is_none() {
             all.push(json!({"id":dashboard_id,"name":"Untitled dashboard","widgets":[]}));
             if let Err(e) = persist(session.connection.id, &all) { eprintln!("Could not create dashboard: {e}"); }
         }
-        if widgets.is_empty() { widgets.push(Widget { id: "welcome".into(), title: "Welcome".into(), sql: "SELECT 1".into(), result: None, error: None }); }
+        if widgets.is_empty() { widgets.push(Widget { id: "welcome".into(), title: "Welcome".into(), sql: "SELECT 1".into(), raw:Value::Null, result: None, error: None }); }
         let title_sub = cx.subscribe(&title, |this, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { this.save(cx); });
         let sql_sub = cx.subscribe(&widget_sql, |_this, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); });
         let mut this = Self { session, dashboard_id, title, widgets, selected: Some(0), widget_title, widget_sql, busy: false, message: None, load_task: None, _subs: vec![title_sub, sql_sub] };
@@ -94,10 +97,16 @@ impl Dashboard {
     }
     fn save(&mut self, cx: &mut Context<Self>) {
         let name = self.title.read(cx).value().trim().to_string();
-        let widgets: Vec<Value> = self.widgets.iter().filter(|w| w.id != "welcome").map(|w| json!({"id":w.id,"title":w.title,"sql":w.sql})).collect();
+        let widgets: Vec<Value> = self.widgets.iter().filter(|w| w.id != "welcome").map(|w| {
+            let mut raw=w.raw.as_object().cloned().unwrap_or_default();
+            raw.insert("id".into(),Value::String(w.id.clone()));raw.insert("title".into(),Value::String(w.title.clone()));
+            raw.insert("query".into(),Value::String(w.sql.clone()));Value::Object(raw)
+        }).collect();
         let mut all = load_dashboards(self.session.connection.id);
-        let value = json!({"id":self.dashboard_id,"name":if name.is_empty(){"Untitled dashboard"}else{&name},"widgets":widgets});
-        if let Some(existing) = all.iter_mut().find(|d| d.get("id").and_then(Value::as_str) == Some(&self.dashboard_id)) { *existing = value; } else { all.push(value); }
+        let id=self.dashboard_id.clone();
+        if let Some(existing) = all.iter_mut().find(|d| d.get("id").and_then(Value::as_str)==Some(&self.dashboard_id)) {
+            if let Some(object)=existing.as_object_mut(){object.insert("name".into(),Value::String(if name.is_empty(){"Untitled dashboard".into()}else{name}));object.insert("widgets".into(),Value::Array(widgets));}
+        } else { all.push(json!({"id":id,"name":if name.is_empty(){"Untitled dashboard".into()}else{name},"folderId":null,"widgets":widgets})); }
         self.message = persist(self.session.connection.id, &all).err().map(|e| format!("Save failed: {e}")).or(Some("Saved".into()));
         cx.notify();
     }
@@ -108,7 +117,7 @@ impl Dashboard {
         self.busy = true; self.widgets[index].error = None; self.message = None;
         let driver = self.session.driver.clone();
         self.load_task = Some(cx.spawn(async move |this, cx| {
-            let result = runtime::spawn(async move { driver.execute(&sql, DEFAULT_ROW_LIMIT).await }).await;
+            let result = runtime::spawn(async move { driver.execute_readonly(&sql, DEFAULT_ROW_LIMIT).await }).await;
             this.update(cx, |this, cx| {
                 if let Some(i) = this.selected { if let Some(w) = this.widgets.get_mut(i) { match result { Ok(result) => { w.result = Some(result); w.error = None; }, Err(e) => { w.error = Some(format!("Query failed: {e}")); w.result = None; } } } }
                 this.busy = false; cx.notify();
@@ -127,7 +136,8 @@ impl Dashboard {
         let title = self.widget_title.read(cx).value().trim().to_string();
         let sql = match validate_read_query(&self.widget_sql.read(cx).value()) { Ok(s)=>s, Err(e)=>{self.message=Some(e);cx.notify();return;} };
         let id = format!("widget-{}", timestamp());
-        self.widgets.push(Widget { id, title: if title.is_empty() { "Query".into() } else { title }, sql, result: None, error: None });
+        let title=if title.is_empty(){"Query".into()}else{title};
+        self.widgets.push(Widget { id:id.clone(), title:title.clone(), sql:sql.clone(), raw:json!({"id":id,"widgetType":"query","title":title,"query":sql,"x":0,"y":0,"width":8,"height":6}), result: None, error: None });
         self.selected = Some(self.widgets.len()-1); self.save(cx); self.load_selected(cx); cx.notify();
     }
     fn run(&mut self, cx: &mut Context<Self>) {

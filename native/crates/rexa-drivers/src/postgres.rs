@@ -281,6 +281,14 @@ impl Driver for PostgresDriver {
         self.run_on(&c, sql, row_limit).await
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let c=self.conn().await?;
+        c.batch_execute("BEGIN TRANSACTION READ ONLY").await.map_err(describe)?;
+        let result=self.run_on(&c,sql,row_limit).await;
+        let rollback=c.batch_execute("ROLLBACK").await.map_err(describe);
+        match (result,rollback){(Ok(value),Ok(()))=>Ok(value),(Err(error),_)=>Err(error),(Ok(_),Err(error))=>Err(error)}
+    }
+
     async fn execute_script(&self, sql: &str, row_limit: usize) -> Result<ScriptResult> {
         let started = Instant::now();
         let c = self.conn().await?;

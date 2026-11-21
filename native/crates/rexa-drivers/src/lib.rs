@@ -436,6 +436,12 @@ pub trait Driver: Send + Sync {
     /// Run one or more statements; the last statement's result set is returned.
     async fn execute(&self, sql: &str, row_limit: usize) -> Result<QueryResult>;
 
+    /// Execute one statement inside an engine-enforced read-only context.
+    /// Drivers without a safe implementation fail closed.
+    async fn execute_readonly(&self, _sql: &str, _row_limit: usize) -> Result<QueryResult> {
+        bail!("This database driver does not support enforced read-only queries.")
+    }
+
     /// Run a script and return every statement's result (stops at the first
     /// error, which is reported in [`ScriptResult::error`]).
     async fn execute_script(&self, sql: &str, row_limit: usize) -> Result<ScriptResult> {

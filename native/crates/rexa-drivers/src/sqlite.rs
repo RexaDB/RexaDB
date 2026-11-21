@@ -490,6 +490,20 @@ impl Driver for SqliteDriver {
         Ok(r)
     }
 
+    async fn execute_readonly(&self, sql:&str,row_limit:usize)->Result<QueryResult>{
+        let sql=sql.to_string();
+        self.blocking(move|c|{
+            if let Err(error)=c.execute_batch("PRAGMA query_only = ON; BEGIN") {
+                let _=c.execute_batch("PRAGMA query_only = OFF");
+                return Err(error.into());
+            }
+            let result=assert_supported(&sql).and_then(|_|run_all(c,&sql,row_limit).map(|mut r|r.pop().unwrap_or_default()));
+            let rollback=c.execute_batch("ROLLBACK");
+            let restore=c.execute_batch("PRAGMA query_only = OFF");
+            match (result,rollback,restore){(Ok(value),Ok(()),Ok(()))=>Ok(value),(Err(error),_,_)=>Err(error),(Ok(_),Err(error),_)=>Err(error.into()),(Ok(_),Ok(()),Err(error))=>Err(error.into())}
+        }).await
+    }
+
     async fn execute_script(&self, sql: &str, row_limit: usize) -> Result<ScriptResult> {
         let stmts = split::split_statements(sql, Dialect::Sqlite);
         let started = Instant::now();

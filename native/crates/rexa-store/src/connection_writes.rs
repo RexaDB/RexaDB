@@ -753,6 +753,7 @@ const SECRET_KEYS: &[&str] = &[
     "access_token", "access-token", "refreshtoken", "refresh_token", "refresh-token", "apikey", "api_key",
     "api-key", "apitoken", "api_token", "api-token", "secret", "clientsecret", "client_secret",
     "client-secret", "privatekey", "private_key", "private-key", "bearer", "credential",
+    "rexadb_ssh_password", "rexadb_ssh_private_key",
 ];
 
 fn is_secret_key(key: &str) -> bool {

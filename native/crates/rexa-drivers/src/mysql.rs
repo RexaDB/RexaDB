@@ -266,6 +266,14 @@ impl Driver for MySqlDriver {
         Ok(r)
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let mut conn=self.pool.get_conn().await?;
+        conn.query_drop("START TRANSACTION READ ONLY").await?;
+        let result=run(&mut conn,sql,row_limit).await;
+        let rollback=conn.query_drop("ROLLBACK").await;
+        match (result,rollback){(Ok(mut values),Ok(()))=>Ok(values.pop().unwrap_or_default()),(Err(error),_)=>Err(error.into()),(Ok(_),Err(error))=>Err(error.into())}
+    }
+
     async fn execute_script(&self, sql: &str, row_limit: usize) -> Result<ScriptResult> {
         let started = Instant::now();
         let mut conn = self.pool.get_conn().await?;

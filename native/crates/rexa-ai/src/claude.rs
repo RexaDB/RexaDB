@@ -74,7 +74,7 @@ pub async fn complete(
     let status = response.status();
     let payload: serde_json::Value = response.json().await.context("Anthropic returned an invalid response")?;
     if !status.is_success() {
-        let message = payload.pointer("error.message").and_then(serde_json::Value::as_str).unwrap_or("request failed");
+        let message = payload.pointer("/error/message").and_then(serde_json::Value::as_str).unwrap_or("request failed");
         bail!("Anthropic API returned HTTP {status}: {message}");
     }
     let text = payload.get("content").and_then(serde_json::Value::as_array).into_iter().flatten()
@@ -84,7 +84,7 @@ pub async fn complete(
     Ok(Completion {
         text,
         stop_reason: payload.get("stop_reason").and_then(serde_json::Value::as_str).map(str::to_string),
-        input_tokens: payload.pointer("usage.input_tokens").and_then(serde_json::Value::as_u64),
-        output_tokens: payload.pointer("usage.output_tokens").and_then(serde_json::Value::as_u64),
+        input_tokens: payload.pointer("/usage/input_tokens").and_then(serde_json::Value::as_u64),
+        output_tokens: payload.pointer("/usage/output_tokens").and_then(serde_json::Value::as_u64),
     })
 }

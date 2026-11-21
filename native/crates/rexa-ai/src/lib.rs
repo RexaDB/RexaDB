@@ -88,7 +88,7 @@ impl Render for AiThreads {
                 .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("AI threads"))
                 .child(div().flex().gap_1()
                     .child(Button::new("ai-thread-refresh").outline().size(ButtonSize::Sm).icon(IconName::RefreshCw).on_click(cx.listener(|this,_,_,cx|this.reload(cx))))
-                    .child(Button::new("ai-thread-new").size(ButtonSize::Sm).icon(IconName::Plus).label("New").on_click(move|_,_,cx|rexa_core::open_tab(TabSpec::View{view:"ai-chat".into(),params:serde_json::json!({"connectionId":connection_id,"chatId":format!("chat-{}",now_ms())})},cx)))))
+                .child(Button::new("ai-thread-new").size(ButtonSize::Sm).icon(IconName::Plus).label("New").on_click(move|_,_,cx|{let chat_id=format!("chat-{}",now_ms());rexa_core::open_tab(TabSpec::View{view:"ai-chat".into(),params:serde_json::json!({"id":format!("ai-chat-{chat_id}"),"connectionId":connection_id,"chatId":chat_id})},cx)}))))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().flex().flex_col().gap_1().p_2()
                 .when(self.chats.is_empty(),|el|el.child(div().tw_text_sm().text_color(t.muted_foreground).child("No saved conversations yet.")))
                 .children(self.chats.iter().filter_map(|chat|{
@@ -96,7 +96,7 @@ impl Render for AiThreads {
                     let title=chat.get("title").and_then(Value::as_str).unwrap_or("Chat").to_string();
                     let id_for_click=id.clone();
                     Some(div().flex().gap_1()
-                        .child(Button::new(format!("ai-thread-{id}")).outline().size(ButtonSize::Sm).w_full().label(title).on_click(move|_,_,cx|rexa_core::open_tab(TabSpec::View{view:"ai-chat".into(),params:serde_json::json!({"connectionId":connection_id,"chatId":id_for_click})},cx)))
+                        .child(Button::new(format!("ai-thread-{id}")).outline().size(ButtonSize::Sm).w_full().label(title).on_click(move|_,_,cx|rexa_core::open_tab(TabSpec::View{view:"ai-chat".into(),params:serde_json::json!({"id":format!("ai-chat-{id_for_click}"),"connectionId":connection_id,"chatId":id_for_click})},cx)))
                         .child(Button::new(format!("ai-thread-delete-{id}")).ghost().size(ButtonSize::IconSm).icon(IconName::Trash).on_click(cx.listener(move|this,_,_,cx|this.delete(&id,cx)))))
                 })))
     }
@@ -105,9 +105,9 @@ impl Render for AiThreads {
 impl AiChat {
     fn new(params: &Value, session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let connection_id=session.connection.id;
-        let requested=params.get("chatId").and_then(Value::as_str).or_else(||params.get("id").and_then(Value::as_str));
-        let loaded=requested.and_then(|id|read_chat(connection_id,id).map(|chat|(id.to_string(),chat))).or_else(||most_recent_chat(connection_id));
-        let (chat_id,chat_title,created_at,messages)=loaded.map(|(id,c)|(id,c.title,c.created_at,c.messages)).unwrap_or_else(||(format!("chat-{}",now_ms()),"New chat".into(),now_ms(),Vec::new()));
+        let requested=params.get("chatId").and_then(Value::as_str).or_else(||params.get("id").and_then(Value::as_str).map(|id|id.strip_prefix("ai-chat-").unwrap_or(id)));
+        let loaded=match requested {Some(id)=>read_chat(connection_id,id).map(|chat|(id.to_string(),chat)),None=>most_recent_chat(connection_id)};
+        let (chat_id,chat_title,created_at,messages)=loaded.map(|(id,c)|(id,c.title,c.created_at,c.messages)).unwrap_or_else(||(requested.map(str::to_string).unwrap_or_else(||format!("chat-{}",now_ms())),"New chat".into(),now_ms(),Vec::new()));
         let draft = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8).placeholder("Ask about your database…"));
         let sub = cx.subscribe(&draft, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); });
         Self { _session: session, connection_id, chat_id, chat_title, created_at, messages, draft, busy: false, error: None, task: None, _subs: vec![sub] }
@@ -129,6 +129,7 @@ impl AiChat {
         self.draft.update(cx, |s, cx| s.set_value("", window, cx));
         self.busy = true; self.error = None;
         let history: Vec<Message> = self.messages.iter().map(|m| Message { role: m.role.clone(), content: m.content.clone() }).collect();
+        let origin_chat_id=self.chat_id.clone();
         let driver=self._session.driver.clone();
         let database=self._session.connection.name.clone();
         let engine=driver.kind().as_str().to_string();
@@ -152,6 +153,7 @@ impl AiChat {
                 claude::complete_configured(Some(&context), &history, 2048).await
             }).await;
             this.update(cx, |this, cx| {
+                if this.chat_id!=origin_chat_id { return; }
                 match result {
                     Ok(completion) if !completion.text.trim().is_empty() => { this.messages.push(Turn { id:format!("message-{}",now_ms()), chat_id:this.chat_id.clone(), role: Role::Assistant, content: completion.text, timestamp: now_ms(), meta_json:None }); this.persist(); },
                     Ok(_) => this.error = Some("Claude returned an empty response.".into()),
@@ -170,7 +172,7 @@ impl Render for AiChat {
         div().size_full().flex().flex_col().bg(t.studio_bg).text_color(t.foreground)
             .child(div().flex().items_center().justify_between().px_4().py_3().border_b_1().border_color(t.border)
                 .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("AI assistant"))
-                .child(Button::new("ai-chat-clear").outline().size(ButtonSize::Sm).label("New chat").on_click(cx.listener(|this, _, _, cx| this.new_chat(cx)))))
+                .child(Button::new("ai-chat-clear").outline().size(ButtonSize::Sm).label("New chat").disabled(self.busy).on_click(cx.listener(|this, _, _, cx| this.new_chat(cx)))))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().flex().flex_col().gap_3().p_4()
                 .when(self.messages.is_empty(), |el| el.child(div().tw_text_sm().text_color(t.muted_foreground).child("Ask a question about SQL, schema design, or database concepts. Configure Anthropic under Settings → AI to get started.")))
                 .children(self.messages.iter().map(|m| {

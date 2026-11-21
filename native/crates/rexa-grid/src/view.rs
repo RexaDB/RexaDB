@@ -54,6 +54,10 @@ fn parse_csv(input: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
     Ok((headers, records.into_iter().skip(1).collect()))
 }
 
+fn has_atomic_transactions(kind:Kind)->bool{
+    matches!(kind,Kind::Postgres|Kind::MySql|Kind::Sqlite|Kind::MsSql|Kind::DuckDb|Kind::SupabaseMgmt)
+}
+
 /// One grid column (a result field joined with its `tableStructure` entry).
 #[derive(Debug, Clone)]
 pub struct GridColumn {
@@ -255,13 +259,12 @@ impl TableEditor {
             Toast::success("Imported rows added to pending changes for review.").show(cx);
             return;
         }
+        if !has_atomic_transactions(self.kind) { Toast::error("CSV import requires a database driver with atomic transactions; no rows were imported.").show(cx); return; }
         let driver = self.driver.clone();
         let table = self.table.clone();
         let count = batch.len();
         let task = runtime::spawn(async move {
-            let mut written = 0;
-            for row in batch.chunks(250) { written += driver.insert_rows(&table, row).await?; }
-            Ok(written)
+            driver.insert_rows(&table, &batch).await
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -1084,7 +1087,11 @@ impl TableEditor {
             Toast::error("Cannot save changes: One or more rows do not have a primary key.").show(cx);
             return;
         }
-        let actions: Vec<String> = self.pending_actions.iter().map(|a| a.sql.clone()).collect();
+        if !has_atomic_transactions(self.kind) {
+            Toast::error("This driver cannot commit review batches atomically; pending changes were kept.").show(cx);
+            return;
+        }
+        let mut statements: Vec<String> = self.pending_actions.iter().map(|a|a.sql.trim().trim_end_matches(';').to_string()).collect();
         let columns = self.data.as_ref().map(|d| d.columns.clone()).unwrap_or_default();
         let updates: Vec<RowUpdate> = self
             .pending
@@ -1100,17 +1107,12 @@ impl TableEditor {
                     .collect(),
             })
             .collect();
+        statements.extend(updates.iter().filter_map(|u|rexa_drivers::grid::build_update_sql(self.kind,&self.table,u)));
         self.committing = true;
         cx.notify();
         let driver = self.driver.clone();
-        let table = self.table.clone();
         let task = runtime::spawn(async move {
-            for sql in &actions {
-                driver.execute(sql, 0).await?;
-            }
-            if !updates.is_empty() {
-                driver.update_rows(&table, &updates).await?;
-            }
+            driver.transaction(&statements).await?;
             anyhow::Ok(())
         });
         cx.spawn(async move |this, cx| {

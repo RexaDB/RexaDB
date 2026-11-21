@@ -27,7 +27,7 @@ fn load_note(connection_id: i64, note_id: &str) -> Option<Value> {
     serde_json::from_str::<Vec<Value>>(&raw).ok()?.into_iter().find(|n| n.get("id").and_then(Value::as_str) == Some(note_id))
 }
 
-fn save_note(connection_id: i64, note_id: &str, fallback_name: &str, name: &str, content: &str) -> rusqlite::Result<()> {
+fn save_note(connection_id: i64, note_id: &str, name: &str, content: &str) -> rusqlite::Result<()> {
     let db = open_db()?;
     let tx = db.unchecked_transaction()?;
     let raw: Option<String> = tx.query_row("SELECT notes_json FROM note_state WHERE connection_id = ?1", [connection_id], |r| r.get(0)).ok();
@@ -40,13 +40,26 @@ fn save_note(connection_id: i64, note_id: &str, fallback_name: &str, name: &str,
             object.insert("updatedAt".into(), Value::from(now));
         }
     } else {
-        notes.push(json!({"id": note_id, "name": if name.trim().is_empty() { fallback_name } else { name.trim() }, "content": content, "folderId": null, "createdAt": now, "updatedAt": now, "widgets": []}));
+        // Autosave and Drop may run after the sidebar deleted this note. Never
+        // turn an update into an implicit resurrection.
+        return tx.commit();
     }
     tx.execute(
         "INSERT INTO note_state(connection_id, notes_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(connection_id) DO UPDATE SET notes_json = excluded.notes_json, updated_at = excluded.updated_at",
         (connection_id, serde_json::to_string(&notes).unwrap_or_else(|_| "[]".into()), now),
     )?;
     tx.commit()
+}
+
+fn create_note(connection_id:i64,note_id:&str,name:&str,content:&str)->rusqlite::Result<()> {
+    let db=open_db()?;let tx=db.unchecked_transaction()?;
+    let raw:Option<String>=tx.query_row("SELECT notes_json FROM note_state WHERE connection_id=?1",[connection_id],|r|r.get(0)).optional()?;
+    let mut notes:Vec<Value>=raw.and_then(|s|serde_json::from_str(&s).ok()).unwrap_or_default();
+    let now=timestamp();
+    if !notes.iter().any(|n|n.get("id").and_then(Value::as_str)==Some(note_id)){
+        notes.push(json!({"id":note_id,"name":if name.trim().is_empty(){"Untitled note"}else{name.trim()},"content":content,"folderId":null,"createdAt":now,"updatedAt":now,"widgets":[]}));
+    }
+    tx.execute("INSERT INTO note_state(connection_id,notes_json,updated_at) VALUES(?1,?2,?3) ON CONFLICT(connection_id) DO UPDATE SET notes_json=excluded.notes_json,updated_at=excluded.updated_at",(connection_id,serde_json::to_string(&notes).unwrap_or_else(|_|"[]".into()),now))?;tx.commit()
 }
 
 pub struct NoteEditor {
@@ -74,7 +87,7 @@ impl NoteEditor {
         let note_name = existing.as_ref().and_then(|n| n.get("name")).and_then(Value::as_str).filter(|n| !n.trim().is_empty()).unwrap_or(&fallback_name).to_string();
         let draft = existing.as_ref().and_then(|n| n.get("content")).and_then(Value::as_str).unwrap_or_default().to_string();
         if existing.is_none() {
-            if let Err(error) = save_note(connection_id, &note_id, &note_name, &note_name, &draft) {
+            if let Err(error) = create_note(connection_id, &note_id, &note_name, &draft) {
                 eprintln!("Could not create note: {error}");
             } else {
                 rexa_core::emit_studio(rexa_core::StudioEvent::NotesChanged { connection_id }, cx);
@@ -105,7 +118,7 @@ impl NoteEditor {
         self.save_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(400)).await;
             this.update(cx, |this, cx| {
-                match save_note(this.connection_id, &this.note_id, &this.note_name, &this.note_name, &this.draft) {
+                match save_note(this.connection_id, &this.note_id, &this.note_name, &this.draft) {
                     Ok(()) => {
                         this.save_error = None;
                         rexa_core::emit_studio(rexa_core::StudioEvent::RenameTab {
@@ -129,7 +142,7 @@ impl NoteEditor {
         let title = self.title.read(cx).value().to_string();
         if !title.trim().is_empty() { self.note_name = title.trim().to_string(); }
         self.saving = false;
-        match save_note(self.connection_id, &self.note_id, &self.note_name, &self.note_name, &self.draft) {
+        match save_note(self.connection_id, &self.note_id, &self.note_name, &self.draft) {
             Ok(()) => {
                 self.save_error = None;
                 rexa_core::emit_studio(rexa_core::StudioEvent::RenameTab {
@@ -156,7 +169,7 @@ impl NoteEditor {
 impl Drop for NoteEditor {
     fn drop(&mut self) {
         // Flush the last edit synchronously before GPUI releases the tab view.
-        let _ = save_note(self.connection_id, &self.note_id, &self.note_name, &self.note_name, &self.draft);
+        let _ = save_note(self.connection_id, &self.note_id, &self.note_name, &self.draft);
     }
 }
 
