@@ -118,9 +118,6 @@ impl AiChat {
         let chat=ChatFile { title:self.chat_title.clone(), created_at:self.created_at, updated_at:now_ms(), messages:self.messages.clone() };
         if let Err(e)=write_chat(self.connection_id,&self.chat_id,&chat) { eprintln!("Could not save AI chat: {e}"); }
     }
-    fn new_chat(&mut self, cx:&mut Context<Self>) {
-        self.messages.clear(); self.chat_id=format!("chat-{}",now_ms()); self.chat_title="New chat".into(); self.created_at=now_ms(); self.error=None; cx.notify();
-    }
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = self.draft.read(cx).value().trim().to_string();
         if prompt.is_empty() || self.busy { return; }
@@ -169,10 +166,11 @@ impl AiChat {
 impl Render for AiChat {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.tokens().clone();
+        let connection_id = self.connection_id;
         div().size_full().flex().flex_col().bg(t.studio_bg).text_color(t.foreground)
             .child(div().flex().items_center().justify_between().px_4().py_3().border_b_1().border_color(t.border)
                 .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("AI assistant"))
-                .child(Button::new("ai-chat-clear").outline().size(ButtonSize::Sm).label("New chat").disabled(self.busy).on_click(cx.listener(|this, _, _, cx| this.new_chat(cx)))))
+                .child(Button::new("ai-chat-clear").outline().size(ButtonSize::Sm).label("New chat").on_click(move|_,_,cx|{let chat_id=format!("chat-{}",now_ms());rexa_core::open_tab(TabSpec::View{view:"ai-chat".into(),params:serde_json::json!({"id":format!("ai-chat-{chat_id}"),"connectionId":connection_id,"chatId":chat_id})},cx)})))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().flex().flex_col().gap_3().p_4()
                 .when(self.messages.is_empty(), |el| el.child(div().tw_text_sm().text_color(t.muted_foreground).child("Ask a question about SQL, schema design, or database concepts. Configure Anthropic under Settings → AI to get started.")))
                 .children(self.messages.iter().map(|m| {

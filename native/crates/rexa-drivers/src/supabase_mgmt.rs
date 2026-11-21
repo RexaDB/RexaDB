@@ -82,6 +82,16 @@ impl Driver for SupabaseMgmtDriver {
         Ok(r)
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let statements = split::split_statements(sql, Dialect::Postgres);
+        if statements.len() != 1 {
+            bail!("Read-only dashboard queries must contain exactly one SQL statement.");
+        }
+        // The management endpoint executes the script in one transaction;
+        // PostgreSQL enforces the transaction's read-only mode server-side.
+        self.execute(&format!("BEGIN TRANSACTION READ ONLY;\n{};\nROLLBACK;", statements[0]), row_limit).await
+    }
+
     /// One request: the API runs the whole script in a single transaction.
     async fn transaction(&self, statements: &[String]) -> Result<Vec<QueryResult>> {
         let script = format!("BEGIN;\n{};\nCOMMIT;", statements.join(";\n"));

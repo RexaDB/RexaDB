@@ -112,9 +112,13 @@ pub fn format_ttl_human(seconds: i64) -> String {
 
 /// `getRedisKeyCommand`: the command that shows a key's value.
 pub fn key_command(key: &str, ty: &str) -> String {
-    // split_args consumes backslash escapes and both quote styles. Always
-    // quote and escape the key so quotes, slashes and whitespace round-trip.
-    let k = format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"));
+    // Keep the existing CLI's double-quoted form for keys with whitespace;
+    // split_args understands the same escapes, including quotes and slashes.
+    let k = if key.chars().any(char::is_whitespace) || key.contains('"') || key.contains('\'') || key.contains('\\') {
+        format!("\"{}\"", key.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        key.to_string()
+    };
     match ty {
         "string" => format!("GET {k}"),
         "hash" => format!("HGETALL {k}"),

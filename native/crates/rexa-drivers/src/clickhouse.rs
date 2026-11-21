@@ -195,6 +195,21 @@ impl Driver for ClickHouseDriver {
         Ok(last)
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        // ClickHouse enforces readonly=1 server-side for every HTTP query.
+        // Override any connection-string setting so callers cannot disable it.
+        let mut settings: Vec<_> = self.settings.iter().filter(|(key, _)| !key.eq_ignore_ascii_case("readonly")).cloned().collect();
+        settings.push(("readonly".into(), "1".into()));
+        let readonly = ClickHouseDriver {
+            base: self.base.clone(),
+            database: self.database.clone(),
+            user: self.user.clone(),
+            password: self.password.clone(),
+            settings,
+        };
+        readonly.execute(sql, row_limit).await
+    }
+
     /// `getClickhouseTableStructure` (`DESCRIBE TABLE`) + primary-key flags.
     async fn table_structure(&self, t: &TableRef) -> Result<Vec<ColumnDetail>> {
         let db = if t.schema.is_empty() { "default" } else { &t.schema };
