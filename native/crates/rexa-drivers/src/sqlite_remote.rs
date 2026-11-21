@@ -402,6 +402,32 @@ impl Driver for RemoteSqliteDriver {
         Ok(last)
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let statements = split::split_statements(sql, Dialect::Sqlite);
+        if statements.len() != 1 {
+            bail!("Read-only dashboard queries must contain exactly one SQL statement.");
+        }
+        match &self.target {
+            RemoteSqlite::Libsql { .. } => {
+                // Hrana batches run on one connection. SQLite enforces
+                // query_only for the widget statement, then we restore the
+                // setting before committing the read-only batch.
+                let statements = vec!["PRAGMA query_only = ON".into(), statements[0].clone(), "PRAGMA query_only = OFF".into()];
+                let mut results = self.batch(&statements).await?.ok_or_else(|| anyhow::anyhow!("libSQL did not run the read-only batch"))?;
+                if results.len() < 2 {
+                    bail!("libSQL did not return the dashboard query result.");
+                }
+                let mut result = results.remove(1);
+                if result.rows.len() > row_limit {
+                    result.rows.truncate(row_limit);
+                    result.truncated = true;
+                }
+                Ok(result)
+            }
+            _ => bail!("This remote SQLite service does not support enforced read-only dashboard queries."),
+        }
+    }
+
     async fn transaction(&self, statements: &[String]) -> Result<Vec<QueryResult>> {
         if statements.is_empty() {
             return Ok(Vec::new());
