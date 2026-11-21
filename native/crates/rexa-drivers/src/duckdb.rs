@@ -36,7 +36,7 @@ pub(crate) async fn open(cs: &str) -> Result<Arc<dyn Driver>> {
     let path = db_path(cs);
     #[cfg(feature = "duckdb")]
     {
-        Ok(Arc::new(DuckDriver { backend: Backend::Embedded(embedded::open(path.as_deref())?) }))
+        Ok(Arc::new(DuckDriver { backend: Backend::Embedded { conn: embedded::open(path.as_deref())?, path } }))
     }
     #[cfg(not(feature = "duckdb"))]
     {
@@ -45,15 +45,15 @@ pub(crate) async fn open(cs: &str) -> Result<Arc<dyn Driver>> {
         if !ok {
             bail!("DuckDB support needs the `duckdb` CLI on PATH (or a build with the `duckdb` feature).");
         }
-        Ok(Arc::new(DuckDriver { backend: Backend::Cli { cli, path } }))
+        Ok(Arc::new(DuckDriver { backend: Backend::Cli { cli, path, readonly: false } }))
     }
 }
 
 enum Backend {
     #[cfg(feature = "duckdb")]
-    Embedded(Arc<std::sync::Mutex<::duckdb::Connection>>),
+    Embedded { conn: Arc<std::sync::Mutex<::duckdb::Connection>>, path: Option<String> },
     #[cfg_attr(feature = "duckdb", allow(dead_code))]
-    Cli { cli: String, path: Option<String> },
+    Cli { cli: String, path: Option<String>, readonly: bool },
 }
 
 pub struct DuckDriver {
@@ -72,6 +72,12 @@ mod embedded {
             None => ::duckdb::Connection::open_in_memory()?,
         };
         Ok(Arc::new(Mutex::new(c)))
+    }
+
+    pub(super) fn open_readonly(path: &str) -> Result<Arc<Mutex<::duckdb::Connection>>> {
+        let config = ::duckdb::Config::default().access_mode(::duckdb::AccessMode::ReadOnly)?;
+        let conn = ::duckdb::Connection::open_with_flags(path, config)?;
+        Ok(Arc::new(Mutex::new(conn)))
     }
 
     fn ts(unit: TimeUnit, v: i64) -> String {
@@ -173,19 +179,15 @@ impl DuckDriver {
         let started = Instant::now();
         let mut r = match &self.backend {
             #[cfg(feature = "duckdb")]
-            Backend::Embedded(conn) => {
+            Backend::Embedded { conn, .. } => {
                 let conn = conn.clone();
                 let sql = sql.to_string();
                 tokio::task::spawn_blocking(move || embedded::run(&conn.lock().unwrap(), &sql, row_limit)).await??
             }
-            Backend::Cli { cli, path } => {
-                let out = tokio::process::Command::new(cli)
-                    .arg("-json")
-                    .arg(path.as_deref().unwrap_or(":memory:"))
-                    .arg("-c")
-                    .arg(sql)
-                    .output()
-                    .await?;
+            Backend::Cli { cli, path, readonly } => {
+                let mut command = tokio::process::Command::new(cli);
+                if *readonly { command.arg("-readonly"); }
+                let out = command.arg("-json").arg(path.as_deref().unwrap_or(":memory:")).arg("-c").arg(sql).output().await?;
                 if !out.status.success() {
                     bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
                 }
@@ -270,6 +272,18 @@ impl Driver for DuckDriver {
         Ok(last)
     }
 
+    async fn execute_readonly(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        let backend = match &self.backend {
+            #[cfg(feature = "duckdb")]
+            Backend::Embedded { path: Some(path), .. } => Backend::Embedded { conn: embedded::open_readonly(path)?, path: Some(path.clone()) },
+            #[cfg(feature = "duckdb")]
+            Backend::Embedded { path: None, .. } => bail!("Read-only dashboard queries require a file-backed DuckDB database."),
+            Backend::Cli { cli, path: Some(path), .. } => Backend::Cli { cli: cli.clone(), path: Some(path.clone()), readonly: true },
+            Backend::Cli { path: None, .. } => bail!("Read-only dashboard queries require a file-backed DuckDB database."),
+        };
+        DuckDriver { backend }.execute(sql, row_limit).await
+    }
+
     async fn transaction(&self, statements: &[String]) -> Result<Vec<QueryResult>> {
         match &self.backend {
             Backend::Cli { .. } => {
@@ -279,7 +293,7 @@ impl Driver for DuckDriver {
                 Ok(statements.iter().map(|_| QueryResult::default()).collect())
             }
             #[cfg(feature = "duckdb")]
-            Backend::Embedded(_) => {
+            Backend::Embedded { .. } => {
                 self.one("BEGIN TRANSACTION", 1).await?;
                 let mut out = Vec::new();
                 for s in statements {
