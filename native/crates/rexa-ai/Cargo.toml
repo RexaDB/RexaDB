@@ -16,3 +16,4 @@ rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
+reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = ["json", "rustls-tls-native-roots", "http2"] }

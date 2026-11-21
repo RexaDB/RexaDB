@@ -6,7 +6,7 @@
 use crate::keybindings::{self, Keybinding};
 use crate::resize::Target;
 use crate::studio::{Phase, Studio};
-use gpui::{div, prelude::*, px, AnyElement, Context, KeyDownEvent, MouseButton, Window};
+use gpui::{canvas, div, point, prelude::*, px, AnyElement, Context, KeyDownEvent, MouseButton, Window};
 use rexa_ui::{ActiveTokens, Tw};
 
 /// Actions handled before editable guards (use-studio.ts "earlyBinding").
@@ -268,7 +268,7 @@ impl Studio {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .bg(t.sidebar)
+            .bg(if self.settings.noise_bg_translucent { rexa_ui::with_alpha(t.sidebar, 0.78) } else { t.sidebar })
             .when(!self.status_bar_open, |d| d.pb_2())
             .when(self.activity_bar_open, |d| d.child(self.render_rail(cx)))
             .children(sidebar)
@@ -281,13 +281,38 @@ impl Studio {
             .flex()
             .flex_col()
             .min_w_0()
-            .bg(t.sidebar)
+            .bg(if self.settings.noise_bg_translucent { rexa_ui::with_alpha(t.sidebar, 0.72) } else { t.sidebar })
             .text_color(t.foreground)
-            .font_family(rexa_ui::SANS)
+            .font_family(if self.settings.tui_mode { rexa_ui::MONO } else { rexa_ui::SANS })
             .child(row)
             .child(self.render_title_bar(cx));
         if self.status_bar_open {
             root = root.child(self.render_status_bar(cx));
+        }
+        if self.settings.noise_bg_enabled && self.settings.noise_bg_opacity > 0. {
+            let mut color = rexa_ui::theme::parse_color(&self.settings.noise_bg_color).unwrap_or(t.foreground);
+            match self.settings.noise_bg_blend_mode.as_str() {
+                "multiply" | "darken" => color.l *= 0.55,
+                "screen" | "lighten" => color.l += (1. - color.l) * 0.55,
+                _ => {}
+            }
+            let opacity = (self.settings.noise_bg_opacity / 100.).clamp(0., 1.);
+            let scale = self.settings.noise_bg_size.clamp(1., 100.);
+            root = root.child(canvas(|_, _, _| {}, move |bounds, _, window, _| {
+                let w = f32::from(bounds.size.width);
+                let h = f32::from(bounds.size.height);
+                let count = ((w * h / (scale * 24.)).round() as usize).clamp(500, 5000);
+                let mut seed = 0x9e3779b97f4a7c15u64;
+                for _ in 0..count {
+                    seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+                    let x = (seed as u32) as f32 / u32::MAX as f32 * w;
+                    seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+                    let y = (seed as u32) as f32 / u32::MAX as f32 * h;
+                    let alpha = opacity * (0.25 + ((seed >> 32) as u8 as f32 / 255.) * 0.75);
+                    let size = px(0.7 + (seed as u8 as f32 / 255.) * 1.0);
+                    window.paint_quad(gpui::fill(gpui::Bounds::new(point(bounds.origin.x + px(x), bounds.origin.y + px(y)), gpui::size(size, size)), rexa_ui::with_alpha(color, alpha)));
+                }
+            }).absolute().size_full());
         }
         root.into_any_element()
     }

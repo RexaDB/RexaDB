@@ -36,14 +36,15 @@ use rexa_core::{Registry, Route, TabSpec};
 
 pub fn init(cx: &mut App) {
     let model = model::SettingsModel::global(cx);
-    let (id, custom, font) = {
+    let (id, custom, font, button_style) = {
         let m = model.read(cx);
-        (m.app_theme_id.clone(), m.custom_app_themes_json(), m.app_font.clone())
+        (m.app_theme_id.clone(), m.custom_app_themes_json(), m.app_font.clone(), m.str("buttonStyle"))
     };
     // rexa-app installs the theme from `app_settings` before init; re-apply so
     // settings.json and the `system` appearance are honoured too.
     model::apply_app_theme(&id, &custom, cx);
     model::apply_app_font(&font, cx);
+    rexa_ui::button::set_global_style(&button_style, cx);
     app_icon::apply_saved();
     update::init(cx);
     startup::init(cx);

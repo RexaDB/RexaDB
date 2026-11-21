@@ -217,6 +217,9 @@ impl SettingsModel {
 
     pub fn set(&mut self, key: &str, value: impl Into<Value>, cx: &mut Context<Self>) {
         self.studio.insert(key.to_string(), value.into());
+        if key == "buttonStyle" {
+            rexa_ui::button::set_global_style(&self.str(key), cx);
+        }
         let payload = self.studio_payload();
         self.last_error = persist::save_studio_settings(&payload).err().map(|e| e.to_string());
         self.changed(key, cx);

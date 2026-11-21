@@ -8,7 +8,7 @@ mod settings_admin;
 mod webstore;
 
 pub use connection_writes::{
-    delete_credential, has_connection_secret, now_secs, protect_payload, read_bundle,
+    delete_credential, has_connection_secret, now_secs, protect_payload, read_account_token, read_bundle, store_account_token,
     redacted_target_for_comparison, strip_connection_secrets, ConnectionDraft, ConnectionRow,
     CredentialBundle, CredentialStorageMode,
 };
@@ -165,6 +165,18 @@ impl Store {
             Some(r) => Some((r.get(0)?, r.get(1)?)),
             None => None,
         })
+    }
+
+    /// Persist the verifier for a newly initialized passphrase vault.
+    pub fn create_vault_config(&self, salt: &str, verifier: &str) -> Result<()> {
+        self.db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS credential_vault (id INTEGER PRIMARY KEY CHECK (id = 1), salt TEXT NOT NULL, verifier TEXT NOT NULL, created_at INTEGER NOT NULL);",
+        )?;
+        self.db.execute(
+            "INSERT INTO credential_vault (id, salt, verifier, created_at) VALUES (1, ?1, ?2, ?3)",
+            (salt, verifier, now_millis()),
+        )?;
+        Ok(())
     }
 
     fn has_table(&self, name: &str) -> Result<bool> {

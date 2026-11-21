@@ -4,9 +4,24 @@
 use crate::theme::{tw, white, with_alpha};
 use crate::{ActiveTokens, IconName, Tw};
 use gpui::{
-    div, prelude::*, px, AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, SharedString,
+    div, prelude::*, px, AnyElement, App, ClickEvent, ElementId, FontWeight, Global, Hsla, SharedString,
     Window,
 };
+
+#[derive(Clone)]
+struct ButtonStyleSetting(String);
+impl Global for ButtonStyleSetting {}
+
+/// Apply the `raised` / `glass` / `off` global button style from settings.
+pub fn set_global_style(style: &str, cx: &mut App) {
+    let style = if matches!(style, "glass" | "off") { style } else { "raised" };
+    cx.set_global(ButtonStyleSetting(style.to_string()));
+    cx.refresh_windows();
+}
+
+fn global_style(cx: &App) -> &str {
+    cx.try_global::<ButtonStyleSetting>().map_or("raised", |s| s.0.as_str())
+}
 use gpui_component::Icon;
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -216,9 +231,14 @@ impl RenderOnce for Button {
             None => look,
         };
         // .rexa-raised (dark): white/20 border, a ~5% white sheen and a 1px drop shadow.
-        let raised = look.raised && dark;
+        let style = global_style(cx);
+        let raised = look.raised && dark && style != "off";
         let (border, bg, hover_bg) = if raised {
-            (white(0.2), overlay(look.bg, 0.0525), overlay(look.hover_bg, 0.08))
+            if style == "glass" {
+                (white(0.12), overlay(look.bg, 0.02), overlay(look.hover_bg, 0.035))
+            } else {
+                (white(0.2), overlay(look.bg, 0.0525), overlay(look.hover_bg, 0.08))
+            }
         } else {
             (look.border, look.bg, look.hover_bg)
         };

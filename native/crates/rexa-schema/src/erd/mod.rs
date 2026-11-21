@@ -89,6 +89,52 @@ fn quote_table(schema: &str, table: &str, db: &str) -> String {
     }
 }
 
+fn svg_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Export the current diagram as a self-contained SVG image.
+pub fn diagram_svg(tables: &[DiagramTable], positions: &HashMap<String, (f32, f32)>) -> String {
+    let width = tables.iter().filter_map(|t| positions.get(&t.name).map(|(x, _)| x + NODE_WIDTH)).fold(640f32, f32::max) + 32.;
+    let height = tables.iter().filter_map(|t| positions.get(&t.name).map(|(_, y)| y + layout::estimate_height(t.columns.len()))).fold(360f32, f32::max) + 32.;
+    let mut out = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.0}\" height=\"{height:.0}\" viewBox=\"0 0 {width:.0} {height:.0}\"><rect width=\"100%\" height=\"100%\" fill=\"#111827\"/>");
+    for table in tables {
+        let Some(&(x1, y1)) = positions.get(&table.name) else { continue };
+        for col in &table.columns {
+            let Some((_, target, _)) = &col.references else { continue };
+            let Some(&(x2, y2)) = positions.get(target) else { continue };
+            let (sx, sy) = (x1 + NODE_WIDTH, y1 + layout::estimate_height(table.columns.len()) / 2.);
+            let (tx, ty) = (x2, y2 + layout::estimate_height(tables.iter().find(|t| t.name == *target).map_or(0, |t| t.columns.len())) / 2.);
+            out.push_str(&format!("<path d=\"M {sx:.1} {sy:.1} C {:.1} {sy:.1}, {:.1} {ty:.1}, {tx:.1} {ty:.1}\" fill=\"none\" stroke=\"#6b7280\" stroke-width=\"1.5\"/>", sx+24., tx-24.));
+        }
+    }
+    for table in tables {
+        let Some(&(x, y)) = positions.get(&table.name) else { continue };
+        let h = layout::estimate_height(table.columns.len());
+        out.push_str(&format!("<rect x=\"{x:.1}\" y=\"{y:.1}\" width=\"{NODE_WIDTH}\" height=\"{h:.1}\" rx=\"5\" fill=\"#1f2937\" stroke=\"#4b5563\"/><rect x=\"{x:.1}\" y=\"{y:.1}\" width=\"{NODE_WIDTH}\" height=\"{HEADER_HEIGHT}\" rx=\"5\" fill=\"#374151\"/><text x=\"{:.1}\" y=\"{:.1}\" fill=\"#f9fafb\" font-family=\"monospace\" font-size=\"12\">{}</text>", x+8., y+15., svg_escape(&table.name)));
+        for (i, col) in table.columns.iter().enumerate() {
+            let cy = y + HEADER_HEIGHT + (i as f32 + 1.) * ROW_HEIGHT - 6.;
+            out.push_str(&format!("<text x=\"{:.1}\" y=\"{cy:.1}\" fill=\"#e5e7eb\" font-family=\"monospace\" font-size=\"10\">{}</text><text x=\"{:.1}\" y=\"{cy:.1}\" fill=\"#9ca3af\" font-family=\"monospace\" font-size=\"9\" text-anchor=\"end\">{}</text>", x+8., svg_escape(&col.name), x+NODE_WIDTH-7., svg_escape(&col.r#type)));
+        }
+    }
+    out.push_str("</svg>");
+    out
+}
+
+fn diagram_png(svg: &str) -> anyhow::Result<Vec<u8>> {
+    let mut options = resvg::usvg::Options::default();
+    options.fontdb_mut().load_system_fonts();
+    let tree = resvg::usvg::Tree::from_str(svg, &options)?;
+    let size = tree.size();
+    let (w, h) = (size.width().ceil().max(1.), size.height().ceil().max(1.));
+    // Export at 2x for crisp text while keeping large schemas bounded.
+    let scale = 2f32.min(8192. / w).min(8192. / h).min((48_000_000f32 / (w * h)).sqrt());
+    let (width, height) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Diagram is too large to export as PNG."))?;
+    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
+    Ok(pixmap.encode_png()?)
+}
+
 /// `buildTableSql`.
 pub fn build_table_sql(t: &DiagramTable, schema: &str, db: &str) -> String {
     let mut lines: Vec<String> = t
@@ -229,7 +275,7 @@ impl SchemaDiagram {
                     Ok(rows) => {
                         let schema = v.schema.clone();
                         v.tables = tables_from_columns(&rows).into_iter().filter(|t| t.schema.eq_ignore_ascii_case(&schema)).collect();
-                        v.relayout();
+                        v.relayout(true);
                     }
                     Err(e) => {
                         Toast::error(format!("{e:#}")).show(cx);
@@ -256,13 +302,37 @@ impl SchemaDiagram {
         e
     }
 
-    fn relayout(&mut self) {
+    fn layout_key(&self) -> String {
+        format!("rexadb:erd-layout:{}:{}", self.session.connection.id, self.schema)
+    }
+
+    fn saved_positions(&self) -> HashMap<String, (f32, f32)> {
+        rexa_store::Store::open()
+            .ok()
+            .and_then(|s| s.setting(&self.layout_key()).ok().flatten())
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_positions(&self) {
+        if let Ok(store) = rexa_store::Store::open() {
+            let _ = store.set_setting(&self.layout_key(), &serde_json::to_string(&self.positions).unwrap_or_default());
+        }
+    }
+
+    fn relayout(&mut self, restore_saved: bool) {
         let nodes: Vec<LayoutNode> = self.tables.iter().map(|t| LayoutNode { id: t.name.clone(), height: layout::estimate_height(t.columns.len()) }).collect();
         let edges = self.edges();
         self.positions = match self.mode {
             LayoutMode::Auto => layout::dagre(&nodes, &edges),
             LayoutMode::Grid => layout::grid(&nodes, &edges),
         };
+        if restore_saved {
+            for (name, position) in self.saved_positions() {
+                if self.tables.iter().any(|t| t.name == name) { self.positions.insert(name, position); }
+            }
+        }
+        self.save_positions();
         self.needs_fit = true;
     }
 
@@ -676,6 +746,8 @@ impl Render for SchemaDiagram {
                 })
         });
         let mode = self.mode;
+        let svg = diagram_svg(&self.tables, &self.positions);
+        let schema_for_export = self.schema.clone();
         let seg = |id: &'static str, label: &'static str, on: bool| {
             div().id(id).h_7().px_2().flex().items_center().tw_rounded_md().tw_text_xs().font_weight(FontWeight::MEDIUM).cursor_pointer().when(on, |d| d.bg(t.muted).shadow(rexa_ui::popup::shadow_sm())).when(!on, |d| d.hover(|s| s.bg(with_alpha(t.muted, 0.5)))).child(label)
         };
@@ -692,11 +764,36 @@ impl Render for SchemaDiagram {
                 DropdownMenu::new("erd-download")
                     .align(Align::End)
                     .trigger(tool("erd-dl").icon(IconName::Download).label("Download"))
-                    .menu(|m, _, _| {
-                        let note = |cx: &mut App| {
-                            Toast::info("Image export isn't available in the native app yet.").show(cx);
-                        };
-                        m.w(160.).item(MenuItem::new("Download as PNG").on_select(move |_, cx| note(cx))).item(MenuItem::new("Download as SVG").on_select(move |_, cx| note(cx)))
+                    .menu(move |m, _, _| {
+                        let image = svg.clone();
+                        let image_copy = image.clone();
+                        let schema = schema_for_export.clone();
+                        let png_image = svg.clone();
+                        let png_schema = schema_for_export.clone();
+                        m.w(220.).item(MenuItem::new("Copy SVG image").on_select(move |_, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(image_copy.clone()));
+                            Toast::success("Diagram SVG copied; paste it into a file or vector editor.").show(cx);
+                        })).item(MenuItem::new("Save SVG to Downloads").on_select(move |_, cx| {
+                            let dir = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Downloads")).unwrap_or_else(std::env::temp_dir);
+                            let safe = schema.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect::<String>();
+                            let mut path = dir.join(format!("{safe}-schema.svg"));
+                            let mut n = 1;
+                            while path.exists() { path = dir.join(format!("{safe}-schema ({n}).svg")); n += 1; }
+                            match std::fs::write(&path, &image) {
+                                Ok(()) => { Toast::success(format!("Saved {}", path.file_name().and_then(|f| f.to_str()).unwrap_or("schema.svg"))).show(cx); }
+                                Err(e) => { Toast::error(format!("Could not save SVG: {e}")).show(cx); }
+                            }
+                        })).item(MenuItem::new("Save PNG to Downloads").on_select(move |_, cx| {
+                            let dir = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Downloads")).unwrap_or_else(std::env::temp_dir);
+                            let safe = png_schema.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect::<String>();
+                            let mut path = dir.join(format!("{safe}-schema.png"));
+                            let mut n = 1;
+                            while path.exists() { path = dir.join(format!("{safe}-schema ({n}).png")); n += 1; }
+                            match diagram_png(&png_image).and_then(|bytes| { std::fs::write(&path, bytes)?; Ok(()) }) {
+                                Ok(()) => { Toast::success(format!("Saved {}", path.file_name().and_then(|f| f.to_str()).unwrap_or("schema.png"))).show(cx); }
+                                Err(e) => { Toast::error(format!("Could not save PNG: {e:#}")).show(cx); }
+                            }
+                        }))
                     }),
             )
             .child(
@@ -711,12 +808,12 @@ impl Render for SchemaDiagram {
                     .shadow(rexa_ui::popup::shadow_sm())
                     .child(seg("erd-auto", "Auto", mode == LayoutMode::Auto).on_click(cx.listener(|v, _, _, cx| {
                         v.mode = LayoutMode::Auto;
-                        v.relayout();
+                        v.relayout(false);
                         cx.notify();
                     })))
                     .child(seg("erd-grid", "Grid", mode == LayoutMode::Grid).on_click(cx.listener(|v, _, _, cx| {
                         v.mode = LayoutMode::Grid;
-                        v.relayout();
+                        v.relayout(false);
                         cx.notify();
                     }))),
             )
@@ -755,7 +852,10 @@ impl Render for SchemaDiagram {
                     None => {}
                 }
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|v, _, _, _| v.drag = None))
+            .on_mouse_up(MouseButton::Left, cx.listener(|v, _, _, _| {
+                if matches!(v.drag, Some(Drag::Node { .. })) { v.save_positions(); }
+                v.drag = None;
+            }))
             .on_scroll(cx.listener(|v, e: &gpui::ScrollEvent, _, cx| {
                 let d = e.delta.pixel_delta(px(16.));
                 let at = v.local(e.position);

@@ -276,7 +276,9 @@ impl ConnectionsScreen {
                     let creds = msg.contains("keychain")
                         || msg.contains("vault")
                         || msg.contains("credentials");
-                    open_failure_dialog(
+                    if row.conn.credential_ref.as_deref().is_some_and(|r| r.starts_with("vault:")) && msg.contains("vault") {
+                        open_vault_unlock_dialog(id, false, this.weak(cx), cx);
+                    } else { open_failure_dialog(
                         if creds { "Credentials locked" } else { "Connection failed" },
                         &name,
                         if creds { format!("Unable to unlock credentials for \"{name}\".") } else { format!("Unable to connect to \"{name}\".") },
@@ -285,7 +287,7 @@ impl ConnectionsScreen {
                         creds.then_some(id),
                         this.weak(cx),
                         cx,
-                    );
+                    ); }
                 }
             })
             .ok();
@@ -312,7 +314,12 @@ impl ConnectionsScreen {
         // Unlock secrets (keychain bundle) so the form shows the real password.
         let mut conn = row.conn.clone();
         if conn.credential_ref.as_deref().is_some_and(|r| !r.is_empty()) {
-            match rexa_store::resolve_credentials(&conn, None) {
+            let vault = rexa_core::credential_vault(cx);
+            if conn.credential_ref.as_deref().is_some_and(|r| r.starts_with("vault:")) && vault.is_none() {
+                open_vault_unlock_dialog(id, true, self.weak(cx), cx);
+                return;
+            }
+            match rexa_store::resolve_credentials(&conn, vault.as_deref()) {
                 Ok(c) => conn.connection_string = c.connection_string,
                 Err(_) => {
                     toast::error(
@@ -1754,6 +1761,40 @@ impl ConnectionsScreen {
             )
             .into_any_element()
     }
+}
+
+fn open_vault_unlock_dialog(id: i64, for_edit: bool, weak: gpui::WeakEntity<ConnectionsScreen>, cx: &mut App) {
+    let config = Store::open().ok().and_then(|s| s.vault_config().ok().flatten());
+    rexa_ui::open_dialog(cx, move |window, cx| {
+        let passphrase = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Vault passphrase"));
+        let input = passphrase.clone();
+        let weak_cancel = weak.clone();
+        let weak_connect = weak.clone();
+        let config = config.clone();
+        Dialog::new()
+            .title("Unlock credential vault")
+            .description("Enter your vault passphrase to connect to this database.")
+            .child(crate::widgets::FieldInput::new(&passphrase))
+            .footer(Button::new("vault-cancel").outline().label("Cancel").on_click(move |_, _, cx| {
+                rexa_ui::close_top(cx);
+                weak_cancel.update(cx, |this, cx| { this.opening.remove(&id); cx.notify(); }).ok();
+            }))
+            .footer(Button::new("vault-connect").label(if for_edit { "Unlock and edit" } else { "Unlock and connect" }).on_click(move |_, window, cx| {
+                let Some((salt, verifier)) = &config else { toast::error("Credential vault settings were not found.", cx); return; };
+                let pass = input.read(cx).value().to_string();
+                match rexa_store::Vault::unlock(&pass, salt, verifier) {
+                    Ok(vault) => {
+                        rexa_core::unlock_credential_vault(vault, cx);
+                        rexa_ui::close_top(cx);
+                        weak_connect.update(cx, |this, cx| {
+                            if for_edit { this.edit_connection(id, false, window, cx); }
+                            else { this.open_connection(id, cx); }
+                        }).ok();
+                    }
+                    Err(e) => { toast::error(format!("{e:#}"), cx); }
+                }
+            }))
+    });
 }
 
 /// `ConnectionTagBadge`.

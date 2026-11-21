@@ -85,20 +85,64 @@ pub fn load_accounts(kind: AccountKind) -> Vec<Value> {
     let from_settings = Store::open().ok().and_then(|s| s.setting(kind.key()).ok().flatten());
     let raw = from_settings.or_else(|| WebStore::open()?.get(kind.key()).ok().flatten());
     let mut list: Vec<Value> = raw.and_then(|r| serde_json::from_str::<Value>(&r).ok()).and_then(|v| v.as_array().cloned()).unwrap_or_default();
-    // filterSortLocalAccounts: drop token-less entries, oldest first.
-    list.retain(|a| match kind {
-        AccountKind::Neon => a.get("profileName").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
-        AccountKind::Planetscale => a.get("accessToken").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
-        _ => a.get("token").and_then(Value::as_str).is_some_and(|s| !s.is_empty()),
-    });
+    // Migrate old plaintext account tokens to the OS keychain on first read.
+    let mut migrated = false;
+    for account in &mut list {
+        let token_key = if kind == AccountKind::Neon || kind == AccountKind::Planetscale { "accessToken" } else { "token" };
+        if let Some(token) = account.get(token_key).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string) {
+            match rexa_store::store_account_token(&token) {
+                Ok(reference) => {
+                    if let Some(object) = account.as_object_mut() {
+                        object.remove(token_key);
+                        object.insert("credentialRef".into(), Value::String(reference));
+                    }
+                    migrated = true;
+                }
+                Err(error) => eprintln!("Could not migrate provider token into the system keychain: {error:#}"),
+            }
+        }
+        if let Some(reference) = account.get("credentialRef").and_then(Value::as_str) {
+            match rexa_store::read_account_token(reference) {
+                Ok(token) => { if let Some(object) = account.as_object_mut() { object.insert(token_key.into(), Value::String(token)); } }
+                Err(error) => eprintln!("Could not read provider token from the system keychain: {error:#}"),
+            }
+        }
+    }
+    if migrated { if let Err(error) = save_accounts(kind, &list) { eprintln!("Could not persist migrated provider accounts: {error:#}"); } }
+    // Drop entries whose token could not be resolved.
+    let mut list: Vec<Value> = list.into_iter().filter(|a| {
+        let token_key = if kind == AccountKind::Neon || kind == AccountKind::Planetscale { "accessToken" } else { "token" };
+        a.get(token_key).and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+    }).collect();
     list.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
     list
 }
 
-fn save_accounts(kind: AccountKind, list: &[Value]) {
-    if let Ok(s) = Store::open() {
-        s.set_setting(kind.key(), &Value::Array(list.to_vec()).to_string()).ok();
+fn save_accounts(kind: AccountKind, list: &[Value]) -> anyhow::Result<()> {
+    let mut stored = Vec::with_capacity(list.len());
+    let mut keep = std::collections::HashSet::new();
+    for account in list {
+        let mut row = account.clone();
+        let token_key = if kind == AccountKind::Neon || kind == AccountKind::Planetscale { "accessToken" } else { "token" };
+        if let Some(token) = account.get(token_key).and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            let reference = match account.get("credentialRef").and_then(Value::as_str) {
+                Some(reference) if rexa_store::read_account_token(reference).is_ok_and(|saved| saved == token) => reference.to_string(),
+                _ => rexa_store::store_account_token(token)?,
+            };
+            keep.insert(reference.clone());
+            let object = row.as_object_mut().ok_or_else(|| anyhow::anyhow!("Invalid account entry."))?;
+            object.remove(token_key);
+            object.insert("credentialRef".into(), Value::String(reference));
+        }
+        stored.push(row);
     }
+    let previous = Store::open().ok().and_then(|s| s.setting(kind.key()).ok().flatten()).and_then(|r| serde_json::from_str::<Vec<Value>>(&r).ok()).unwrap_or_default();
+    for reference in previous.iter().filter_map(|a| a.get("credentialRef").and_then(Value::as_str)) {
+        if !keep.contains(reference) { let _ = rexa_store::delete_credential(reference); }
+    }
+    let store = Store::open()?;
+    store.set_setting(kind.key(), &Value::Array(stored).to_string())?;
+    Ok(())
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
@@ -248,9 +292,10 @@ impl AccountsScreen {
         self.existing.iter().any(|cs| connection_key(self.kind, cs).as_deref() == Some(key))
     }
 
-    fn create(&mut self, name: &str, cs: &str, kind: &str) -> bool {
+    fn create(&mut self, name: &str, cs: &str, kind: &str, cx: &App) -> bool {
+        let vault = rexa_core::credential_vault(cx);
         let ok = Store::open()
-            .and_then(|s| s.create_connection(ConnectionDraft { name: Some(name.into()), connection_string: Some(cs.into()), connection_type: Some(kind.into()), ..Default::default() }))
+            .and_then(|s| s.create_connection_with_vault(ConnectionDraft { name: Some(name.into()), connection_string: Some(cs.into()), connection_type: Some(kind.into()), ..Default::default() }, vault.as_deref()))
             .is_ok();
         if ok {
             self.existing.push(cs.into());
@@ -264,7 +309,7 @@ impl AccountsScreen {
                 if self.is_connected(&key) {
                     return;
                 }
-                if self.create(&name, &cs, kind) {
+                if self.create(&name, &cs, kind, cx) {
                     toast::success(format!("Connected to {name}"), cx);
                     cx.emit(AccountsEvent::Changed);
                 } else {
@@ -285,7 +330,7 @@ impl AccountsScreen {
                             Ok((name, cs, kind)) => {
                                 if this.existing.iter().any(|e| *e == cs) {
                                     toast::info("This database and role are already connected.", cx);
-                                } else if this.create(&name, &cs, kind) {
+                                } else if this.create(&name, &cs, kind, cx) {
                                     toast::success(format!("Connected to {name}"), cx);
                                     cx.emit(AccountsEvent::Changed);
                                 } else {
@@ -321,7 +366,7 @@ impl AccountsScreen {
                 }
                 if self.is_connected(key) {
                     already += 1;
-                } else if self.create(name, cs, kind) {
+                } else if self.create(name, cs, kind, cx) {
                     imported += 1;
                 } else {
                     failed += 1;
@@ -348,8 +393,10 @@ impl AccountsScreen {
         if i >= self.accounts.len() {
             return;
         }
-        self.accounts.remove(i);
-        save_accounts(self.kind, &self.accounts);
+        let mut next = self.accounts.clone();
+        next.remove(i);
+        if let Err(error) = save_accounts(self.kind, &next) { toast::error(format!("Could not remove account: {error:#}"), cx); return; }
+        self.accounts = next;
         self.active = (!self.accounts.is_empty()).then_some(0);
         cx.emit(AccountsEvent::Changed);
         self.load(cx);
@@ -358,49 +405,58 @@ impl AccountsScreen {
 
     fn open_login(&mut self, cx: &mut Context<Self>) {
         let kind = self.kind;
-        rexa_ui::open_dialog(cx, move |_, cx| {
-            let t = cx.tokens().clone();
-            let (title, desc, body, action) = match kind {
-                AccountKind::Supabase => (
-                    "Connect Supabase Account",
-                    "Log in to your Supabase account to browse and connect your projects.",
-                    "This opens the Supabase dashboard in your browser. You'll get a verification code to paste back here.",
-                    "Log in to Supabase",
-                ),
-                AccountKind::SpacetimeDb => (
-                    "Connect SpacetimeDB Account",
-                    "Log in with GitHub to link your SpacetimeDB identity and browse your databases.",
-                    "",
-                    "Log in to SpacetimeDB",
-                ),
-                AccountKind::Neon => (
-                    "Sign in to Neon",
-                    "Opens Neon in your browser. Once you authorize, you will be brought back here automatically — no CLI install needed.",
-                    "",
-                    "Sign in to Neon",
-                ),
-                AccountKind::Planetscale => (
-                    "Connect PlanetScale Account",
-                    "Log in to PlanetScale in your browser to browse and connect your databases.",
-                    "",
-                    "Log in to PlanetScale",
-                ),
+        let weak = cx.entity().downgrade();
+        rexa_ui::open_dialog(cx, move |window, cx| {
+            let title = format!("Connect {} account", kind.title());
+            let token_hint = match kind {
+                AccountKind::Supabase => "Create a management access token in Supabase account settings.",
+                AccountKind::SpacetimeDb => "Paste a SpacetimeDB identity token. Use the default host unless you run a self-hosted server.",
+                AccountKind::Neon => "Create an API key in the Neon console. It stays on this device.",
+                AccountKind::Planetscale => "Create a service token with database and branch access in PlanetScale settings.",
             };
+            let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Access token"));
+            let label = cx.new(|cx| InputState::new(window, cx).placeholder("Account name or email"));
+            let host = cx.new(|cx| InputState::new(window, cx).placeholder("maincloud.spacetimedb.com"));
+            let token2 = token.clone();
+            let label2 = label.clone();
+            let host2 = host.clone();
+            let weak = weak.clone();
             rexa_ui::Dialog::new()
                 .max_w(384.)
                 .title(title)
-                .description(desc)
+                .description(token_hint)
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap_3()
                         .pt_2()
-                        .when(!body.is_empty(), |d| d.child(div().tw_text_xs().text_color(t.muted_foreground).child(body)))
-                        .child(Button::new("login-start").size(ButtonSize::Lg).w_full().label(action).on_click(move |_, _, cx| {
-                            // The browser sign-in flows (Supabase device code + ECDH, SpacetimeDB/GitHub,
-                            // Neon PKCE, PlanetScale OAuth) are not ported yet.
-                            toast::info("Sign-in from the native app isn't available yet. Sign in once in the RexaDB desktop app; the account appears here.", cx);
+                        .child(FieldInput::new(&token))
+                        .child(FieldInput::new(&label))
+                        .when(kind == AccountKind::SpacetimeDb, |d| d.child(FieldInput::new(&host)))
+                        .child(Button::new("login-save").size(ButtonSize::Lg).w_full().label("Save and connect").on_click(move |_, _, cx| {
+                            let secret = token2.read(cx).value().trim().to_string();
+                            if secret.is_empty() { toast::error("Enter an access token.", cx); return; }
+                            let account_name = label2.read(cx).value().trim().to_string();
+                            let mut account = serde_json::Map::new();
+                            account.insert("createdAt".into(), Value::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)));
+                            match kind {
+                                AccountKind::Supabase => { account.insert("token".into(), Value::String(secret)); account.insert("name".into(), Value::String(account_name)); }
+                                AccountKind::SpacetimeDb => { account.insert("token".into(), Value::String(secret)); account.insert("host".into(), Value::String(host2.read(cx).value().trim().to_string())); }
+                                AccountKind::Neon => { account.insert("accessToken".into(), Value::String(secret)); account.insert("profileName".into(), Value::String(format!("native-{}", uuid::Uuid::new_v4().simple()))); account.insert("label".into(), Value::String(if account_name.is_empty() { "Neon account".into() } else { account_name })); }
+                                AccountKind::Planetscale => { account.insert("accessToken".into(), Value::String(secret)); account.insert("name".into(), Value::String(account_name)); }
+                            }
+                            weak.update(cx, |this, cx| {
+                                let mut next = this.accounts.clone();
+                                next.push(Value::Object(account));
+                                next.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
+                                if let Err(error) = save_accounts(kind, &next) { toast::error(format!("Could not save account token: {error:#}"), cx); return; }
+                                this.accounts = next;
+                                this.active = Some(this.accounts.len().saturating_sub(1));
+                                cx.emit(AccountsEvent::Changed);
+                                this.load(cx);
+                                cx.notify();
+                            }).ok();
                             rexa_ui::close_top(cx);
                         })),
                 )
@@ -885,7 +941,7 @@ async fn list_resources(kind: AccountKind, account: &Value) -> anyhow::Result<Ve
         }
         AccountKind::Neon => {
             let profile = s(account, "profileName").unwrap_or("DEFAULT").to_string();
-            let token = neon_token(&profile)?;
+            let token = s(account, "accessToken").map(str::to_string).map(Ok).unwrap_or_else(|| neon_token(&profile))?;
             let orgs = crate::http::get_json(&format!("{NEON_API}/users/me/organizations"), &token).await.map(|v| arr(&v, "organizations")).unwrap_or_default();
             let mut out = Vec::new();
             let scopes: Vec<(String, String)> = if orgs.is_empty() { vec![(String::new(), String::new())] } else { orgs.iter().map(|o| (st(o, "id"), st(o, "name"))).collect() };
@@ -935,7 +991,7 @@ async fn resolve_connect(c: &Connect, account: &Value) -> anyhow::Result<(String
     let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     match c {
         Connect::Neon { profile, project_id, project } => {
-            let token = neon_token(profile)?;
+            let token = s(account, "accessToken").map(str::to_string).map(Ok).unwrap_or_else(|| neon_token(profile))?;
             let branches = crate::http::get_json(&format!("{NEON_API}/projects/{project_id}/branches"), &token).await?;
             let list = branches.get("branches").and_then(Value::as_array).cloned().unwrap_or_default();
             let branch = list.iter().find(|b| b.get("default").and_then(Value::as_bool) == Some(true)).or(list.first()).cloned().ok_or_else(|| anyhow::anyhow!("This project has no branches."))?;

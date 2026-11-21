@@ -18,6 +18,7 @@ use gpui::{
 use gpui_component::input::{InputEvent, InputState, TextareaState};
 use gpui_component::Icon;
 use rexa_store::{ConnectionDraft, ConnectionRow, SavedConnection, Store, TagDef};
+use rexa_store::Vault;
 use rexa_ui::theme::{with_alpha, Tokens};
 use rexa_ui::{
     toast, ActiveTokens, Align, Button, ButtonSize, Checkbox, IconName, Kbd, PasswordInput, Popover, Select, SelectOption,
@@ -79,6 +80,7 @@ pub struct ConnectionForm {
     mode: FormMode,
     provider: String,
     credential_ref: Option<String>,
+    vault: Option<Arc<Vault>>,
     last_active: Option<i64>,
     // details
     name: Entity<InputState>,
@@ -145,6 +147,7 @@ impl ConnectionForm {
             mode: FormMode::New,
             provider: provider.to_string(),
             credential_ref: None,
+            vault: None,
             last_active: None,
             name: i(window, cx, "", &crate::fields::connection_name_from_details("", Some(provider)).split(" • ").next().unwrap_or("PostgreSQL").to_string()),
             tags: Vec::new(),
@@ -295,6 +298,9 @@ impl ConnectionForm {
         } else {
             widgets::set_value(&this.name, &c.name, window, cx);
             this.credential_ref = c.credential_ref.clone();
+            if c.credential_ref.as_deref().is_some_and(|r| r.starts_with("vault:")) {
+                this.vault = rexa_core::credential_vault(cx);
+            }
             this.last_active = c.last_active;
         }
         this.tags = c.tags.clone();
@@ -566,6 +572,10 @@ impl ConnectionForm {
 
     /// `handleAdd`.
     fn save(&mut self, cx: &mut Context<Self>) {
+        if Store::open().ok().is_some_and(|s| rexa_store::CredentialStorageMode::current(&s) == rexa_store::CredentialStorageMode::Vault) && self.vault.is_none() {
+            self.prompt_vault(cx);
+            return;
+        }
         let candidate = self.candidate(cx);
         if !self.validate_turso(&candidate, cx) {
             return;
@@ -623,12 +633,13 @@ impl ConnectionForm {
             d.ssl_mode = Some("require".into());
             d.auth_token = Some(Some(widgets::value(&self.turso_token, cx)));
         }
+        let vault = self.vault.clone();
         let res = Store::open().and_then(|s| match self.mode {
             FormMode::Edit(id) => {
                 d.credential_ref = Some(self.credential_ref.clone());
-                s.update_connection(id, d).map(|_| id)
+                s.update_connection_with_vault(id, d, vault.as_deref()).map(|_| id)
             }
-            _ => s.create_connection(d),
+            _ => s.create_connection_with_vault(d, vault.as_deref()),
         });
         self.loading = false;
         match res {
@@ -642,6 +653,44 @@ impl ConnectionForm {
                 cx.notify();
             }
         }
+    }
+
+    fn prompt_vault(&mut self, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        let existing = Store::open().ok().and_then(|s| s.vault_config().ok().flatten());
+        rexa_ui::open_dialog(cx, move |window, cx| {
+            let passphrase = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("At least 12 characters"));
+            let pass = passphrase.clone();
+            let existing = existing.clone();
+            let w = weak.clone();
+            rexa_ui::Dialog::new()
+                .title(if existing.is_some() { "Unlock credential vault" } else { "Set up credential vault" })
+                .description(if existing.is_some() { "Enter your vault passphrase to save this connection." } else { "Choose a passphrase of at least 12 characters. It cannot be recovered." })
+                .child(FieldInput::new(&passphrase))
+                .footer(Button::new("vault-cancel").outline().label("Cancel").on_click(|_, _, cx| rexa_ui::close_top(cx)))
+                .footer(Button::new("vault-unlock").label(if existing.is_some() { "Unlock and save" } else { "Create vault and save" }).on_click(move |_, _, cx| {
+                    let input = pass.read(cx).value().to_string();
+                    if input.len() < 12 {
+                        toast::error("Use at least 12 characters for the vault passphrase.", cx);
+                        return;
+                    }
+                    let result = if let Some((salt, verifier)) = &existing {
+                        Vault::unlock(&input, salt, verifier).map(|v| (v, None))
+                    } else {
+                        Vault::create(&input).and_then(|(v, salt, verifier)| {
+                            Store::open()?.create_vault_config(&salt, &verifier)?;
+                            Ok((v, Some(())))
+                        })
+                    };
+                    match result {
+                        Ok((vault, _)) => {
+                            rexa_ui::close_top(cx);
+                            w.update(cx, |form, cx| { form.vault = Some(Arc::new(vault)); form.save(cx); }).ok();
+                        }
+                        Err(e) => { toast::error(format!("{e:#}"), cx); }
+                    }
+                }))
+        });
     }
 
     fn on_key_down(&mut self, ev: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {

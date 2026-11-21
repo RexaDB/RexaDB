@@ -11,7 +11,7 @@
 //! `credential_ref`. `REXADB_KEYCHAIN_SERVICE` overrides the service name
 //! (development only, so tests never touch the real entries).
 
-use crate::{SavedConnection, Store};
+use crate::{SavedConnection, Store, Vault};
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
@@ -56,6 +56,8 @@ pub struct ConnectionDraft {
     pub ssl_mode: Option<String>,
     pub auth_token: Option<Option<String>>,
     pub credential_ref: Option<Option<String>>,
+    /// Encrypted envelope for a `vault:` reference; never populated for keychain rows.
+    pub credential_secret: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,9 +253,14 @@ impl Store {
 
     /// `createConnection` (protectConnectionPayload + POST /api/connections). Returns the new id.
     pub fn create_connection(&self, draft: ConnectionDraft) -> Result<i64> {
+        self.create_connection_with_vault(draft, None)
+    }
+
+    /// Create a connection with an unlocked vault when vault storage is selected.
+    pub fn create_connection_with_vault(&self, draft: ConnectionDraft, vault: Option<&Vault>) -> Result<i64> {
         self.ensure_connection_tables()?;
         let mode = CredentialStorageMode::current(self);
-        let protected = protect_payload(draft, &mode, None)?;
+        let protected = protect_payload(draft, &mode, None, vault)?;
         let result = self.insert_connection(&protected);
         if result.is_err() {
             if let Some(Some(reference)) = &protected.credential_ref {
@@ -286,7 +293,7 @@ impl Store {
             r#"INSERT INTO connections (id, name, connection_string, connection_type, host, port, database,
                  username, password, ssl_mode, auth_token, credential_ref, credential_secret, color, tags,
                  icon, "group", is_favorite, created_at, sort_order, last_active)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)"#,
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)"#,
             params![
                 id,
                 name,
@@ -300,6 +307,7 @@ impl Store {
                 d.ssl_mode,
                 d.auth_token.clone().flatten(),
                 d.credential_ref.clone().flatten(),
+                d.credential_secret.clone().flatten(),
                 d.color.clone().flatten(),
                 tags,
                 icon,
@@ -320,12 +328,17 @@ impl Store {
     /// `stored_bundle` is the unlocked credential bundle when the caller has it
     /// (used to detect that the target changed and the old reference is stale).
     pub fn update_connection(&self, id: i64, draft: ConnectionDraft) -> Result<()> {
+        self.update_connection_with_vault(id, draft, None)
+    }
+
+    /// Update a connection with an unlocked vault when vault storage is selected.
+    pub fn update_connection_with_vault(&self, id: i64, draft: ConnectionDraft, vault: Option<&Vault>) -> Result<()> {
         self.ensure_connection_tables()?;
         let existing = self.connection_rows()?.into_iter().find(|r| r.conn.id == id);
         let old_ref = draft.credential_ref.clone().flatten();
         let mode = CredentialStorageMode::current(self);
         let stored = old_ref.as_deref().filter(|r| !r.starts_with("vault:")).and_then(|r| read_bundle(r).ok());
-        let protected = protect_payload(draft, &mode, stored.as_ref())?;
+        let protected = protect_payload(draft, &mode, stored.as_ref(), vault)?;
         let new_ref = protected.credential_ref.clone().flatten();
         let result = self.write_update(id, &protected, existing.as_ref());
         match &result {
@@ -387,7 +400,9 @@ impl Store {
         }
         if let Some(v) = &d.credential_ref {
             set("credential_ref", text(v));
-            set("credential_secret", V::Null);
+        }
+        if let Some(v) = &d.credential_secret {
+            set("credential_secret", text(v));
         }
         if let Some(v) = &d.color {
             set("color", text(v));
@@ -634,6 +649,19 @@ pub fn read_bundle(reference: &str) -> Result<CredentialBundle> {
     Ok(CredentialBundle { connection_string: s("connectionString"), password: s("password"), auth_token: s("authToken") })
 }
 
+/// Store a provider account token in the system keychain and return its opaque reference.
+pub fn store_account_token(token: &str) -> Result<String> {
+    let reference = uuid::Uuid::new_v4().simple().to_string();
+    let bundle = CredentialBundle { connection_string: None, password: None, auth_token: Some(token.to_string()) };
+    store_keychain_bundle(&reference, &bundle.to_json(), true)?;
+    Ok(reference)
+}
+
+/// Resolve an opaque account-token reference from the system keychain.
+pub fn read_account_token(reference: &str) -> Result<String> {
+    read_bundle(reference)?.auth_token.ok_or_else(|| anyhow!("The saved provider token is missing from the system keychain."))
+}
+
 /// `deleteConnectionCredential` (vault refs live in the row, nothing to delete).
 pub fn delete_credential(reference: &str) -> Result<()> {
     if reference.starts_with("vault:") {
@@ -650,6 +678,7 @@ pub fn protect_payload(
     mut d: ConnectionDraft,
     mode: &CredentialStorageMode,
     stored: Option<&CredentialBundle>,
+    vault: Option<&Vault>,
 ) -> Result<ConnectionDraft> {
     let cs = d.connection_string.clone().unwrap_or_default();
     let password = d.password.clone().flatten().filter(|p| !p.is_empty());
@@ -682,11 +711,22 @@ pub fn protect_payload(
     match mode {
         CredentialStorageMode::Plaintext => {
             d.credential_ref = Some(None);
+            d.credential_secret = Some(None);
             Ok(d)
         }
-        CredentialStorageMode::Vault => bail!(
-            "Saving into the encrypted vault is not available in this build yet. Choose the system keychain in Settings → Security and retry."
-        ),
+        CredentialStorageMode::Vault => {
+            let vault = vault.ok_or_else(|| anyhow!("Unlock the encrypted credential vault before saving this connection."))?;
+            let bundle = CredentialBundle { connection_string: d.connection_string.clone(), password, auth_token: token };
+            let reference = format!("vault:{}", uuid::Uuid::new_v4());
+            let envelope = vault.encrypt(&reference, &bundle.to_json())?;
+            if !valid_vault_envelope(&envelope) { bail!("Could not validate encrypted vault entry."); }
+            d.connection_string = d.connection_string.map(|s| strip_connection_secrets(&s));
+            d.password = Some(None);
+            d.auth_token = Some(None);
+            d.credential_ref = Some(Some(reference));
+            d.credential_secret = Some(Some(envelope));
+            Ok(d)
+        }
         CredentialStorageMode::Keychain => {
             let bundle = CredentialBundle { connection_string: d.connection_string.clone(), password: password.clone(), auth_token: token.clone() };
             let reference = uuid::Uuid::new_v4().to_string();
@@ -695,9 +735,17 @@ pub fn protect_payload(
             d.password = Some(None);
             d.auth_token = Some(None);
             d.credential_ref = Some(Some(reference));
+            d.credential_secret = Some(None);
             Ok(d)
         }
     }
+}
+
+fn valid_vault_envelope(envelope: &str) -> bool {
+    let mut parts = envelope.split('.');
+    matches!((parts.next(), parts.next(), parts.next(), parts.next()), (Some("v1"), Some(n), Some(c), None)
+        if base64::Engine::decode(&base64::engine::general_purpose::STANDARD, n).is_ok_and(|b| b.len() == 12)
+        && base64::Engine::decode(&base64::engine::general_purpose::STANDARD, c).is_ok_and(|b| b.len() >= 16))
 }
 
 const SECRET_KEYS: &[&str] = &[

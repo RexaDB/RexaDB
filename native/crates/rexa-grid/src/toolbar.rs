@@ -902,12 +902,30 @@ impl TableEditor {
         let loading = self.loading || self.fetching_structure;
         let this = cx.entity().downgrade();
         let current = self.auto_refresh_ms;
+        let refresh_label = if current == 0 { "Auto-refresh: Off".to_string() } else { format!("Auto-refresh: {}s", current / 1000) };
         div()
             .flex()
             .items_center()
             .gap_2()
             .when(self.kind != rexa_drivers::Kind::SpacetimeDb, |d| {
                 d.child(Self::toolbar_btn("insert-btn", IconName::Plus, "Insert").on_click(cx.listener(|this, _, window, cx| this.open_insert_sheet(window, cx))))
+                    .child(Self::toolbar_btn("import-csv-btn", IconName::Upload, "Import CSV").on_click(cx.listener(|this, _, window, cx| this.open_import_csv(window, cx))))
+            })
+            .child({
+                let this = cx.entity().downgrade();
+                DropdownMenu::new("export-all-menu")
+                    .align(Align::End)
+                    .trigger(Button::new("export-all-trigger").outline().size(ButtonSize::Sm).icon(IconName::Download).label(if self.exporting_all { "Exporting…" } else { "Export all" }))
+                    .menu(move |m, _, _| {
+                        let mut m = m.w(216.).label("All filtered rows").separator();
+                        for (format, label, icon) in [("csv", "CSV", IconName::FileText), ("json", "JSON", IconName::FileBraces), ("sql", "SQL inserts", IconName::Database)] {
+                            let this = this.clone();
+                            m = m.item(MenuItem::new(label).leading(gpui_component::Icon::new(icon).size_4()).on_select(move |_, cx| {
+                                this.update(cx, |this, cx| this.export_all_data(format, cx)).ok();
+                            }));
+                        }
+                        m
+                    })
             })
             .child(
                 div()
@@ -921,7 +939,7 @@ impl TableEditor {
                     .child(
                         DropdownMenu::new("auto-refresh")
                             .align(Align::End)
-                            .trigger(Button::new("auto-refresh-btn").outline().size(ButtonSize::Sm).icon(IconName::ChevronDown))
+                            .trigger(Button::new("auto-refresh-btn").outline().size(ButtonSize::Sm).icon(IconName::ChevronDown).label(refresh_label))
                             .menu(move |m, _, _| {
                                 let mut m = m.w(192.).label("Auto-refresh").separator();
                                 for (label, ms) in [("Off", 0u64), ("5 seconds", 5000), ("10 seconds", 10000), ("30 seconds", 30000), ("1 minute", 60000), ("5 minutes", 300000)] {

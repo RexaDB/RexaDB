@@ -3,4 +3,10 @@
 
 use gpui::App;
 
-pub fn init(_cx: &mut App) {}
+mod notes;
+mod dashboard;
+
+pub fn init(cx: &mut App) {
+    notes::init(cx);
+    dashboard::init(cx);
+}

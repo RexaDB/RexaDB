@@ -11,6 +11,7 @@ use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use rand::RngCore;
 use serde::Deserialize;
 use zeroize::Zeroize;
 
@@ -39,6 +40,26 @@ pub struct Vault {
 }
 
 impl Vault {
+    /// Create a vault configuration for a new passphrase vault.
+    pub fn create(passphrase: &str) -> Result<(Self, String, String)> {
+        if passphrase.chars().count() < 12 {
+            bail!("Use at least 12 characters for the vault passphrase.");
+        }
+        let mut salt = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut salt);
+        let salt_b64 = B64.encode(salt);
+        let params = argon2::Params::new(65_536, 3, 1, Some(32)).map_err(|e| anyhow!("{e}"))?;
+        let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+        let mut key = [0u8; 32];
+        argon.hash_password_into(passphrase.as_bytes(), &salt, &mut key)
+            .map_err(|e| anyhow!("deriving vault key: {e}"))?;
+        let cipher = Aes256Gcm::new(&key.into());
+        key.zeroize();
+        let vault = Self { cipher };
+        let verifier = vault.encrypt(VAULT_CHECK_REF, VAULT_CHECK_TEXT)?;
+        Ok((vault, salt_b64, verifier))
+    }
+
     pub fn unlock(passphrase: &str, salt_b64: &str, verifier: &str) -> Result<Self> {
         let salt = B64.decode(salt_b64).context("vault salt")?;
         let params = argon2::Params::new(65_536, 3, 1, Some(32)).map_err(|e| anyhow!("{e}"))?;
@@ -74,6 +95,17 @@ impl Vault {
             )
             .map_err(|_| anyhow!("Could not decrypt vault entry."))?;
         Ok(String::from_utf8(plaintext)?)
+    }
+
+    /// Encrypt a secret bundle using a fresh nonce and the reference as AAD.
+    pub fn encrypt(&self, reference: &str, plaintext: &str) -> Result<String> {
+        let mut nonce = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        let ciphertext = self.cipher.encrypt(
+            Nonce::from_slice(&nonce),
+            Payload { msg: plaintext.as_bytes(), aad: reference.as_bytes() },
+        ).map_err(|_| anyhow!("Could not encrypt vault entry."))?;
+        Ok(format!("v1.{}.{}", B64.encode(nonce), B64.encode(ciphertext)))
     }
 }
 

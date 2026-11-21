@@ -165,6 +165,12 @@ impl Studio {
         let mut subs = Vec::new();
         subs.push(cx.subscribe(&search, |_, _, _: &gpui_component::input::InputEvent, cx| cx.notify()));
         subs.push(cx.subscribe_in(&studio_bus(cx), window, Self::on_bus));
+        let settings_model = rexa_settings::model::SettingsModel::global(cx);
+        subs.push(cx.subscribe(&settings_model, |this, _, event: &rexa_settings::model::SettingsChanged, cx| {
+            this.settings = persistence::global_settings();
+            if event.key == "schemaExplorer" { this.refresh_tables(cx); }
+            cx.notify();
+        }));
         let (tags, table_tags) = persistence::load_tags(connection_id);
         let rail_order = persistence::local_get(persistence::RAIL_ORDER_KEY)
             .and_then(|v| serde_json::from_str(&v).ok())
@@ -366,6 +372,11 @@ impl Studio {
             StudioEvent::SchemaChanged => {
                 self.load_schemas(cx);
             }
+            StudioEvent::NotesChanged { connection_id } if *connection_id == self.connection_id => {
+                self.lists.notes = crate::sidebar::SideLists::load(self.connection_id).notes;
+                cx.notify();
+            }
+            StudioEvent::NotesChanged { .. } => {}
             StudioEvent::MarkDirty { tab, dirty } => {
                 let mut changed = false;
                 for t in self.tabs.iter_mut().filter(|t| tabs::spec_matches(tab, t)) {

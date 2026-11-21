@@ -16,3 +16,4 @@ rexa-ui = { path = "../rexa-ui" }
 rexa-core = { path = "../rexa-core" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
+resvg = "=0.45.1"

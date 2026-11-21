@@ -15,14 +15,44 @@ use gpui::{
 };
 use rexa_core::{runtime, Session, StudioEvent, TabSpec};
 use rexa_drivers::{
-    ColumnDetail, Driver, EnumType, ForeignKey, Kind, RowUpdate, SortConfig, SortDirection, TableFilter, TableQuery,
+    Cell, ColumnDetail, Driver, EnumType, ForeignKey, Kind, RowUpdate, SortConfig, SortDirection, TableFilter, TableQuery,
     TableRef, TypeCategory, Value,
 };
 use rexa_ui::widgets::InputState;
-use rexa_ui::{ActiveTokens, Toast};
+use rexa_ui::{ActiveTokens, Button, Dialog, TextArea, Toast};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Small RFC-4180 style parser for pasted CSV (quoted commas, quotes, CRLF, and newlines).
+fn parse_csv(input: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut chars = input.chars().peekable();
+    let mut quoted = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => { field.push('"'); chars.next(); }
+            '"' => quoted = !quoted,
+            ',' if !quoted => { record.push(std::mem::take(&mut field)); }
+            '\n' | '\r' if !quoted => {
+                if ch == '\r' && chars.peek() == Some(&'\n') { chars.next(); }
+                record.push(std::mem::take(&mut field));
+                if !record.iter().all(|v| v.is_empty()) { records.push(std::mem::take(&mut record)); } else { record.clear(); }
+            }
+            _ => field.push(ch),
+        }
+    }
+    if quoted { return Err("CSV has an unclosed quoted field.".into()); }
+    record.push(field);
+    if !record.iter().all(|v| v.is_empty()) { records.push(record); }
+    let Some(headers) = records.first().cloned() else { return Err("CSV is empty.".into()) };
+    if headers.iter().all(|h| h.trim().is_empty()) { return Err("CSV needs a header row.".into()); }
+    let width = headers.len();
+    if records.iter().skip(1).any(|r| r.len() != width) { return Err("Each CSV row must have the same number of fields as the header.".into()); }
+    Ok((headers, records.into_iter().skip(1).collect()))
+}
 
 /// One grid column (a result field joined with its `tableStructure` entry).
 #[derive(Debug, Clone)]
@@ -175,11 +205,73 @@ pub struct TableEditor {
     pub(crate) fk_preview: Option<crate::sheets::FkPreview>,
     pub(crate) auto_refresh_ms: u64,
     auto_refresh_task: Option<Task<()>>,
+    pub(crate) exporting_all: bool,
     debug_ran: bool,
     _subs: Vec<Subscription>,
 }
 
 impl TableEditor {
+    pub fn open_import_csv(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.entity().downgrade();
+        rexa_ui::open_dialog(cx, move |window, cx| {
+            let input = cx.new(|cx| gpui_component::input::TextareaState::new(window, cx).auto_grow(8, 22).placeholder("id,name\n1,Ada"));
+            let text = input.clone();
+            let target = this.clone();
+            Dialog::new().title("Import CSV rows").description("Paste CSV with a header row. Matching table columns will be imported.")
+                .child(TextArea::new(&input).min_h(180.))
+                .footer(Button::new("csv-cancel").outline().label("Cancel").on_click(|_, _, cx| rexa_ui::close_top(cx)))
+                .footer(Button::new("csv-import").label("Import rows").on_click(move |_, _, cx| {
+                    let source = text.read(cx).value().to_string();
+                    match parse_csv(&source) {
+                        Ok((headers, rows)) if !rows.is_empty() => {
+                            target.update(cx, |this, cx| this.import_csv_rows(&headers, &rows, cx)).ok();
+                            rexa_ui::close_top(cx);
+                        }
+                        Ok(_) => { Toast::error("CSV contains no data rows.").show(cx); }
+                        Err(e) => { Toast::error(e).show(cx); }
+                    }
+                }))
+        });
+        let _ = window;
+    }
+
+    fn import_csv_rows(&mut self, headers: &[String], rows: &[Vec<String>], cx: &mut Context<Self>) {
+        let Some(data) = self.data.as_ref() else { Toast::error("Load the table before importing rows.").show(cx); return };
+        let cols = data.columns.clone();
+        let mapping: Vec<_> = headers.iter().filter_map(|h| cols.iter().find(|c| c.name.eq_ignore_ascii_case(h.trim())).map(|c| (h.clone(), c.name.clone(), c.shape, c.category))).collect();
+        if mapping.is_empty() { Toast::error("No CSV headers match columns in this table.").show(cx); return; }
+        let batch: Vec<_> = rows.iter().filter(|r| !r.iter().all(|v| v.trim().is_empty())).map(|row| mapping.iter().filter_map(|(h, name, _shape, category)| {
+            let i = headers.iter().position(|x| x == h)?;
+            let value = row.get(i)?;
+            Some((name.clone(), if value.is_empty() { Value::Null } else { Value::from_text_typed(value, *category) }))
+        }).collect()).filter(|r: &Vec<_>| !r.is_empty()).collect();
+        if batch.is_empty() { Toast::error("CSV contains no importable rows.").show(cx); return; }
+        if batch.len() > 10_000 { Toast::error("CSV import is limited to 10,000 rows per operation.").show(cx); return; }
+        if self.settings.review_mode {
+            for row in batch {
+                let sql = self.insert_sql(&row);
+                self.add_action(ActionKind::InsertRow, format!("Import row into {}.{}", self.table.schema, self.table.name), sql, Vec::new(), cx);
+            }
+            Toast::success("Imported rows added to pending changes for review.").show(cx);
+            return;
+        }
+        let driver = self.driver.clone();
+        let table = self.table.clone();
+        let count = batch.len();
+        let task = runtime::spawn(async move {
+            let mut written = 0;
+            for row in batch.chunks(250) { written += driver.insert_rows(&table, row).await?; }
+            Ok(written)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match result {
+                Ok(_) => { Toast::success(format!("Imported {count} rows")).show(cx); this.count_cache.clear(); this.refresh(cx); }
+                Err(e) => { Toast::error(format!("CSV import failed: {e:#}")).show(cx); }
+            }).ok();
+        }).detach();
+    }
+
     pub fn new(schema: String, table: String, session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let driver = session.driver.clone();
         let kind = driver.kind();
@@ -236,6 +328,7 @@ impl TableEditor {
             fk_preview: None,
             auto_refresh_ms: 0,
             auto_refresh_task: None,
+            exporting_all: false,
             debug_ran: false,
             session,
             _subs: subs,
@@ -1290,6 +1383,10 @@ impl TableEditor {
     pub fn export_data(&mut self, format: &str, cx: &mut Context<Self>) {
         let Some(rows) = self.rows_for_export(cx, false) else { return };
         let text = self.format_rows(&rows, format, ',');
+        self.write_export_file(&text, format, cx);
+    }
+
+    fn write_export_file(&mut self, text: &str, format: &str, cx: &mut Context<Self>) {
         let dir = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Downloads")).unwrap_or_else(std::env::temp_dir);
         let mut path = dir.join(format!("{}.{format}", self.table.name));
         let mut n = 1;
@@ -1303,6 +1400,57 @@ impl TableEditor {
             }
             Err(e) => self.error_toast(&e.to_string(), cx),
         }
+    }
+
+    /// Export every row matching the current filter and sort, independent of the visible page.
+    pub fn export_all_data(&mut self, format: &str, cx: &mut Context<Self>) {
+        let Some(data) = self.data.as_ref() else { self.error_toast("No table data available to export.", cx); return };
+        if self.exporting_all { return; }
+        const PAGE: usize = 1000;
+        const MAX_ROWS: usize = 100_000;
+        let columns = data.columns.clone();
+        let mut query = self.build_query(0);
+        query.columns = Some(columns.iter().map(|c| c.name.clone()).collect());
+        query.limit = PAGE;
+        let driver = self.driver.clone();
+        let format = format.to_string();
+        self.exporting_all = true;
+        Toast::info("Exporting filtered rows…").show(cx);
+        cx.notify();
+        let task = runtime::spawn(async move {
+            let mut rows = Vec::<Vec<Option<String>>>::new();
+            loop {
+                let page = driver.read_table(&query).await?;
+                let count = page.result.rows.len();
+                for row in page.result.rows {
+                    rows.push(row.into_iter().map(|cell| match cell { Cell::Null => None, Cell::Text(value) => Some(value) }).collect());
+                    if rows.len() > MAX_ROWS { anyhow::bail!("Export is limited to {MAX_ROWS} rows. Apply a filter and retry."); }
+                }
+                if count < PAGE { break; }
+                query.offset += count;
+            }
+            Ok::<_, anyhow::Error>(rows)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.exporting_all = false;
+                match result {
+                    Ok(rows) => {
+                        let previous = this.data.replace(GridData {
+                            columns,
+                            rows: rows.into_iter().map(|r| r.into_iter().map(|v| v.map(SharedString::from)).collect()).collect(),
+                        });
+                        let indexes: Vec<usize> = this.data.as_ref().map_or_else(Vec::new, |d| (0..d.rows.len()).collect());
+                        let text = this.format_rows(&indexes, &format, ',');
+                        this.data = previous;
+                        this.write_export_file(&text, &format, cx);
+                    }
+                    Err(error) => { Toast::error(format!("Export failed: {error:#}")).show(cx); }
+                }
+                cx.notify();
+            }).ok();
+        }).detach();
     }
 
     /// `copyRowData(row, format)`.
@@ -1325,11 +1473,20 @@ impl TableEditor {
     // ---- auto refresh ------------------------------------------------------------------------
 
     pub fn set_auto_refresh(&mut self, ms: u64, cx: &mut Context<Self>) {
+        // Dropping GPUI's task cancels its async loop. Replacing the handle
+        // without first dropping it left every previous interval running.
+        self.auto_refresh_task = None;
         self.auto_refresh_ms = ms;
         self.auto_refresh_task = (ms > 0).then(|| {
             cx.spawn(async move |this, cx| loop {
                 cx.background_executor().timer(Duration::from_millis(ms)).await;
-                if this.update(cx, |this, cx| this.refresh_current_tab(cx)).is_err() {
+                if this.update(cx, |this, cx| {
+                    // Do not stack periodic reads while a manual or previous
+                    // refresh is still in flight.
+                    if !this.loading && !this.fetching_structure {
+                        this.refresh_current_tab(cx);
+                    }
+                }).is_err() {
                     break;
                 }
             })

@@ -78,6 +78,7 @@ pub struct Session {
 #[derive(Default)]
 pub struct Sessions {
     pub open: HashMap<i64, Arc<Session>>,
+    vault: Option<Arc<rexa_store::Vault>>,
 }
 
 impl Global for Sessions {}
@@ -87,10 +88,11 @@ pub fn connect(connection: SavedConnection, cx: &mut App) -> gpui::Task<Result<A
     if let Some(s) = cx.default_global::<Sessions>().open.get(&connection.id) {
         return gpui::Task::ready(Ok(s.clone()));
     }
+    let vault = cx.default_global::<Sessions>().vault.clone();
     let task = runtime::spawn(async move {
         let creds = tokio::task::spawn_blocking({
             let c = connection.clone();
-            move || rexa_store::resolve_credentials(&c, None)
+            move || rexa_store::resolve_credentials(&c, vault.as_deref())
         })
         .await??;
         let driver = rexa_drivers::connect_detect(&connection.kind, &creds.connection_string).await?;
@@ -106,6 +108,15 @@ pub fn connect(connection: SavedConnection, cx: &mut App) -> gpui::Task<Result<A
         }
         Ok(session)
     })
+}
+
+/// Install a passphrase-unlocked vault for this app session.
+pub fn unlock_credential_vault(vault: rexa_store::Vault, cx: &mut App) {
+    cx.default_global::<Sessions>().vault = Some(Arc::new(vault));
+}
+
+pub fn credential_vault(cx: &App) -> Option<Arc<rexa_store::Vault>> {
+    cx.try_global::<Sessions>().and_then(|sessions| sessions.vault.clone())
 }
 
 // ---- studio tabs --------------------------------------------------------------
@@ -165,6 +176,8 @@ pub enum StudioEvent {
     OpenTab(TabSpec),
     CloseTab(TabSpec),
     SchemaChanged,
+    /// A connection's note collection changed (native notes autosave / creation).
+    NotesChanged { connection_id: i64 },
     /// A tab reports unsaved edits (dirty dot in the tab strip, "N unsaved" in the status bar).
     MarkDirty { tab: TabSpec, dirty: bool },
     /// Rename a tab's title (e.g. a saved snippet name).

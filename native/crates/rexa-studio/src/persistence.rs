@@ -284,6 +284,12 @@ pub struct GlobalStudioSettings {
     pub restore_app_state: bool,
     /// commandMenuSections: (id, visible)
     pub command_menu_sections: Vec<(String, bool)>,
+    pub tui_mode: bool,
+    pub noise_bg_enabled: bool,
+    pub noise_bg_opacity: f32,
+    pub noise_bg_size: f32,
+    pub noise_bg_color: String,
+    pub noise_bg_blend_mode: String,
     pub noise_bg_translucent: bool,
 }
 
@@ -301,6 +307,12 @@ pub fn global_settings() -> GlobalStudioSettings {
         preview_tabs: b("previewTabs", false),
         auto_close_pane: b("autoClosePane", false),
         restore_app_state: b("restoreAppState", true),
+        tui_mode: b("tuiMode", false),
+        noise_bg_enabled: b("noiseBgEnabled", false),
+        noise_bg_opacity: v.get("noiseBgOpacity").and_then(|x| x.as_f64()).unwrap_or(30.) as f32,
+        noise_bg_size: v.get("noiseBgSize").and_then(|x| x.as_f64()).unwrap_or(50.) as f32,
+        noise_bg_color: v.get("noiseBgColor").and_then(|x| x.as_str()).unwrap_or("#000000").to_string(),
+        noise_bg_blend_mode: v.get("noiseBgBlendMode").and_then(|x| x.as_str()).unwrap_or("overlay").to_string(),
         noise_bg_translucent: b("noiseBgTranslucent", false),
         command_menu_sections: v
             .get("commandMenuSections")

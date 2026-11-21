@@ -13,6 +13,7 @@ struct AppRoot {
     route: Route,
     view: Option<AnyView>,
     _nav: Subscription,
+    _settings: Subscription,
 }
 
 impl AppRoot {
@@ -23,18 +24,25 @@ impl AppRoot {
             this.view = Registry::build_screen(&this.route, window, cx);
             cx.notify();
         });
+        let settings = rexa_settings::model::SettingsModel::global(cx);
+        let settings_sub = cx.observe(&settings, |_, _, cx| cx.notify());
         let route = nav.read(cx).route.clone();
         let view = Registry::build_screen(&route, window, cx);
-        Self { route, view, _nav: sub }
+        Self { route, view, _nav: sub, _settings: settings_sub }
     }
 }
 
 impl Render for AppRoot {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.tokens();
+        let model = rexa_settings::model::SettingsModel::read(cx);
+        let translucent = model.is_some_and(|m| m.bool("noiseBgTranslucent"));
+        let zoom = model.map_or(100., |m| m.num("appZoom") as f32).clamp(50., 200.);
+        window.set_rem_size(px(16. * zoom / 100.));
+        window.set_background_appearance(if translucent { gpui::WindowBackgroundAppearance::Blurred } else { gpui::WindowBackgroundAppearance::Opaque });
         div()
             .size_full()
-            .bg(t.studio_bg)
+            .bg(if translucent { gpui::transparent_black() } else { t.studio_bg })
             .text_color(t.foreground)
             .font_family(rexa_ui::app_font::family(cx))
             .children(self.view.clone())
