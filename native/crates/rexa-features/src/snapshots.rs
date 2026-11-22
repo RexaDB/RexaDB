@@ -283,20 +283,70 @@ fn sql_literal(value: &Value, dialect: rexa_drivers::Dialect) -> String {
     }
 }
 
-fn mysql_text_default_type(detail: Option<&ColumnDetail>) -> bool {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MysqlDefaultKind {
+    /// String-like types whose defaults are always literal values.
+    Text,
+    /// Date/time types that may use `CURRENT_TIMESTAMP`-style expressions.
+    Temporal,
+    Other,
+}
+
+fn mysql_default_kind(detail: Option<&ColumnDetail>) -> MysqlDefaultKind {
     let Some(detail) = detail else {
-        return false;
+        return MysqlDefaultKind::Other;
     };
     let kind = detail.data_type.trim().to_ascii_lowercase();
-    detail.is_enum
+    if detail.is_enum
         || kind.contains("char")
         || kind.contains("text")
         || kind.contains("blob")
         || kind.contains("binary")
-        || matches!(
-            kind.as_str(),
-            "enum" | "set" | "date" | "time" | "datetime" | "timestamp" | "year" | "json"
-        )
+        || matches!(kind.as_str(), "enum" | "set" | "json")
+    {
+        MysqlDefaultKind::Text
+    } else if matches!(
+        kind.as_str(),
+        "date" | "time" | "datetime" | "timestamp" | "year"
+    ) {
+        MysqlDefaultKind::Temporal
+    } else {
+        MysqlDefaultKind::Other
+    }
+}
+
+fn mysql_temporal_expression(upper: &str) -> bool {
+    matches!(upper, "CURRENT_TIMESTAMP" | "CURRENT_DATE" | "CURRENT_TIME")
+        || [
+            "CURRENT_TIMESTAMP(",
+            "CURRENT_DATE(",
+            "CURRENT_TIME(",
+            "NOW(",
+            "LOCALTIME(",
+            "LOCALTIMESTAMP(",
+        ]
+        .iter()
+        .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'))
+}
+
+fn mysql_expression_default(upper: &str) -> bool {
+    matches!(
+        upper,
+        "NULL"
+            | "TRUE"
+            | "FALSE"
+            | "CURRENT_TIMESTAMP"
+            | "CURRENT_DATE"
+            | "CURRENT_TIME"
+            | "CURRENT_USER"
+    ) || mysql_temporal_expression(upper)
+        || ["UUID(", "JSON_OBJECT(", "JSON_ARRAY("]
+            .iter()
+            .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'))
+        || (upper.starts_with("B'") && upper.ends_with('\''))
+        || upper.starts_with("0B")
+        || (upper.starts_with("X'") && upper.ends_with('\''))
+        || upper.starts_with("0X")
 }
 
 fn default_sql(
@@ -316,38 +366,28 @@ fn default_sql(
         return trimmed.to_string();
     }
     let upper = trimmed.to_ascii_uppercase();
-    let keyword_expression = matches!(
-        upper.as_str(),
-        "NULL"
-            | "TRUE"
-            | "FALSE"
-            | "CURRENT_TIMESTAMP"
-            | "CURRENT_DATE"
-            | "CURRENT_TIME"
-            | "CURRENT_USER"
-    ) || [
-        "CURRENT_TIMESTAMP(",
-        "CURRENT_DATE(",
-        "CURRENT_TIME(",
-        "NOW(",
-        "UUID(",
-        "JSON_OBJECT(",
-        "JSON_ARRAY(",
-    ]
-    .iter()
-    .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'));
-    if keyword_expression {
-        return trimmed.to_string();
-    }
-    // MySQL reports literal defaults without SQL quotes. Quote them for
-    // textual types even when the literal itself looks numeric (`'01'`).
-    if mysql_text_default_type(detail) {
-        return dialect.quote_str(trimmed);
-    }
-    if trimmed.parse::<i128>().is_ok() || trimmed.parse::<f64>().is_ok() {
-        trimmed.to_string()
-    } else {
-        dialect.quote_str(trimmed)
+    match mysql_default_kind(detail) {
+        // MySQL reports literal defaults without SQL quotes. A string default
+        // such as `CURRENT_TIMESTAMP`, `NULL`, or `01` is still a literal, not
+        // an expression, on a textual column.
+        MysqlDefaultKind::Text => dialect.quote_str(trimmed),
+        MysqlDefaultKind::Temporal => {
+            if mysql_temporal_expression(&upper) {
+                trimmed.to_string()
+            } else {
+                dialect.quote_str(trimmed)
+            }
+        }
+        MysqlDefaultKind::Other => {
+            if mysql_expression_default(&upper)
+                || trimmed.parse::<i128>().is_ok()
+                || trimmed.parse::<f64>().is_ok()
+            {
+                trimmed.to_string()
+            } else {
+                dialect.quote_str(trimmed)
+            }
+        }
     }
 }
 
@@ -1132,7 +1172,29 @@ impl Snapshots {
         cx.notify();
     }
 
+    fn invalidate_pending_open(&mut self) {
+        self.open_generation = self.open_generation.wrapping_add(1);
+    }
+
+    fn begin_compare(&mut self, selected: Option<String>, cx: &mut Context<Self>) {
+        // A snapshot opened from the list may still be loading. Entering
+        // compare mode must keep its result from replacing the picker.
+        self.invalidate_pending_open();
+        self.selected = None;
+        self.compare_mode = true;
+        self.selected_ids = selected.into_iter().collect();
+        cx.notify();
+    }
+
+    fn cancel_compare(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_pending_open();
+        self.compare_mode = false;
+        self.selected_ids.clear();
+        cx.notify();
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_pending_open();
         self.list_generation = self.list_generation.wrapping_add(1);
         let generation = self.list_generation;
         let connection_id = self.connection_id;
@@ -1188,7 +1250,7 @@ impl Snapshots {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
-                if this.open_generation != generation {
+                if this.open_generation != generation || this.compare_mode {
                     return;
                 }
                 match result {
@@ -1218,6 +1280,7 @@ impl Snapshots {
         self.compare_generation = self.compare_generation.wrapping_add(1);
         let generation = self.compare_generation;
         let connection_id = self.connection_id;
+        self.invalidate_pending_open();
         self.compare_mode = false;
         self.selected_ids.clear();
         self.error = None;
@@ -1247,6 +1310,7 @@ impl Snapshots {
     }
 
     fn leave_comparison(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_pending_open();
         self.diff = None;
         self.selected_ids.clear();
         cx.notify();
@@ -1605,10 +1669,7 @@ impl Render for Snapshots {
                                 .icon(IconName::GitCompare)
                                 .label("Compare…")
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.selected = None;
-                                    this.compare_mode = true;
-                                    this.selected_ids = vec![compare_snapshot_id.clone()];
-                                    cx.notify();
+                                    this.begin_compare(Some(compare_snapshot_id.clone()), cx);
                                 })),
                         )
                         .child(
@@ -1752,9 +1813,7 @@ impl Render for Snapshots {
                             .size(ButtonSize::Sm)
                             .label("Cancel")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.compare_mode = false;
-                                this.selected_ids.clear();
-                                cx.notify();
+                                this.cancel_compare(cx);
                             })),
                     )
                     .child(
@@ -1775,9 +1834,7 @@ impl Render for Snapshots {
                                 .icon(IconName::GitCompare)
                                 .label("Compare")
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.compare_mode = true;
-                                    this.selected_ids.clear();
-                                    cx.notify();
+                                    this.begin_compare(None, cx);
                                 })),
                         )
                     })
@@ -2568,6 +2625,25 @@ mod tests {
             default_sql(Kind::MySql, rexa_drivers::Dialect::MySql, "01", Some(&text)),
             "'01'"
         );
+        // Keyword-looking values are still literals on a string column.
+        assert_eq!(
+            default_sql(
+                Kind::MySql,
+                rexa_drivers::Dialect::MySql,
+                "CURRENT_TIMESTAMP",
+                Some(&text)
+            ),
+            "'CURRENT_TIMESTAMP'"
+        );
+        assert_eq!(
+            default_sql(
+                Kind::MySql,
+                rexa_drivers::Dialect::MySql,
+                "NULL",
+                Some(&text)
+            ),
+            "'NULL'"
+        );
 
         let number = ColumnDetail {
             data_type: "int".into(),
@@ -2581,6 +2657,29 @@ mod tests {
                 Some(&number)
             ),
             "01"
+        );
+
+        let timestamp = ColumnDetail {
+            data_type: "timestamp".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            default_sql(
+                Kind::MySql,
+                rexa_drivers::Dialect::MySql,
+                "CURRENT_TIMESTAMP",
+                Some(&timestamp)
+            ),
+            "CURRENT_TIMESTAMP"
+        );
+        assert_eq!(
+            default_sql(
+                Kind::MySql,
+                rexa_drivers::Dialect::MySql,
+                "2020-01-01 00:00:00",
+                Some(&timestamp)
+            ),
+            "'2020-01-01 00:00:00'"
         );
     }
 
