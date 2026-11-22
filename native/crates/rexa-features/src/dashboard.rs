@@ -23,6 +23,7 @@ pub struct Dashboard {
     widget_title: Entity<InputState>,
     widget_sql: Entity<TextareaState>,
     busy: bool,
+    load_generation: u64,
     message: Option<String>,
     load_task: Option<Task<()>>,
     _subs: Vec<Subscription>,
@@ -91,7 +92,7 @@ impl Dashboard {
         if widgets.is_empty() { widgets.push(Widget { id: "welcome".into(), title: "Welcome".into(), sql: "SELECT 1".into(), raw:Value::Null, result: None, error: None }); }
         let title_sub = cx.subscribe(&title, |this, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { this.save(cx); });
         let sql_sub = cx.subscribe(&widget_sql, |_this, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); });
-        let mut this = Self { session, dashboard_id, title, widgets, selected: Some(0), widget_title, widget_sql, busy: false, message: None, load_task: None, _subs: vec![title_sub, sql_sub] };
+        let mut this = Self { session, dashboard_id, title, widgets, selected: Some(0), widget_title, widget_sql, busy: false, load_generation: 0, message: None, load_task: None, _subs: vec![title_sub, sql_sub] };
         this.load_selected(cx);
         this
     }
@@ -114,12 +115,15 @@ impl Dashboard {
         let Some(index) = self.selected else { return };
         if index >= self.widgets.len() { return; }
         let sql = match validate_read_query(&self.widgets[index].sql) { Ok(s)=>s, Err(e)=>{self.widgets[index].error=Some(e);cx.notify();return;} };
+        self.load_generation = self.load_generation.wrapping_add(1);
+        let generation = self.load_generation;
         self.busy = true; self.widgets[index].error = None; self.message = None;
         let driver = self.session.driver.clone();
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = runtime::spawn(async move { driver.execute_readonly(&sql, DEFAULT_ROW_LIMIT).await }).await;
             this.update(cx, |this, cx| {
-                if let Some(i) = this.selected { if let Some(w) = this.widgets.get_mut(i) { match result { Ok(result) => { w.result = Some(result); w.error = None; }, Err(e) => { w.error = Some(format!("Query failed: {e}")); w.result = None; } } } }
+                if this.load_generation != generation || this.selected != Some(index) { return; }
+                if let Some(w) = this.widgets.get_mut(index) { match result { Ok(result) => { w.result = Some(result); w.error = None; }, Err(e) => { w.error = Some(format!("Query failed: {e}")); w.result = None; } } }
                 this.busy = false; cx.notify();
             }).ok();
         }));
