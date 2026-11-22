@@ -5,15 +5,46 @@ use gpui::{div, prelude::*, px, AnyView, App, AppContext, Context, Entity, Share
 use gpui_component::input::InputState;
 use gpui_component::scroll::ScrollableElement;
 use rexa_core::{Registry, Session, TabSpec};
-use rexa_drivers::{Driver, Kind, SchemaColumn, TableRef};
+use rexa_drivers::{ColumnDetail, Driver, IndexInfo, Kind, SchemaColumn, SequenceInfo, TableRef};
 use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, TextInput, Tw};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
 
 fn snapshot_dir(connection_id: i64) -> PathBuf {
-    rexa_store::app_data_dir()
+    snapshot_root_dir()
         .join("snapshots")
         .join(connection_id.to_string())
+}
+
+/// Matches `getSnapshotDir` in `lib/db/snapshot-core.ts`. Snapshots have
+/// always lived beside the desktop settings under `Rexa DB`, separately from
+/// the legacy/Tauri application data directory used by the native store.
+fn snapshot_root_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library/Application Support/Rexa DB")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData/Roaming"))
+            .join("Rexa DB")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".config"))
+            .join("Rexa DB")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        PathBuf::from("Rexa DB")
+    }
 }
 
 fn load_snapshots(connection_id: i64) -> Result<Vec<Value>, String> {
@@ -130,19 +161,14 @@ fn cell_json(cell: &rexa_drivers::Cell, data_type: &str) -> Value {
             "real" | "float" | "double precision" | "numeric" | "decimal"
         )
     {
-        if let Ok(n) = raw.parse::<i64>() {
-            return json!(n);
-        }
-        if let Ok(n) = raw.parse::<f64>() {
-            if n.is_finite() {
-                return json!(n);
-            }
-        }
+        // Keep the driver's exact decimal representation. JSON floating point
+        // numbers cannot represent every BIGINT or DECIMAL value exactly.
+        return Value::String(raw.to_owned());
     }
     Value::String(raw.to_owned())
 }
 
-fn sql_literal(value: &Value) -> String {
+fn sql_literal(value: &Value, dialect: rexa_drivers::Dialect) -> String {
     match value {
         Value::Null => "NULL".into(),
         Value::Bool(value) => {
@@ -153,15 +179,279 @@ fn sql_literal(value: &Value) -> String {
             }
         }
         Value::Number(value) => value.to_string(),
-        _ => format!(
-            "'{}'",
-            value
-                .as_str()
-                .unwrap_or_default()
-                .replace('\\', "\\\\")
-                .replace('\'', "''")
-        ),
+        _ => dialect.quote_str(value.as_str().unwrap_or_default()),
     }
+}
+
+fn default_sql(
+    kind: Kind,
+    dialect: rexa_drivers::Dialect,
+    default: &str,
+    detail: Option<&ColumnDetail>,
+) -> String {
+    if kind != Kind::MySql {
+        return default.to_string();
+    }
+    let trimmed = default.trim();
+    if detail
+        .and_then(|detail| detail.extra.as_deref())
+        .is_some_and(|extra| extra.to_ascii_uppercase().contains("DEFAULT_GENERATED"))
+    {
+        return trimmed.to_string();
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    let expression = matches!(
+        upper.as_str(),
+        "NULL"
+            | "TRUE"
+            | "FALSE"
+            | "CURRENT_TIMESTAMP"
+            | "CURRENT_DATE"
+            | "CURRENT_TIME"
+            | "CURRENT_USER"
+    ) || [
+        "CURRENT_TIMESTAMP(",
+        "CURRENT_DATE(",
+        "CURRENT_TIME(",
+        "NOW(",
+        "UUID(",
+        "JSON_OBJECT(",
+        "JSON_ARRAY(",
+    ]
+    .iter()
+    .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'))
+        || trimmed.parse::<i128>().is_ok()
+        || trimmed.parse::<f64>().is_ok();
+    if expression {
+        trimmed.to_string()
+    } else {
+        dialect.quote_str(trimmed)
+    }
+}
+
+fn full_column_type(column: &SchemaColumn, details: &[ColumnDetail]) -> String {
+    details
+        .iter()
+        .find(|detail| detail.column_name == column.column_name)
+        .map(|detail| detail.display_type().to_owned())
+        .filter(|type_name| !type_name.is_empty())
+        .unwrap_or_else(|| column.data_type.clone())
+}
+
+fn referential_action(action: Option<&str>) -> Option<&'static str> {
+    match action?.trim().to_ascii_uppercase().as_str() {
+        "CASCADE" => Some("CASCADE"),
+        "RESTRICT" => Some("RESTRICT"),
+        "SET NULL" => Some("SET NULL"),
+        "SET DEFAULT" => Some("SET DEFAULT"),
+        "NO ACTION" => Some("NO ACTION"),
+        _ => None,
+    }
+}
+
+fn foreign_key_reference(
+    kind: Kind,
+    foreign_key: &Value,
+    dialect: rexa_drivers::Dialect,
+) -> String {
+    let schema = foreign_key["foreignSchema"].as_str().unwrap_or_default();
+    let table = foreign_key["foreignTable"].as_str().unwrap_or_default();
+    let mut reference = if kind == Kind::Sqlite {
+        dialect.quote_ident(table)
+    } else {
+        dialect.table_ref(schema, table)
+    };
+    let columns = foreign_key["foreignColumns"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    if !columns.is_empty() {
+        reference.push_str(&format!(
+            " ({})",
+            columns
+                .iter()
+                .map(|column| dialect.quote_ident(column))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    for (key, clause) in [("onDelete", " ON DELETE "), ("onUpdate", " ON UPDATE ")] {
+        if let Some(action) = foreign_key[key]
+            .as_str()
+            .and_then(|value| referential_action(Some(value)))
+        {
+            reference.push_str(clause);
+            reference.push_str(action);
+        }
+    }
+    reference
+}
+
+fn sqlite_on_keyword(sql: &str) -> Option<usize> {
+    let bytes = sql.as_bytes();
+    let (mut quote, mut bracket) = (None, false);
+    let mut index = 0;
+    while index + 4 <= bytes.len() {
+        let byte = bytes[index];
+        if bracket {
+            if byte == b']' {
+                bracket = false;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                if bytes.get(index + 1) == Some(&delimiter) {
+                    index += 2;
+                    continue;
+                }
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' | b'`' => quote = Some(byte),
+            b'[' => bracket = true,
+            _ => {}
+        }
+        if quote.is_none() && !bracket && bytes[index..index + 4].eq_ignore_ascii_case(b" ON ") {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn sqlite_identifier_end(sql: &str) -> usize {
+    let bytes = sql.as_bytes();
+    if let Some(&opening) = bytes.first() {
+        let closing = match opening {
+            b'"' | b'`' => Some(opening),
+            b'[' => Some(b']'),
+            _ => None,
+        };
+        if let Some(closing) = closing {
+            let mut i = 1;
+            while i < bytes.len() {
+                if bytes[i] == closing {
+                    if bytes.get(i + 1) == Some(&closing) {
+                        i += 2;
+                        continue;
+                    }
+                    return i + 1;
+                }
+                i += 1;
+            }
+            return bytes.len();
+        }
+    }
+    bytes
+        .iter()
+        .position(|byte| byte.is_ascii_whitespace() || *byte == b'(')
+        .unwrap_or(bytes.len())
+}
+
+fn index_sql(kind: Kind, driver: &dyn Driver, index: &IndexInfo, table_ref: &str) -> String {
+    let dialect = driver.dialect();
+    if kind == Kind::Sqlite {
+        let name = if index.name.starts_with("sqlite_autoindex_") {
+            format!("snapshot_{}", index.name)
+        } else {
+            index.name.clone()
+        };
+        let qualified_name = format!(
+            "{}.{}",
+            driver.quote_ident(&index.schema),
+            driver.quote_ident(&name)
+        );
+        if let Some(on) = sqlite_on_keyword(&index.definition) {
+            let target_and_tail = index.definition[on + 4..].trim_start();
+            let tail = &target_and_tail[sqlite_identifier_end(target_and_tail)..];
+            return format!(
+                "CREATE {}INDEX {qualified_name} ON {} {}",
+                if index.is_unique { "UNIQUE " } else { "" },
+                driver.quote_ident(&index.table_name),
+                tail
+            );
+        }
+        return format!(
+            "CREATE {}INDEX {qualified_name} ON {} ({})",
+            if index.is_unique { "UNIQUE " } else { "" },
+            driver.quote_ident(&index.table_name),
+            index
+                .columns
+                .iter()
+                .map(|column| driver.quote_ident(column))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if !index.definition.trim().is_empty() {
+        return index.definition.trim().trim_end_matches(';').to_string();
+    }
+    format!(
+        "CREATE {}INDEX {} ON {table_ref} ({})",
+        if index.is_unique { "UNIQUE " } else { "" },
+        dialect.quote_ident(&index.name),
+        index
+            .columns
+            .iter()
+            .map(|column| dialect.quote_ident(column))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn sequence_ddl(sequence: &SequenceInfo, driver: &dyn Driver) -> String {
+    let dialect = driver.dialect();
+    let data_type = match sequence.data_type.as_deref().unwrap_or("bigint") {
+        "smallint" => "smallint",
+        "integer" => "integer",
+        _ => "bigint",
+    };
+    let mut sql = format!(
+        "CREATE SEQUENCE {}.{} AS {data_type}",
+        driver.quote_ident(&sequence.schema),
+        driver.quote_ident(&sequence.name)
+    );
+    for (option, value) in [
+        ("INCREMENT BY", sequence.increment_by.as_deref()),
+        ("MINVALUE", sequence.min_value.as_deref()),
+        ("MAXVALUE", sequence.max_value.as_deref()),
+        ("START WITH", sequence.start_value.as_deref()),
+        ("CACHE", sequence.cache_size.as_deref()),
+    ] {
+        if let Some(value) = value.filter(|value| value.parse::<i128>().is_ok()) {
+            sql.push_str(&format!(" {option} {value}"));
+        }
+    }
+    sql.push_str(if sequence.cycle_flag {
+        " CYCLE"
+    } else {
+        " NO CYCLE"
+    });
+    sql.push(';');
+    if let Some(last_number) = sequence
+        .last_number
+        .as_deref()
+        .filter(|value| value.parse::<i128>().is_ok())
+    {
+        let sequence_ref = format!(
+            "{}.{}",
+            dialect.quote_ident(&sequence.schema),
+            dialect.quote_ident(&sequence.name)
+        );
+        sql.push_str(&format!(
+            "\nSELECT setval({}, {last_number}, true);",
+            dialect.quote_str(&sequence_ref)
+        ));
+    }
+    sql.push_str("\n\n");
+    sql
 }
 
 async fn create_snapshot_file(
@@ -193,7 +483,8 @@ async fn create_snapshot_file(
         .await
         .unwrap_or_else(|_| grouped.keys().map(|(schema, _)| schema.clone()).collect());
     let mut schema_views = Vec::new();
-    for schema_name in schema_names {
+    let mut schema_sequences = Vec::new();
+    for schema_name in &schema_names {
         let is_system_schema = match kind {
             Kind::Postgres | Kind::SupabaseMgmt => {
                 matches!(schema_name.as_str(), "information_schema" | "pg_catalog")
@@ -208,6 +499,9 @@ async fn create_snapshot_file(
         };
         if is_system_schema {
             continue;
+        }
+        if kind == Kind::Postgres || kind == Kind::SupabaseMgmt {
+            schema_sequences.extend(driver.sequences(schema_name).await.unwrap_or_default());
         }
         let view_names = driver.views(&schema_name).await.unwrap_or_default();
         for view_name in view_names {
@@ -240,6 +534,7 @@ async fn create_snapshot_file(
     let mut data_tables = serde_json::Map::new();
     let mut schema_sql = String::new();
     let mut data_sql = String::new();
+    let mut warnings = Vec::new();
     let mut row_count = 0u64;
     // PostgreSQL requires enum types to exist before tables whose columns use
     // them. Defer foreign keys and indexes until all tables have been created
@@ -257,7 +552,12 @@ async fn create_snapshot_file(
             driver.quote_ident(&enum_type.name)
         ));
     }
-    let mut deferred_schema_sql = String::new();
+    for sequence in &schema_sequences {
+        schema_sql.push_str(&sequence_ddl(sequence, driver.as_ref()));
+    }
+    let mut deferred_index_sql = String::new();
+    let mut deferred_foreign_keys = Vec::<(String, Value)>::new();
+    let mut captured_tables = std::collections::BTreeSet::new();
     for ((schema, table), columns) in grouped {
         let table_indexes: Vec<_> = all_indexes
             .iter()
@@ -288,17 +588,21 @@ async fn create_snapshot_file(
                     "columns": [],
                     "foreignSchema": foreign_key.foreign_table_schema,
                     "foreignTable": foreign_key.foreign_table_name,
-                    "foreignColumns": []
+                    "foreignColumns": [],
+                    "onDelete": foreign_key.on_delete,
+                    "onUpdate": foreign_key.on_update
                 })
             });
             entry["columns"]
                 .as_array_mut()
                 .expect("foreign key columns initialized as an array")
                 .push(json!(foreign_key.column_name));
-            entry["foreignColumns"]
-                .as_array_mut()
-                .expect("foreign key columns initialized as an array")
-                .push(json!(foreign_key.foreign_column_name));
+            if !foreign_key.foreign_column_name.is_empty() {
+                entry["foreignColumns"]
+                    .as_array_mut()
+                    .expect("foreign key columns initialized as an array")
+                    .push(json!(foreign_key.foreign_column_name));
+            }
         }
         // Some drivers expose foreign keys only through the denormalized
         // column catalog. Keep that fallback for engines without FK catalog
@@ -334,6 +638,11 @@ async fn create_snapshot_file(
             })
             .collect();
         let table_ref = dialect.table_ref(&schema, &table);
+        let table_ref_info = TableRef::new(&schema, &table);
+        let details = driver
+            .table_structure(&table_ref_info)
+            .await
+            .unwrap_or_default();
         let col_names: Vec<String> = columns.iter().map(|c| c.column_name.clone()).collect();
         let select_cols = col_names
             .iter()
@@ -357,19 +666,45 @@ async fn create_snapshot_file(
                     .join(", ")
             )
         };
-        let query = format!("SELECT * FROM {table_ref}{order_clause} LIMIT 500");
-        let result = driver.execute(&query, 500).await?;
+        let query = format!("SELECT {select_cols} FROM {table_ref}{order_clause} LIMIT 500");
+        let result = match driver.execute(&query, 500).await {
+            Ok(result) => result,
+            Err(error) => {
+                warnings.push(json!({
+                    "table": format!("{schema}.{table}"),
+                    "message": format!("Could not capture table data: {error:#}")
+                }));
+                continue;
+            }
+        };
         let json_rows: Vec<Value> = result
             .rows
             .iter()
             .map(|row| {
                 let mut object = serde_json::Map::new();
-                for (index, column) in columns.iter().enumerate() {
-                    if let Some(cell) = row.get(index) {
-                        object.insert(
-                            column.column_name.clone(),
-                            cell_json(cell, &column.data_type),
-                        );
+                if result.columns.is_empty() {
+                    for (index, column) in columns.iter().enumerate() {
+                        if let Some(cell) = row.get(index) {
+                            object.insert(
+                                column.column_name.clone(),
+                                cell_json(cell, &full_column_type(column, &details)),
+                            );
+                        }
+                    }
+                } else {
+                    for (index, result_column) in result.columns.iter().enumerate() {
+                        let Some(column) = columns
+                            .iter()
+                            .find(|column| column.column_name.eq_ignore_ascii_case(result_column))
+                        else {
+                            continue;
+                        };
+                        if let Some(cell) = row.get(index) {
+                            object.insert(
+                                column.column_name.clone(),
+                                cell_json(cell, &full_column_type(column, &details)),
+                            );
+                        }
                     }
                 }
                 Value::Object(object)
@@ -377,8 +712,9 @@ async fn create_snapshot_file(
             .collect();
         row_count += json_rows.len() as u64;
         let table_key = format!("{schema}.{table}");
+        captured_tables.insert(table_key.clone());
         data_tables.insert(table_key.clone(), Value::Array(json_rows.clone()));
-        let structured_indexes: Vec<Value> = table_indexes.iter().map(|index| json!({"name": index.name, "columns": index.columns, "isUnique": index.is_unique})).collect();
+        let structured_indexes: Vec<Value> = table_indexes.iter().map(|index| json!({"name": index.name, "columns": index.columns, "isUnique": index.is_unique, "definition": index.definition})).collect();
         schema_tables.push(json!({"schema": schema, "name": table, "columns": schema_columns, "primaryKey": primary_key, "indexes": structured_indexes, "foreignKeys": foreign_keys}));
 
         let mut definitions: Vec<String> = columns
@@ -387,14 +723,27 @@ async fn create_snapshot_file(
                 format!(
                     "  {} {}{}",
                     driver.quote_ident(&column.column_name),
-                    column.data_type,
+                    full_column_type(column, &details),
                     format!(
                         "{}{}",
                         if column.is_nullable { "" } else { " NOT NULL" },
                         column
                             .column_default
                             .as_ref()
-                            .map(|default| format!(" DEFAULT {default}"))
+                            .map(|default| {
+                                format!(
+                                        " DEFAULT {}",
+                                        default_sql(
+                                            kind,
+                                            dialect,
+                                            default,
+                                            details
+                                                .iter()
+                                                .find(|detail| detail.column_name
+                                                    == column.column_name),
+                                        )
+                                    )
+                            })
                             .unwrap_or_default()
                     )
                 )
@@ -412,9 +761,8 @@ async fn create_snapshot_file(
         }
         if kind == Kind::Sqlite {
             for foreign_key in &foreign_keys {
-                let referenced_table = foreign_key["foreignTable"].as_str().unwrap_or_default();
                 definitions.push(format!(
-                    "  CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
+                    "  CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {}",
                     driver.quote_ident(foreign_key["name"].as_str().unwrap_or_default()),
                     foreign_key["columns"]
                         .as_array()
@@ -424,15 +772,7 @@ async fn create_snapshot_file(
                         .map(|column| driver.quote_ident(column))
                         .collect::<Vec<_>>()
                         .join(", "),
-                    driver.quote_ident(referenced_table),
-                    foreign_key["foreignColumns"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(|column| driver.quote_ident(column))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    foreign_key_reference(kind, foreign_key, dialect)
                 ));
             }
         }
@@ -441,33 +781,17 @@ async fn create_snapshot_file(
             definitions.join(",\n")
         ));
         for foreign_key in foreign_keys.iter().filter(|_| kind != Kind::Sqlite) {
-            let referenced_table = dialect.table_ref(
-                foreign_key["foreignSchema"].as_str().unwrap_or(&schema),
-                foreign_key["foreignTable"].as_str().unwrap_or_default(),
-            );
-            deferred_schema_sql.push_str(&format!("ALTER TABLE {table_ref} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {referenced_table} ({});\n\n",
-                driver.quote_ident(foreign_key["name"].as_str().unwrap_or_default()),
-                foreign_key["columns"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|column| driver.quote_ident(column)).collect::<Vec<_>>().join(", "),
-                foreign_key["foreignColumns"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|column| driver.quote_ident(column)).collect::<Vec<_>>().join(", ")));
+            deferred_foreign_keys.push((table_ref.clone(), foreign_key.clone()));
         }
         for index in table_indexes {
-            deferred_schema_sql.push_str(&format!(
-                "CREATE {}INDEX {} ON {table_ref} ({});\n\n",
-                if index.is_unique { "UNIQUE " } else { "" },
-                driver.quote_ident(&index.name),
-                index
-                    .columns
-                    .iter()
-                    .map(|column| driver.quote_ident(column))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+            deferred_index_sql.push_str(&index_sql(kind, driver.as_ref(), index, &table_ref));
+            deferred_index_sql.push_str(";\n\n");
         }
         if !json_rows.is_empty() && !col_names.is_empty() {
             for row in json_rows {
                 let values = col_names
                     .iter()
-                    .map(|column| sql_literal(&row[column]))
+                    .map(|column| sql_literal(&row[column], dialect))
                     .collect::<Vec<_>>()
                     .join(", ");
                 data_sql.push_str(&format!(
@@ -477,7 +801,33 @@ async fn create_snapshot_file(
         }
     }
 
-    schema_sql.push_str(&deferred_schema_sql);
+    schema_sql.push_str(&deferred_index_sql);
+    for (table_ref, foreign_key) in deferred_foreign_keys {
+        let target = format!(
+            "{}.{}",
+            foreign_key["foreignSchema"].as_str().unwrap_or_default(),
+            foreign_key["foreignTable"].as_str().unwrap_or_default()
+        );
+        if !captured_tables.contains(&target) {
+            continue;
+        }
+        let columns = foreign_key["columns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|column| dialect.quote_ident(column))
+            .collect::<Vec<_>>()
+            .join(", ");
+        schema_sql.push_str(&format!(
+            "ALTER TABLE {table_ref} ADD CONSTRAINT {} FOREIGN KEY ({columns}) REFERENCES {};\n\n",
+            driver.quote_ident(foreign_key["name"].as_str().unwrap_or_default()),
+            foreign_key_reference(kind, &foreign_key, dialect)
+        ));
+    }
+    if schema_tables.is_empty() {
+        anyhow::bail!("No readable tables were available to include in the snapshot.");
+    }
     for view in &schema_views {
         let view_ref = dialect.table_ref(
             view["schema"].as_str().unwrap_or_default(),
@@ -517,7 +867,7 @@ async fn create_snapshot_file(
     let snapshot = json!({
         "meta": { "id": id, "name": name, "description": "", "createdAt": created_at.to_rfc3339(), "engine": engine,
             "connectionString": connection_string, "tableCount": schema["tables"].as_array().map_or(0, Vec::len),
-            "rowCount": row_count, "schemaHash": format!("{:x}", hash.unsigned_abs()) },
+            "rowCount": row_count, "schemaHash": format!("{:x}", hash.unsigned_abs()), "warnings": warnings },
         "schemaSQL": schema_sql, "dataSQL": data_sql, "schemaStructured": schema, "dataTables": data_tables
     });
     let dir = snapshot_dir(connection_id);
@@ -1006,10 +1356,11 @@ impl Render for Snapshots {
                             .child(format!("{count} columns")),
                     ))
                     .on_click(cx.listener(move |_, _, _, cx| {
+                        let tab_id = format!("snapshot-table-{snapshot_id}-{table_ref}");
                         rexa_core::open_tab(
                             TabSpec::View {
                                 view: "snapshot-table".into(),
-                                params: json!({"snapshotId": snapshot_id, "tableRef": table_ref}),
+                                params: json!({"id": tab_id, "snapshotId": snapshot_id, "tableRef": table_ref}),
                             },
                             cx,
                         );
@@ -1764,23 +2115,21 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
                 primary_key.clone()
             };
             let row_key = |row: &Value| {
-                key_columns
+                let values: Vec<Value> = key_columns
                     .iter()
-                    .map(|column| match row.get(column) {
-                        None | Some(Value::Null) => "NULL".to_owned(),
-                        Some(Value::String(value)) => value.clone(),
-                        Some(value) => value.to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join("|")
+                    .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
+                    .collect();
+                serde_json::to_string(&values).unwrap_or_default()
             };
-            let mut old_by_key: BTreeMap<String, Value> = old_rows
-                .iter()
-                .map(|row| (row_key(row), row.clone()))
-                .collect();
+            let mut old_by_key: BTreeMap<String, std::collections::VecDeque<Value>> =
+                BTreeMap::new();
+            for row in old_rows {
+                old_by_key.entry(row_key(&row)).or_default().push_back(row);
+            }
             for row in &new_rows {
                 let key = row_key(row);
-                if let Some(old_row) = old_by_key.remove(&key) {
+                let old_row = old_by_key.get_mut(&key).and_then(|rows| rows.pop_front());
+                if let Some(old_row) = old_row {
                     let changed = columns
                         .iter()
                         .filter(|column| !primary_key.contains(column))
@@ -1792,7 +2141,10 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
                     added.push(row.clone());
                 }
             }
-            removed = old_by_key.into_values().collect();
+            removed = old_by_key
+                .into_values()
+                .flat_map(std::collections::VecDeque::into_iter)
+                .collect();
         }
         if !added.is_empty() || !removed.is_empty() || !modified.is_empty() {
             let rows_added = added.len();

@@ -137,13 +137,26 @@ impl WorkflowEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let requested_id = params.get("workflowId").and_then(Value::as_str);
         let tab_id = params
-            .get("id")
+            .get("baseId")
+            .or_else(|| params.get("id"))
             .and_then(Value::as_str)
             .unwrap_or("workflow")
+            .split("::pane::")
+            .next()
+            .unwrap_or("workflow")
             .to_string();
-        let workflow_id = requested_id.map(str::to_owned).unwrap_or_else(generated_id);
+        let saved_workflow_id = params
+            .get("workflowId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                tab_id
+                    .strip_prefix("workflow-")
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+            });
+        let workflow_id = saved_workflow_id.clone().unwrap_or_else(generated_id);
         let existing = load_workflow(&workflow_id).ok().flatten();
         // The create marker is persisted with the tab. Treat it as a one-time
         // request so restoring a saved tab never resets its workflow contents.
@@ -152,7 +165,7 @@ impl WorkflowEditor {
                 .get("create")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
-                || requested_id.is_none());
+                || saved_workflow_id.is_none());
         let not_found = !is_new && existing.is_none();
         let workflow = existing.unwrap_or_else(|| Workflow {
             id: workflow_id.clone(),
