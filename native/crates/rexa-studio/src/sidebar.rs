@@ -305,8 +305,10 @@ impl Studio {
 
     fn render_workflows_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let mut col = div().flex().flex_col().gap(px(2.)).pt_1().child(self.new_row("new-workflow", "New workflow", cx).on_click(cx.listener(|this, _, _, cx| {
-            let mut tab = StudioTab::new("workflow", "workflow", "Workflow");
+            let workflow_id = format!("workflow-{}", tabs::uid());
+            let mut tab = StudioTab::new(format!("workflow-{workflow_id}"), "workflow", "Workflow");
             tab.extra.insert("create".into(), true.into());
+            tab.extra.insert("workflowId".into(), workflow_id.into());
             this.open_tab(tab, false, cx);
         })));
         for w in self.lists.workflows.clone() {

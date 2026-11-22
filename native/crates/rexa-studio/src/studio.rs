@@ -377,6 +377,11 @@ impl Studio {
                 cx.notify();
             }
             StudioEvent::NotesChanged { .. } => {}
+            StudioEvent::WorkflowsChanged { connection_id } if *connection_id == self.connection_id => {
+                self.lists.workflows = crate::sidebar::SideLists::load(self.connection_id).workflows;
+                cx.notify();
+            }
+            StudioEvent::WorkflowsChanged { .. } => {}
             StudioEvent::MarkDirty { tab, dirty } => {
                 let mut changed = false;
                 for t in self.tabs.iter_mut().filter(|t| tabs::spec_matches(tab, t)) {

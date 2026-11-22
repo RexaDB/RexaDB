@@ -178,6 +178,8 @@ pub enum StudioEvent {
     SchemaChanged,
     /// A connection's note collection changed (native notes autosave / creation).
     NotesChanged { connection_id: i64 },
+    /// A connection's workflow collection changed in the native editor.
+    WorkflowsChanged { connection_id: i64 },
     /// A tab reports unsaved edits (dirty dot in the tab strip, "N unsaved" in the status bar).
     MarkDirty { tab: TabSpec, dirty: bool },
     /// Rename a tab's title (e.g. a saved snippet name).
