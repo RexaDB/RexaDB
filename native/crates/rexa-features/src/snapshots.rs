@@ -1,12 +1,14 @@
 //! Port of `components/studio/snapshots/snapshots-view.tsx` and
 //! `snapshot-detail.tsx`: browse saved snapshots and inspect their schema/data.
 
-use gpui::{div, prelude::*, px, AnyView, App, AppContext, Context, SharedString, Window};
+use gpui::{div, prelude::*, px, AnyView, App, AppContext, Context, Entity, SharedString, Window};
+use gpui_component::input::InputState;
 use gpui_component::scroll::ScrollableElement;
 use rexa_core::{Registry, Session, TabSpec};
-use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Tw};
-use serde_json::Value;
-use std::{fs, path::PathBuf, sync::Arc};
+use rexa_drivers::{Driver, Kind, SchemaColumn};
+use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, TextInput, Tw};
+use serde_json::{json, Value};
+use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
 
 fn snapshot_dir(connection_id: i64) -> PathBuf {
     rexa_store::app_data_dir()
@@ -58,30 +60,366 @@ fn number(meta: &Value, key: &str) -> u64 {
     meta.get(key).and_then(Value::as_u64).unwrap_or_default()
 }
 
+fn supported_engine(kind: Kind) -> Option<&'static str> {
+    match kind {
+        Kind::Postgres | Kind::SupabaseMgmt => Some("postgres"),
+        Kind::MySql => Some("mysql"),
+        Kind::Sqlite => Some("sqlite"),
+        _ => None,
+    }
+}
+
+fn safe_snapshot_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn slug(name: &str) -> String {
+    let mut out = String::new();
+    let mut separator = false;
+    for ch in name.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            if separator && !out.is_empty() {
+                out.push('-');
+            }
+            out.push(ch);
+            separator = false;
+        } else {
+            separator = true;
+        }
+        if out.len() >= 60 {
+            break;
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        "snapshot".into()
+    } else {
+        out
+    }
+}
+
+fn cell_json(cell: &rexa_drivers::Cell, data_type: &str) -> Value {
+    let Some(raw) = cell.as_str() else {
+        return Value::Null;
+    };
+    let kind = data_type.to_ascii_lowercase();
+    if matches!(kind.as_str(), "bool" | "boolean" | "bit") {
+        return match raw.to_ascii_lowercase().as_str() {
+            "true" | "1" => Value::Bool(true),
+            "false" | "0" => Value::Bool(false),
+            _ => Value::String(raw.to_owned()),
+        };
+    }
+    if kind.contains("int")
+        || matches!(
+            kind.as_str(),
+            "real" | "float" | "double precision" | "numeric" | "decimal"
+        )
+    {
+        if let Ok(n) = raw.parse::<i64>() {
+            return json!(n);
+        }
+        if let Ok(n) = raw.parse::<f64>() {
+            if n.is_finite() {
+                return json!(n);
+            }
+        }
+    }
+    Value::String(raw.to_owned())
+}
+
+fn sql_literal(value: &Value) -> String {
+    match value {
+        Value::Null => "NULL".into(),
+        Value::Bool(value) => {
+            if *value {
+                "TRUE".into()
+            } else {
+                "FALSE".into()
+            }
+        }
+        Value::Number(value) => value.to_string(),
+        _ => format!(
+            "'{}'",
+            value
+                .as_str()
+                .unwrap_or_default()
+                .replace('\\', "\\\\")
+                .replace('\'', "''")
+        ),
+    }
+}
+
+async fn create_snapshot_file(
+    driver: Arc<dyn Driver>,
+    connection_id: i64,
+    connection_string: String,
+    name: String,
+) -> anyhow::Result<Value> {
+    let kind = driver.kind();
+    let engine = supported_engine(kind).ok_or_else(|| {
+        anyhow::anyhow!("Snapshots currently support PostgreSQL, MySQL, and SQLite.")
+    })?;
+    let rows = driver.all_tables_with_columns(None).await?;
+    let mut grouped: BTreeMap<(String, String), Vec<SchemaColumn>> = BTreeMap::new();
+    for row in rows {
+        grouped
+            .entry((row.table_schema.clone(), row.table_name.clone()))
+            .or_default()
+            .push(row);
+    }
+    if grouped.is_empty() {
+        anyhow::bail!("No tables were found to include in the snapshot.");
+    }
+
+    let dialect = driver.dialect();
+    let mut schema_tables = Vec::new();
+    let mut data_tables = serde_json::Map::new();
+    let mut schema_sql = String::new();
+    let mut data_sql = String::new();
+    let mut row_count = 0u64;
+    for ((schema, table), columns) in grouped {
+        let primary_key: Vec<String> = columns
+            .iter()
+            .filter(|c| c.is_primary)
+            .map(|c| c.column_name.clone())
+            .collect();
+        let foreign_keys: Vec<Value> = columns.iter().filter_map(|c| {
+            let foreign_table = c.referenced_table_name.as_ref()?;
+            let foreign_column = c.referenced_column_name.as_ref()?;
+            Some(json!({"name": format!("fk_{}_{}", table, c.column_name), "columns": [c.column_name], "foreignSchema": c.referenced_table_schema.as_deref().unwrap_or(&schema), "foreignTable": foreign_table, "foreignColumns": [foreign_column]}))
+        }).collect();
+        let schema_columns: Vec<Value> = columns
+            .iter()
+            .map(|c| {
+                json!({
+                    "name": c.column_name, "dataType": c.data_type, "isNullable": c.is_nullable,
+                    "defaultValue": c.column_default, "isPrimary": c.is_primary
+                })
+            })
+            .collect();
+        let table_ref = dialect.table_ref(&schema, &table);
+        let col_names: Vec<String> = columns.iter().map(|c| c.column_name.clone()).collect();
+        let select_cols = col_names
+            .iter()
+            .map(|c| driver.quote_ident(c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let order = if !primary_key.is_empty() {
+            primary_key.clone()
+        } else {
+            col_names.first().cloned().into_iter().collect()
+        };
+        let order_clause = if order.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " ORDER BY {}",
+                order
+                    .iter()
+                    .map(|c| driver.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let query = format!("SELECT * FROM {table_ref}{order_clause} LIMIT 500");
+        let result = driver.execute(&query, 500).await?;
+        let json_rows: Vec<Value> = result
+            .rows
+            .iter()
+            .map(|row| {
+                let mut object = serde_json::Map::new();
+                for (index, column) in columns.iter().enumerate() {
+                    if let Some(cell) = row.get(index) {
+                        object.insert(
+                            column.column_name.clone(),
+                            cell_json(cell, &column.data_type),
+                        );
+                    }
+                }
+                Value::Object(object)
+            })
+            .collect();
+        row_count += json_rows.len() as u64;
+        let table_key = format!("{schema}.{table}");
+        data_tables.insert(table_key.clone(), Value::Array(json_rows.clone()));
+        schema_tables.push(json!({"schema": schema, "name": table, "columns": schema_columns, "primaryKey": primary_key, "indexes": [], "foreignKeys": foreign_keys}));
+
+        let mut definitions: Vec<String> = columns
+            .iter()
+            .map(|column| {
+                format!(
+                    "  {} {}{}",
+                    driver.quote_ident(&column.column_name),
+                    column.data_type,
+                    if column.is_nullable { "" } else { " NOT NULL" }
+                )
+            })
+            .collect();
+        if !primary_key.is_empty() {
+            definitions.push(format!(
+                "  PRIMARY KEY ({})",
+                primary_key
+                    .iter()
+                    .map(|c| driver.quote_ident(c))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        schema_sql.push_str(&format!(
+            "CREATE TABLE {table_ref} (\n{}\n);\n\n",
+            definitions.join(",\n")
+        ));
+        if !json_rows.is_empty() && !col_names.is_empty() {
+            for row in json_rows {
+                let values = col_names
+                    .iter()
+                    .map(|column| sql_literal(&row[column]))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                data_sql.push_str(&format!(
+                    "INSERT INTO {table_ref} ({select_cols}) VALUES ({values});\n"
+                ));
+            }
+        }
+    }
+
+    let schema = json!({"tables": schema_tables, "views": [], "enums": []});
+    let schema_json = serde_json::to_string(&schema)?;
+    let mut hash = 0i32;
+    for unit in schema_json.encode_utf16() {
+        hash = hash.wrapping_mul(31).wrapping_add(unit as i32);
+    }
+    let created_at = chrono::Utc::now();
+    let name = name.trim();
+    let id = format!(
+        "{}-{:03}-{}",
+        created_at.format("%Y%m%dT%H%M%S"),
+        created_at.timestamp_subsec_millis(),
+        slug(name)
+    );
+    let snapshot = json!({
+        "meta": { "id": id, "name": name, "description": "", "createdAt": created_at.to_rfc3339(), "engine": engine,
+            "connectionString": connection_string, "tableCount": schema["tables"].as_array().map_or(0, Vec::len),
+            "rowCount": row_count, "schemaHash": format!("{:x}", hash.unsigned_abs()) },
+        "schemaSQL": schema_sql, "dataSQL": data_sql, "schemaStructured": schema, "dataTables": data_tables
+    });
+    let dir = snapshot_dir(connection_id);
+    fs::create_dir_all(&dir)?;
+    let final_path = dir.join(format!("{id}.json"));
+    let temp_path = dir.join(format!(".{id}.json.tmp"));
+    fs::write(&temp_path, serde_json::to_vec_pretty(&snapshot)?)?;
+    fs::rename(&temp_path, &final_path)?;
+    Ok(snapshot)
+}
+
 pub struct Snapshots {
     connection_id: i64,
+    connection_string: String,
+    driver: Arc<dyn Driver>,
     snapshots: Vec<Value>,
     selected: Option<Value>,
     error: Option<String>,
     show_schema: bool,
     show_data: bool,
+    name: Entity<InputState>,
+    creating: bool,
 }
 
 impl Snapshots {
-    fn new(session: Arc<Session>) -> Self {
+    fn new(session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let connection_id = session.connection.id;
+        let connection_string = session.connection.connection_string.clone();
+        let driver = session.driver.clone();
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Snapshot name"));
         let (snapshots, error) = match load_snapshots(connection_id) {
             Ok(snapshots) => (snapshots, None),
             Err(error) => (Vec::new(), Some(error)),
         };
         Self {
             connection_id,
+            connection_string,
+            driver,
             snapshots,
             selected: None,
             error,
             show_schema: false,
             show_data: false,
+            name,
+            creating: false,
         }
+    }
+
+    fn create(&mut self, cx: &mut Context<Self>) {
+        if self.creating {
+            return;
+        }
+        let name = self.name.read(cx).value().trim().to_string();
+        if name.is_empty() {
+            self.error = Some("Enter a snapshot name first.".into());
+            cx.notify();
+            return;
+        }
+        if supported_engine(self.driver.kind()).is_none() {
+            self.error = Some("Snapshots currently support PostgreSQL, MySQL, and SQLite.".into());
+            cx.notify();
+            return;
+        }
+        self.creating = true;
+        self.error = None;
+        cx.notify();
+        let driver = self.driver.clone();
+        let id = self.connection_id;
+        let connection_string = self.connection_string.clone();
+        let task = rexa_core::runtime::spawn(async move {
+            create_snapshot_file(driver, id, connection_string, name).await
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.creating = false;
+                match result {
+                    Ok(snapshot) => {
+                        this.snapshots.push(snapshot);
+                        this.snapshots.sort_by(|a, b| {
+                            b["meta"]["createdAt"]
+                                .as_str()
+                                .cmp(&a["meta"]["createdAt"].as_str())
+                        });
+                        this.selected = None;
+                        rexa_ui::toast::success("Snapshot created", cx);
+                    }
+                    Err(error) => {
+                        this.error = Some(format!("Could not create snapshot: {error:#}"))
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn delete(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !safe_snapshot_id(id) {
+            self.error = Some("Invalid snapshot id.".into());
+            cx.notify();
+            return;
+        }
+        match fs::remove_file(snapshot_dir(self.connection_id).join(format!("{id}.json"))) {
+            Ok(()) => {
+                self.snapshots
+                    .retain(|s| s["meta"]["id"].as_str() != Some(id));
+                self.selected = None;
+                self.error = None;
+            }
+            Err(error) => self.error = Some(format!("Could not delete snapshot: {error}")),
+        }
+        cx.notify();
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -122,6 +460,7 @@ impl Render for Snapshots {
         if let Some(snapshot) = selected {
             let meta = snapshot.get("meta").cloned().unwrap_or(Value::Null);
             let name = meta_text(&meta, "name");
+            let snapshot_id = meta_text(&meta, "id");
             let tables = snapshot["schemaStructured"]["tables"]
                 .as_array()
                 .cloned()
@@ -191,6 +530,30 @@ impl Render for Snapshots {
                                 .icon(IconName::RefreshCw)
                                 .label("Refresh")
                                 .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                        )
+                        .child(
+                            Button::new("snapshot-delete")
+                                .outline()
+                                .size(ButtonSize::Sm)
+                                .icon(IconName::Trash)
+                                .label("Delete")
+                                .on_click(cx.listener(move |_this, _, _, cx| {
+                                    let id = snapshot_id.clone();
+                                    let confirm = rexa_ui::confirm(
+                                        rexa_ui::ConfirmOptions::destructive("Delete snapshot?")
+                                            .description(
+                                                "This permanently removes the saved snapshot.",
+                                            )
+                                            .confirm_text("Delete"),
+                                        cx,
+                                    );
+                                    cx.spawn(async move |this, cx| {
+                                        if confirm.await {
+                                            this.update(cx, |this, cx| this.delete(&id, cx)).ok();
+                                        }
+                                    })
+                                    .detach();
+                                })),
                         ),
                 )
                 .child(
@@ -293,6 +656,23 @@ impl Render for Snapshots {
                         .flex_1()
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .child(format!("Snapshots ({})", self.snapshots.len())),
+                )
+                .child(div().w(px(190.)).child(TextInput::new(&self.name).h(28.)))
+                .child(
+                    Button::new("snapshot-create")
+                        .size(ButtonSize::Sm)
+                        .icon(if self.creating {
+                            IconName::LoaderCircle
+                        } else {
+                            IconName::Plus
+                        })
+                        .label(if self.creating {
+                            "Creating…"
+                        } else {
+                            "New Snapshot"
+                        })
+                        .disabled(self.creating)
+                        .on_click(cx.listener(|this, _, _, cx| this.create(cx))),
                 )
                 .child(
                     Button::new("snapshots-refresh")
@@ -425,14 +805,16 @@ pub fn init(cx: &mut App) {
     Registry::tab(
         cx,
         "rexa-features-snapshots",
-        |spec, session, _window, cx| {
+        |spec, session, window, cx| {
             let TabSpec::View { view, .. } = spec else {
                 return None;
             };
             if view != "snapshots" {
                 return None;
             }
-            Some(Into::<AnyView>::into(cx.new(|_| Snapshots::new(session))))
+            Some(Into::<AnyView>::into(
+                cx.new(|cx| Snapshots::new(session, window, cx)),
+            ))
         },
     );
 }

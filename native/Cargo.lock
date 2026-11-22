@@ -6514,6 +6514,7 @@ name = "rexa-features"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "gpui-component",
  "gpui-pre",
  "rexa-core",
