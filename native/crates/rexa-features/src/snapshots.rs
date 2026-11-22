@@ -5,7 +5,7 @@ use gpui::{div, prelude::*, px, AnyView, App, AppContext, Context, Entity, Share
 use gpui_component::input::InputState;
 use gpui_component::scroll::ScrollableElement;
 use rexa_core::{Registry, Session, TabSpec};
-use rexa_drivers::{Driver, Kind, SchemaColumn};
+use rexa_drivers::{Driver, Kind, SchemaColumn, TableRef};
 use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, TextInput, Tw};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
@@ -187,22 +187,143 @@ async fn create_snapshot_file(
     }
 
     let dialect = driver.dialect();
+    let all_indexes = driver.indexes(None).await.unwrap_or_default();
+    let schema_names = driver
+        .schemas()
+        .await
+        .unwrap_or_else(|_| grouped.keys().map(|(schema, _)| schema.clone()).collect());
+    let mut schema_views = Vec::new();
+    for schema_name in schema_names {
+        let is_system_schema = match kind {
+            Kind::Postgres | Kind::SupabaseMgmt => {
+                matches!(schema_name.as_str(), "information_schema" | "pg_catalog")
+                    || schema_name.starts_with("pg_toast")
+                    || schema_name.starts_with("pg_temp")
+            }
+            Kind::MySql => matches!(
+                schema_name.as_str(),
+                "information_schema" | "mysql" | "performance_schema" | "sys"
+            ),
+            _ => false,
+        };
+        if is_system_schema {
+            continue;
+        }
+        let view_names = driver.views(&schema_name).await.unwrap_or_default();
+        for view_name in view_names {
+            let query = match kind {
+                Kind::Sqlite => format!("SELECT sql AS definition FROM {}.sqlite_master WHERE type = 'view' AND name = {}", driver.quote_ident(&schema_name), dialect.quote_str(&view_name)),
+                _ => format!("SELECT view_definition AS definition FROM information_schema.views WHERE table_schema = {} AND table_name = {}", dialect.quote_str(&schema_name), dialect.quote_str(&view_name)),
+            };
+            let definition = driver
+                .execute(&query, 1)
+                .await
+                .ok()
+                .and_then(|result| {
+                    result
+                        .rows
+                        .first()
+                        .and_then(|row| row.first())
+                        .and_then(|cell| cell.as_str())
+                        .map(str::to_owned)
+                })
+                .unwrap_or_default();
+            if !definition.is_empty() {
+                schema_views.push(
+                    json!({"schema": schema_name, "name": view_name, "definition": definition}),
+                );
+            }
+        }
+    }
+    let schema_enums = driver.enums().await.unwrap_or_default();
     let mut schema_tables = Vec::new();
     let mut data_tables = serde_json::Map::new();
     let mut schema_sql = String::new();
     let mut data_sql = String::new();
     let mut row_count = 0u64;
+    // PostgreSQL requires enum types to exist before tables whose columns use
+    // them. Defer foreign keys and indexes until all tables have been created
+    // so references to tables sorted later in the catalog also work.
+    for enum_type in &schema_enums {
+        let values = enum_type
+            .values
+            .iter()
+            .map(|value| dialect.quote_str(value))
+            .collect::<Vec<_>>()
+            .join(", ");
+        schema_sql.push_str(&format!(
+            "CREATE TYPE {}.{} AS ENUM ({values});\n\n",
+            driver.quote_ident(&enum_type.schema),
+            driver.quote_ident(&enum_type.name)
+        ));
+    }
+    let mut deferred_schema_sql = String::new();
     for ((schema, table), columns) in grouped {
+        let table_indexes: Vec<_> = all_indexes
+            .iter()
+            .filter(|index| {
+                index.schema == schema && index.table_name == table && !index.is_primary
+            })
+            .collect();
         let primary_key: Vec<String> = columns
             .iter()
             .filter(|c| c.is_primary)
             .map(|c| c.column_name.clone())
             .collect();
-        let foreign_keys: Vec<Value> = columns.iter().filter_map(|c| {
-            let foreign_table = c.referenced_table_name.as_ref()?;
-            let foreign_column = c.referenced_column_name.as_ref()?;
-            Some(json!({"name": format!("fk_{}_{}", table, c.column_name), "columns": [c.column_name], "foreignSchema": c.referenced_table_schema.as_deref().unwrap_or(&schema), "foreignTable": foreign_table, "foreignColumns": [foreign_column]}))
-        }).collect();
+        let foreign_key_rows = driver
+            .foreign_keys(&TableRef::new(&schema, &table))
+            .await
+            .unwrap_or_default();
+        let mut grouped_foreign_keys: BTreeMap<String, Value> = BTreeMap::new();
+        for foreign_key in &foreign_key_rows {
+            let name = foreign_key.constraint_name.clone().unwrap_or_else(|| {
+                format!(
+                    "fk_{table}_{}_{}",
+                    foreign_key.foreign_table_schema, foreign_key.foreign_table_name
+                )
+            });
+            let entry = grouped_foreign_keys.entry(name.clone()).or_insert_with(|| {
+                json!({
+                    "name": name,
+                    "columns": [],
+                    "foreignSchema": foreign_key.foreign_table_schema,
+                    "foreignTable": foreign_key.foreign_table_name,
+                    "foreignColumns": []
+                })
+            });
+            entry["columns"]
+                .as_array_mut()
+                .expect("foreign key columns initialized as an array")
+                .push(json!(foreign_key.column_name));
+            entry["foreignColumns"]
+                .as_array_mut()
+                .expect("foreign key columns initialized as an array")
+                .push(json!(foreign_key.foreign_column_name));
+        }
+        // Some drivers expose foreign keys only through the denormalized
+        // column catalog. Keep that fallback for engines without FK catalog
+        // support, while preferring the named constraint rows when available.
+        if grouped_foreign_keys.is_empty() {
+            for column in &columns {
+                let (Some(foreign_table), Some(foreign_column)) = (
+                    column.referenced_table_name.as_ref(),
+                    column.referenced_column_name.as_ref(),
+                ) else {
+                    continue;
+                };
+                grouped_foreign_keys.insert(
+                    format!("fk_{}_{}", table, column.column_name),
+                    json!({
+                        "name": format!("fk_{}_{}", table, column.column_name),
+                        "columns": [column.column_name],
+                        "foreignSchema": column.referenced_table_schema.as_deref().unwrap_or(&schema),
+                        "foreignTable": foreign_table,
+                        "foreignColumns": [foreign_column]
+                    }),
+                );
+            }
+        }
+        let foreign_keys: Vec<Value> = grouped_foreign_keys.into_values().collect();
         let schema_columns: Vec<Value> = columns
             .iter()
             .map(|c| {
@@ -257,7 +378,8 @@ async fn create_snapshot_file(
         row_count += json_rows.len() as u64;
         let table_key = format!("{schema}.{table}");
         data_tables.insert(table_key.clone(), Value::Array(json_rows.clone()));
-        schema_tables.push(json!({"schema": schema, "name": table, "columns": schema_columns, "primaryKey": primary_key, "indexes": [], "foreignKeys": foreign_keys}));
+        let structured_indexes: Vec<Value> = table_indexes.iter().map(|index| json!({"name": index.name, "columns": index.columns, "isUnique": index.is_unique})).collect();
+        schema_tables.push(json!({"schema": schema, "name": table, "columns": schema_columns, "primaryKey": primary_key, "indexes": structured_indexes, "foreignKeys": foreign_keys}));
 
         let mut definitions: Vec<String> = columns
             .iter()
@@ -266,7 +388,15 @@ async fn create_snapshot_file(
                     "  {} {}{}",
                     driver.quote_ident(&column.column_name),
                     column.data_type,
-                    if column.is_nullable { "" } else { " NOT NULL" }
+                    format!(
+                        "{}{}",
+                        if column.is_nullable { "" } else { " NOT NULL" },
+                        column
+                            .column_default
+                            .as_ref()
+                            .map(|default| format!(" DEFAULT {default}"))
+                            .unwrap_or_default()
+                    )
                 )
             })
             .collect();
@@ -280,10 +410,59 @@ async fn create_snapshot_file(
                     .join(", ")
             ));
         }
+        if kind == Kind::Sqlite {
+            for foreign_key in &foreign_keys {
+                let referenced_table = foreign_key["foreignTable"].as_str().unwrap_or_default();
+                definitions.push(format!(
+                    "  CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {} ({})",
+                    driver.quote_ident(foreign_key["name"].as_str().unwrap_or_default()),
+                    foreign_key["columns"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(|column| driver.quote_ident(column))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    driver.quote_ident(referenced_table),
+                    foreign_key["foreignColumns"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(|column| driver.quote_ident(column))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
         schema_sql.push_str(&format!(
             "CREATE TABLE {table_ref} (\n{}\n);\n\n",
             definitions.join(",\n")
         ));
+        for foreign_key in foreign_keys.iter().filter(|_| kind != Kind::Sqlite) {
+            let referenced_table = dialect.table_ref(
+                foreign_key["foreignSchema"].as_str().unwrap_or(&schema),
+                foreign_key["foreignTable"].as_str().unwrap_or_default(),
+            );
+            deferred_schema_sql.push_str(&format!("ALTER TABLE {table_ref} ADD CONSTRAINT {} FOREIGN KEY ({}) REFERENCES {referenced_table} ({});\n\n",
+                driver.quote_ident(foreign_key["name"].as_str().unwrap_or_default()),
+                foreign_key["columns"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|column| driver.quote_ident(column)).collect::<Vec<_>>().join(", "),
+                foreign_key["foreignColumns"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|column| driver.quote_ident(column)).collect::<Vec<_>>().join(", ")));
+        }
+        for index in table_indexes {
+            deferred_schema_sql.push_str(&format!(
+                "CREATE {}INDEX {} ON {table_ref} ({});\n\n",
+                if index.is_unique { "UNIQUE " } else { "" },
+                driver.quote_ident(&index.name),
+                index
+                    .columns
+                    .iter()
+                    .map(|column| driver.quote_ident(column))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         if !json_rows.is_empty() && !col_names.is_empty() {
             for row in json_rows {
                 let values = col_names
@@ -298,7 +477,30 @@ async fn create_snapshot_file(
         }
     }
 
-    let schema = json!({"tables": schema_tables, "views": [], "enums": []});
+    schema_sql.push_str(&deferred_schema_sql);
+    for view in &schema_views {
+        let view_ref = dialect.table_ref(
+            view["schema"].as_str().unwrap_or_default(),
+            view["name"].as_str().unwrap_or_default(),
+        );
+        let definition = view["definition"].as_str().unwrap_or_default();
+        if kind == Kind::Sqlite
+            && definition
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("create view")
+        {
+            schema_sql.push_str(definition.trim_end_matches(';'));
+            schema_sql.push_str(";\n\n");
+        } else {
+            schema_sql.push_str(&format!("CREATE VIEW {view_ref} AS\n{definition};\n\n"));
+        }
+    }
+    let schema = json!({
+        "tables": schema_tables,
+        "views": schema_views,
+        "enums": schema_enums.iter().map(|enum_type| json!({"schema":enum_type.schema, "name":enum_type.name, "values":enum_type.values})).collect::<Vec<_>>()
+    });
     let schema_json = serde_json::to_string(&schema)?;
     let mut hash = 0i32;
     for unit in schema_json.encode_utf16() {
@@ -1455,6 +1657,36 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
                 schema_changes.push(json!({"type":"column", "action":"modified", "entityName":format!("{table_key}.{name}"), "details":format!("{} → {}", old_column["dataType"].as_str().unwrap_or("?"), new_column["dataType"].as_str().unwrap_or("?"))}));
             }
         }
+        let indexes_by_name = |table: &Value| -> BTreeMap<String, Value> {
+            table["indexes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|index| Some((index["name"].as_str()?.to_owned(), index.clone())))
+                .collect()
+        };
+        let old_indexes = indexes_by_name(old_table);
+        let new_indexes = indexes_by_name(new_table);
+        for name in new_indexes
+            .keys()
+            .filter(|name| !old_indexes.contains_key(*name))
+        {
+            schema_changes.push(json!({"type":"index", "action":"added", "entityName":format!("{table_key}.{name}")}));
+        }
+        for name in old_indexes
+            .keys()
+            .filter(|name| !new_indexes.contains_key(*name))
+        {
+            schema_changes.push(json!({"type":"index", "action":"removed", "entityName":format!("{table_key}.{name}")}));
+        }
+        for (name, new_index) in &new_indexes {
+            if old_indexes
+                .get(name)
+                .is_some_and(|old_index| old_index != new_index)
+            {
+                schema_changes.push(json!({"type":"index", "action":"modified", "entityName":format!("{table_key}.{name}")}));
+            }
+        }
     }
     let old_views = entries_by_key(older, "views");
     let new_views = entries_by_key(newer, "views");
@@ -1463,6 +1695,30 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
     }
     for key in old_views.keys().filter(|key| !new_views.contains_key(*key)) {
         schema_changes.push(json!({"type":"view", "action":"removed", "entityName":key}));
+    }
+    for (key, new_view) in &new_views {
+        if old_views
+            .get(key)
+            .is_some_and(|old_view| old_view["definition"] != new_view["definition"])
+        {
+            schema_changes.push(json!({"type":"view", "action":"modified", "entityName":key}));
+        }
+    }
+    let old_enums = entries_by_key(older, "enums");
+    let new_enums = entries_by_key(newer, "enums");
+    for key in new_enums.keys().filter(|key| !old_enums.contains_key(*key)) {
+        schema_changes.push(json!({"type":"enum", "action":"added", "entityName":key}));
+    }
+    for key in old_enums.keys().filter(|key| !new_enums.contains_key(*key)) {
+        schema_changes.push(json!({"type":"enum", "action":"removed", "entityName":key}));
+    }
+    for (key, new_enum) in &new_enums {
+        if old_enums
+            .get(key)
+            .is_some_and(|old_enum| old_enum["values"] != new_enum["values"])
+        {
+            schema_changes.push(json!({"type":"enum", "action":"modified", "entityName":key}));
+        }
     }
 
     let mut data_changes = Vec::new();
