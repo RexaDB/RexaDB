@@ -51,14 +51,17 @@ pub fn split_args(input: &str) -> Vec<String> {
     let mut cur = String::new();
     let mut quote: Option<char> = None;
     let mut escape = false;
+    let mut token_started = false;
     for ch in raw.chars() {
         if escape {
             cur.push(ch);
             escape = false;
+            token_started = true;
             continue;
         }
         if ch == '\\' {
             escape = true;
+            token_started = true;
             continue;
         }
         if let Some(q) = quote {
@@ -71,18 +74,24 @@ pub fn split_args(input: &str) -> Vec<String> {
         }
         if ch == '"' || ch == '\'' {
             quote = Some(ch);
+            token_started = true;
             continue;
         }
         if ch.is_whitespace() {
-            if !cur.is_empty() {
+            if token_started {
                 out.push(std::mem::take(&mut cur));
+                token_started = false;
             }
             continue;
         }
         cur.push(ch);
+        token_started = true;
     }
-    if !cur.trim().is_empty() {
-        out.push(cur.trim().to_string());
+    if escape {
+        cur.push('\\');
+    }
+    if token_started {
+        out.push(cur);
     }
     out
 }
@@ -114,7 +123,7 @@ pub fn format_ttl_human(seconds: i64) -> String {
 pub fn key_command(key: &str, ty: &str) -> String {
     // Keep the existing CLI's double-quoted form for keys with whitespace;
     // split_args understands the same escapes, including quotes and slashes.
-    let k = if key.chars().any(char::is_whitespace) || key.contains('"') || key.contains('\'') || key.contains('\\') {
+    let k = if key.is_empty() || key.chars().any(char::is_whitespace) || key.contains('"') || key.contains('\'') || key.contains('\\') {
         format!("\"{}\"", key.replace('\\', "\\\\").replace('"', "\\\""))
     } else {
         key.to_string()
