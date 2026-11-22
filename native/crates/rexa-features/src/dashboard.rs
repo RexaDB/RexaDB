@@ -114,7 +114,17 @@ impl Dashboard {
     fn load_selected(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected else { return };
         if index >= self.widgets.len() { return; }
-        let sql = match validate_read_query(&self.widgets[index].sql) { Ok(s)=>s, Err(e)=>{self.widgets[index].error=Some(e);cx.notify();return;} };
+        let sql = match validate_read_query(&self.widgets[index].sql) {
+            Ok(s) => s,
+            Err(e) => {
+                self.load_generation = self.load_generation.wrapping_add(1);
+                self.load_task = None;
+                self.busy = false;
+                self.widgets[index].error = Some(e);
+                cx.notify();
+                return;
+            }
+        };
         self.load_generation = self.load_generation.wrapping_add(1);
         let generation = self.load_generation;
         self.busy = true; self.widgets[index].error = None; self.message = None;
