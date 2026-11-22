@@ -49,6 +49,16 @@ fn load_snapshots(connection_id: i64) -> Result<Vec<Value>, String> {
     Ok(snapshots)
 }
 
+fn load_snapshot(connection_id: i64, id: &str) -> Result<Value, String> {
+    if !safe_snapshot_id(id) {
+        return Err("Invalid snapshot id.".into());
+    }
+    let path = snapshot_dir(connection_id).join(format!("{id}.json"));
+    let content =
+        fs::read_to_string(path).map_err(|error| format!("Could not open snapshot: {error}"))?;
+    serde_json::from_str(&content).map_err(|error| format!("Snapshot file is invalid: {error}"))
+}
+
 fn meta_text(meta: &Value, key: &str) -> String {
     meta.get(key)
         .and_then(Value::as_str)
@@ -461,33 +471,40 @@ impl Render for Snapshots {
             let meta = snapshot.get("meta").cloned().unwrap_or(Value::Null);
             let name = meta_text(&meta, "name");
             let snapshot_id = meta_text(&meta, "id");
+            let delete_snapshot_id = snapshot_id.clone();
             let tables = snapshot["schemaStructured"]["tables"]
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            let table_lines = tables.iter().map(|table| {
-                let schema = table["schema"].as_str().unwrap_or_default();
-                let name = table["name"].as_str().unwrap_or_default();
-                let count = table["columns"].as_array().map_or(0, Vec::len);
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .py_1()
-                    .child(
-                        div()
-                            .tw_text_sm()
-                            .font_family(rexa_ui::MONO)
-                            .child(format!("{schema}.{name}")),
-                    )
+            let table_lines =
+                tables.iter().map(|table| {
+                    let schema = table["schema"].as_str().unwrap_or_default();
+                    let name = table["name"].as_str().unwrap_or_default();
+                    let count = table["columns"].as_array().map_or(0, Vec::len);
+                    let table_ref = format!("{schema}.{name}");
+                    let snapshot_id = snapshot_id.clone();
+                    Button::new(format!("snapshot-table-{table_ref}"))
+                    .ghost()
+                    .w_full()
+                    .child(div().flex().items_center().gap_2().py_1().w_full()
+                    .child(div().tw_text_sm().font_family(rexa_ui::MONO).child(table_ref.clone()))
                     .child(
                         div()
                             .ml_auto()
                             .tw_text_xs()
                             .text_color(t.muted_foreground)
                             .child(format!("{count} columns")),
-                    )
-            });
+                    ))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        rexa_core::open_tab(
+                            TabSpec::View {
+                                view: "snapshot-table".into(),
+                                params: json!({"snapshotId": snapshot_id, "tableRef": table_ref}),
+                            },
+                            cx,
+                        );
+                    }))
+                });
             let meta_line = format!(
                 "{} · {} tables · {} rows",
                 meta_text(&meta, "createdAt"),
@@ -538,7 +555,7 @@ impl Render for Snapshots {
                                 .icon(IconName::Trash)
                                 .label("Delete")
                                 .on_click(cx.listener(move |_this, _, _, cx| {
-                                    let id = snapshot_id.clone();
+                                    let id = delete_snapshot_id.clone();
                                     let confirm = rexa_ui::confirm(
                                         rexa_ui::ConfirmOptions::destructive("Delete snapshot?")
                                             .description(
@@ -801,20 +818,212 @@ fn code_block(value: &str, t: &rexa_ui::Tokens) -> impl IntoElement {
         )
 }
 
+struct SnapshotTable {
+    title: String,
+    columns: Vec<(String, String)>,
+    rows: Vec<Value>,
+    error: Option<String>,
+}
+
+impl SnapshotTable {
+    fn new(session: Arc<Session>, params: Value) -> Self {
+        let snapshot_id = params
+            .get("snapshotId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let table_ref = params
+            .get("tableRef")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match load_snapshot(session.connection.id, snapshot_id) {
+            Ok(snapshot) => {
+                let table = snapshot["schemaStructured"]["tables"]
+                    .as_array()
+                    .and_then(|tables| {
+                        tables.iter().find(|table| {
+                            format!(
+                                "{}.{}",
+                                table["schema"].as_str().unwrap_or_default(),
+                                table["name"].as_str().unwrap_or_default()
+                            ) == table_ref
+                        })
+                    });
+                let Some(table) = table else {
+                    return Self {
+                        title: table_ref.into(),
+                        columns: Vec::new(),
+                        rows: Vec::new(),
+                        error: Some("Table was not found in this snapshot.".into()),
+                    };
+                };
+                let columns = table["columns"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|column| {
+                        (
+                            column["name"].as_str().unwrap_or_default().to_owned(),
+                            column["dataType"].as_str().unwrap_or_default().to_owned(),
+                        )
+                    })
+                    .collect();
+                let rows = snapshot["dataTables"][table_ref]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                Self {
+                    title: table_ref.into(),
+                    columns,
+                    rows,
+                    error: None,
+                }
+            }
+            Err(error) => Self {
+                title: table_ref.into(),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                error: Some(error),
+            },
+        }
+    }
+}
+
+impl Render for SnapshotTable {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.tokens().clone();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(t.studio_bg)
+            .text_color(t.foreground)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(t.border)
+                    .child(
+                        rexa_ui::widgets::Icon::new(IconName::Table)
+                            .size_4()
+                            .text_color(t.muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(self.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .tw_text_xs()
+                            .text_color(t.muted_foreground)
+                            .child(format!("{} rows · read-only snapshot", self.rows.len())),
+                    ),
+            )
+            .when_some(self.error.clone(), |el, error| {
+                el.child(
+                    div()
+                        .p_4()
+                        .text_color(t.destructive)
+                        .tw_text_sm()
+                        .child(error),
+                )
+            })
+            .when(self.error.is_none(), |el| {
+                let header = div()
+                    .flex()
+                    .flex_shrink_0()
+                    .border_b_1()
+                    .border_color(t.border)
+                    .bg(t.muted)
+                    .children(self.columns.iter().map(|(name, kind)| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .justify_center()
+                            .px_3()
+                            .py_2()
+                            .border_r_1()
+                            .border_color(t.border)
+                            .min_w(px(150.))
+                            .child(
+                                div()
+                                    .tw_text_xs()
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .tw_text_xs()
+                                    .text_color(t.muted_foreground)
+                                    .child(kind.clone()),
+                            )
+                    }));
+                el.child(
+                    div().flex_1().min_h_0().overflow_scrollbar().child(
+                        div()
+                            .w_full()
+                            .child(header)
+                            .children(self.rows.iter().enumerate().map(|(index, row)| {
+                                div()
+                                    .flex()
+                                    .border_b_1()
+                                    .border_color(t.border)
+                                    .when(index % 2 == 1, |el| el.bg(t.muted))
+                                    .children(self.columns.iter().map(|(name, _)| {
+                                        let value =
+                                            row.get(name).map(json_cell_text).unwrap_or_default();
+                                        div()
+                                            .min_w(px(150.))
+                                            .max_w(px(420.))
+                                            .truncate()
+                                            .px_3()
+                                            .py_2()
+                                            .border_r_1()
+                                            .border_color(t.border)
+                                            .tw_text_xs()
+                                            .font_family(rexa_ui::MONO)
+                                            .child(value)
+                                    }))
+                            })),
+                    ),
+                )
+            })
+    }
+}
+
+fn json_cell_text(value: &Value) -> String {
+    match value {
+        Value::Null => "NULL".into(),
+        Value::String(text) => text.clone(),
+        _ => value.to_string(),
+    }
+}
+
 pub fn init(cx: &mut App) {
     Registry::tab(
         cx,
         "rexa-features-snapshots",
         |spec, session, window, cx| {
-            let TabSpec::View { view, .. } = spec else {
+            let TabSpec::View { view, params } = spec else {
                 return None;
             };
-            if view != "snapshots" {
-                return None;
+            match view.as_str() {
+                "snapshots" => Some(Into::<AnyView>::into(
+                    cx.new(|cx| Snapshots::new(session, window, cx)),
+                )),
+                "snapshot-table" => {
+                    let params = params.clone();
+                    Some(Into::<AnyView>::into(
+                        cx.new(|_| SnapshotTable::new(session, params)),
+                    ))
+                }
+                _ => None,
             }
-            Some(Into::<AnyView>::into(
-                cx.new(|cx| Snapshots::new(session, window, cx)),
-            ))
         },
     );
 }
