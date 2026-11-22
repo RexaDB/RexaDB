@@ -175,8 +175,14 @@ impl WorkflowEditor {
             edges: "[]".into(),
         });
         if is_new {
-            if let Err(error) = save_workflow(session.connection.id, &workflow) {
-                eprintln!("Could not create workflow: {error}");
+            match save_workflow(session.connection.id, &workflow) {
+                Ok(()) => rexa_core::emit_studio(
+                    StudioEvent::WorkflowsChanged {
+                        connection_id: session.connection.id,
+                    },
+                    cx,
+                ),
+                Err(error) => eprintln!("Could not create workflow: {error}"),
             }
         }
         let name = cx.new(|cx| InputState::new(window, cx).default_value(workflow.name));

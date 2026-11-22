@@ -47,7 +47,9 @@ fn snapshot_root_dir() -> PathBuf {
     }
 }
 
-fn load_snapshots(connection_id: i64) -> Result<Vec<Value>, String> {
+/// Read only each snapshot's metadata for the list view. The full snapshot
+/// (including `dataTables`/`dataSQL`) is loaded on demand when it is opened.
+fn load_snapshot_summaries(connection_id: i64) -> Result<Vec<Value>, String> {
     let dir = snapshot_dir(connection_id);
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -67,8 +69,8 @@ fn load_snapshots(connection_id: i64) -> Result<Vec<Value>, String> {
             Err(_) => continue,
         };
         if let Ok(snapshot) = serde_json::from_str::<Value>(&content) {
-            if snapshot.get("meta").is_some_and(Value::is_object) {
-                snapshots.push(snapshot);
+            if let Some(meta) = snapshot.get("meta").filter(|meta| meta.is_object()) {
+                snapshots.push(json!({ "meta": meta }));
             }
         }
     }
@@ -143,6 +145,24 @@ fn slug(name: &str) -> String {
     }
 }
 
+fn is_numeric_type(data_type: &str) -> bool {
+    let kind = data_type.trim().to_ascii_lowercase();
+    kind.contains("int")
+        || kind.contains("serial")
+        || matches!(
+            kind.as_str(),
+            "real"
+                | "float"
+                | "double"
+                | "double precision"
+                | "numeric"
+                | "decimal"
+                | "number"
+                | "money"
+                | "smallmoney"
+        )
+}
+
 fn cell_json(cell: &rexa_drivers::Cell, data_type: &str) -> Value {
     let Some(raw) = cell.as_str() else {
         return Value::Null;
@@ -155,17 +175,97 @@ fn cell_json(cell: &rexa_drivers::Cell, data_type: &str) -> Value {
             _ => Value::String(raw.to_owned()),
         };
     }
-    if kind.contains("int")
-        || matches!(
-            kind.as_str(),
-            "real" | "float" | "double precision" | "numeric" | "decimal"
-        )
-    {
-        // Keep the driver's exact decimal representation. JSON floating point
-        // numbers cannot represent every BIGINT or DECIMAL value exactly.
-        return Value::String(raw.to_owned());
-    }
+    // Keep the driver's exact decimal representation. JSON floating point
+    // numbers cannot represent every BIGINT or DECIMAL value exactly.
     Value::String(raw.to_owned())
+}
+
+/// Numeric text in a canonical form so numeric values captured as JSON strings
+/// compare equal to older snapshots that stored them as JSON numbers. The
+/// representation is exact (no floating-point round-trip): `digits e exponent`.
+fn canonical_numeric(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let (negative, rest) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
+    };
+    let (mantissa, exponent) = match rest.find(['e', 'E']) {
+        Some(index) => (&rest[..index], rest[index + 1..].parse::<i64>().ok()?),
+        None => (rest, 0),
+    };
+    let (integer, fraction) = match mantissa.split_once('.') {
+        Some((integer, fraction)) => (integer, fraction),
+        None => (mantissa, ""),
+    };
+    if integer.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    if !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let mut digits = String::with_capacity(integer.len() + fraction.len());
+    digits.push_str(integer);
+    digits.push_str(fraction);
+    let mut point = integer.len() as i64 + exponent;
+    let leading = digits.bytes().take_while(|byte| *byte == b'0').count();
+    if leading == digits.len() {
+        return Some("0".into());
+    }
+    if leading > 0 {
+        digits.drain(..leading);
+        point -= leading as i64;
+    }
+    while digits.ends_with('0') {
+        digits.pop();
+    }
+    Some(format!(
+        "{}{}e{}",
+        if negative { "-" } else { "" },
+        digits,
+        point - digits.len() as i64
+    ))
+}
+
+fn numeric_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(text) if !text.trim().is_empty() => Some(text.clone()),
+        _ => None,
+    }
+}
+
+fn cells_equal(old: &Value, new: &Value, data_type: &str) -> bool {
+    if old == new {
+        return true;
+    }
+    if is_numeric_type(data_type) {
+        if let (Some(old), Some(new)) = (numeric_text(old), numeric_text(new)) {
+            if let (Some(old), Some(new)) = (canonical_numeric(&old), canonical_numeric(&new)) {
+                return old == new;
+            }
+        }
+    }
+    false
+}
+
+/// Match a result column to its catalog column. Exact names win so `a` and
+/// `"A"` stay distinct; the case-insensitive fallback is only used when it
+/// identifies exactly one column.
+fn result_column<'a>(columns: &'a [SchemaColumn], name: &str) -> Option<&'a SchemaColumn> {
+    if let Some(column) = columns.iter().find(|column| column.column_name == name) {
+        return Some(column);
+    }
+    let mut matches = columns
+        .iter()
+        .filter(|column| column.column_name.eq_ignore_ascii_case(name));
+    let column = matches.next()?;
+    matches.next().is_none().then_some(column)
 }
 
 fn sql_literal(value: &Value, dialect: rexa_drivers::Dialect) -> String {
@@ -181,6 +281,22 @@ fn sql_literal(value: &Value, dialect: rexa_drivers::Dialect) -> String {
         Value::Number(value) => value.to_string(),
         _ => dialect.quote_str(value.as_str().unwrap_or_default()),
     }
+}
+
+fn mysql_text_default_type(detail: Option<&ColumnDetail>) -> bool {
+    let Some(detail) = detail else {
+        return false;
+    };
+    let kind = detail.data_type.trim().to_ascii_lowercase();
+    detail.is_enum
+        || kind.contains("char")
+        || kind.contains("text")
+        || kind.contains("blob")
+        || kind.contains("binary")
+        || matches!(
+            kind.as_str(),
+            "enum" | "set" | "date" | "time" | "datetime" | "timestamp" | "year" | "json"
+        )
 }
 
 fn default_sql(
@@ -200,7 +316,7 @@ fn default_sql(
         return trimmed.to_string();
     }
     let upper = trimmed.to_ascii_uppercase();
-    let expression = matches!(
+    let keyword_expression = matches!(
         upper.as_str(),
         "NULL"
             | "TRUE"
@@ -219,10 +335,16 @@ fn default_sql(
         "JSON_ARRAY(",
     ]
     .iter()
-    .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'))
-        || trimmed.parse::<i128>().is_ok()
-        || trimmed.parse::<f64>().is_ok();
-    if expression {
+    .any(|prefix| upper.starts_with(prefix) && upper.ends_with(')'));
+    if keyword_expression {
+        return trimmed.to_string();
+    }
+    // MySQL reports literal defaults without SQL quotes. Quote them for
+    // textual types even when the literal itself looks numeric (`'01'`).
+    if mysql_text_default_type(detail) {
+        return dialect.quote_str(trimmed);
+    }
+    if trimmed.parse::<i128>().is_ok() || trimmed.parse::<f64>().is_ok() {
         trimmed.to_string()
     } else {
         dialect.quote_str(trimmed)
@@ -530,6 +652,17 @@ async fn create_snapshot_file(
         }
     }
     let schema_enums = driver.enums().await.unwrap_or_default();
+    // `all_tables_with_columns` includes views on PostgreSQL and MySQL. They are
+    // written as `CREATE VIEW` below, so skip their `CREATE TABLE` definitions.
+    let view_keys: std::collections::BTreeSet<(String, String)> = schema_views
+        .iter()
+        .filter_map(|view| {
+            Some((
+                view["schema"].as_str()?.to_owned(),
+                view["name"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
     let mut schema_tables = Vec::new();
     let mut data_tables = serde_json::Map::new();
     let mut schema_sql = String::new();
@@ -559,6 +692,9 @@ async fn create_snapshot_file(
     let mut deferred_foreign_keys = Vec::<(String, Value)>::new();
     let mut captured_tables = std::collections::BTreeSet::new();
     for ((schema, table), columns) in grouped {
+        if view_keys.contains(&(schema.clone(), table.clone())) {
+            continue;
+        }
         let table_indexes: Vec<_> = all_indexes
             .iter()
             .filter(|index| {
@@ -692,11 +828,8 @@ async fn create_snapshot_file(
                         }
                     }
                 } else {
-                    for (index, result_column) in result.columns.iter().enumerate() {
-                        let Some(column) = columns
-                            .iter()
-                            .find(|column| column.column_name.eq_ignore_ascii_case(result_column))
-                        else {
+                    for (index, result_column_name) in result.columns.iter().enumerate() {
+                        let Some(column) = result_column(&columns, result_column_name) else {
                             continue;
                         };
                         if let Some(cell) = row.get(index) {
@@ -894,6 +1027,10 @@ pub struct Snapshots {
     expanded_diffs: std::collections::HashSet<String>,
     name: Entity<InputState>,
     creating: bool,
+    loading: bool,
+    list_generation: u64,
+    open_generation: u64,
+    compare_generation: u64,
 }
 
 impl Snapshots {
@@ -902,17 +1039,13 @@ impl Snapshots {
         let connection_string = session.connection.connection_string.clone();
         let driver = session.driver.clone();
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Snapshot name"));
-        let (snapshots, error) = match load_snapshots(connection_id) {
-            Ok(snapshots) => (snapshots, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
-        Self {
+        let mut this = Self {
             connection_id,
             connection_string,
             driver,
-            snapshots,
+            snapshots: Vec::new(),
             selected: None,
-            error,
+            error: None,
             show_schema: false,
             show_data: false,
             compare_mode: false,
@@ -921,7 +1054,13 @@ impl Snapshots {
             expanded_diffs: std::collections::HashSet::new(),
             name,
             creating: false,
-        }
+            loading: false,
+            list_generation: 0,
+            open_generation: 0,
+            compare_generation: 0,
+        };
+        this.refresh(cx);
+        this
     }
 
     fn create(&mut self, cx: &mut Context<Self>) {
@@ -954,7 +1093,8 @@ impl Snapshots {
                 this.creating = false;
                 match result {
                     Ok(snapshot) => {
-                        this.snapshots.push(snapshot);
+                        this.snapshots
+                            .push(json!({ "meta": snapshot["meta"].clone() }));
                         this.snapshots.sort_by(|a, b| {
                             b["meta"]["createdAt"]
                                 .as_str()
@@ -993,15 +1133,35 @@ impl Snapshots {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        match load_snapshots(self.connection_id) {
-            Ok(snapshots) => {
-                self.snapshots = snapshots;
-                self.error = None;
-                self.selected = None;
-            }
-            Err(error) => self.error = Some(error),
-        }
+        self.list_generation = self.list_generation.wrapping_add(1);
+        let generation = self.list_generation;
+        let connection_id = self.connection_id;
+        self.loading = true;
+        self.error = None;
         cx.notify();
+        let task = rexa_core::runtime::spawn(async move {
+            load_snapshot_summaries(connection_id).map_err(anyhow::Error::msg)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if this.list_generation != generation {
+                    return;
+                }
+                this.loading = false;
+                match result {
+                    Ok(snapshots) => {
+                        this.snapshots = snapshots;
+                        this.error = None;
+                        this.selected = None;
+                    }
+                    Err(error) => this.error = Some(error.to_string()),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn open_snapshot(&mut self, id: String, cx: &mut Context<Self>) {
@@ -1017,14 +1177,34 @@ impl Snapshots {
             cx.notify();
             return;
         }
-        self.selected = self
-            .snapshots
-            .iter()
-            .find(|snapshot| snapshot["meta"]["id"].as_str() == Some(&id))
-            .cloned();
-        self.show_schema = false;
-        self.show_data = false;
+        self.open_generation = self.open_generation.wrapping_add(1);
+        let generation = self.open_generation;
+        let connection_id = self.connection_id;
+        self.error = None;
         cx.notify();
+        let task = rexa_core::runtime::spawn(async move {
+            load_snapshot(connection_id, &id).map_err(anyhow::Error::msg)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if this.open_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(snapshot) => {
+                        this.selected = Some(snapshot);
+                        this.show_schema = false;
+                        this.show_data = false;
+                        this.error = None;
+                    }
+                    Err(error) => this.error = Some(error.to_string()),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn compare_selected(&mut self, cx: &mut Context<Self>) {
@@ -1033,20 +1213,37 @@ impl Snapshots {
         }
         let mut selected = self.selected_ids.clone();
         selected.sort();
-        let find = |id: &str| {
-            self.snapshots
-                .iter()
-                .find(|snapshot| snapshot["meta"]["id"].as_str() == Some(id))
-        };
-        let (Some(older), Some(newer)) = (find(&selected[0]), find(&selected[1])) else {
-            self.error = Some("Could not load the selected snapshots.".into());
-            cx.notify();
-            return;
-        };
-        self.diff = Some(compare_snapshots(older, newer));
+        let older_id = selected[0].clone();
+        let newer_id = selected[1].clone();
+        self.compare_generation = self.compare_generation.wrapping_add(1);
+        let generation = self.compare_generation;
+        let connection_id = self.connection_id;
         self.compare_mode = false;
         self.selected_ids.clear();
+        self.error = None;
         cx.notify();
+        let task = rexa_core::runtime::spawn(async move {
+            let older = load_snapshot(connection_id, &older_id).map_err(anyhow::Error::msg)?;
+            let newer = load_snapshot(connection_id, &newer_id).map_err(anyhow::Error::msg)?;
+            Ok::<_, anyhow::Error>(compare_snapshots(&older, &newer))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if this.compare_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(diff) => this.diff = Some(diff),
+                    Err(error) => {
+                        this.error = Some(format!("Could not compare snapshots: {error}"))
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn leave_comparison(&mut self, cx: &mut Context<Self>) {
@@ -1621,29 +1818,44 @@ impl Render for Snapshots {
                     .child(error),
             )
         })
-        .when(self.snapshots.is_empty() && self.error.is_none(), |el| {
+        .when(self.loading && self.snapshots.is_empty(), |el| {
             el.child(
                 div()
                     .flex_1()
                     .flex()
-                    .flex_col()
                     .items_center()
                     .justify_center()
-                    .gap_2()
                     .text_color(t.muted_foreground)
-                    .child(
-                        rexa_ui::widgets::Icon::new(IconName::Camera)
-                            .size_10()
-                            .opacity(0.35),
-                    )
-                    .child(div().tw_text_sm().child("No snapshots yet"))
-                    .child(
-                        div()
-                            .tw_text_xs()
-                            .child("Saved database snapshots will appear here."),
-                    ),
+                    .tw_text_sm()
+                    .child("Loading snapshots…"),
             )
         })
+        .when(
+            self.snapshots.is_empty() && self.error.is_none() && !self.loading,
+            |el| {
+                el.child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .text_color(t.muted_foreground)
+                        .child(
+                            rexa_ui::widgets::Icon::new(IconName::Camera)
+                                .size_10()
+                                .opacity(0.35),
+                        )
+                        .child(div().tw_text_sm().child("No snapshots yet"))
+                        .child(
+                            div()
+                                .tw_text_xs()
+                                .child("Saved database snapshots will appear here."),
+                        ),
+                )
+            },
+        )
         .when(!self.snapshots.is_empty(), |el| {
             el.child(
                 div()
@@ -1871,35 +2083,44 @@ impl Render for SnapshotTable {
                 )
             })
             .when(self.error.is_none(), |el| {
+                let widths = snapshot_column_widths(&self.columns, &self.rows);
                 let header = div()
                     .flex()
                     .flex_shrink_0()
                     .border_b_1()
                     .border_color(t.border)
                     .bg(t.muted)
-                    .children(self.columns.iter().map(|(name, kind)| {
-                        div()
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .px_3()
-                            .py_2()
-                            .border_r_1()
-                            .border_color(t.border)
-                            .min_w(px(150.))
-                            .child(
+                    .children(
+                        self.columns
+                            .iter()
+                            .zip(&widths)
+                            .map(|((name, kind), width)| {
                                 div()
-                                    .tw_text_xs()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .child(name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .tw_text_xs()
-                                    .text_color(t.muted_foreground)
-                                    .child(kind.clone()),
-                            )
-                    }));
+                                    .flex()
+                                    .flex_col()
+                                    .flex_shrink_0()
+                                    .w(px(*width))
+                                    .justify_center()
+                                    .px_3()
+                                    .py_2()
+                                    .border_r_1()
+                                    .border_color(t.border)
+                                    .child(
+                                        div()
+                                            .tw_text_xs()
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .truncate()
+                                            .child(name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .tw_text_xs()
+                                            .text_color(t.muted_foreground)
+                                            .truncate()
+                                            .child(kind.clone()),
+                                    )
+                            }),
+                    );
                 el.child(
                     div().flex_1().min_h_0().overflow_scrollbar().child(
                         div()
@@ -1911,26 +2132,50 @@ impl Render for SnapshotTable {
                                     .border_b_1()
                                     .border_color(t.border)
                                     .when(index % 2 == 1, |el| el.bg(t.muted))
-                                    .children(self.columns.iter().map(|(name, _)| {
-                                        let value =
-                                            row.get(name).map(json_cell_text).unwrap_or_default();
-                                        div()
-                                            .min_w(px(150.))
-                                            .max_w(px(420.))
-                                            .truncate()
-                                            .px_3()
-                                            .py_2()
-                                            .border_r_1()
-                                            .border_color(t.border)
-                                            .tw_text_xs()
-                                            .font_family(rexa_ui::MONO)
-                                            .child(value)
-                                    }))
+                                    .children(self.columns.iter().zip(&widths).map(
+                                        |((name, _), width)| {
+                                            let value = row
+                                                .get(name)
+                                                .map(json_cell_text)
+                                                .unwrap_or_default();
+                                            div()
+                                                .w(px(*width))
+                                                .flex_shrink_0()
+                                                .truncate()
+                                                .px_3()
+                                                .py_2()
+                                                .border_r_1()
+                                                .border_color(t.border)
+                                                .tw_text_xs()
+                                                .font_family(rexa_ui::MONO)
+                                                .child(value)
+                                        },
+                                    ))
                             })),
                     ),
                 )
             })
     }
+}
+
+/// Size each column once from its heading and widest value, then use that
+/// width for both the header and body cells so rows stay aligned.
+fn snapshot_column_widths(columns: &[(String, String)], rows: &[Value]) -> Vec<f32> {
+    columns
+        .iter()
+        .map(|(name, kind)| {
+            let header = name.chars().count().max(kind.chars().count());
+            let widest = rows
+                .iter()
+                .filter_map(|row| row.get(name))
+                .map(json_cell_text)
+                .map(|value| value.chars().count())
+                .max()
+                .unwrap_or(0);
+            let characters = header.max(widest).min(60);
+            (characters as f32 * 7.2 + 32.0).clamp(150.0, 420.0)
+        })
+        .collect()
 }
 
 fn json_cell_text(value: &Value) -> String {
@@ -2114,10 +2359,40 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
             } else {
                 primary_key.clone()
             };
+            let column_types: BTreeMap<String, String> = table["columns"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|column| {
+                    Some((
+                        column["name"].as_str()?.to_owned(),
+                        column["dataType"].as_str().unwrap_or_default().to_owned(),
+                    ))
+                })
+                .collect();
+            let cell = |row: &Value, column: &str| row.get(column).cloned().unwrap_or(Value::Null);
+            // Numeric cells are strings in new snapshots and numbers in older
+            // ones. Compare them by value using the column type so the capture
+            // format change is not reported as changed data.
+            let normalized_cell = |row: &Value, column: &str| {
+                let value = cell(row, column);
+                let data_type = column_types
+                    .get(column)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                if is_numeric_type(data_type) {
+                    if let Some(canonical) =
+                        numeric_text(&value).and_then(|text| canonical_numeric(&text))
+                    {
+                        return Value::String(canonical);
+                    }
+                }
+                value
+            };
             let row_key = |row: &Value| {
                 let values: Vec<Value> = key_columns
                     .iter()
-                    .map(|column| row.get(column).cloned().unwrap_or(Value::Null))
+                    .map(|column| normalized_cell(row, column))
                     .collect();
                 serde_json::to_string(&values).unwrap_or_default()
             };
@@ -2133,7 +2408,13 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
                     let changed = columns
                         .iter()
                         .filter(|column| !primary_key.contains(column))
-                        .any(|column| old_row.get(column) != row.get(column));
+                        .any(|column| {
+                            let data_type = column_types
+                                .get(column)
+                                .map(String::as_str)
+                                .unwrap_or_default();
+                            !cells_equal(&cell(&old_row, column), &cell(row, column), data_type)
+                        });
                     if changed {
                         modified.push(json!({"old":old_row, "new":row}));
                     }
@@ -2174,7 +2455,11 @@ fn compare_snapshots(older: &Value, newer: &Value) -> Value {
     };
     let tables_modified = schema_changes
         .iter()
-        .any(|change| change["type"] == "column" && change["action"] != "removed");
+        .filter(|change| matches!(change["type"].as_str(), Some("column") | Some("index")))
+        .filter_map(|change| change["entityName"].as_str())
+        .filter_map(|entity| entity.rsplit_once('.').map(|(table, _)| table.to_owned()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     json!({
         "olderName":older["meta"]["name"], "newerName":newer["meta"]["name"],
         "schemaChanges":schema_changes, "dataChanges":data_changes,
@@ -2206,4 +2491,176 @@ pub fn init(cx: &mut App) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_values_compare_across_snapshot_formats() {
+        assert!(cells_equal(&json!(42), &json!("42"), "bigint"));
+        assert!(cells_equal(&json!(1.5), &json!("1.50"), "numeric"));
+        assert!(cells_equal(
+            &json!(10000000000000000000u64),
+            &json!("10000000000000000000"),
+            "numeric"
+        ));
+        assert!(cells_equal(&json!(1.0), &json!("1e0"), "double precision"));
+        assert!(!cells_equal(&json!(42), &json!("43"), "bigint"));
+    }
+
+    #[test]
+    fn exact_column_names_win_over_case_insensitive_matches() {
+        let columns = vec![
+            SchemaColumn {
+                column_name: "A".into(),
+                ..Default::default()
+            },
+            SchemaColumn {
+                column_name: "a".into(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(result_column(&columns, "A").unwrap().column_name, "A");
+        assert_eq!(result_column(&columns, "a").unwrap().column_name, "a");
+        assert!(result_column(&columns, "b").is_none());
+    }
+
+    #[test]
+    fn case_insensitive_column_fallback_must_be_unambiguous() {
+        let columns = vec![
+            SchemaColumn {
+                column_name: "A".into(),
+                ..Default::default()
+            },
+            SchemaColumn {
+                column_name: "b".into(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(result_column(&columns, "a").unwrap().column_name, "A");
+
+        let ambiguous = vec![
+            SchemaColumn {
+                column_name: "Ab".into(),
+                ..Default::default()
+            },
+            SchemaColumn {
+                column_name: "aB".into(),
+                ..Default::default()
+            },
+        ];
+        assert!(result_column(&ambiguous, "ab").is_none());
+    }
+
+    #[test]
+    fn mysql_literal_defaults_are_quoted() {
+        let text = ColumnDetail {
+            data_type: "char".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            default_sql(Kind::MySql, rexa_drivers::Dialect::MySql, "x", Some(&text)),
+            "'x'"
+        );
+        assert_eq!(
+            default_sql(Kind::MySql, rexa_drivers::Dialect::MySql, "01", Some(&text)),
+            "'01'"
+        );
+
+        let number = ColumnDetail {
+            data_type: "int".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            default_sql(
+                Kind::MySql,
+                rexa_drivers::Dialect::MySql,
+                "01",
+                Some(&number)
+            ),
+            "01"
+        );
+    }
+
+    #[test]
+    fn numeric_capture_format_change_is_not_reported_as_data_change() {
+        let table = json!({
+            "schema": "public",
+            "name": "items",
+            "columns": [
+                {"name": "id", "dataType": "bigint", "isNullable": false},
+                {"name": "amount", "dataType": "numeric", "isNullable": true}
+            ],
+            "primaryKey": ["id"],
+            "indexes": []
+        });
+        let older = json!({
+            "meta": {"name": "older"},
+            "schemaStructured": {"tables": [table.clone()]},
+            "dataTables": {"public.items": [{"id": 1, "amount": 12.5}]}
+        });
+        let newer = json!({
+            "meta": {"name": "newer"},
+            "schemaStructured": {"tables": [table]},
+            "dataTables": {"public.items": [{"id": "1", "amount": "12.50"}]}
+        });
+
+        let diff = compare_snapshots(&older, &newer);
+        assert_eq!(diff["summary"]["rowsAdded"], json!(0));
+        assert_eq!(diff["summary"]["rowsRemoved"], json!(0));
+        assert_eq!(diff["summary"]["rowsModified"], json!(0));
+        assert_eq!(diff["dataChanges"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn tables_modified_counts_distinct_changed_tables() {
+        let older = json!({
+            "meta": {"name": "older"},
+            "schemaStructured": {"tables": [
+                {
+                    "schema": "public", "name": "without_column",
+                    "columns": [
+                        {"name": "id", "dataType": "bigint", "isNullable": false},
+                        {"name": "removed", "dataType": "text", "isNullable": true}
+                    ],
+                    "primaryKey": ["id"], "indexes": []
+                },
+                {
+                    "schema": "public", "name": "nullable_change",
+                    "columns": [
+                        {"name": "id", "dataType": "bigint", "isNullable": false},
+                        {"name": "value", "dataType": "text", "isNullable": true}
+                    ],
+                    "primaryKey": ["id"], "indexes": []
+                }
+            ]},
+            "dataTables": {}
+        });
+        let newer = json!({
+            "meta": {"name": "newer"},
+            "schemaStructured": {"tables": [
+                {
+                    "schema": "public", "name": "without_column",
+                    "columns": [
+                        {"name": "id", "dataType": "bigint", "isNullable": false}
+                    ],
+                    "primaryKey": ["id"], "indexes": []
+                },
+                {
+                    "schema": "public", "name": "nullable_change",
+                    "columns": [
+                        {"name": "id", "dataType": "bigint", "isNullable": false},
+                        {"name": "value", "dataType": "text", "isNullable": false}
+                    ],
+                    "primaryKey": ["id"], "indexes": []
+                }
+            ]},
+            "dataTables": {}
+        });
+
+        let diff = compare_snapshots(&older, &newer);
+        assert_eq!(diff["summary"]["tablesModified"], json!(2));
+    }
 }
