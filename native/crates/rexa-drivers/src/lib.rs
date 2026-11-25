@@ -54,6 +54,7 @@ mod mongo;
 #[cfg(feature = "mssql")]
 mod mssql;
 mod mysql;
+mod neon_oauth;
 mod oracle;
 mod pgcat;
 mod postgres;
@@ -770,6 +771,13 @@ pub async fn connect_with(kind: Kind, connection_string: &str, opts: &ConnectOpt
     if detect::is_internal_placeholder(connection_string) {
         bail!("This is an internal placeholder, not a database connection. Return to Connections and reopen a saved connection.");
     }
+    let resolved_connection_string;
+    let connection_string = if kind == Kind::Postgres && neon_oauth::is_pointer(connection_string) {
+        resolved_connection_string = neon_oauth::resolve_pointer(connection_string).await?;
+        resolved_connection_string.as_str()
+    } else {
+        connection_string
+    };
     Ok(match kind {
         Kind::Postgres => Arc::new(postgres::PostgresDriver::connect(connection_string, opts).await?),
         Kind::MySql => Arc::new(mysql::MySqlDriver::connect(connection_string, opts).await?),

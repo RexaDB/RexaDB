@@ -6500,6 +6500,7 @@ dependencies = [
  "postgres-native-tls",
  "regex",
  "reqwest",
+ "rexa-store",
  "rusqlite",
  "serde",
  "serde_json",

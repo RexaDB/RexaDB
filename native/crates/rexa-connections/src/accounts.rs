@@ -14,7 +14,7 @@ use gpui::{div, img, prelude::*, px, svg, AnyElement, App, Context, Entity, Even
 use gpui_component::input::InputState;
 use gpui_component::Icon;
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm};
-use ring::{agreement, rand::SystemRandom};
+use ring::{agreement, digest, rand::{SecureRandom, SystemRandom}};
 use rexa_store::{ConnectionDraft, Store, WebStore};
 use rexa_ui::theme::{with_alpha, Tokens};
 use rexa_ui::{toast, ActiveTokens, Button, ButtonSize, IconName, Tw, MONO};
@@ -454,6 +454,14 @@ impl AccountsScreen {
                             }))
                         })
                         .when(kind == AccountKind::Supabase, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with a management token")))
+                        .when(kind == AccountKind::Neon, {
+                            let weak = weak.clone();
+                            move |d| d.child(Button::new("neon-browser-login").size(ButtonSize::Lg).w_full().label("Continue with browser").on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.start_neon_login(cx)).ok();
+                                rexa_ui::close_top(cx);
+                            }))
+                        })
+                        .when(kind == AccountKind::Neon, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with an API key")))
                         .when(kind == AccountKind::SpacetimeDb, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with a token")))
                         .child(FieldInput::new(&token))
                         .child(FieldInput::new(&label))
@@ -551,6 +559,46 @@ impl AccountsScreen {
                     toast::success("Supabase account connected", cx);
                 }
                 Err(error) => { toast::error(format!("Supabase sign-in failed: {error:#}. Start browser sign-in again to retry."), cx); }
+            }).ok();
+        }).detach();
+    }
+
+    fn start_neon_login(&mut self, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        toast::info("Starting Neon sign-in in your browser…", cx);
+        let prepare = rexa_core::runtime::spawn(neon_auth_prepare());
+        cx.spawn(async move |_, cx| {
+            let result = match prepare.await {
+                Ok(flow) => {
+                    let auth_url = flow.auth_url.clone();
+                    cx.update(|cx| cx.open_url(&auth_url));
+                    rexa_core::runtime::spawn(neon_auth_finish(flow)).await
+                }
+                Err(error) => Err(error),
+            };
+            weak.update(cx, |this, cx| match result {
+                Ok(credentials) => {
+                    let profile = format!("rexadb-{}", uuid::Uuid::new_v4().simple());
+                    let label = credentials.get("email").and_then(Value::as_str).unwrap_or("Neon account").to_string();
+                    let mut account = serde_json::Map::new();
+                    account.insert("createdAt".into(), Value::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)));
+                    account.insert("accessToken".into(), Value::String(credentials.to_string()));
+                    account.insert("profileName".into(), Value::String(profile));
+                    account.insert("label".into(), Value::String(label));
+                    let mut next = this.accounts.clone();
+                    next.push(Value::Object(account));
+                    next.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
+                    if let Err(error) = save_accounts(AccountKind::Neon, &next) {
+                        toast::error(format!("Could not save Neon credentials: {error:#}"), cx);
+                        return;
+                    }
+                    this.accounts = next;
+                    this.active = Some(this.accounts.len().saturating_sub(1));
+                    cx.emit(AccountsEvent::Changed);
+                    this.load(cx);
+                    toast::success("Neon account connected", cx);
+                }
+                Err(error) => { toast::error(format!("Neon sign-in failed: {error:#}"), cx); }
             }).ok();
         }).detach();
     }
@@ -923,6 +971,107 @@ impl Render for AccountsScreen {
 
 const SPACETIMEDB_AUTH_HOST: &str = "spacetimedb.com";
 
+struct NeonAuthFlow {
+    listener: tokio::net::TcpListener,
+    auth_url: String,
+    redirect_uri: String,
+    state: String,
+    verifier: String,
+    token_endpoint: String,
+}
+
+async fn neon_auth_prepare() -> anyhow::Result<NeonAuthFlow> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
+    let discovery: Value = client.get("https://oauth2.neon.tech/.well-known/openid-configuration").send().await?.error_for_status()?.json().await?;
+    let authorization_endpoint = discovery.get("authorization_endpoint").and_then(Value::as_str).filter(|s| s.starts_with("https://")).ok_or_else(|| anyhow::anyhow!("Neon OAuth discovery did not provide a valid authorization endpoint"))?;
+    let token_endpoint = discovery.get("token_endpoint").and_then(Value::as_str).filter(|s| s.starts_with("https://")).ok_or_else(|| anyhow::anyhow!("Neon OAuth discovery did not provide a valid token endpoint"))?.to_string();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+    let port = listener.local_addr()?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let rng = SystemRandom::new();
+    let mut verifier_bytes = [0u8; 32];
+    let mut state_bytes = [0u8; 16];
+    rng.fill(&mut verifier_bytes).map_err(|_| anyhow::anyhow!("could not create a secure PKCE verifier"))?;
+    rng.fill(&mut state_bytes).map_err(|_| anyhow::anyhow!("could not create secure OAuth state"))?;
+    use base64::Engine;
+    let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+    let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest::digest(&digest::SHA256, verifier.as_bytes()).as_ref());
+    let scopes = ["openid", "offline", "offline_access", "urn:neoncloud:projects:create", "urn:neoncloud:projects:read", "urn:neoncloud:projects:update", "urn:neoncloud:projects:delete", "urn:neoncloud:orgs:create", "urn:neoncloud:orgs:read", "urn:neoncloud:orgs:update", "urn:neoncloud:orgs:delete", "urn:neoncloud:orgs:permission"];
+    let mut auth_url = url::Url::parse(authorization_endpoint)?;
+    auth_url.query_pairs_mut()
+        .append_pair("client_id", "neonctl")
+        .append_pair("response_type", "code")
+        .append_pair("scope", &scopes.join(" "))
+        .append_pair("redirect_uri", &redirect_uri)
+        .append_pair("state", &state)
+        .append_pair("code_challenge", &challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("prompt", "login");
+    Ok(NeonAuthFlow { listener, auth_url: auth_url.to_string(), redirect_uri, state, verifier, token_endpoint })
+}
+
+async fn neon_auth_finish(flow: NeonAuthFlow) -> anyhow::Result<Value> {
+    use tokio::io::AsyncReadExt;
+    let exchange = async {
+        loop {
+            let (mut stream, _) = flow.listener.accept().await?;
+            let mut buffer = [0u8; 8192];
+            let length = stream.read(&mut buffer).await?;
+            let request = String::from_utf8_lossy(&buffer[..length]);
+            let Some(path) = request.lines().next().and_then(|line| line.split_whitespace().nth(1)) else { continue };
+            let callback = url::Url::parse(&format!("http://127.0.0.1{}", path))?;
+            if callback.path() != "/callback" {
+                write_oauth_reply(&mut stream, "404 Not Found", "Sign-in callback not found.").await?;
+                continue;
+            }
+            if callback.query_pairs().find(|(key, _)| key == "state").map(|(_, value)| value.into_owned()).as_deref() != Some(flow.state.as_str()) {
+                write_oauth_reply(&mut stream, "400 Bad Request", "Sign-in state did not match. Return to RexaDB and try again.").await?;
+                continue;
+            }
+            if let Some((_, error)) = callback.query_pairs().find(|(key, _)| key == "error") {
+                let message = callback.query_pairs().find(|(key, _)| key == "error_description").map(|(_, value)| value.into_owned()).unwrap_or(error.into_owned());
+                write_oauth_reply(&mut stream, "400 Bad Request", "Neon sign-in was not completed. You can close this tab.").await?;
+                anyhow::bail!("Neon rejected sign-in: {message}");
+            }
+            let code = callback.query_pairs().find(|(key, _)| key == "code").map(|(_, value)| value.into_owned()).filter(|value| !value.is_empty()).ok_or_else(|| anyhow::anyhow!("Neon callback did not include an authorization code"))?;
+            let response = reqwest::Client::new().post(&flow.token_endpoint)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .form(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &flow.redirect_uri), ("client_id", "neonctl"), ("code_verifier", &flow.verifier)])
+                .send().await?;
+            let status = response.status();
+            let body = response.text().await?;
+            if !status.is_success() { write_oauth_reply(&mut stream, "400 Bad Request", "Neon token exchange failed. Return to RexaDB to retry.").await?; anyhow::bail!("Neon token exchange failed ({status}): {}", body.chars().take(300).collect::<String>()); }
+            let mut credentials: Value = serde_json::from_str(&body)?;
+            credentials.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("Neon did not return an access token"))?;
+            let expires_in = credentials.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
+            credentials["expires_at"] = Value::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64 + expires_in * 1000);
+            credentials["type"] = Value::String("oauth".into());
+            credentials["token_type"] = credentials.get("token_type").cloned().unwrap_or(Value::String("bearer".into()));
+            credentials["scope"] = credentials.get("scope").cloned().unwrap_or(Value::String("openid offline offline_access".into()));
+            if let Some(email) = credentials.get("id_token").and_then(Value::as_str).and_then(id_token_email) { credentials["email"] = Value::String(email); }
+            write_oauth_reply(&mut stream, "200 OK", "Signed in to Neon. You can close this tab and return to RexaDB.").await?;
+            return Ok::<Value, anyhow::Error>(credentials);
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(60), exchange).await.map_err(|_| anyhow::anyhow!("Neon sign-in timed out"))?
+}
+
+async fn write_oauth_reply(stream: &mut tokio::net::TcpStream, status: &str, message: &str) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let body = format!("<!doctype html><html><meta charset=\"utf-8\"><title>Neon</title><body style=\"font:16px system-ui;text-align:center;padding:4rem\"><h2>{message}</h2></body></html>");
+    stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await?;
+    stream.shutdown().await?;
+    Ok(())
+}
+
+fn id_token_email(token: &str) -> Option<String> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=' )).ok()?;
+    serde_json::from_slice::<Value>(&bytes).ok()?.get("email")?.as_str().map(str::to_string)
+}
+
 fn supabase_login_session() -> anyhow::Result<(String, String, agreement::EphemeralPrivateKey)> {
     let rng = SystemRandom::new();
     let private_key = agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
@@ -1130,6 +1279,47 @@ fn neon_token(profile: &str) -> anyhow::Result<String> {
     v.get("access_token").and_then(Value::as_str).map(str::to_string).ok_or_else(|| anyhow::anyhow!("Neon credentials are invalid. Reconnect the account."))
 }
 
+async fn neon_access_token(account: &Value) -> anyhow::Result<String> {
+    let profile = s(account, "profileName").unwrap_or("DEFAULT");
+    let saved = s(account, "accessToken").map(str::to_string).map(Ok).unwrap_or_else(|| neon_token(profile))?;
+    let Ok(mut credentials) = serde_json::from_str::<Value>(&saved) else { return Ok(saved) };
+    if credentials.get("type").and_then(Value::as_str) != Some("oauth") { return Ok(saved); }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
+    let expires_at = credentials.get("expires_at").and_then(Value::as_u64).unwrap_or(0);
+    let mut changed = false;
+    if expires_at <= now + 120_000 {
+        let refresh = credentials.get("refresh_token").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("Neon session expired. Sign in again to reconnect this account."))?.to_string();
+        let discovery: Value = reqwest::Client::new().get("https://oauth2.neon.tech/.well-known/openid-configuration").send().await?.error_for_status()?.json().await?;
+        let token_endpoint = discovery.get("token_endpoint").and_then(Value::as_str).filter(|s| s.starts_with("https://")).ok_or_else(|| anyhow::anyhow!("Neon OAuth discovery did not provide a valid token endpoint"))?;
+        let response = reqwest::Client::new().post(token_endpoint)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .form(&[("grant_type", "refresh_token"), ("refresh_token", refresh.as_str()), ("client_id", "neonctl")])
+            .send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+        if !status.is_success() { anyhow::bail!("Neon token refresh failed ({status}): {}. Sign in again to reconnect this account.", body.chars().take(300).collect::<String>()); }
+        let updated: Value = serde_json::from_str(&body)?;
+        let access = updated.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("Neon token refresh did not return an access token"))?.to_string();
+        let expires_in = updated.get("expires_in").and_then(Value::as_u64).unwrap_or(3600);
+        credentials["access_token"] = Value::String(access);
+        credentials["refresh_token"] = updated.get("refresh_token").and_then(Value::as_str).map(|s| Value::String(s.into())).unwrap_or(Value::String(refresh));
+        credentials["expires_at"] = Value::from(now + expires_in * 1000);
+        for key in ["id_token", "token_type", "scope"] {
+            if let Some(value) = updated.get(key) { credentials[key] = value.clone(); }
+        }
+        changed = true;
+    }
+    let access = credentials.get("access_token").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("Neon credentials do not include an access token"))?.to_string();
+    if changed {
+        let mut accounts = load_accounts(AccountKind::Neon);
+        if let Some(saved_account) = accounts.iter_mut().find(|row| s(row, "profileName") == Some(profile)) {
+            if let Some(object) = saved_account.as_object_mut() { object.insert("accessToken".into(), Value::String(credentials.to_string())); }
+            save_accounts(AccountKind::Neon, &accounts)?;
+        }
+    }
+    Ok(access)
+}
+
 const NEON_API: &str = "https://console.neon.tech/api/v2";
 
 async fn list_resources(kind: AccountKind, account: &Value) -> anyhow::Result<Vec<Resource>> {
@@ -1193,7 +1383,7 @@ async fn list_resources(kind: AccountKind, account: &Value) -> anyhow::Result<Ve
         }
         AccountKind::Neon => {
             let profile = s(account, "profileName").unwrap_or("DEFAULT").to_string();
-            let token = s(account, "accessToken").map(str::to_string).map(Ok).unwrap_or_else(|| neon_token(&profile))?;
+            let token = neon_access_token(account).await?;
             let orgs = crate::http::get_json(&format!("{NEON_API}/users/me/organizations"), &token).await.map(|v| arr(&v, "organizations")).unwrap_or_default();
             let mut out = Vec::new();
             let scopes: Vec<(String, String)> = if orgs.is_empty() { vec![(String::new(), String::new())] } else { orgs.iter().map(|o| (st(o, "id"), st(o, "name"))).collect() };
@@ -1243,7 +1433,7 @@ async fn resolve_connect(c: &Connect, account: &Value) -> anyhow::Result<(String
     let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     match c {
         Connect::Neon { profile, project_id, project } => {
-            let token = s(account, "accessToken").map(str::to_string).map(Ok).unwrap_or_else(|| neon_token(profile))?;
+            let token = neon_access_token(account).await?;
             let branches = crate::http::get_json(&format!("{NEON_API}/projects/{project_id}/branches"), &token).await?;
             let list = branches.get("branches").and_then(Value::as_array).cloned().unwrap_or_default();
             let branch = list.iter().find(|b| b.get("default").and_then(Value::as_bool) == Some(true)).or(list.first()).cloned().ok_or_else(|| anyhow::anyhow!("This project has no branches."))?;

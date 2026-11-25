@@ -17,6 +17,7 @@ duckdb = ["dep:duckdb"]
 
 [dependencies]
 anyhow.workspace = true
+rexa-store.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process"] }
 rusqlite = { workspace = true, features = ["hooks"] }
 url.workspace = true
