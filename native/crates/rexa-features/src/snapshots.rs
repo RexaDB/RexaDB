@@ -616,9 +616,9 @@ fn sequence_ddl(sequence: &SequenceInfo, driver: &dyn Driver) -> String {
     sql
 }
 
-async fn create_snapshot_file(
+pub(super) async fn create_snapshot_file(
     driver: Arc<dyn Driver>,
-    connection_id: i64,
+    connection_id: Option<i64>,
     connection_string: String,
     name: String,
 ) -> anyhow::Result<Value> {
@@ -1043,12 +1043,14 @@ async fn create_snapshot_file(
             "rowCount": row_count, "schemaHash": format!("{:x}", hash.unsigned_abs()), "warnings": warnings },
         "schemaSQL": schema_sql, "dataSQL": data_sql, "schemaStructured": schema, "dataTables": data_tables
     });
-    let dir = snapshot_dir(connection_id);
-    fs::create_dir_all(&dir)?;
-    let final_path = dir.join(format!("{id}.json"));
-    let temp_path = dir.join(format!(".{id}.json.tmp"));
-    fs::write(&temp_path, serde_json::to_vec_pretty(&snapshot)?)?;
-    fs::rename(&temp_path, &final_path)?;
+    if let Some(connection_id) = connection_id {
+        let dir = snapshot_dir(connection_id);
+        fs::create_dir_all(&dir)?;
+        let final_path = dir.join(format!("{id}.json"));
+        let temp_path = dir.join(format!(".{id}.json.tmp"));
+        fs::write(&temp_path, serde_json::to_vec_pretty(&snapshot)?)?;
+        fs::rename(&temp_path, &final_path)?;
+    }
     Ok(snapshot)
 }
 
@@ -1125,7 +1127,7 @@ impl Snapshots {
         let id = self.connection_id;
         let connection_string = self.connection_string.clone();
         let task = rexa_core::runtime::spawn(async move {
-            create_snapshot_file(driver, id, connection_string, name).await
+            create_snapshot_file(driver, Some(id), connection_string, name).await
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;

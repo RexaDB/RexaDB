@@ -18,3 +18,4 @@ rexa-store.workspace = true
 rexa-drivers.workspace = true
 rusqlite.workspace = true
 chrono = "0.4"
+base64 = "0.22"

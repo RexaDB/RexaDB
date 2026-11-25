@@ -5,12 +5,14 @@ use gpui::App;
 
 mod notes;
 mod dashboard;
+mod import_export;
 mod snapshots;
 mod workflows;
 
 pub fn init(cx: &mut App) {
     notes::init(cx);
     dashboard::init(cx);
+    import_export::init(cx);
     snapshots::init(cx);
     workflows::init(cx);
 }
