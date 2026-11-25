@@ -5,6 +5,7 @@ use gpui::App;
 
 mod notes;
 mod dashboard;
+mod advisor;
 mod import_export;
 mod snapshots;
 mod workflows;
@@ -12,6 +13,7 @@ mod workflows;
 pub fn init(cx: &mut App) {
     notes::init(cx);
     dashboard::init(cx);
+    advisor::init(cx);
     import_export::init(cx);
     snapshots::init(cx);
     workflows::init(cx);
