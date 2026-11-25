@@ -36,6 +36,22 @@ impl SupabaseMgmtDriver {
         let (project_ref, token) = parse(cs).ok_or_else(|| anyhow::anyhow!("Invalid Supabase Management API connection string"))?;
         Ok(SupabaseMgmtDriver { project_ref, token })
     }
+
+    async fn management_list(&self, path: &str, label: &str) -> Result<Vec<serde_json::Value>> {
+        let response = client().get(format!("{API}/projects/{}/{path}", self.project_ref))
+            .bearer_auth(&self.token).header("User-Agent", "supabase-cli").send().await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            bail!("Supabase {label} request failed ({}): {}", status.as_u16(), body.chars().take(300).collect::<String>());
+        }
+        let payload: serde_json::Value = serde_json::from_str(&body)?;
+        if let Some(items) = payload.as_array() { return Ok(items.clone()); }
+        for key in ["data", "functions", "secrets"] {
+            if let Some(items) = payload.get(key).and_then(serde_json::Value::as_array) { return Ok(items.clone()); }
+        }
+        bail!("Supabase {label} response did not contain a list.")
+    }
 }
 
 #[async_trait]
@@ -167,6 +183,12 @@ impl Driver for SupabaseMgmtDriver {
     }
     async fn supabase_auth_users(&self) -> Result<Vec<AuthUser>> {
         pgcat::auth_users(self).await
+    }
+    async fn supabase_edge_functions(&self) -> Result<Vec<serde_json::Value>> {
+        self.management_list("functions", "Edge Functions").await
+    }
+    async fn supabase_edge_secrets(&self) -> Result<Vec<serde_json::Value>> {
+        self.management_list("secrets", "Edge Function secrets").await
     }
 }
 

@@ -6553,8 +6553,10 @@ name = "rexa-providers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "gpui-component",
  "gpui-pre",
+ "reqwest",
  "rexa-core",
  "rexa-drivers",
  "rexa-store",

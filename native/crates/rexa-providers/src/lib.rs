@@ -13,16 +13,18 @@ use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, MONO};
 use serde_json::Value;
 use std::sync::Arc;
 
+mod common;
+mod database_views;
+mod team;
+
 pub fn init(cx: &mut App) {
     Registry::tab(cx, "rexa-providers", build_tab);
+    Registry::screen(cx, "rexa-providers", team::build_screen);
 }
 
 fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mut App) -> Option<AnyView> {
     let TabSpec::View { view, params } = spec else { return None };
-    if view == "storage-bucket" || view == "supabase-storage" {
-        let bucket=params.get("bucketName").or_else(||params.get("bucket")).and_then(Value::as_str).map(str::to_owned);
-        return Some(cx.new(|cx| StorageBrowser::new(session, bucket, cx)).into());
-    }
+    if let Some(tab) = database_views::build_tab(spec, session.clone(), window, cx) { return Some(tab); }
     if view != "redis" && view != "redis-keys" && view != "redis-browser" { return None; }
     if session.driver.kind() != Kind::Redis {
         return Some(cx.new(|cx| RedisKeys::unsupported(session, window, cx)).into());
@@ -30,56 +32,6 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
     let spec = spec.clone();
     let params = params.clone();
     Some(cx.new(|cx| RedisKeys::new(spec, params, session, window, cx)).into())
-}
-
-#[derive(Clone)]
-struct StorageRow { id:String, name:String, public:String, details:String }
-
-pub struct StorageBrowser {
-    session:Arc<Session>, bucket:Option<String>, rows:Vec<StorageRow>, loading:bool, error:Option<String>,
-}
-impl StorageBrowser {
-    fn new(session:Arc<Session>,bucket:Option<String>,cx:&mut Context<Self>)->Self {
-        let mut this=Self{session,bucket,rows:Vec::new(),loading:false,error:None};this.load(cx);this
-    }
-    fn load(&mut self,cx:&mut Context<Self>){
-        let bucket=self.bucket.clone();let driver=self.session.driver.clone();self.loading=true;self.error=None;cx.notify();
-        let task=runtime::spawn(async move {
-            if let Some(bucket)=bucket {
-                if driver.kind()!=Kind::Postgres { anyhow::bail!("Supabase Storage browsing needs a Supabase Postgres connection."); }
-                let escaped=bucket.replace('\'', "''");
-                let sql=format!("SELECT name, bucket_id, created_at, updated_at, metadata FROM storage.objects WHERE bucket_id = '{escaped}' ORDER BY name LIMIT 500");
-                let result=driver.execute(&sql,500).await?;
-                Ok(result.rows.into_iter().map(|r|StorageRow{id:r.first().map(|x|x.display().to_string()).unwrap_or_default(),name:r.first().map(|x|x.display().to_string()).unwrap_or_default(),public:String::new(),details:r.iter().skip(1).map(|x|x.display().to_string()).collect::<Vec<_>>().join(" · ")}).collect())
-            } else {
-                if driver.kind()!=Kind::Postgres { anyhow::bail!("Supabase Storage browsing needs a Supabase Postgres connection."); }
-                let result=driver.execute("SELECT id, name, public, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name",500).await?;
-                Ok(result.rows.into_iter().map(|r|StorageRow{id:r.first().map(|x|x.display().to_string()).unwrap_or_default(),name:r.get(1).map(|x|x.display().to_string()).unwrap_or_default(),public:r.get(2).map(|x|x.display().to_string()).unwrap_or_default(),details:r.iter().skip(3).map(|x|x.display().to_string()).collect::<Vec<_>>().join(" · ")}).collect())
-            }
-        });
-        cx.spawn(async move|this,cx|{let result=task.await;this.update(cx,|view,cx|{view.loading=false;match result{Ok(rows)=>view.rows=rows,Err(e)=>view.error=Some(format!("{e:#}"))}cx.notify();}).ok();}).detach();
-    }
-}
-impl Render for StorageBrowser {
-    fn render(&mut self,_:&mut Window,cx:&mut Context<Self>)->impl IntoElement{
-        let t=cx.tokens().clone();let selected=self.bucket.clone();
-        div().size_full().flex().flex_col().bg(t.studio_bg).text_color(t.foreground)
-            .child(div().flex().items_center().gap_2().px_4().py_3().border_b_1().border_color(t.border)
-                .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(selected.clone().map(|b|format!("Storage / {b}")).unwrap_or_else(||"Storage buckets".into())))
-                .when(selected.is_some(),|el|el.child(Button::new("storage-back").outline().size(ButtonSize::Sm).label("Buckets").on_click(cx.listener(|this,_,_,cx|{this.bucket=None;this.load(cx);}))))
-                .child(Button::new("storage-refresh").outline().size(ButtonSize::Sm).icon(IconName::RefreshCw).label(if self.loading{"Loading…"}else{"Refresh"}).on_click(cx.listener(|this,_,_,cx|this.load(cx)))))
-            .when_some(self.error.clone(),|el,e|el.child(div().p_4().text_color(t.destructive).child(e)))
-                .when(self.error.is_none(),|el|el.child(div().flex_1().min_h_0().overflow_y_scrollbar().children(self.rows.iter().map(|row|{
-                    let is_bucket=selected.is_none();let bucket=row.name.clone();
-                    Button::new(format!("storage-entry-{}",row.id)).outline().w_full().disabled(!is_bucket)
-                        .child(div().flex().items_center().gap_3().w_full()
-                            .child(div().flex_1().text_left().font_family(if is_bucket{rexa_ui::SANS}else{MONO}).child(row.name.clone()))
-                            .when(is_bucket,|d|d.child(div().text_xs().text_color(t.muted_foreground).child(if row.public=="true"{"Public"}else{"Private"})))
-                            .child(div().max_w(px(540.)).text_xs().text_color(t.muted_foreground).child(row.details.clone())))
-                        .on_click(cx.listener(move|this,_,_,cx|{this.bucket=Some(bucket.clone());this.load(cx);}))
-            }))))
-            .when(self.loading&&self.rows.is_empty(),|el|el.child(div().flex_1().flex().items_center().justify_center().text_sm().text_color(t.muted_foreground).child("Loading Supabase Storage…")))
-    }
 }
 
 pub struct RedisKeys {

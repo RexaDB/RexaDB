@@ -204,6 +204,22 @@ impl Driver for SpacetimeDriver {
         Kind::SpacetimeDb
     }
 
+    async fn spacetimedb_module(&self) -> Result<J> { self.module().await }
+
+    async fn spacetimedb_logs(&self, num_lines: usize) -> Result<Vec<J>> {
+        let url = format!("{}/logs?num_lines={}", self.db_path(), num_lines.clamp(1, 1000));
+        let response = self.auth(client().get(url)).send().await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() { bail!("SpacetimeDB log request failed ({status}): {body}"); }
+        let payload: J = serde_json::from_str(&body)?;
+        Ok(payload.as_array().cloned().unwrap_or_default())
+    }
+
+    async fn call_spacetimedb_reducer(&self, name: &str, args: &[J]) -> Result<()> {
+        self.call_reducer(name, args).await
+    }
+
     /// The original reports no schemas; the database name acts as the namespace.
     async fn schemas(&self) -> Result<Vec<String>> {
         Ok(Vec::new())

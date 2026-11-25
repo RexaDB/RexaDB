@@ -706,6 +706,26 @@ pub trait Driver: Send + Sync {
     async fn supabase_auth_users(&self) -> Result<Vec<AuthUser>> {
         Ok(Vec::new())
     }
+    /// Supabase Management API Edge Function inventory.
+    async fn supabase_edge_functions(&self) -> Result<Vec<serde_json::Value>> {
+        unsupported(self.kind(), "Supabase Edge Functions")
+    }
+    /// Supabase Management API secret metadata. Secret values are never returned.
+    async fn supabase_edge_secrets(&self) -> Result<Vec<serde_json::Value>> {
+        unsupported(self.kind(), "Supabase Edge Function secrets")
+    }
+    /// SpacetimeDB module definition used by schema and reducer views.
+    async fn spacetimedb_module(&self) -> Result<serde_json::Value> {
+        unsupported(self.kind(), "SpacetimeDB module schema")
+    }
+    /// Recent SpacetimeDB server logs.
+    async fn spacetimedb_logs(&self, _num_lines: usize) -> Result<Vec<serde_json::Value>> {
+        unsupported(self.kind(), "SpacetimeDB logs")
+    }
+    /// Invoke one SpacetimeDB reducer with its JSON arguments.
+    async fn call_spacetimedb_reducer(&self, _name: &str, _args: &[serde_json::Value]) -> Result<()> {
+        unsupported(self.kind(), "SpacetimeDB reducers")
+    }
     /// Redis keys with type/TTL/size (`fetchRedisKeys`).
     async fn redis_keys(&self, _pattern: &str, _limit: usize, _db: Option<&str>) -> Result<Vec<RedisKeyInfo>> {
         unsupported(self.kind(), "Redis key browsing")
