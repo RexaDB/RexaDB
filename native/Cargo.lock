@@ -6448,6 +6448,7 @@ dependencies = [
 name = "rexa-connections"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "base64 0.22.1",
  "dirs 6.0.0",
@@ -6460,6 +6461,7 @@ dependencies = [
  "rexa-drivers",
  "rexa-store",
  "rexa-ui",
+ "ring",
  "serde",
  "serde_json",
  "tokio",

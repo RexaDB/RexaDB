@@ -13,6 +13,8 @@ use crate::widgets::{self, FieldInput};
 use gpui::{div, img, prelude::*, px, svg, AnyElement, App, Context, Entity, EventEmitter, FontWeight, SharedString, Window};
 use gpui_component::input::InputState;
 use gpui_component::Icon;
+use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm};
+use ring::{agreement, rand::SystemRandom};
 use rexa_store::{ConnectionDraft, Store, WebStore};
 use rexa_ui::theme::{with_alpha, Tokens};
 use rexa_ui::{toast, ActiveTokens, Button, ButtonSize, IconName, Tw, MONO};
@@ -438,6 +440,20 @@ impl AccountsScreen {
                                 rexa_ui::close_top(cx);
                             }))
                         })
+                        .when(kind == AccountKind::Supabase, {
+                            let weak = weak.clone();
+                            move |d| d.child(Button::new("supabase-browser-login").size(ButtonSize::Lg).w_full().label("Continue with browser").on_click(move |_, _, cx| {
+                                match supabase_login_session() {
+                                    Ok((session_id, login_url, private_key)) => {
+                                        cx.open_url(&login_url);
+                                        rexa_ui::close_top(cx);
+                                        open_supabase_code_dialog(session_id, private_key, weak.clone(), cx);
+                                    }
+                                    Err(error) => { toast::error(format!("Could not start Supabase sign-in: {error:#}"), cx); }
+                                }
+                            }))
+                        })
+                        .when(kind == AccountKind::Supabase, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with a management token")))
                         .when(kind == AccountKind::SpacetimeDb, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with a token")))
                         .child(FieldInput::new(&token))
                         .child(FieldInput::new(&label))
@@ -506,6 +522,35 @@ impl AccountsScreen {
                     Err(error) => { toast::error(format!("SpacetimeDB sign-in failed: {error:#}"), cx); }
                 }
                 cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    fn finish_supabase_login(&mut self, session_id: String, private_key: agreement::EphemeralPrivateKey, code: String, cx: &mut Context<Self>) {
+        let request = rexa_core::runtime::spawn(supabase_login_exchange(session_id, code, private_key));
+        let weak = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| {
+            let result = request.await;
+            weak.update(cx, |this, cx| match result {
+                Ok(token) => {
+                    let mut account = serde_json::Map::new();
+                    account.insert("createdAt".into(), Value::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)));
+                    account.insert("token".into(), Value::String(token));
+                    account.insert("name".into(), Value::String("Supabase account".into()));
+                    let mut next = this.accounts.clone();
+                    next.push(Value::Object(account));
+                    next.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
+                    if let Err(error) = save_accounts(AccountKind::Supabase, &next) {
+                        toast::error(format!("Could not save Supabase account: {error:#}"), cx);
+                        return;
+                    }
+                    this.accounts = next;
+                    this.active = Some(this.accounts.len().saturating_sub(1));
+                    cx.emit(AccountsEvent::Changed);
+                    this.load(cx);
+                    toast::success("Supabase account connected", cx);
+                }
+                Err(error) => { toast::error(format!("Supabase sign-in failed: {error:#}. Start browser sign-in again to retry."), cx); }
             }).ok();
         }).detach();
     }
@@ -877,6 +922,99 @@ impl Render for AccountsScreen {
 // ---- API clients ---------------------------------------------------------------------
 
 const SPACETIMEDB_AUTH_HOST: &str = "spacetimedb.com";
+
+fn supabase_login_session() -> anyhow::Result<(String, String, agreement::EphemeralPrivateKey)> {
+    let rng = SystemRandom::new();
+    let private_key = agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
+        .map_err(|_| anyhow::anyhow!("could not generate an ephemeral P-256 key"))?;
+    let public_key = private_key.compute_public_key()
+        .map_err(|_| anyhow::anyhow!("could not compute the public key"))?;
+    let public_hex = encode_hex(public_key.as_ref());
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+    let mut login_url = url::Url::parse("https://supabase.com/dashboard/cli/login")?;
+    login_url.query_pairs_mut()
+        .append_pair("session_id", &session_id)
+        .append_pair("token_name", &format!("rexadb_RexaDB_{timestamp}"))
+        .append_pair("public_key", &public_hex);
+    Ok((session_id, login_url.to_string(), private_key))
+}
+
+fn open_supabase_code_dialog(
+    session_id: String,
+    private_key: agreement::EphemeralPrivateKey,
+    account: gpui::WeakEntity<AccountsScreen>,
+    cx: &mut App,
+) {
+    use std::sync::{Arc, Mutex};
+    let private_key = Arc::new(Mutex::new(Some(private_key)));
+    rexa_ui::open_dialog(cx, move |window, cx| {
+        let code = cx.new(|cx| InputState::new(window, cx).placeholder("8-character device code"));
+        let code_value = code.clone();
+        let private_key = private_key.clone();
+        let account = account.clone();
+        let session_id = session_id.clone();
+        rexa_ui::Dialog::new()
+            .max_w(384.)
+            .title("Finish Supabase sign-in")
+            .description("Approve the request in your browser, then enter the device code shown by Supabase.")
+            .child(div().flex().flex_col().gap_3().pt_2()
+                .child(FieldInput::new(&code))
+                .child(Button::new("supabase-code-submit").size(ButtonSize::Lg).w_full().label("Verify and connect").on_click(move |_, _, cx| {
+                    let code = code_value.read(cx).value().trim().to_string();
+                    if code.chars().count() != 8 || !code.chars().all(|c| c.is_ascii_alphanumeric()) {
+                        toast::error("Enter the 8-character code shown in the Supabase browser page.", cx);
+                        return;
+                    }
+                    let key = private_key.lock().ok().and_then(|mut key| key.take());
+                    let Some(private_key) = key else {
+                        toast::error("This sign-in attempt has already been used. Start browser sign-in again.", cx);
+                        return;
+                    };
+                    account.update(cx, |this, cx| this.finish_supabase_login(session_id.clone(), private_key, code, cx)).ok();
+                    rexa_ui::close_top(cx);
+                })))
+    });
+}
+
+async fn supabase_login_exchange(session_id: String, device_code: String, private_key: agreement::EphemeralPrivateKey) -> anyhow::Result<String> {
+    let mut endpoint = url::Url::parse(&format!("https://api.supabase.com/platform/cli/login/{}", session_id))?;
+    endpoint.query_pairs_mut().append_pair("device_code", &device_code);
+    let response = reqwest::Client::new().get(endpoint).send().await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() { anyhow::bail!("Supabase returned {status}: {body}"); }
+    let response: Value = serde_json::from_str(&body)?;
+    let encrypted = decode_hex(response.get("access_token").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("Supabase response is missing access_token"))?)?;
+    let server_public = decode_hex(response.get("public_key").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("Supabase response is missing public_key"))?)?;
+    let nonce = decode_hex(response.get("nonce").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("Supabase response is missing nonce"))?)?;
+    if nonce.len() != 12 { anyhow::bail!("Supabase returned an invalid AES-GCM nonce"); }
+    let peer = agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, server_public);
+    let decrypted = agreement::agree_ephemeral(private_key, &peer, |shared| {
+        use aes_gcm::aead::generic_array::GenericArray;
+        let cipher = Aes256Gcm::new_from_slice(shared).map_err(|_| anyhow::anyhow!("invalid ECDH key material"))?;
+        cipher.decrypt(GenericArray::from_slice(&nonce), encrypted.as_ref())
+            .map_err(|_| anyhow::anyhow!("could not decrypt Supabase access token"))
+    }).map_err(|_| anyhow::anyhow!("Supabase key agreement failed"))??;
+    Ok(String::from_utf8(decrypted)?.trim().to_string())
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes { result.push(HEX[(byte >> 4) as usize] as char); result.push(HEX[(byte & 0x0f) as usize] as char); }
+    result
+}
+
+fn decode_hex(input: &str) -> anyhow::Result<Vec<u8>> {
+    if input.len() % 2 != 0 { anyhow::bail!("Supabase returned malformed hexadecimal data"); }
+    input.as_bytes().chunks_exact(2).map(|pair| {
+        let digit = |b: u8| match b { b'0'..=b'9' => Some(b - b'0'), b'a'..=b'f' => Some(b - b'a' + 10), b'A'..=b'F' => Some(b - b'A' + 10), _ => None };
+        let hi = digit(pair[0]).ok_or_else(|| anyhow::anyhow!("Supabase returned malformed hexadecimal data"))?;
+        let lo = digit(pair[1]).ok_or_else(|| anyhow::anyhow!("Supabase returned malformed hexadecimal data"))?;
+        Ok((hi << 4) | lo)
+    }).collect()
+}
 
 async fn spacetimedb_login_request() -> anyhow::Result<(String, String)> {
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build()?;
