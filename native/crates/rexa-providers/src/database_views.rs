@@ -35,6 +35,11 @@ pub fn build_tab(
         "database-spacetimedb-schema" => "SpacetimeDB schema",
         "database-spacetimedb-reducers" => "SpacetimeDB reducers",
         "database-spacetimedb-logs" => "SpacetimeDB logs",
+        "payments-plans" => "Billing plans",
+        "payments-customers" => "Billing customers",
+        "payments-subscriptions" => "Billing subscriptions",
+        "payments-revenue" => "Billing revenue",
+        "payments-webhooks" => "Billing webhooks",
         _ => return None,
     };
     Some(
@@ -118,6 +123,11 @@ impl DatabaseView {
             }
             "storage-policies" => Some("SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check FROM pg_policies WHERE schemaname = 'storage' ORDER BY tablename, policyname".into()),
             "storage-settings" => Some("SELECT * FROM storage.buckets ORDER BY name LIMIT 500".into()),
+            "payments-plans" => Some("SELECT p.internal_id, p.id, p.name, p.\"group\", p.is_default, p.price_amount, p.price_interval, p.price_currency, p.stripe_product_id, p.stripe_price_id, (SELECT count(*) FROM paykit.subscription s WHERE s.product_internal_id = p.internal_id AND s.status IN ('active','trialing') AND s.canceled = false AND s.ended_at IS NULL) AS active_subs FROM paykit.product p ORDER BY p.price_amount NULLS FIRST, p.id LIMIT 500".into()),
+            "payments-customers" => Some("SELECT c.id, c.email, c.name, c.stripe_customer_id, c.created_at, (SELECT count(*) FROM paykit.subscription s WHERE s.customer_id = c.id AND s.status IN ('active','trialing') AND s.canceled = false AND s.ended_at IS NULL) AS active_subs, (SELECT count(*) FROM paykit.subscription s WHERE s.customer_id = c.id) AS total_subs FROM paykit.customer c ORDER BY c.created_at DESC LIMIT 200".into()),
+            "payments-subscriptions" => Some("SELECT s.id, s.customer_id, c.email AS customer_email, s.product_internal_id, p.name AS plan_name, s.status, s.canceled, s.cancel_at_period_end, s.current_period_end_at, s.quantity, s.updated_at FROM paykit.subscription s LEFT JOIN paykit.customer c ON c.id = s.customer_id LEFT JOIN paykit.product p ON p.internal_id = s.product_internal_id ORDER BY s.updated_at DESC LIMIT 200".into()),
+            "payments-revenue" => Some("SELECT (SELECT coalesce(sum(amount), 0) FROM paykit.invoice WHERE status = 'paid') AS paid_total, (SELECT count(*) FROM paykit.subscription WHERE status IN ('active','trialing') AND canceled = false AND ended_at IS NULL) AS active_subs, (SELECT count(*) FROM paykit.customer) AS customers, (SELECT count(*) FROM paykit.invoice WHERE status = 'failed') AS failed_invoices".into()),
+            "payments-webhooks" => Some("SELECT id, type, status, error, received_at, processed_at, stripe_event_id FROM paykit.webhook_event ORDER BY received_at DESC LIMIT 200".into()),
             _ => None,
         }
     }
@@ -146,6 +156,11 @@ impl DatabaseView {
                 anyhow::bail!(
                     "Supabase Edge resources require a Supabase Management API connection."
                 );
+            }
+            if view.starts_with("payments-")
+                && !matches!(driver.kind(), Kind::Postgres | Kind::SupabaseMgmt)
+            {
+                anyhow::bail!("PayKit billing data requires a PostgreSQL or Supabase Management API connection.");
             }
             if view.starts_with("database-spacetimedb-") && driver.kind() != Kind::SpacetimeDb {
                 anyhow::bail!("This view requires a SpacetimeDB connection.");
