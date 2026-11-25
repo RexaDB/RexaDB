@@ -25,6 +25,9 @@ pub fn init(cx: &mut App) {
 fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mut App) -> Option<AnyView> {
     let TabSpec::View { view, params } = spec else { return None };
     if let Some(tab) = database_views::build_tab(spec, session.clone(), window, cx) { return Some(tab); }
+    if view == "manage-workspaces" {
+        return Some(cx.new(|cx| team::Workspaces::new(window, cx)).into());
+    }
     if view != "redis" && view != "redis-keys" && view != "redis-browser" { return None; }
     if session.driver.kind() != Kind::Redis {
         return Some(cx.new(|cx| RedisKeys::unsupported(session, window, cx)).into());

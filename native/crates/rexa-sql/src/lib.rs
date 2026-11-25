@@ -10,6 +10,7 @@
 //! (`screen:dev-sql:<connection id>`).
 
 pub mod ai;
+pub mod analytics_view;
 pub mod approval;
 pub mod completion;
 mod dev;
@@ -42,6 +43,9 @@ pub fn init(cx: &mut App) {
         }
         TabSpec::View { view, .. } if view == "history" => {
             Some(cx.new(|cx| history_view::QueryHistoryView::new(session, window, cx)).into())
+        }
+        TabSpec::View { view, .. } if view == "analytics" => {
+            Some(cx.new(|cx| analytics_view::AnalyticsView::new(session, cx)).into())
         }
         TabSpec::View { view, .. } if view == "sql-sheet" => {
             let key = view.clone();
