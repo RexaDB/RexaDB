@@ -403,6 +403,16 @@ impl Studio {
                 }
                 self.persist(cx);
             }
+            StudioEvent::TabParamsChanged { tab, patch } => {
+                for t in self.tabs.iter_mut().filter(|t| tabs::spec_matches(tab, t)) {
+                    if let Some(fields) = patch.as_object() {
+                        for (key, value) in fields {
+                            t.extra.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                self.persist(cx);
+            }
             StudioEvent::QueryChanged { id, sql } => {
                 for t in self.tabs.iter_mut().filter(|t| t.kind == "sql" && (t.id == *id || t.base() == id)) {
                     t.query = Some(sql.clone());

@@ -184,6 +184,8 @@ pub enum StudioEvent {
     MarkDirty { tab: TabSpec, dirty: bool },
     /// Rename a tab's title (e.g. a saved snippet name).
     RenameTab { tab: TabSpec, title: String },
+    /// Patch persisted metadata on a tab (e.g. a browser tab's current URL).
+    TabParamsChanged { tab: TabSpec, patch: serde_json::Value },
     /// A SQL tab's text changed; the shell persists it with the tab (`open_tabs.query`).
     QueryChanged { id: String, sql: String },
     /// Shell → tab: a keybinding action meant for the active tab, by its
