@@ -410,7 +410,7 @@ impl AccountsScreen {
             let title = format!("Connect {} account", kind.title());
             let token_hint = match kind {
                 AccountKind::Supabase => "Create a management access token in Supabase account settings.",
-                AccountKind::SpacetimeDb => "Paste a SpacetimeDB identity token. Use the default host unless you run a self-hosted server.",
+                AccountKind::SpacetimeDb => "Sign in with your browser, or paste an identity token for a self-hosted server.",
                 AccountKind::Neon => "Create an API key in the Neon console. It stays on this device.",
                 AccountKind::Planetscale => "Create a service token with database and branch access in PlanetScale settings.",
             };
@@ -431,6 +431,14 @@ impl AccountsScreen {
                         .flex_col()
                         .gap_3()
                         .pt_2()
+                        .when(kind == AccountKind::SpacetimeDb, {
+                            let weak = weak.clone();
+                            move |d| d.child(Button::new("stdb-browser-login").size(ButtonSize::Lg).w_full().label("Continue with browser").on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.start_spacetimedb_login(cx)).ok();
+                                rexa_ui::close_top(cx);
+                            }))
+                        })
+                        .when(kind == AccountKind::SpacetimeDb, |d| d.child(div().py_1().text_center().tw_text_xs().text_color(cx.tokens().muted_foreground).child("Or connect with a token")))
                         .child(FieldInput::new(&token))
                         .child(FieldInput::new(&label))
                         .when(kind == AccountKind::SpacetimeDb, |d| d.child(FieldInput::new(&host)))
@@ -461,6 +469,45 @@ impl AccountsScreen {
                         })),
                 )
         });
+    }
+
+    fn start_spacetimedb_login(&mut self, cx: &mut Context<Self>) {
+        let request = rexa_core::runtime::spawn(spacetimedb_login_request());
+        toast::info("Opening SpacetimeDB sign-in in your browser…", cx);
+        cx.spawn(async move |this, cx| {
+            let result = match request.await {
+                Ok((request_token, login_url)) => {
+                    cx.update(|cx| cx.open_url(&login_url));
+                    rexa_core::runtime::spawn(async move { spacetimedb_login_poll(&request_token).await }).await
+                }
+                Err(error) => Err(error),
+            };
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(token) => {
+                        let mut account = serde_json::Map::new();
+                        account.insert("createdAt".into(), Value::from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)));
+                        account.insert("token".into(), Value::String(token.clone()));
+                        account.insert("host".into(), Value::String("maincloud.spacetimedb.com".into()));
+                        if let Some(identity) = stdb_identity(&token) { account.insert("identity".into(), Value::String(identity)); }
+                        let mut next = this.accounts.clone();
+                        next.push(Value::Object(account));
+                        next.sort_by_key(|a| a.get("createdAt").and_then(Value::as_i64).unwrap_or(0));
+                        if let Err(error) = save_accounts(AccountKind::SpacetimeDb, &next) {
+                            toast::error(format!("Could not save account token: {error:#}"), cx);
+                            return;
+                        }
+                        this.accounts = next;
+                        this.active = Some(this.accounts.len().saturating_sub(1));
+                        cx.emit(AccountsEvent::Changed);
+                        this.load(cx);
+                        toast::success("SpacetimeDB account connected", cx);
+                    }
+                    Err(error) => { toast::error(format!("SpacetimeDB sign-in failed: {error:#}"), cx); }
+                }
+                cx.notify();
+            }).ok();
+        }).detach();
     }
 
     // ---- rendering ---------------------------------------------------------------------
@@ -828,6 +875,73 @@ impl Render for AccountsScreen {
 }
 
 // ---- API clients ---------------------------------------------------------------------
+
+const SPACETIMEDB_AUTH_HOST: &str = "spacetimedb.com";
+
+async fn spacetimedb_login_request() -> anyhow::Result<(String, String)> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build()?;
+    let mut url = url::Url::parse(&format!("https://{SPACETIMEDB_AUTH_HOST}/api/auth/cli/login/request-token"))?;
+    url.query_pairs_mut().append_pair("host", SPACETIMEDB_AUTH_HOST);
+    let response = client.post(url).send().await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() { anyhow::bail!("SpacetimeDB request failed ({status}): {}", body.chars().take(400).collect::<String>()); }
+    let payload: Value = serde_json::from_str(&body)?;
+    if payload.get("success").and_then(Value::as_bool) != Some(true) {
+        anyhow::bail!("{}", payload.get("error").map(format_provider_error).unwrap_or_else(|| "SpacetimeDB could not start sign-in".into()));
+    }
+    let request_token = payload.pointer("/data/token").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("SpacetimeDB returned no login token"))?.to_string();
+    let mut login_url = url::Url::parse(&format!("https://{SPACETIMEDB_AUTH_HOST}/login/cli"))?;
+    login_url.query_pairs_mut().append_pair("token", &request_token);
+    Ok((request_token, login_url.to_string()))
+}
+
+async fn spacetimedb_login_poll(request_token: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build()?;
+    let started = tokio::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(180) {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut url = url::Url::parse(&format!("https://{SPACETIMEDB_AUTH_HOST}/api/auth/cli/status"))?;
+        url.query_pairs_mut().append_pair("host", SPACETIMEDB_AUTH_HOST).append_pair("token", request_token);
+        let response = match client.get(url).send().await {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        if !response.status().is_success() { continue; }
+        let payload: Value = match response.json().await { Ok(payload) => payload, Err(_) => continue };
+        if payload.get("success").and_then(Value::as_bool) != Some(true) {
+            anyhow::bail!("{}", payload.get("error").map(format_provider_error).unwrap_or_else(|| "SpacetimeDB sign-in was rejected".into()));
+        }
+        if payload.pointer("/data/approved").and_then(Value::as_bool) == Some(true) {
+            if let Some(session_token) = payload.pointer("/data/sessionToken").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                return spacetimedb_login_exchange(&client, session_token).await;
+            }
+        }
+    }
+    anyhow::bail!("Sign-in timed out. Please try again.")
+}
+
+async fn spacetimedb_login_exchange(client: &reqwest::Client, session_token: &str) -> anyhow::Result<String> {
+    let mut url = url::Url::parse(&format!("https://{SPACETIMEDB_AUTH_HOST}/api/spacetimedb-token"))?;
+    url.query_pairs_mut().append_pair("host", SPACETIMEDB_AUTH_HOST);
+    let response = client.post(url).bearer_auth(session_token).send().await?;
+    let status = response.status();
+    let body = response.text().await?;
+    if !status.is_success() { anyhow::bail!("SpacetimeDB token exchange failed ({status}): {}", body.chars().take(400).collect::<String>()); }
+    let payload: Value = serde_json::from_str(&body)?;
+    if payload.get("success").and_then(Value::as_bool) != Some(true) {
+        anyhow::bail!("{}", payload.get("error").map(format_provider_error).unwrap_or_else(|| "SpacetimeDB token exchange failed".into()));
+    }
+    payload.pointer("/data/token").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string).ok_or_else(|| anyhow::anyhow!("SpacetimeDB returned no identity token"))
+}
+
+fn format_provider_error(error: &Value) -> String {
+    match error {
+        Value::String(message) => message.clone(),
+        Value::Null => "Unknown error".into(),
+        value => value.to_string(),
+    }
+}
 
 fn connection_key(kind: AccountKind, cs: &str) -> Option<String> {
     let t = cs.trim();
