@@ -60,6 +60,40 @@ fn validate_manifest(manifest: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Compact summary of the contribution points advertised by an extension.
+/// These are manifest metadata only until the native sandbox host is available.
+fn contribution_summary(manifest: &Value) -> Vec<String> {
+    let contributes = &manifest["contributes"];
+    let mut summary = Vec::new();
+    for (field, label) in [
+        ("commands", "command"),
+        ("keybindings", "keybinding"),
+        ("viewsContainers", "view container"),
+        ("views", "view"),
+        ("railItems", "rail item"),
+        ("webviewPanels", "webview panel"),
+        ("statusBar", "status item"),
+        ("languages", "language"),
+        ("themes", "theme"),
+        ("resultVisualizers", "result visualizer"),
+        ("cellRenderers", "cell renderer"),
+        ("dbDrivers", "database driver"),
+        ("aiTools", "AI tool"),
+    ] {
+        let count = contributes[field].as_array().map_or(0, Vec::len);
+        if count > 0 {
+            summary.push(format!("{count} {label}{}", if count == 1 { "" } else { "s" }));
+        }
+    }
+    for (field, label) in [("stylePacks", "style pack"), ("shells", "shell")] {
+        let count = contributes["ui"][field].as_array().map_or(0, Vec::len);
+        if count > 0 {
+            summary.push(format!("{count} {label}{}", if count == 1 { "" } else { "s" }));
+        }
+    }
+    summary
+}
+
 pub struct ExtensionsView {
     records: Vec<Value>,
     bundle: Entity<TextareaState>,
@@ -180,13 +214,15 @@ impl Render for ExtensionsView {
                     let name = record["manifest"]["displayName"].as_str().or_else(|| record["manifest"]["name"].as_str()).unwrap_or(&id).to_string();
                     let version = record["manifest"]["version"].as_str().unwrap_or("?").to_string();
                     let description = record["manifest"]["description"].as_str().unwrap_or("").to_string();
+                    let contributions = contribution_summary(&record["manifest"]);
                     let enabled = record["enabled"].as_bool().unwrap_or(true);
                     let (toggle_id, remove_id) = (id.clone(), id.clone());
                     div().flex().items_center().gap_3().rounded_md().border_1().border_color(t.border).bg(t.card).p_3()
                         .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
                             .child(div().flex().items_center().gap_2().child(div().truncate().tw_text_sm().font_weight(gpui::FontWeight::SEMIBOLD).child(name)).child(div().tw_text_xs().text_color(t.muted_foreground).child(format!("v{version}"))))
                             .child(div().tw_text_xs().text_color(t.muted_foreground).child(id.clone()))
-                            .when(!description.is_empty(), |d| d.child(div().tw_text_xs().text_color(t.muted_foreground).child(description))))
+                            .when(!description.is_empty(), |d| d.child(div().tw_text_xs().text_color(t.muted_foreground).child(description)))
+                            .when(!contributions.is_empty(), |d| d.child(div().flex().flex_wrap().gap_x_2().tw_text_xs().text_color(t.muted_foreground).children(contributions))))
                         .child(Button::new(format!("ext-toggle-{id}")).outline().size(ButtonSize::Sm).label(if enabled { "Disable" } else { "Enable" }).on_click(cx.listener(move |this, _, _, cx| this.toggle(&toggle_id, cx))))
                         .child(Button::new(format!("ext-remove-{id}")).ghost().size(ButtonSize::IconSm).icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| this.uninstall(&remove_id, cx))))
                 }))
