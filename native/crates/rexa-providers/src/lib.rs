@@ -28,6 +28,11 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
     if view == "manage-workspaces" {
         return Some(cx.new(|cx| team::Workspaces::new(window, cx)).into());
     }
+    if view == "connect-studio" {
+        // The desktop "Workspace Studio" tab is the same workspace admin
+        // surface as the Team route; new workspace links use accept-invite.
+        return Some(cx.new(|cx| team::TeamScreen::new(window, cx)).into());
+    }
     if view != "redis" && view != "redis-keys" && view != "redis-browser" { return None; }
     if session.driver.kind() != Kind::Redis {
         return Some(cx.new(|cx| RedisKeys::unsupported(session, window, cx)).into());
