@@ -10,6 +10,7 @@ mod browser;
 mod import_export;
 mod snapshots;
 mod workflows;
+mod extensions;
 
 pub fn init(cx: &mut App) {
     notes::init(cx);
@@ -19,4 +20,5 @@ pub fn init(cx: &mut App) {
     import_export::init(cx);
     snapshots::init(cx);
     workflows::init(cx);
+    extensions::init(cx);
 }
