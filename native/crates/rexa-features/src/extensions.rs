@@ -4,7 +4,7 @@
 //! still needs a native equivalent before extension JavaScript can activate.
 
 use gpui::{div, prelude::*, px, App, AppContext, Context, Entity, Subscription, Window};
-use gpui_component::{input::{InputEvent, Textarea, TextareaState}, scroll::ScrollableElement};
+use gpui_component::{input::{Input, InputEvent, InputState, Textarea, TextareaState}, scroll::ScrollableElement};
 use rexa_core::{Registry, Session, TabSpec};
 use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Tw};
 use serde_json::{json, Value};
@@ -63,6 +63,8 @@ fn validate_manifest(manifest: &Value) -> anyhow::Result<()> {
 pub struct ExtensionsView {
     records: Vec<Value>,
     bundle: Entity<TextareaState>,
+    search: Entity<InputState>,
+    query: String,
     message: Option<String>,
     _subs: Vec<Subscription>,
 }
@@ -70,8 +72,12 @@ pub struct ExtensionsView {
 impl ExtensionsView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let bundle = cx.new(|cx| TextareaState::new(window, cx).auto_grow(8, 20).placeholder("Paste { manifest, code } JSON or a raw extension manifest"));
-        let sub = cx.subscribe(&bundle, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); });
-        Self { records: load(), bundle, message: None, _subs: vec![sub] }
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search installed extensions…"));
+        let subs = vec![
+            cx.subscribe(&bundle, |_, _, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { cx.notify(); }),
+            cx.subscribe(&search, |this, state, event: &InputEvent, cx| if matches!(event, InputEvent::Change) { this.query = state.read(cx).value().to_string(); cx.notify(); }),
+        ];
+        Self { records: load(), bundle, search, query: String::new(), message: None, _subs: subs }
     }
 
     fn persist(&mut self, cx: &mut Context<Self>) {
@@ -124,6 +130,33 @@ impl ExtensionsView {
         self.message = Some(format!("Uninstalled {id}."));
         self.persist(cx);
     }
+
+    fn choose_bundle(&mut self, cx: &mut Context<Self>) {
+        let prompt = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Select an extension JSON bundle".into()) });
+        let bundle = self.bundle.clone();
+        let this = cx.entity().downgrade();
+        cx.spawn(async move |_, cx| {
+            let result = match prompt.await {
+                Ok(Ok(Some(paths))) => match paths.first() {
+                    Some(path) => {
+                        let path = path.clone();
+                        tokio::task::spawn_blocking(move || std::fs::read_to_string(path)).await.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string()))
+                    }
+                    None => return,
+                },
+                Ok(Ok(None)) | Err(_) => return,
+                Ok(Err(error)) => Err(format!("Could not open file picker: {error:#}")),
+            };
+            cx.update(|cx| match result {
+                Ok(text) => {
+                    if let Some(window) = cx.active_window() {
+                        window.update(cx, |_, window, cx| bundle.update(cx, |state, cx| state.set_value(text, window, cx))).ok();
+                    }
+                }
+                Err(error) => { this.update(cx, |view, cx| { view.message = Some(format!("Could not load bundle: {error}")); cx.notify(); }).ok(); }
+            });
+        }).detach();
+    }
 }
 
 impl Render for ExtensionsView {
@@ -136,9 +169,13 @@ impl Render for ExtensionsView {
                     .child(div().tw_text_xs().text_color(t.muted_foreground).child(format!("{} installed", self.records.len())))))
             .child(div().mx_5().mt_4().rounded_md().border_1().border_color(t.border).bg(t.card).p_3()
                 .child(div().tw_text_xs().text_color(t.muted_foreground).child("Installed bundles and enablement are stored locally. Extension JavaScript, webview panels, commands, and runtime contributions remain inactive until the native sandbox host is ported.")))
+            .child(div().px_5().pt_4().child(Input::new(&self.search)))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().px_5().py_4().flex().flex_col().gap_3()
                 .when(self.records.is_empty(), |d| d.child(div().rounded_md().border_1().border_color(t.border).p_4().tw_text_sm().text_color(t.muted_foreground).child("No extensions installed yet.")))
-                .children(self.records.iter().map(|record| {
+                .children(self.records.iter().filter(|record| {
+                    let query = self.query.trim().to_lowercase();
+                    query.is_empty() || [record["manifest"]["id"].as_str().unwrap_or_default(), record["manifest"]["displayName"].as_str().unwrap_or_default(), record["manifest"]["name"].as_str().unwrap_or_default(), record["manifest"]["description"].as_str().unwrap_or_default()].iter().any(|text| text.to_lowercase().contains(&query))
+                }).map(|record| {
                     let id = record["manifest"]["id"].as_str().unwrap_or("unknown").to_string();
                     let name = record["manifest"]["displayName"].as_str().or_else(|| record["manifest"]["name"].as_str()).unwrap_or(&id).to_string();
                     let version = record["manifest"]["version"].as_str().unwrap_or("?").to_string();
@@ -156,7 +193,9 @@ impl Render for ExtensionsView {
                 .child(div().flex().flex_col().gap_2().rounded_md().border_1().border_color(t.border).bg(t.card).p_4()
                     .child(div().tw_text_sm().font_weight(gpui::FontWeight::SEMIBOLD).child("Install from JSON bundle"))
                     .child(Textarea::new(&self.bundle).h(px(180.)))
-                    .child(Button::new("extension-install").size(ButtonSize::Sm).icon(IconName::Plus).label("Install extension").on_click(cx.listener(|this, _, window, cx| this.install(window, cx))))
+                    .child(div().flex().gap_2()
+                        .child(Button::new("extension-file").outline().size(ButtonSize::Sm).icon(IconName::Upload).label("Choose JSON file").on_click(cx.listener(|this, _, _, cx| this.choose_bundle(cx))))
+                        .child(Button::new("extension-install").size(ButtonSize::Sm).icon(IconName::Plus).label("Install extension").on_click(cx.listener(|this, _, window, cx| this.install(window, cx)))))
                     .when_some(self.message.clone(), |d, message| d.child(div().tw_text_xs().text_color(t.muted_foreground).child(message)))))
     }
 }
