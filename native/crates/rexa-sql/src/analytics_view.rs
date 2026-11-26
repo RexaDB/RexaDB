@@ -50,14 +50,16 @@ impl Render for AnalyticsView {
         let successes = self.history.iter().filter(|entry| entry.status == "success").count();
         let errors = self.history.iter().filter(|entry| entry.status == "error").count();
         let average_ms = if total == 0 { 0 } else { self.history.iter().map(|entry| entry.duration).sum::<i64>() / total as i64 };
-        let mut daily = BTreeMap::<String, usize>::new();
+        // Keep a sortable date key separate from the short display label;
+        // sorting labels such as "Apr 2" alphabetically scrambles the chart.
+        let mut daily = BTreeMap::<String, (String, usize)>::new();
         for entry in &self.history {
-            let day = chrono::DateTime::from_timestamp_millis(entry.executed_at)
-                .map(|date| date.format("%b %-d").to_string())
-                .unwrap_or_else(|| "Unknown date".into());
-            *daily.entry(day).or_default() += 1;
+            let date = chrono::DateTime::from_timestamp_millis(entry.executed_at);
+            let key = date.map(|date| date.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "9999-99-99".into());
+            let label = date.map(|date| date.format("%b %-d").to_string()).unwrap_or_else(|| "Unknown date".into());
+            daily.entry(key).and_modify(|(_, count)| *count += 1).or_insert((label, 1));
         }
-        let max_daily = daily.values().copied().max().unwrap_or(1);
+        let max_daily = daily.values().map(|(_, count)| *count).max().unwrap_or(1);
 
         div().size_full().flex().flex_col().bg(t.studio_bg).text_color(t.foreground)
             .child(div().px_5().py_4().border_b_1().border_color(t.border)
@@ -72,7 +74,7 @@ impl Render for AnalyticsView {
                 .child(div().flex().flex_col().gap_3()
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("Query activity"))
                     .when(daily.is_empty(), |el| el.child(div().rounded_md().border_1().border_color(t.border).p_4().tw_text_sm().text_color(t.muted_foreground).child("Run queries to start seeing connection activity.")))
-                    .children(daily.into_iter().map(|(day, count)| {
+                    .children(daily.into_values().map(|(day, count)| {
                         let width = (count as f32 / max_daily as f32 * 100.).max(3.);
                         div().flex().items_center().gap_3()
                             .child(div().w_16().tw_text_xs().text_color(t.muted_foreground).child(day))
