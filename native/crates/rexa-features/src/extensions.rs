@@ -24,14 +24,38 @@ fn save(records: &[Value]) -> anyhow::Result<()> {
 
 fn validate_manifest(manifest: &Value) -> anyhow::Result<()> {
     let id = manifest.get("id").and_then(Value::as_str).unwrap_or_default();
-    if id.is_empty() || !id.contains('.') || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_') {
+    let valid_part = |part: &str| !part.is_empty() && part.as_bytes()[0].is_ascii_alphanumeric() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    let valid_id = id.split_once('.').is_some_and(|(publisher, name)| valid_part(publisher) && valid_part(name));
+    if !valid_id {
         anyhow::bail!("Manifest id must be a publisher.name identifier.");
     }
-    if manifest.get("version").and_then(Value::as_str).is_none_or(str::is_empty) {
-        anyhow::bail!("Manifest version is required.");
+    if manifest.get("name").and_then(Value::as_str).is_none_or(|name| name.trim().is_empty()) {
+        anyhow::bail!("Manifest name is required.");
+    }
+    let version = manifest.get("version").and_then(Value::as_str).unwrap_or_default();
+    let (numbers, prerelease) = version.split_once('-').map_or((version, None), |(n, p)| (n, Some(p)));
+    let version_parts: Vec<_> = numbers.split('.').collect();
+    if version_parts.len() != 3 || version_parts.iter().any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
+        || prerelease.is_some_and(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
+    {
+        anyhow::bail!("Manifest version must be semantic version text, such as 1.0.0.");
     }
     if manifest.get("engines").and_then(|v| v.get("rexadb")).and_then(Value::as_str).is_none() {
         anyhow::bail!("Manifest engines.rexadb is required.");
+    }
+    let contributes = manifest.get("contributes").unwrap_or(&Value::Null);
+    if !contributes.is_null() && !contributes.is_object() {
+        anyhow::bail!("Manifest contributes must be an object.");
+    }
+    if let Some(commands) = contributes.get("commands") {
+        let Some(commands) = commands.as_array() else { anyhow::bail!("Manifest contributes.commands must be an array."); };
+        for (index, command) in commands.iter().enumerate() {
+            if command.get("command").and_then(Value::as_str).is_none_or(|v| v.trim().is_empty())
+                || command.get("title").and_then(Value::as_str).is_none_or(|v| v.trim().is_empty())
+            {
+                anyhow::bail!("Manifest command contribution {index} requires command and title.");
+            }
+        }
     }
     Ok(())
 }
