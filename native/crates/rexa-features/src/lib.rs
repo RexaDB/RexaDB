@@ -12,6 +12,7 @@ mod snapshots;
 mod workflows;
 mod extensions;
 pub mod transfer;
+mod backup;
 
 pub fn init(cx: &mut App) {
     notes::init(cx);
@@ -23,4 +24,5 @@ pub fn init(cx: &mut App) {
     workflows::init(cx);
     extensions::init(cx);
     transfer::init(cx);
+    backup::init(cx);
 }

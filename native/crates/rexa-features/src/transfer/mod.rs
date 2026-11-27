@@ -13,5 +13,8 @@ pub mod service;
 pub mod sql;
 pub mod supabase_api;
 pub mod types;
+mod wizard;
 
-pub fn init(_cx: &mut gpui::App) {}
+pub fn init(cx: &mut gpui::App) {
+    rexa_core::Registry::screen(cx, "rexa-features", wizard::build);
+}
