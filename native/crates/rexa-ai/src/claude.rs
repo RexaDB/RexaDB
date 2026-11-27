@@ -59,12 +59,111 @@ pub async fn complete_configured(
     match provider {
         "anthropic" => complete(api_key, model, base_url, system, messages, max_tokens).await,
         "openai" | "openrouter" | "kilo" | "ollama" | "external" => {
-            complete_openai_compatible(provider, api_key, model, base_url, system, messages, max_tokens).await
+            complete_openai_compatible(
+                provider, api_key, model, base_url, system, messages, max_tokens,
+            )
+            .await
         }
-        "google" => bail!("Google Gemini is not supported by the native chat client yet. Select Anthropic or an OpenAI-compatible provider in Settings → AI."),
+        "google" => complete_google(api_key, model, base_url, system, messages, max_tokens).await,
         "" => bail!("Choose a default provider and model in Settings → AI."),
         other => bail!("The native chat client does not support the `{other}` provider yet."),
     }
+}
+
+async fn complete_google(
+    api_key: &str,
+    model: &str,
+    base_url: Option<&str>,
+    system: Option<&str>,
+    messages: &[Message],
+    max_tokens: u32,
+) -> Result<Completion> {
+    if api_key.trim().is_empty() {
+        bail!("Configure a Google AI API key in Settings → AI.");
+    }
+    if model.trim().is_empty() {
+        bail!("Choose a Gemini model in Settings → AI.");
+    }
+    if messages.is_empty() {
+        bail!("Add a user message before requesting a response.");
+    }
+    if max_tokens == 0 {
+        bail!("The response token limit must be greater than zero.");
+    }
+
+    let base = base_url
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("https://generativelanguage.googleapis.com/v1beta")
+        .trim()
+        .trim_end_matches('/');
+    let endpoint = if base.contains(":generateContent") {
+        url::Url::parse(base).context("Google AI base URL is invalid")?
+    } else {
+        let model =
+            url::form_urlencoded::byte_serialize(model.trim().as_bytes()).collect::<String>();
+        url::Url::parse(&format!("{base}/models/{model}:generateContent"))
+            .context("Google AI base URL is invalid")?
+    };
+    let mut endpoint = endpoint;
+    endpoint
+        .query_pairs_mut()
+        .append_pair("key", api_key.trim());
+
+    let contents: Vec<_> = messages
+        .iter()
+        .map(|message| {
+            serde_json::json!({
+                "role": match message.role { Role::User => "user", Role::Assistant => "model" },
+                "parts": [{"text": message.content}],
+            })
+        })
+        .collect();
+    let mut body = serde_json::json!({
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    });
+    if let Some(system) = system.filter(|text| !text.trim().is_empty()) {
+        body["systemInstruction"] = serde_json::json!({"parts": [{"text": system}]});
+    }
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .json(&body)
+        .send()
+        .await
+        .context("Could not reach Google Gemini")?;
+    let status = response.status();
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .context("Google Gemini returned an invalid response")?;
+    if !status.is_success() {
+        let message = payload
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("request failed");
+        bail!("Google Gemini returned HTTP {status}: {message}");
+    }
+    let text = payload
+        .pointer("/candidates/0/content/parts")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+    Ok(Completion {
+        text,
+        stop_reason: payload
+            .pointer("/candidates/0/finishReason")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        input_tokens: payload
+            .pointer("/usageMetadata/promptTokenCount")
+            .and_then(serde_json::Value::as_u64),
+        output_tokens: payload
+            .pointer("/usageMetadata/candidatesTokenCount")
+            .and_then(serde_json::Value::as_u64),
+    })
 }
 
 /// OpenAI Chat Completions-compatible providers used by Settings → AI.
