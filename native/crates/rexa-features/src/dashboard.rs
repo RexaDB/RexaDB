@@ -6,6 +6,7 @@ use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaSta
 use gpui_component::scroll::ScrollableElement;
 use rexa_core::{runtime, Registry, Session, TabSpec};
 use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Tw};
+use rexa_ui::{Select, SelectEntry, SelectOption};
 use rexa_drivers::{QueryResult, DEFAULT_ROW_LIMIT};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
@@ -72,6 +73,45 @@ fn validate_read_query(sql:&str)->Result<String,String>{
     }
     Ok(statement.to_string())
 }
+
+fn widget_type(widget: &Widget) -> &str {
+    widget.raw.get("widgetType").and_then(Value::as_str).unwrap_or("table")
+}
+
+fn render_result(result: QueryResult, kind: &str, cx: &Context<Dashboard>) -> gpui::AnyElement {
+    let t = cx.tokens().clone();
+    match kind {
+        "metric" => {
+            let value = result.rows.first().and_then(|row| row.first()).map(|cell| cell.display().to_string()).unwrap_or_else(|| "—".into());
+            let label = result.columns.first().cloned().unwrap_or_else(|| "Value".into());
+            div().flex().flex_col().items_center().justify_center().gap_2().flex_1().min_h_0()
+                .child(div().text_size(px(36.)).font_weight(gpui::FontWeight::SEMIBOLD).child(value))
+                .child(div().tw_text_xs().text_color(t.muted_foreground).child(label))
+                .into_any_element()
+        }
+        "bar-chart" => {
+            let numeric_column = result.rows.first().and_then(|row| row.iter().enumerate().skip(1).find(|(_, cell)| cell.display().parse::<f64>().is_ok()).map(|(i, _)| i)).unwrap_or(1);
+            let values: Vec<(String, f64)> = result.rows.iter().take(30).filter_map(|row| {
+                let label = row.first()?.display().to_string();
+                let value = row.get(numeric_column)?.display().parse::<f64>().ok()?;
+                Some((label, value))
+            }).collect();
+            let max = values.iter().map(|(_, value)| value.abs()).fold(0.0f64, f64::max).max(1.0);
+            div().flex_1().min_h_0().overflow_y_scrollbar().flex().flex_col().gap_2().p_4()
+                .children(values.into_iter().map(|(label, value)| {
+                    let width = ((value.abs() / max) * 280.0).clamp(2.0, 280.0) as f32;
+                    div().flex().items_center().gap_3()
+                        .child(div().w(px(150.)).truncate().tw_text_xs().child(label))
+                        .child(div().flex().items_center().gap_2().child(div().h(px(12.)).w(px(width)).rounded(px(3.)).bg(t.primary))
+                            .child(div().tw_text_xs().text_color(t.muted_foreground).child(value.to_string())))
+                })).into_any_element()
+        }
+        _ => div().flex_1().min_h_0().overflow_y_scrollbar().border_1().border_color(t.border).child(
+            div().flex().flex_col().children(std::iter::once(div().flex().gap_3().border_b_1().border_color(t.border).px_3().py_2().children(result.columns.iter().map(|c|div().w(px(180.)).tw_text_xs().font_weight(gpui::FontWeight::BOLD).child(c.clone())))).chain(result.rows.iter().take(250).map(|row|div().flex().gap_3().border_b_1().border_color(t.border).px_3().py_2().children(row.iter().map(|v|div().w(px(180.)).tw_text_xs().child(v.display().to_string()))))))
+        ).into_any_element(),
+    }
+}
+
 impl Dashboard {
     fn new(params: &Value, session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let raw_id=params.get("baseId").or_else(||params.get("id")).and_then(Value::as_str).unwrap_or("dashboard-default");
@@ -160,11 +200,23 @@ impl Dashboard {
         self.widgets[i].sql = match validate_read_query(&self.widget_sql.read(cx).value()) { Ok(s)=>s, Err(e)=>{self.message=Some(e);cx.notify();return;} };
         self.save(cx); self.load_selected(cx);
     }
+
+    fn set_widget_type(&mut self, index: usize, kind: String, cx: &mut Context<Self>) {
+        if let Some(widget) = self.widgets.get_mut(index) {
+            if !widget.raw.is_object() { widget.raw = json!({}); }
+            widget.raw["widgetType"] = Value::String(kind);
+            self.save(cx);
+        }
+    }
 }
 impl Render for Dashboard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.tokens().clone();
         let selected = self.selected.unwrap_or(0);
+        let selected_type = self.selected.and_then(|index| self.widgets.get(index)).map(widget_type).unwrap_or("table").to_string();
+        let selector_entity = cx.entity().downgrade();
+        let result_view = self.selected.and_then(|index| self.widgets.get(index)).and_then(|widget| widget.result.clone().map(|result| (result, widget_type(widget).to_string()))).map(|(result, kind)| render_result(result, &kind, cx));
+        let types: Vec<SelectEntry> = [("table", "Table"), ("metric", "Metric"), ("bar-chart", "Bar chart")].into_iter().map(|(value, label)| SelectOption::new(value, label).into()).collect();
         div().size_full().flex().flex_col().bg(t.studio_bg).text_color(t.foreground)
             .child(div().flex().items_center().gap_3().px_5().py_3().border_b_1().border_color(t.border)
                 .child(div().w(px(360.)).child(Input::new(&self.title).appearance(false)))
@@ -175,13 +227,12 @@ impl Render for Dashboard {
                     .children(self.widgets.iter().enumerate().map(|(i,w)| { let label=w.title.clone(); Button::new(format!("dashboard-widget-{i}")).when(i==selected,|b|b.secondary()).size(ButtonSize::Sm).label(label).on_click(cx.listener(move |this,_,window,cx|this.choose(i,window,cx))) }))
                     .child(Button::new("dashboard-add-widget").outline().size(ButtonSize::Sm).icon(IconName::Plus).label("Add query").on_click(cx.listener(|this,_,_,cx|this.add_widget(cx)))))
                 .child(div().flex_1().min_w_0().flex().flex_col().gap_3().p_5()
-                    .child(div().flex().gap_2().child(div().w(px(240.)).child(Input::new(&self.widget_title).appearance(false))).child(Button::new("dashboard-run").size(ButtonSize::Sm).icon(IconName::Play).label(if self.busy{"Running…"}else{"Run & save"}).on_click(cx.listener(|this,_,_,cx|this.run(cx)))))
+                    .child(div().flex().items_center().gap_2().child(div().w(px(240.)).child(Input::new(&self.widget_title).appearance(false)))
+                        .child(Select::new("dashboard-widget-type").w(px(130.)).entries(types).value(Some(selected_type)).on_change(move |value, _, cx| { selector_entity.update(cx, |this, cx| this.set_widget_type(selected, value.to_string(), cx)).ok(); }))
+                        .child(Button::new("dashboard-run").size(ButtonSize::Sm).icon(IconName::Play).label(if self.busy{"Running…"}else{"Run & save"}).on_click(cx.listener(|this,_,_,cx|this.run(cx)))))
                     .child(div().h(px(120.)).child(Textarea::new(&self.widget_sql).appearance(false)))
                     .when_some(self.selected.and_then(|i|self.widgets.get(i)).and_then(|w|w.error.clone()),|el,e|el.child(div().text_color(t.destructive).child(e)))
-                    .when_some(self.selected.and_then(|i|self.widgets.get(i)).and_then(|w|w.result.as_ref()).cloned(),|el,r: QueryResult| {
-                        el.child(div().flex_1().min_h_0().overflow_y_scrollbar().border_1().border_color(t.border).child(
-                            div().flex().flex_col().children(std::iter::once(div().flex().gap_3().border_b_1().border_color(t.border).px_3().py_2().children(r.columns.iter().map(|c|div().w(px(180.)).tw_text_xs().font_weight(gpui::FontWeight::BOLD).child(c.clone())))).chain(r.rows.iter().take(250).map(|row|div().flex().gap_3().border_b_1().border_color(t.border).px_3().py_2().children(row.iter().map(|v|div().w(px(180.)).tw_text_xs().child(v.display().to_string()))))))))
-                    })
+                    .children(result_view)
                 ))
     }
 }
