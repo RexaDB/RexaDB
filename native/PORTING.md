@@ -64,8 +64,10 @@ sibling feature crates; they talk through `rexa-core` (`navigate`,
 
 ## Disk space
 
-The shared target dir lives on a nearly full disk. Before each build, check `df -h ~`; if under
-10 GB is free, stop and report instead of building. Never enable the `duckdb` feature in dev builds
+The main disk is nearly full, so the shared target dir lives on an external drive:
+`export CARGO_TARGET_DIR=/Volumes/Flaxo/rexadb-native-target/target`. Use exactly that for every build
+(if the drive isn't mounted, stop and report). Still check `df -h ~` before work: if the main disk is
+under 6 GB free, stop and report. Never enable the `duckdb` feature in dev builds
 (it adds tens of GB of C++ build output); it is for release builds only.
 
 ## Data

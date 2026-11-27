@@ -4,7 +4,8 @@
 # parallel build in another worktree can't swap it underneath us.
 set -e
 here=${0:A:h}; root=${here:h}
-target=${CARGO_TARGET_DIR:-$root/target}
+target=${CARGO_TARGET_DIR:-/Volumes/Flaxo/rexadb-native-target/target}
+export CARGO_TARGET_DIR=$target
 cargo build -q -p rexa-app --manifest-path $root/Cargo.toml
 bin=$(mktemp -t rexadb).bin
 cp $target/debug/rexadb $bin
