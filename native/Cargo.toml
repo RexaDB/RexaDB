@@ -18,3 +18,11 @@ url = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 rexa-store = { path = "crates/rexa-store" }
 rexa-drivers = { path = "crates/rexa-drivers" }
+
+# Keep debug builds small: full debuginfo for GPUI + drivers took ~10 GB on a
+# nearly full disk. Line tables still give file:line in panics/backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
