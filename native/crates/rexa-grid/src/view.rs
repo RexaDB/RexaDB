@@ -814,12 +814,38 @@ impl TableEditor {
         true
     }
 
-    /// `createAiFilter` (⌘↩): needs the AI agent crate, which talks to providers.
-    pub fn create_ai_filter(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.search_query(cx).trim().is_empty() {
+    /// `createAiFilter` (⌘↩): the agent (rexa-ai) builds the WHERE condition.
+    pub fn create_ai_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.search_query(cx).trim().to_string();
+        if text.is_empty() {
             return;
         }
-        Toast::error("Set a default AI provider in AI settings first (Models section).").show(cx);
+        self.toolbar.assist_open = false;
+        let columns: Vec<(String, String)> = if !self.structure.is_empty() {
+            self.structure.iter().map(|c| (c.column_name.clone(), c.display_type().to_string())).collect()
+        } else {
+            self.data.as_ref().map(|d| d.columns.iter().map(|c| (c.name.clone(), "text".to_string())).collect()).unwrap_or_default()
+        };
+        let task = rexa_ai::generate_ai_filter(self.connection_id(), &self.table.schema, &self.table.name, self.kind.as_str(), columns, &text, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| match result {
+                Ok(clause) => {
+                    // Merge against the live filter; clear the box only if unchanged.
+                    this.filter_query = filters::join_filter_clause(&this.filter_query, &clause);
+                    this.refresh(cx);
+                    if this.search_query(cx).trim() == text {
+                        this.search_input.update(cx, |s, cx| s.set_value("", window, cx));
+                    }
+                    Toast::success(format!("AI filter added: {clause}")).show(cx);
+                }
+                Err(e) => {
+                    Toast::error(format!("{e:#}")).show(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// `handleFilterByCell`.

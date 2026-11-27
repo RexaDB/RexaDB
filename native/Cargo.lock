@@ -6408,17 +6408,22 @@ name = "rexa-ai"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-reqwest",
  "rexa-core",
  "rexa-drivers",
+ "rexa-settings",
+ "rexa-sql",
  "rexa-store",
  "rexa-ui",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -6541,6 +6546,7 @@ dependencies = [
  "futures",
  "gpui-component",
  "gpui-pre",
+ "rexa-ai",
  "rexa-core",
  "rexa-drivers",
  "rexa-schema",
