@@ -352,6 +352,24 @@ impl Studio {
 
     fn on_bus(&mut self, _: &Entity<rexa_core::StudioBus>, event: &StudioEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
+            // Hosted AI panels (rexa-ai): open/close the side columns instead of tabs.
+            StudioEvent::OpenTab(TabSpec::View { view, .. }) if view == "ai-chat" || view == "ai-threads" => {
+                if view == "ai-chat" {
+                    self.ai_open = true;
+                    self.sql_sheet_open = false;
+                } else {
+                    self.threads_open = true;
+                }
+                cx.notify();
+            }
+            StudioEvent::CloseTab(TabSpec::View { view, .. }) if view == "ai-chat" || view == "ai-threads" => {
+                if view == "ai-chat" {
+                    self.ai_open = false;
+                } else {
+                    self.threads_open = false;
+                }
+                cx.notify();
+            }
             StudioEvent::OpenTab(spec) => {
                 if let TabSpec::Settings { section } = spec {
                     if tabs::spec_to_tab(spec).is_none() {
