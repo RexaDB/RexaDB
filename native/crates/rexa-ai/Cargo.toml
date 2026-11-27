@@ -17,6 +17,7 @@ rexa-settings = { path = "../rexa-settings" }
 rexa-sql = { path = "../rexa-sql" }
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
 rexa-core = { path = "../rexa-core" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true

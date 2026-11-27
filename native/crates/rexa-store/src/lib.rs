@@ -3,6 +3,7 @@
 
 mod connection_writes;
 mod credentials;
+mod mcp_audit;
 mod paths;
 mod settings_admin;
 mod webstore;
@@ -13,6 +14,7 @@ pub use connection_writes::{
     CredentialBundle, CredentialStorageMode,
 };
 pub use credentials::{resolve_credentials, ResolvedCredentials, Vault};
+pub use mcp_audit::McpAuditRow;
 pub use paths::app_data_dir;
 pub use webstore::WebStore;
 
