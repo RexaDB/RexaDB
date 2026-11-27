@@ -15,7 +15,16 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub mod agent;
+pub mod chat_store;
 pub mod claude;
+pub mod db_tools;
+pub mod llm;
+pub mod markdown;
+pub mod settings;
+pub mod sql_guards;
+pub mod system_prompt;
+pub mod web;
 pub use claude::{
     complete as claude_complete, complete_configured as claude_complete_configured,
     Completion as ClaudeCompletion, Message as ClaudeMessage, Role as ClaudeRole,
