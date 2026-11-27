@@ -17,6 +17,8 @@ rexa-core = { path = "../rexa-core" }
 # open_add_column_sheet (the grid's "+" header).
 rexa-schema = { path = "../rexa-schema" }
 rexa-ai = { path = "../rexa-ai" }
+# SettingsModel: live grid settings (SettingsChanged).
+rexa-settings = { path = "../rexa-settings" }
 rexa-store.workspace = true
 rexa-drivers.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

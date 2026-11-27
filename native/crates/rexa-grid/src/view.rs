@@ -285,6 +285,12 @@ impl TableEditor {
         let mut subs = Vec::new();
         subs.push(cx.subscribe_in(&search_input, window, Self::on_search_event));
         subs.push(cx.subscribe_in(&rexa_core::studio_bus(cx), window, Self::on_bus));
+        // use-global-studio-settings: the grid re-renders when a setting changes.
+        let settings_model = rexa_settings::model::SettingsModel::global(cx);
+        subs.push(cx.subscribe(&settings_model, |this, model, _: &rexa_settings::model::SettingsChanged, cx| {
+            this.settings = GridSettings::from_json(&serde_json::Value::Object(model.read(cx).studio.clone()));
+            cx.notify();
+        }));
         let hidden = settings::load_hidden_columns(session.connection.id, &schema, &table);
         let (schema_name, table_name) = (schema.clone(), table.clone());
         let mut this = TableEditor {

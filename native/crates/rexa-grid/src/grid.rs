@@ -1039,10 +1039,22 @@ impl TableEditor {
                 indicator,
                 hovered: self.grid.hover_header == Some(vi),
             };
+            // `computeColumnMaxValues`: per numeric column, the max over the loaded rows.
+            let column_max = (self.settings.data_bars && cells::classify_column_type(&col.data_type).is_numeric)
+                .then(|| {
+                    data.unwrap()
+                        .rows
+                        .iter()
+                        .filter_map(|row| row.get(ix).cloned().flatten())
+                        .filter_map(|v| js_number(&v))
+                        .fold(0f64, |max, v| if v > max { v } else { max })
+                })
+                .filter(|max| *max != 0.);
             let cells_v = rows
                 .iter()
                 .map(|&r| {
                     let value = self.cell_value(r, ix);
+                    let data_bar = column_max.and_then(|max| value.as_deref().and_then(js_number).map(|v| (v.abs() / max) as f32));
                     let pending = self.pending_cell(r, ix).is_some();
                     let pending_delete = self.is_row_pending_delete(r);
                     let kind = if value.is_none() {
@@ -1095,6 +1107,7 @@ impl TableEditor {
                         row_hovered: self.settings.grid_animations && self.grid.hover_cell.is_some_and(|(_, hr)| hr == r),
                         column_hovered: self.grid.hover_header == Some(vi),
                         pill: self.settings.colorized_pills && matches!(kind, CellKind::Boolean | CellKind::Enum),
+                        data_bar,
                     }
                 })
                 .collect();
@@ -1163,6 +1176,17 @@ struct FrameCell {
     row_hovered: bool,
     column_hovered: bool,
     pill: bool,
+    /// `dataBarRatio` (Data bars setting).
+    data_bar: Option<f32>,
+}
+
+/// JS `Number(value)` for a cell's text (NaN → None).
+fn js_number(value: &str) -> Option<f64> {
+    let t = value.trim();
+    if t.is_empty() {
+        return Some(0.);
+    }
+    t.parse::<f64>().ok().filter(|v| !v.is_nan())
 }
 
 struct FrameCol {
@@ -1386,6 +1410,10 @@ fn paint_cell(c: &FrameCell, cell: Bounds<Pixels>, th: &GridTheme, _dark: bool, 
         if c.hovered && !c.fk_hovered {
             window.paint_quad(fill(cell, th.cell_hover));
         }
+    }
+    if let Some(ratio) = c.data_bar.filter(|r| *r > 0.) {
+        // `rgba(59, 130, 246, 0.10)` over `width * min(1, ratio)`.
+        window.paint_quad(fill(Bounds::new(cell.origin, gpui::size(px(w * ratio.min(1.)), cell.size.height)), gpui::rgba(0x3b82f61a)));
     }
     if c.search_match {
         window.paint_quad(fill(cell, gpui::rgba(0x9e6a094d)));

@@ -6555,6 +6555,7 @@ dependencies = [
  "rexa-core",
  "rexa-drivers",
  "rexa-schema",
+ "rexa-settings",
  "rexa-store",
  "rexa-ui",
  "serde",
