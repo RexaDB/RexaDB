@@ -53,6 +53,14 @@ impl Render for AppRoot {
 }
 
 fn main() {
+    // `rexadb --mcp`: the RexaDB MCP stdio server (lib/agents/mcp/external-stdio.ts).
+    if std::env::args().any(|a| a == "--mcp") {
+        if let Err(e) = rexa_ai::mcp::run_stdio() {
+            eprintln!("[rexadb-mcp] fatal: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     rexa_core::runtime::init();
     let app = gpui_platform::application().with_assets(rexa_ui::assets::Assets);
     app.run(|cx: &mut App| {
