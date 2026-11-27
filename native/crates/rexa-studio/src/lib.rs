@@ -10,7 +10,8 @@
 //!   `create-*` → `Create { object }`, `settings`/`profile-settings`/`keybindings`/
 //!   `agent-settings` → `Settings { section }`, everything else →
 //!   `View { view: <old type>, params: <the whole tab record> }`
-//!   (`database-schema` / `erd-designer` fall back to `Erd { schema }`).
+//!   (`database-schema` falls back to `Erd { schema }`; `erd-designer` opens
+//!   local ERD projects through the schema crate).
 //! - Hosted panels are `View { view: "ai-chat" | "ai-threads" | "sql-sheet" |
 //!   "bottom-sql-panel", params: { connectionId } }`.
 //! - Talk back through `rexa_core::studio_bus`: `OpenTab`, `CloseTab`,

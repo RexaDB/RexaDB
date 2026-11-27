@@ -28,6 +28,7 @@ pub mod create;
 pub mod data_table;
 pub mod dictionary;
 pub mod erd;
+pub mod erd_project;
 pub mod lists;
 pub mod object_view;
 pub mod prefill;
@@ -41,6 +42,7 @@ use std::sync::Arc;
 
 pub fn init(cx: &mut App) {
     Registry::tab(cx, "rexa-schema", build_tab);
+    erd_project::init(cx);
     Registry::screen(cx, "rexa-schema", |route, window, cx| match route {
         rexa_core::Route::ConnectionScreen(s) if s == "compare" => Some(compare::build(window, cx)),
         _ => None,

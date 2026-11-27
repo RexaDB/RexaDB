@@ -29,7 +29,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagramColumn {
     pub name: String,
     pub r#type: String,
@@ -39,7 +40,8 @@ pub struct DiagramColumn {
     pub references: Option<(String, String, String)>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagramTable {
     pub schema: String,
     pub name: String,

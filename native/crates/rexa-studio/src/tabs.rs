@@ -101,6 +101,7 @@ pub fn config(kind: &str) -> Option<TabConfig> {
         "note" => c("Note", "book-open", "content"),
         "workflow" => c("Workflow", "workflow", "content"),
         "erd-designer" => c("ERD Designer", "schema", "content"),
+        "erd-project" => c("ERD Project", "schema", "content"),
         "browser" => c("Browser", "browser", "content"),
         "create-table" => c("New Table", "create-table", "create"),
         "create-key" => c("New Key", "create-key", "create"),
