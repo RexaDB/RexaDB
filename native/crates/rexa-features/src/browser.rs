@@ -20,12 +20,36 @@ impl BrowserTab {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut history: Vec<String> = params
+            .get("history")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .filter_map(|url| normalize_url(url).ok())
+            .take(100)
+            .collect();
+        let mut history_index = params
+            .get("historyIndex")
+            .and_then(serde_json::Value::as_u64)
+            .map(|index| index as usize)
+            .unwrap_or_else(|| history.len().saturating_sub(1))
+            .min(history.len().saturating_sub(1));
         let initial = params
             .get("url")
             .and_then(serde_json::Value::as_str)
             .filter(|url| !url.trim().is_empty())
-            .unwrap_or("https://www.google.com");
-        let initial = normalize_url(initial).unwrap_or_else(|_| "https://www.google.com".into());
+            .and_then(|url| normalize_url(url).ok())
+            .or_else(|| history.get(history_index).cloned())
+            .unwrap_or_else(|| "https://www.google.com".to_string());
+        if history.is_empty() {
+            history.push(initial.clone());
+        } else if history[history_index] != initial {
+            history.truncate(history_index + 1);
+            history.push(initial.clone());
+            history_index = history.len() - 1;
+        }
+        history_index = history_index.min(history.len().saturating_sub(1));
         let address = cx.new(|cx| {
             InputState::new(window, cx)
                 .default_value(initial.clone())
@@ -39,8 +63,8 @@ impl BrowserTab {
         Self {
             spec,
             address,
-            history: vec![initial],
-            history_index: 0,
+            history,
+            history_index,
             _sub: sub,
         }
     }
@@ -59,6 +83,9 @@ impl BrowserTab {
         self.history.truncate(self.history_index + 1);
         if self.history.last() != Some(&url) {
             self.history.push(url.clone());
+            if self.history.len() > 100 {
+                self.history.remove(0);
+            }
         }
         self.history_index = self.history.len().saturating_sub(1);
         self.persist_url(&url, cx);
@@ -99,7 +126,11 @@ impl BrowserTab {
         emit_studio(
             StudioEvent::TabParamsChanged {
                 tab: self.spec.clone(),
-                patch: serde_json::json!({ "url": url }),
+                patch: serde_json::json!({
+                    "url": url,
+                    "history": &self.history,
+                    "historyIndex": self.history_index,
+                }),
             },
             cx,
         );
