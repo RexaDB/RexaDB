@@ -49,6 +49,11 @@ pub struct FkPreview {
     pub result: Option<QueryResult>,
     pub error: Option<String>,
     pub loading: bool,
+    /// `fkPreviewSize` (bottom-right resize handle), null until resized.
+    pub size: Option<(f32, f32)>,
+    /// Active resize: pointer start + the size it started from.
+    pub resize_from: Option<(gpui::Point<Pixels>, f32, f32)>,
+    pub bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
 }
 
 impl TableEditor {
@@ -82,6 +87,9 @@ impl TableEditor {
             result: None,
             error: incomplete.then(|| "Foreign key metadata is incomplete for this column.".to_string()),
             loading: !incomplete,
+            size: None,
+            resize_from: None,
+            bounds: Default::default(),
         });
         cx.notify();
         if incomplete {
@@ -544,6 +552,7 @@ impl TableEditor {
     pub(crate) fn render_fk_preview(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.fk_preview.clone()?;
         let t = cx.tokens().clone();
+        let grip_color = with_alpha(t.muted_foreground, 0.4);
         let body = if p.loading {
             div().flex().items_center().justify_center().p_8().gap_2().child(rexa_ui::Spinner::new(16.)).child(div().tw_text_xs().text_color(t.muted_foreground).child("Loading...")).into_any_element()
         } else if let Some(res) = p.result.as_ref().filter(|r| !r.rows.is_empty()) {
@@ -591,11 +600,105 @@ impl TableEditor {
             div().flex().items_center().justify_center().p_8().tw_text_xs().text_color(t.muted_foreground).child(p.error.clone().unwrap_or_else(|| "Record not found".into())).into_any_element()
         };
         let (schema, table, fcol, value) = (p.table.schema.clone(), p.table.name.clone(), p.foreign_column.clone(), p.value.clone());
+        // Viewport clamp of the resize (80vw / 80vh), min 280×120.
+        let viewport = _window.viewport_size();
+        let (max_w, max_h) = (f32::from(viewport.width) * 0.8, f32::from(viewport.height) * 0.8);
+        let bounds_cell = p.bounds.clone();
+        let resizing = p.resize_from.is_some();
+        let this = cx.entity();
+        let tracker = gpui::canvas(
+            {
+                let bounds_cell = bounds_cell.clone();
+                move |b, _, _| bounds_cell.set(b)
+            },
+            move |_, _, window, _| {
+                if !resizing {
+                    return;
+                }
+                let this_move = this.clone();
+                window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    this_move.update(cx, |this, cx| {
+                        if let Some(p) = this.fk_preview.as_mut() {
+                            if let Some((start, w0, h0)) = p.resize_from {
+                                let w = (w0 + f32::from(e.position.x - start.x)).min(max_w.round()).max(280.);
+                                let h = (h0 + f32::from(e.position.y - start.y)).min(max_h.round()).max(120.);
+                                p.size = Some((w.round(), h.round()));
+                                cx.notify();
+                            }
+                        }
+                    });
+                });
+                let this_up = this.clone();
+                window.on_mouse_event(move |_: &gpui::MouseUpEvent, phase, _, cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    this_up.update(cx, |this, cx| {
+                        if let Some(p) = this.fk_preview.as_mut() {
+                            p.resize_from = None;
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+        )
+        .absolute()
+        .inset_0();
+        let grip = gpui::canvas(
+            |_, _, _| {},
+            move |b, _, window, _| {
+                // `<path d="M0 10 L10 10 L10 0 Z" />` in text-muted-foreground/40.
+                let mut path = gpui::PathBuilder::fill();
+                let (x, y, w, h) = (b.origin.x, b.origin.y, b.size.width, b.size.height);
+                path.move_to(gpui::point(x, y + h));
+                path.line_to(gpui::point(x + w, y + h));
+                path.line_to(gpui::point(x + w, y));
+                path.close();
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, grip_color);
+                }
+            },
+        )
+        .absolute()
+        .bottom(px(2.))
+        .right(px(2.))
+        .size_3();
+        let handle = div()
+            .id("fk-resize")
+            .absolute()
+            .bottom_0()
+            .right_0()
+            .size_4()
+            .cursor(gpui::CursorStyle::ResizeUpLeftDownRight)
+            .child(grip)
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, e: &gpui::MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(p) = this.fk_preview.as_mut() {
+                        let b = p.bounds.get();
+                        let (w, h) = p.size.unwrap_or((f32::from(b.size.width), f32::from(b.size.height)));
+                        p.resize_from = Some((e.position, w, h));
+                        cx.notify();
+                    }
+                }),
+            );
+        let (width, height) = match p.size {
+            Some((w, h)) => (w, Some(h)),
+            None => (420., None),
+        };
         let panel = div()
             .id("fk-preview")
+            .relative()
             .occlude()
-            .w(px(420.))
-            .max_h(px(420.))
+            .w(px(width))
+            .when_some(height, |d, h| d.h(px(h)))
+            .max_w(px(max_w))
+            .max_h(px(max_h))
+            .child(tracker)
             .flex()
             .flex_col()
             .bg(t.studio_bg)
@@ -666,7 +769,8 @@ impl TableEditor {
                             ),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(body));
+            .child(div().flex_1().min_h_0().child(body))
+            .child(handle);
         Some(rexa_ui::popup::floating(p.anchor, rexa_ui::Side::Bottom, rexa_ui::Align::Start, 6., 0., panel))
     }
 }
