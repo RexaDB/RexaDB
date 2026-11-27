@@ -19,3 +19,6 @@ rexa-drivers.workspace = true
 rusqlite.workspace = true
 chrono = "0.4"
 base64 = "0.22"
+regex = "1"
+percent-encoding = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
