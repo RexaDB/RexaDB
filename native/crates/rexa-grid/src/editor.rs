@@ -31,6 +31,10 @@ pub struct CellEditor {
 
 impl TableEditor {
     pub(crate) fn open_editor(&mut self, vcol: usize, row: usize, col: usize, initial: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        // setEditingCell is a no-op while previewing as a role or user.
+        if self.preview_only() {
+            return;
+        }
         let Some(column) = self.data.as_ref().and_then(|d| d.columns.get(col)).cloned() else { return };
         let value = self.cell_value(row, col);
         let modified = self.pending_cell(row, col).is_some();

@@ -120,6 +120,7 @@ pub enum ActionKind {
     DeleteRow,
     InsertRow,
     DuplicateRow,
+    EnableRls,
 }
 
 impl ActionKind {
@@ -128,6 +129,7 @@ impl ActionKind {
             ActionKind::DeleteRow => "delete_row",
             ActionKind::InsertRow => "insert_row",
             ActionKind::DuplicateRow => "duplicate_row",
+            ActionKind::EnableRls => "enable_rls",
         }
     }
 }
@@ -210,6 +212,7 @@ pub struct TableEditor {
     pub(crate) auto_refresh_ms: u64,
     auto_refresh_task: Option<Task<()>>,
     pub(crate) exporting_all: bool,
+    pub(crate) access: crate::permissions::AccessState,
     debug_ran: bool,
     _subs: Vec<Subscription>,
 }
@@ -338,6 +341,7 @@ impl TableEditor {
             auto_refresh_ms: 0,
             auto_refresh_task: None,
             exporting_all: false,
+            access: Default::default(),
             debug_ran: false,
             session,
             _subs: subs,
@@ -345,6 +349,8 @@ impl TableEditor {
         this.load_toolbar_prefs();
         this.load_structure(cx);
         this.refresh(cx);
+        this.load_table_security(cx);
+        this.load_auth_users(cx);
         this
     }
 
@@ -525,7 +531,8 @@ impl TableEditor {
         let offset = if self.infinite() { 0 } else { self.page * self.page_size };
         let query = self.build_query(offset);
         let fast = self.settings.fast_table_loading;
-        let count_key = format!("{}|{}", self.table.name, self.filter_query);
+        let preview = self.access.context.clone();
+        let count_key = format!("{}|{}|{}", self.table.name, self.filter_query, preview.as_ref().map(|c| c.key()).unwrap_or_default());
         let cached_count = self.count_cache.get(&count_key).copied();
         if fast {
             self.total_count = cached_count;
@@ -533,13 +540,14 @@ impl TableEditor {
         }
         let driver = self.driver.clone();
         let rows_query = query.clone();
-        let rows_task = runtime::spawn(async move { driver.read_table(&rows_query).await });
+        let rows_preview = preview.clone();
+        let rows_task = runtime::spawn(crate::permissions::read_table(driver, rows_query, rows_preview));
         // Fast mode: the count runs beside the rows and lands later; otherwise rows wait for it.
         let need_count = cached_count.is_none() || !fast;
         let count_task = need_count.then(|| {
             let driver = self.driver.clone();
             let (table, filter) = (query.table.clone(), query.filter.clone());
-            runtime::spawn(async move { driver.count_rows(&table, &filter).await })
+            runtime::spawn(crate::permissions::count_rows(driver, table, filter, preview.clone()))
         });
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -633,7 +641,7 @@ impl TableEditor {
         self.loading_more = true;
         self.load_more_error = None;
         let driver = self.driver.clone();
-        let task = runtime::spawn(async move { driver.read_table(&query).await });
+        let task = runtime::spawn(crate::permissions::read_table(driver, query, self.access.context.clone()));
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -982,6 +990,10 @@ impl TableEditor {
     // ---- edits (handleUpdateRow) ------------------------------------------------------------
 
     pub fn update_cell(&mut self, row: usize, col: usize, new_value: CellValue, cx: &mut Context<Self>) {
+        // Permission preview is read-only (handleUpdateRow is a no-op).
+        if self.preview_only() {
+            return;
+        }
         let Some(data) = &self.data else { return };
         let Some(column) = data.columns.get(col).cloned() else { return };
         // normalizeJsonColumnValue: JSON columns must hold valid JSON.
@@ -1079,7 +1091,7 @@ impl TableEditor {
         cx.notify();
     }
 
-    fn add_action(&mut self, kind: ActionKind, description: String, sql: String, r#where: Vec<(String, String)>, cx: &mut Context<Self>) {
+    pub(crate) fn add_action(&mut self, kind: ActionKind, description: String, sql: String, r#where: Vec<(String, String)>, cx: &mut Context<Self>) {
         let id = self.next_action_id;
         self.next_action_id += 1;
         self.pending_actions.push(PendingAction { id, kind, description, sql, r#where });
@@ -1271,6 +1283,9 @@ impl TableEditor {
 
     /// `handleDuplicateRow`: every column except PKs with defaults.
     pub fn duplicate_row(&mut self, row: usize, cx: &mut Context<Self>) {
+        if self.preview_only() {
+            return;
+        }
         let Some(data) = &self.data else { return };
         let values: Vec<(String, Value)> = self
             .structure
@@ -1290,6 +1305,9 @@ impl TableEditor {
     }
 
     pub fn open_insert_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.preview_only() {
+            return;
+        }
         let inputs = self
             .structure
             .iter()

@@ -9,6 +9,7 @@ mod date_value;
 mod debug;
 mod editor;
 pub mod filters;
+mod permissions;
 mod footer;
 mod grid;
 pub mod settings;

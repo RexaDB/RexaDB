@@ -466,7 +466,34 @@ impl ListView for RlsPoliciesList {
     }
 }
 
+/// `setRlsTableFilter(table)` handed from the table toolbar's "RLS Policies" button
+/// to the (possibly not yet created) RLS policies tab.
+struct PendingRlsFilter(Option<(String, String)>);
+impl gpui::Global for PendingRlsFilter {}
+
+const APPLY_RLS_FILTER: &str = "APPLY_RLS_TABLE_FILTER";
+
+/// `openCurrentTableRlsPolicies`: open the RLS policies tab filtered to `schema.table`.
+pub fn open_rls_policies_for_table(schema: &str, table: &str, cx: &mut App) {
+    if table.is_empty() || schema.is_empty() {
+        return;
+    }
+    cx.set_global(PendingRlsFilter(Some((schema.to_string(), table.to_string()))));
+    let spec = TabSpec::View { view: "database-rls-policies".into(), params: serde_json::Value::Null };
+    open_tab(spec.clone(), cx);
+    rexa_core::emit_studio(rexa_core::StudioEvent::TabCommand { tab: spec, command: APPLY_RLS_FILTER.into() }, cx);
+}
+
 impl RlsPoliciesList {
+    fn apply_pending_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((schema, table)) = cx.try_global::<PendingRlsFilter>().and_then(|p| p.0.clone()) else { return };
+        cx.set_global(PendingRlsFilter(None));
+        self.base.search.update(cx, |s, cx| s.set_value(table, window, cx));
+        self.policy_filter.update(cx, |s, cx| s.set_value("", window, cx));
+        ListBase::set_schema(self, schema, cx);
+        cx.notify();
+    }
+
     pub fn new(spec: TabSpec, session: Arc<Session>, schema: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let base = ListBase::new(spec, session, schema, "Filter by table", window, cx);
         let policy_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by policy"));
@@ -484,7 +511,17 @@ impl RlsPoliciesList {
             saving: false,
             adding: None,
         };
+        let my_spec = this.base.spec.clone();
+        cx.subscribe_in(&rexa_core::studio_bus(cx), window, move |this: &mut Self, _, e: &rexa_core::StudioEvent, window, cx| {
+            if let rexa_core::StudioEvent::TabCommand { tab, command } = e {
+                if *tab == my_spec && command == APPLY_RLS_FILTER {
+                    this.apply_pending_filter(window, cx);
+                }
+            }
+        })
+        .detach();
         this.load(cx);
+        this.apply_pending_filter(window, cx);
         this
     }
 

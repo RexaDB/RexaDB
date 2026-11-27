@@ -35,6 +35,7 @@ pub mod prefill;
 pub mod sheet;
 
 pub use column_sheet::{open_add_column_sheet, open_edit_column_sheet, ColumnSheetTarget};
+pub use lists::rls::open_rls_policies_for_table;
 
 use gpui::{AnyView, App, AppContext, Window};
 use rexa_core::{Registry, Session, TabSpec};

@@ -898,8 +898,11 @@ impl TableEditor {
             .into_any_element()
     }
 
-    fn render_global_actions(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_global_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let loading = self.loading || self.fetching_structure;
+        let preview = self.preview_only();
+        let rls = self.render_rls_button(cx);
+        let permission = self.render_permission_filter(window, cx);
         let this = cx.entity().downgrade();
         let current = self.auto_refresh_ms;
         let refresh_label = if current == 0 { "Auto-refresh: Off".to_string() } else { format!("Auto-refresh: {}s", current / 1000) };
@@ -908,7 +911,7 @@ impl TableEditor {
             .items_center()
             .gap_2()
             .when(self.kind != rexa_drivers::Kind::SpacetimeDb, |d| {
-                d.child(Self::toolbar_btn("insert-btn", IconName::Plus, "Insert").on_click(cx.listener(|this, _, window, cx| this.open_insert_sheet(window, cx))))
+                d.child(Self::toolbar_btn("insert-btn", IconName::Plus, "Insert").disabled(preview).on_click(cx.listener(|this, _, window, cx| this.open_insert_sheet(window, cx))))
                     .child(Self::toolbar_btn("import-csv-btn", IconName::Upload, "Import CSV").on_click(cx.listener(|this, _, window, cx| this.open_import_csv(window, cx))))
             })
             .child({
@@ -927,6 +930,8 @@ impl TableEditor {
                         m
                     })
             })
+            .children(rls)
+            .children(permission)
             .child(
                 div()
                     .flex()
@@ -1006,7 +1011,7 @@ impl TableEditor {
             .child(
                 Self::toolbar_btn("delete-rows", if deleting { IconName::LoaderCircle } else { IconName::Trash }, "Delete")
                     .colors(gpui::transparent_black(), with_alpha(tw("red-500"), 0.1), tw("red-500"))
-                    .disabled(deleting)
+                    .disabled(deleting || self.preview_only())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let n = this.selected_rows.len();
                         let ok = rexa_ui::confirm(
@@ -1299,7 +1304,7 @@ impl TableEditor {
                 }
                 "views" => self.render_saved_views(cx),
                 "columns" => self.render_columns_menu(cx),
-                _ => self.render_global_actions(cx),
+                _ => self.render_global_actions(window, cx),
             };
             if i < visible {
                 items.push(div().flex().items_center().gap_2().flex_shrink_0().child(content).into_any_element());
