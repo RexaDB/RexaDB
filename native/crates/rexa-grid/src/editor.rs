@@ -15,7 +15,7 @@ const INLINE_TYPED_OPTIONS_MAX: usize = 8;
 
 pub enum EditorInput {
     Text(Entity<TextareaState>),
-    Date(Entity<InputState>),
+    Date { state: Entity<InputState>, initial_raw: String, column: crate::date_value::DateColumn },
     /// Options + the highlighted one.
     #[allow(dead_code)]
     Typed { options: Vec<String>, active: usize, is_enum: bool },
@@ -42,10 +42,13 @@ impl TableEditor {
             let active = options.iter().position(|o| *o == current).unwrap_or(0);
             EditorInput::Typed { options, active, is_enum: enum_options.is_some() }
         } else if column.is_date() {
-            let text = initial.unwrap_or_else(|| value.as_deref().unwrap_or("").to_string());
+            // DateEditor starts from the cell value (a typed key is not carried over).
+            let initial_raw = value.as_deref().unwrap_or("").to_string();
+            let date_column = crate::date_value::DateColumn::new(&column.data_type);
+            let text = date_column.to_input_value(&initial_raw);
             let state = cx.new(|cx| InputState::new(window, cx).default_value(text));
             state.update(cx, |s, cx| s.focus(window, cx));
-            EditorInput::Date(state)
+            EditorInput::Date { state, initial_raw, column: date_column }
         } else {
             let text = initial.unwrap_or_else(|| value.as_deref().unwrap_or("").to_string());
             let state = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 10).default_value(text));
@@ -63,7 +66,7 @@ impl TableEditor {
     fn editor_text(&self, cx: &Context<Self>) -> Option<String> {
         match &self.grid.editor.as_ref()?.input {
             EditorInput::Text(s) => Some(s.read(cx).value().to_string()),
-            EditorInput::Date(s) => Some(s.read(cx).value().to_string()),
+            EditorInput::Date { state, initial_raw, column } => Some(column.commit_value(initial_raw, &state.read(cx).value())),
             EditorInput::Typed { options, active, .. } => options.get(*active).cloned(),
         }
     }
@@ -262,22 +265,55 @@ impl TableEditor {
                     .child(footer)
                     .into_any_element()
             }
-            EditorInput::Date(state) => div()
-                .flex()
-                .flex_col()
-                .bg(typed_bg)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .px_3()
-                        .gap_2()
-                        .py_2()
-                        .child(gpui_component::Icon::new(IconName::Calendar).size_3p5().text_color(tw("blue-500")))
-                        .child(div().flex_1().tw_text_xs().child(gpui_component::input::Input::new(state).appearance(false))),
-                )
-                .child(footer)
-                .into_any_element(),
+            EditorInput::Date { state, column, .. } => {
+                let selected = column.selected_day(&state.read(cx).value()).map(|d| {
+                    use chrono::Datelike;
+                    rexa_ui::calendar::Date::new(d.year(), d.month(), d.day())
+                });
+                let editor = cx.entity();
+                let input = state.clone();
+                // Popover + Calendar anchored on the calendar button (align start, sideOffset 8).
+                let calendar = rexa_ui::Popover::new("ed-calendar")
+                    .align(rexa_ui::popup::Align::Start)
+                    .side_offset(8.)
+                    .w(None)
+                    .p(0.)
+                    .trigger(div().id("ed-calendar-btn").flex_shrink_0().cursor_pointer().child(gpui_component::Icon::new(IconName::Calendar).size_3p5().text_color(tw("blue-500"))))
+                    .content(move |ctl, _, _| {
+                        let (editor, input, ctl) = (editor.clone(), input.clone(), ctl.clone());
+                        rexa_ui::Calendar::new("ed-calendar-days")
+                            .selected(selected)
+                            .selected_colors(tw("blue-600"), gpui::white())
+                            .on_select(move |date, window, cx| {
+                                let Some(day) = chrono::NaiveDate::from_ymd_opt(date.year, date.month, date.day) else { return };
+                                let next = editor.read(cx).grid.editor.as_ref().and_then(|ed| match &ed.input {
+                                    EditorInput::Date { column, .. } => Some(column.with_day(&input.read(cx).value(), day)),
+                                    _ => None,
+                                });
+                                if let Some(next) = next {
+                                    input.update(cx, |s, cx| s.set_value(next, window, cx));
+                                }
+                                ctl.close(window, cx);
+                                input.update(cx, |s, cx| s.focus(window, cx));
+                            })
+                    });
+                div()
+                    .flex()
+                    .flex_col()
+                    .bg(typed_bg)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .px_3()
+                            .gap_2()
+                            .py_2()
+                            .child(calendar)
+                            .child(div().flex_1().tw_text_xs().child(gpui_component::input::Input::new(state).appearance(false))),
+                    )
+                    .child(footer)
+                    .into_any_element()
+            }
             EditorInput::Typed { options, active, .. } => {
                 let inline = !options.is_empty() && options.len() <= INLINE_TYPED_OPTIONS_MAX;
                 let list = div().flex().flex_col().w_full().overflow_hidden().children(options.iter().enumerate().map(|(i, o)| {

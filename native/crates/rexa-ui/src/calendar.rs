@@ -113,11 +113,12 @@ pub struct Calendar {
     month: Option<Date>,
     on_select: Option<Rc<dyn Fn(Date, &mut Window, &mut App)>>,
     disabled: Option<Rc<dyn Fn(Date) -> bool>>,
+    selected_colors: Option<(gpui::Hsla, gpui::Hsla)>,
 }
 
 impl Calendar {
     pub fn new(id: impl Into<ElementId>) -> Self {
-        Self { id: id.into(), selected: None, month: None, on_select: None, disabled: None }
+        Self { id: id.into(), selected: None, month: None, on_select: None, disabled: None, selected_colors: None }
     }
     pub fn selected(mut self, d: Option<Date>) -> Self {
         self.selected = d;
@@ -130,6 +131,11 @@ impl Calendar {
     }
     pub fn on_select(mut self, f: impl Fn(Date, &mut Window, &mut App) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
+        self
+    }
+    /// `classNames.day_selected` override: (background, text).
+    pub fn selected_colors(mut self, bg: gpui::Hsla, fg: gpui::Hsla) -> Self {
+        self.selected_colors = Some((bg, fg));
         self
     }
     /// `disabled` matcher.
@@ -191,7 +197,8 @@ impl RenderOnce for Calendar {
                     .tw_text_sm()
                     .child(date.day.to_string());
                 b = if selected {
-                    b.bg(t.primary).text_color(t.var_or("--primary-foreground", gpui::white()))
+                    let (bg, fg) = self.selected_colors.unwrap_or((t.primary, t.var_or("--primary-foreground", gpui::white())));
+                    b.bg(bg).text_color(fg)
                 } else if is_today {
                     b.bg(t.accent).text_color(t.accent_foreground)
                 } else {
