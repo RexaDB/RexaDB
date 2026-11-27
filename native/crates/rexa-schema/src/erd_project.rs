@@ -143,9 +143,12 @@ pub struct ProjectEditor {
     table_name: Entity<InputState>,
     column_name: Entity<InputState>,
     column_type: Entity<InputState>,
+    edit_column_name: Entity<InputState>,
+    edit_column_type: Entity<InputState>,
     reference_table: Entity<InputState>,
     reference_column: Entity<InputState>,
     selected_table: Option<String>,
+    selected_column: Option<String>,
     message: Option<String>,
 }
 
@@ -159,9 +162,11 @@ impl ProjectEditor {
         let table_name = cx.new(|cx| InputState::new(window, cx).placeholder("table_name"));
         let column_name = cx.new(|cx| InputState::new(window, cx).placeholder("column_name"));
         let column_type = cx.new(|cx| InputState::new(window, cx).default_value("TEXT").placeholder("type"));
+        let edit_column_name = cx.new(|cx| InputState::new(window, cx).placeholder("column name"));
+        let edit_column_type = cx.new(|cx| InputState::new(window, cx).placeholder("column type"));
         let reference_table = cx.new(|cx| InputState::new(window, cx).placeholder("references table (optional)"));
         let reference_column = cx.new(|cx| InputState::new(window, cx).placeholder("column"));
-        let mut this = Self { session, project, title, table_name, column_name, column_type, reference_table, reference_column, selected_table: None, message: None };
+        let mut this = Self { session, project, title, table_name, column_name, column_type, edit_column_name, edit_column_type, reference_table, reference_column, selected_table: None, selected_column: None, message: None };
         this.persist(cx);
         this
     }
@@ -217,9 +222,44 @@ impl ProjectEditor {
         let Some(table) = self.project.tables.iter_mut().find(|t| t.name == table_name) else { return; };
         if table.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&name)) { self.message = Some("That column already exists.".into()); cx.notify(); return; }
         table.columns.push(DiagramColumn { name, r#type: ty, is_primary: false, is_nullable: true, references });
+        self.selected_column = None;
         self.column_name.update(cx, |s, cx| s.set_value(String::new(), window, cx));
         self.reference_table.update(cx, |s, cx| s.set_value(String::new(), window, cx));
         self.reference_column.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+        self.persist(cx); cx.notify();
+    }
+
+    fn select_column(&mut self, table_name: String, column_name: String, column_type: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_table = Some(table_name);
+        self.selected_column = Some(column_name.clone());
+        self.edit_column_name.update(cx, |s, cx| s.set_value(column_name, window, cx));
+        self.edit_column_type.update(cx, |s, cx| s.set_value(column_type, window, cx));
+        cx.notify();
+    }
+
+    fn update_column(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(table_name), Some(old_name)) = (self.selected_table.clone(), self.selected_column.clone()) else { return; };
+        let new_name = self.edit_column_name.read(cx).value().trim().to_string();
+        let new_type = self.edit_column_type.read(cx).value().trim().to_string();
+        if new_name.is_empty() || new_type.is_empty() { self.message = Some("Column name and type are required.".into()); cx.notify(); return; }
+        let Some(table) = self.project.tables.iter_mut().find(|t| t.name == table_name) else { return; };
+        if table.columns.iter().any(|c| !c.name.eq_ignore_ascii_case(&old_name) && c.name.eq_ignore_ascii_case(&new_name)) {
+            self.message = Some("That column name is already in use.".into()); cx.notify(); return;
+        }
+        let Some(column) = table.columns.iter_mut().find(|c| c.name == old_name) else { return; };
+        column.name = new_name.clone();
+        column.r#type = new_type;
+        if old_name != new_name {
+            for source in &mut self.project.tables {
+                for col in &mut source.columns {
+                    if let Some((_, target, target_col)) = &mut col.references {
+                        if target == &table_name && target_col == &old_name { *target_col = new_name.clone(); }
+                    }
+                }
+            }
+        }
+        self.selected_column = Some(new_name.clone());
+        self.edit_column_name.update(cx, |s, cx| s.set_value(new_name, window, cx));
         self.persist(cx); cx.notify();
     }
 
@@ -233,6 +273,9 @@ impl ProjectEditor {
         if let Some(table) = self.project.tables.iter_mut().find(|table| table.name == table_name) {
             table.columns.retain(|column| column.name != column_name);
             self.persist(cx);
+        }
+        if self.selected_table.as_deref() == Some(table_name) && self.selected_column.as_deref() == Some(column_name) {
+            self.selected_column = None;
         }
         cx.notify();
     }
@@ -263,7 +306,7 @@ impl Render for ProjectEditor {
                         .children(self.project.tables.iter().map(|table| {
                             let name = table.name.clone(); let del = name.clone();
                             div().id(SharedString::from(format!("erd-select-table-{name}"))).flex().items_center().gap_1().rounded_md().px_2().py_1().cursor_pointer().when(selected.as_deref() == Some(name.as_str()), |d| d.bg(t.accent.opacity(0.16)))
-                                .on_click(cx.listener(move |this, _, _, cx| { this.selected_table = Some(name.clone()); cx.notify(); }))
+                                .on_click(cx.listener(move |this, _, _, cx| { this.selected_table = Some(name.clone()); this.selected_column = None; cx.notify(); }))
                                 .child(div().flex_1().child(div().tw_text_sm().child(table.name.clone())).child(div().tw_text_xs().text_color(t.muted_foreground).child(format!("{} columns", table.columns.len()))))
                                 .child(Button::new(format!("erd-delete-table-{del}")).ghost().size(ButtonSize::IconSm).icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.delete_table(&del, cx); })))
                         }))))
@@ -272,13 +315,22 @@ impl Render for ProjectEditor {
                         d.child(div().flex().flex_col().gap_3()
                             .child(div().tw_text_lg().font_weight(gpui::FontWeight::SEMIBOLD).child(table.name.clone()))
                             .child(div().flex().flex_col().gap_1().children(table.columns.iter().map(|column| {
-                                let table_name = table.name.clone(); let column_name = column.name.clone();
+                                let table_name = table.name.clone(); let column_name = column.name.clone(); let column_type = column.r#type.clone();
+                                let (table_for_select, column_for_select, type_for_select) = (table_name.clone(), column_name.clone(), column_type.clone());
                                 div().flex().items_center().gap_3().border_b_1().border_color(t.border).px_2().py_2()
+                                    .id(SharedString::from(format!("erd-select-column-{}-{}", table_name, column.name)))
+                                    .cursor_pointer()
+                                    .when(self.selected_column.as_deref() == Some(column.name.as_str()), |d| d.bg(t.accent.opacity(0.12)))
+                                    .on_click(cx.listener(move |this, _, window, cx| this.select_column(table_for_select.clone(), column_for_select.clone(), type_for_select.clone(), window, cx)))
                                     .child(div().flex_1().font_family(rexa_ui::MONO).tw_text_sm().child(column.name.clone()))
                                     .child(div().w(px(140.)).tw_text_xs().text_color(t.muted_foreground).child(column.r#type.clone()))
                                     .child(div().tw_text_xs().text_color(t.muted_foreground).child(if column.is_primary { "PRIMARY KEY" } else if column.is_nullable { "NULL" } else { "NOT NULL" }))
-                                    .child(Button::new(format!("erd-delete-column-{table_name}-{column_name}")).ghost().size(ButtonSize::IconSm).icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| this.delete_column(&table_name, &column_name, cx))))
+                                    .child(Button::new(format!("erd-delete-column-{table_name}-{column_name}")).ghost().size(ButtonSize::IconSm).icon(IconName::Trash).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.delete_column(&table_name, &column_name, cx); })))
                             })))
+                            .child(div().flex().items_center().gap_2().pt_3()
+                                .child(div().w(px(210.)).child(Input::new(&self.edit_column_name)))
+                                .child(div().w(px(150.)).child(Input::new(&self.edit_column_type)))
+                                .child(Button::new("erd-project-update-column").outline().size(ButtonSize::Sm).icon(IconName::Check).label("Update column").disabled(self.selected_column.is_none()).on_click(cx.listener(|this, _, window, cx| this.update_column(window, cx)))))
                             .child(div().flex().items_center().gap_2().pt_3()
                                 .child(div().w(px(210.)).child(Input::new(&self.column_name)))
                                 .child(div().w(px(150.)).child(Input::new(&self.column_type)))
