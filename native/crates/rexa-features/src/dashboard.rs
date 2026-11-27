@@ -138,6 +138,7 @@ impl Dashboard {
     }
     fn save(&mut self, cx: &mut Context<Self>) {
         let name = self.title.read(cx).value().trim().to_string();
+        let saved_title = if name.is_empty() { "Untitled dashboard".to_string() } else { name.clone() };
         let widgets: Vec<Value> = self.widgets.iter().filter(|w| w.id != "welcome").map(|w| {
             let mut raw=w.raw.as_object().cloned().unwrap_or_default();
             raw.insert("id".into(),Value::String(w.id.clone()));raw.insert("title".into(),Value::String(w.title.clone()));
@@ -146,9 +147,16 @@ impl Dashboard {
         let mut all = load_dashboards(self.session.connection.id);
         let id=self.dashboard_id.clone();
         if let Some(existing) = all.iter_mut().find(|d| d.get("id").and_then(Value::as_str)==Some(&self.dashboard_id)) {
-            if let Some(object)=existing.as_object_mut(){object.insert("name".into(),Value::String(if name.is_empty(){"Untitled dashboard".into()}else{name}));object.insert("widgets".into(),Value::Array(widgets));}
-        } else { all.push(json!({"id":id,"name":if name.is_empty(){"Untitled dashboard".into()}else{name},"folderId":null,"widgets":widgets})); }
-        self.message = persist(self.session.connection.id, &all).err().map(|e| format!("Save failed: {e}")).or(Some("Saved".into()));
+            if let Some(object)=existing.as_object_mut(){object.insert("name".into(),Value::String(saved_title.clone()));object.insert("widgets".into(),Value::Array(widgets));}
+        } else { all.push(json!({"id":id,"name":saved_title.clone(),"folderId":null,"widgets":widgets})); }
+        let saved = persist(self.session.connection.id, &all);
+        self.message = saved.as_ref().err().map(|e| format!("Save failed: {e}")).or(Some("Saved".into()));
+        if saved.is_ok() {
+            rexa_core::emit_studio(rexa_core::StudioEvent::RenameTab {
+                tab: TabSpec::View { view: "dashboard".into(), params: json!({ "id": format!("dashboard-{}", self.dashboard_id) }) },
+                title: saved_title,
+            }, cx);
+        }
         cx.notify();
     }
     fn load_selected(&mut self, cx: &mut Context<Self>) {
