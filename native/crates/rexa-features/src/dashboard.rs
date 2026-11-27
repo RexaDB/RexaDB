@@ -208,12 +208,29 @@ impl Dashboard {
             self.save(cx);
         }
     }
+
+    fn remove_widget(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.widgets.get(index).is_none_or(|widget| widget.id == "welcome") { return; }
+        self.widgets.remove(index);
+        if self.widgets.is_empty() {
+            self.widgets.push(Widget { id: "welcome".into(), title: "Welcome".into(), sql: "SELECT 1".into(), raw: Value::Null, result: None, error: None });
+        }
+        let next = index.min(self.widgets.len() - 1);
+        self.selected = Some(next);
+        let widget = &self.widgets[next];
+        self.widget_title.update(cx, |state, cx| state.set_value(widget.title.clone(), window, cx));
+        self.widget_sql.update(cx, |state, cx| state.set_value(widget.sql.clone(), window, cx));
+        self.save(cx);
+        self.load_selected(cx);
+        cx.notify();
+    }
 }
 impl Render for Dashboard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.tokens().clone();
         let selected = self.selected.unwrap_or(0);
         let selected_type = self.selected.and_then(|index| self.widgets.get(index)).map(widget_type).unwrap_or("table").to_string();
+        let can_remove = self.selected.and_then(|index| self.widgets.get(index)).is_some_and(|widget| widget.id != "welcome");
         let selector_entity = cx.entity().downgrade();
         let result_view = self.selected.and_then(|index| self.widgets.get(index)).and_then(|widget| widget.result.clone().map(|result| (result, widget_type(widget).to_string()))).map(|(result, kind)| render_result(result, &kind, cx));
         let types: Vec<SelectEntry> = [("table", "Table"), ("metric", "Metric"), ("bar-chart", "Bar chart")].into_iter().map(|(value, label)| SelectOption::new(value, label).into()).collect();
@@ -229,6 +246,7 @@ impl Render for Dashboard {
                 .child(div().flex_1().min_w_0().flex().flex_col().gap_3().p_5()
                     .child(div().flex().items_center().gap_2().child(div().w(px(240.)).child(Input::new(&self.widget_title).appearance(false)))
                         .child(Select::new("dashboard-widget-type").w(px(130.)).entries(types).value(Some(selected_type)).on_change(move |value, _, cx| { selector_entity.update(cx, |this, cx| this.set_widget_type(selected, value.to_string(), cx)).ok(); }))
+                        .child(Button::new("dashboard-widget-delete").outline().size(ButtonSize::Sm).icon(IconName::Trash).label("Delete").disabled(!can_remove).on_click(cx.listener(move |this, _, window, cx| this.remove_widget(selected, window, cx))))
                         .child(Button::new("dashboard-run").size(ButtonSize::Sm).icon(IconName::Play).label(if self.busy{"Running…"}else{"Run & save"}).on_click(cx.listener(|this,_,_,cx|this.run(cx)))))
                     .child(div().h(px(120.)).child(Textarea::new(&self.widget_sql).appearance(false)))
                     .when_some(self.selected.and_then(|i|self.widgets.get(i)).and_then(|w|w.error.clone()),|el,e|el.child(div().text_color(t.destructive).child(e)))
