@@ -6,6 +6,7 @@ use gpui::App;
 mod notes;
 mod dashboard;
 mod advisor;
+mod advisor_checks;
 mod browser;
 mod import_export;
 mod snapshots;

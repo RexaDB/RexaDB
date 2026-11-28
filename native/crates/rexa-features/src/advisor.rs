@@ -1,4 +1,7 @@
-//! PostgreSQL database advisor: security and schema checks.
+//! PostgreSQL database advisor. The check catalogue and result formatting are a
+//! port of lib/db/advisor (see `advisor_checks`); the page layout is an
+//! approximation of components/advisor/advisor-view.tsx (one card per check, no
+//! severity tabs / detail sheet).
 
 use gpui::{div, prelude::*, px, App, AppContext, Context, Subscription, Window};
 use gpui_component::scroll::ScrollableElement;
@@ -7,58 +10,11 @@ use rexa_drivers::Kind;
 use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, Tw};
 use std::sync::Arc;
 
-struct Check {
-    title: &'static str,
-    category: &'static str,
-    description: &'static str,
-    sql: &'static str,
-}
-
-const CHECKS: &[Check] = &[
-    Check {
-        title: "Tables without Row-Level Security",
-        category: "Security · Critical",
-        description: "Public tables without RLS can be exposed to roles granted table access.",
-        sql: "SELECT n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p') AND NOT c.relrowsecurity ORDER BY c.relname",
-    },
-    Check {
-        title: "Tables without a primary key",
-        category: "Schema · Warning",
-        description: "Primary keys help identify rows and support replication and reliable editing.",
-        sql: "SELECT n.nspname AS schema_name, c.relname AS table_name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_constraint pk ON pk.conrelid=c.oid AND pk.contype='p' WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND c.relkind IN ('r','p') AND pk.oid IS NULL ORDER BY n.nspname,c.relname",
-    },
-    Check {
-        title: "RLS enabled without policies",
-        category: "Security · Info",
-        description: "With RLS enabled and no policies, normal roles cannot read or modify any rows.",
-        sql: "SELECT n.nspname AS schema_name,c.relname AS table_name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relrowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname=n.nspname AND p.tablename=c.relname) ORDER BY n.nspname,c.relname",
-    },
-    Check {
-        title: "Unused indexes",
-        category: "Performance · Warning",
-        description: "Indexes with no scans can increase storage and write costs. Review before dropping.",
-        sql: "SELECT schemaname,tablename,indexname,idx_scan FROM pg_stat_user_indexes WHERE idx_scan=0 AND indexrelid NOT IN (SELECT conindid FROM pg_constraint WHERE contype IN ('p','u')) ORDER BY schemaname,tablename,indexname LIMIT 100",
-    },
-    Check {
-        title: "Disabled triggers",
-        category: "Schema · Warning",
-        description: "Disabled triggers may prevent expected data validation or derived updates.",
-        sql: "SELECT n.nspname AS schema_name,c.relname AS table_name,t.tgname AS trigger_name FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal AND t.tgenabled='D' ORDER BY n.nspname,c.relname,t.tgname",
-    },
-];
-
-#[derive(Clone)]
-struct CheckResult {
-    title: &'static str,
-    category: &'static str,
-    description: &'static str,
-    rows: Vec<Vec<String>>,
-    error: Option<String>,
-}
+use crate::advisor_checks::{self, AdvisorResult, Row, CHECKS};
 
 pub struct Advisor {
     session: Arc<Session>,
-    results: Vec<CheckResult>,
+    results: Vec<AdvisorResult>,
     busy: bool,
     error: Option<String>,
     spec: TabSpec,
@@ -103,24 +59,15 @@ impl Advisor {
             let mut results = Vec::with_capacity(CHECKS.len());
             for check in CHECKS {
                 match driver.execute_readonly(check.sql, 500).await {
-                    Ok(result) => results.push(CheckResult {
-                        title: check.title,
-                        category: check.category,
-                        description: check.description,
-                        rows: result
+                    Ok(result) => {
+                        let rows: Vec<Row> = result
                             .rows
                             .iter()
-                            .map(|row| row.iter().map(|cell| cell.display().to_string()).collect())
-                            .collect(),
-                        error: None,
-                    }),
-                    Err(error) => results.push(CheckResult {
-                        title: check.title,
-                        category: check.category,
-                        description: check.description,
-                        rows: Vec::new(),
-                        error: Some(format!("Check unavailable: {error:#}")),
-                    }),
+                            .map(|row| result.columns.iter().cloned().zip(row.iter().map(|cell| cell.display().to_string())).collect())
+                            .collect();
+                        results.push(advisor_checks::format_result(check, rows, None));
+                    }
+                    Err(error) => results.push(advisor_checks::format_result(check, Vec::new(), Some(format!("{error:#}")))),
                 }
             }
             Ok(results)
@@ -144,8 +91,8 @@ impl Render for Advisor {
         let issues = self
             .results
             .iter()
-            .filter(|r| r.error.is_none())
-            .map(|r| r.rows.len())
+            .filter(|r| !r.passed)
+            .map(|r| r.rows.len().max(1))
             .sum::<usize>();
         div()
             .size_full()
@@ -219,7 +166,9 @@ impl Render for Advisor {
                         .gap_3()
                         .p_5()
                         .children(self.results.iter().map(|result| {
-                            let rows = result.rows.len();
+                            let check = result.check;
+                            let failed = result.detail.starts_with("Check failed");
+                            let category = format!("{}{} · {}", check.category[..1].to_uppercase(), &check.category[1..], check.severity.label());
                             div()
                                 .flex()
                                 .flex_col()
@@ -240,62 +189,26 @@ impl Render for Advisor {
                                                 .flex()
                                                 .flex_col()
                                                 .gap_1()
-                                                .child(
-                                                    div()
-                                                        .tw_text_sm()
-                                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                                        .child(result.title),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .tw_text_xs()
-                                                        .text_color(t.muted_foreground)
-                                                        .child(result.description),
-                                                ),
+                                                .child(div().tw_text_sm().font_weight(gpui::FontWeight::MEDIUM).child(check.title))
+                                                .child(div().tw_text_xs().text_color(t.muted_foreground).child(check.description)),
                                         )
                                         .child(
                                             div()
                                                 .tw_text_10()
-                                                .text_color(if result.error.is_some() {
-                                                    t.muted_foreground
-                                                } else if rows > 0 {
-                                                    t.destructive
-                                                } else {
-                                                    t.primary
-                                                })
-                                                .child(result.error.clone().unwrap_or_else(|| {
-                                                    if rows == 0 {
-                                                        "No issues".into()
-                                                    } else {
-                                                        format!("{rows} result(s)")
-                                                    }
-                                                })),
+                                                .flex_shrink_0()
+                                                .text_color(if failed { t.muted_foreground } else if !result.passed { t.destructive } else { t.primary })
+                                                .child(result.detail.clone()),
                                         ),
                                 )
-                                .child(
-                                    div()
-                                        .tw_text_10()
-                                        .text_color(t.muted_foreground)
-                                        .child(result.category),
-                                )
-                                .when(rows > 0, |el| {
-                                    el.child(div().flex().flex_col().gap_1().children(
-                                        result.rows.iter().take(50).map(|row| {
-                                            let label = row
-                                                .iter()
-                                                .filter(|v| !v.is_empty())
-                                                .cloned()
-                                                .collect::<Vec<_>>()
-                                                .join(" · ");
-                                            div()
-                                                .rounded(px(4.))
-                                                .bg(t.studio_bg)
-                                                .px_2()
-                                                .py_1()
-                                                .tw_text_xs()
-                                                .child(label)
-                                        }),
-                                    ))
+                                .child(div().tw_text_10().text_color(t.muted_foreground).child(category))
+                                .when(!result.rows.is_empty(), |el| {
+                                    el.child(div().flex().flex_col().gap_1().children(result.rows.iter().take(50).map(|row| {
+                                        div().rounded(px(4.)).bg(t.studio_bg).px_2().py_1().tw_text_xs().child(advisor_checks::entity_label(check.id, row))
+                                    })))
+                                })
+                                .when_some(result.suggestion.clone(), |el, s| el.child(div().tw_text_xs().text_color(t.muted_foreground).child(s)))
+                                .when_some(result.sql_statement.clone(), |el, sql| {
+                                    el.child(div().rounded(px(4.)).bg(t.studio_bg).px_2().py_1().font_family(rexa_ui::MONO).text_size(px(11.)).child(sql))
                                 })
                         })),
                 ),
