@@ -1,0 +1,24 @@
+[package]
+name = "rexa-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+rexa-ui = { path = "../rexa-ui" }
+rexa-settings = { path = "../rexa-settings" }
+rexa-sql = { path = "../rexa-sql" }
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rexa-core = { path = "../rexa-core" }
+rexa-store.workspace = true
+rexa-drivers.workspace = true
+reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = ["json", "rustls-tls-native-roots", "http2"] }

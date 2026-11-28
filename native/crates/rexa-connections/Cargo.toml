@@ -1,0 +1,26 @@
+[package]
+name = "rexa-connections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = { version = "0.9.1", features = ["tree-sitter-sql"] }
+rexa-ui = { path = "../rexa-ui" }
+rexa-core = { path = "../rexa-core" }
+rexa-store.workspace = true
+rexa-drivers.workspace = true
+base64 = "0.22"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+futures = "0.3"
+reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = ["json", "rustls-tls-native-roots", "http2"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+ring = "=0.17.14"
+aes-gcm = "0.10"
