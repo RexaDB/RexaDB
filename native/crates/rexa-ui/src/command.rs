@@ -17,7 +17,7 @@ use crate::popup;
 use crate::tracked_text::tracked;
 use crate::{ActiveTokens, IconName, Kbd, Tw};
 use gpui::{
-    div, prelude::*, px, AnimationExt, App, ElementId, FontWeight, MouseButton,
+    div, prelude::*, px, AnimationExt, AnyElement, App, ElementId, FontWeight, MouseButton,
     SharedString, Window,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
@@ -37,12 +37,13 @@ pub struct CommandItem {
     disabled: bool,
     on_select: Option<Handler>,
     keep_open: bool,
+    leading: Option<Rc<dyn Fn(&mut App) -> AnyElement>>,
 }
 
 impl CommandItem {
     pub fn new(label: impl Into<SharedString>) -> Self {
         let label = label.into();
-        Self { value: label.clone(), label, keywords: Vec::new(), icon: None, shortcut: None, disabled: false, on_select: None, keep_open: false }
+        Self { value: label.clone(), label, keywords: Vec::new(), icon: None, shortcut: None, disabled: false, on_select: None, keep_open: false, leading: None }
     }
     /// Unique value (defaults to the label).
     pub fn value(mut self, v: impl Into<SharedString>) -> Self {
@@ -51,6 +52,11 @@ impl CommandItem {
     }
     pub fn keywords(mut self, k: impl IntoIterator<Item = impl Into<SharedString>>) -> Self {
         self.keywords = k.into_iter().map(Into::into).collect();
+        self
+    }
+    /// A custom leading element (e.g. a provider logo tile) in place of `icon`.
+    pub fn leading(mut self, f: impl Fn(&mut App) -> AnyElement + 'static) -> Self {
+        self.leading = Some(Rc::new(f));
         self
     }
     pub fn icon(mut self, i: IconName) -> Self {
@@ -304,7 +310,10 @@ impl RenderOnce for Command {
                     .tw_text_sm()
                     .when(is_sel, |d| d.bg(t.muted).text_color(t.foreground))
                     .when(item.disabled, |d| d.opacity(0.5))
-                    .children(item.icon.map(|i| Icon::new(i).size(px(icon_size)).flex_shrink_0()))
+                    .children(match &item.leading {
+                        Some(f) => Some(f(cx)),
+                        None => item.icon.map(|i| Icon::new(i).size(px(icon_size)).flex_shrink_0().into_any_element()),
+                    })
                     .child(item.label.clone())
                     .children(item.shortcut.clone().map(|s| {
                         div().ml_auto().tw_text_xs().text_color(t.muted_foreground).child(tracked(s, 0.1))
@@ -409,6 +418,17 @@ pub fn open_command_dialog_with(
     placeholder: impl Into<SharedString>,
     groups: impl Fn(&mut Window, &mut App) -> Vec<CommandGroup> + 'static,
 ) -> crate::OverlayId {
+    open_command_dialog_with_footer(cx, id, placeholder, groups, |_, _| None)
+}
+
+/// [`open_command_dialog_with`] plus a footer strip under the list.
+pub fn open_command_dialog_with_footer(
+    cx: &mut App,
+    id: impl Into<ElementId>,
+    placeholder: impl Into<SharedString>,
+    groups: impl Fn(&mut Window, &mut App) -> Vec<CommandGroup> + 'static,
+    footer: impl Fn(&mut Window, &mut App) -> Option<AnyElement> + 'static,
+) -> crate::OverlayId {
     let id: ElementId = id.into();
     let placeholder = placeholder.into();
     let overlay = Rc::new(std::cell::Cell::new(0));
@@ -425,6 +445,7 @@ pub fn open_command_dialog_with(
                     .groups(groups(window, cx))
                     .dialog(close),
             )
+            .children(footer(window, cx))
     });
     overlay.set(opened);
     opened

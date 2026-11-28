@@ -711,24 +711,70 @@ impl ConnectionsScreen {
     fn open_command_menu(&mut self, cx: &mut Context<Self>) {
         let rows = self.rows.clone();
         let weak = self.weak(cx);
-        rexa_ui::open_command_dialog_with(cx, "connections-search", "Search connections...", move |_, _| {
-            let items = rows.iter().map(|r| {
-                let (id, weak) = (r.conn.id, weak.clone());
-                rexa_ui::CommandItem::new(r.conn.name.clone())
-                    .value(format!("{} {}", r.conn.name, r.conn.id))
-                    .keywords([r.conn.name.clone(), r.conn.connection_string.clone()])
-                    .icon(IconName::Database)
-                    .on_select(move |_, cx| {
-                        weak.update(cx, |this, cx| this.open_connection(id, cx)).ok();
-                    })
-            });
-            vec![
-                rexa_ui::CommandGroup::new("Connections").items(items),
-                rexa_ui::CommandGroup::new("Actions").item(
-                    rexa_ui::CommandItem::new("Open Browser").value("open-browser").keywords(["browser", "web", "internet", "url"]).icon(IconName::Globe),
-                ),
-            ]
-        });
+        // Leading `h-7 w-7 rounded-lg border border-studio-border bg-studio-bg/60` tile.
+        fn tile(child: gpui::AnyElement, cx: &App) -> gpui::AnyElement {
+            let t = cx.tokens();
+            div()
+                .flex()
+                .size_7()
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .tw_rounded_lg()
+                .border_1()
+                .border_color(t.studio_border)
+                .bg(with_alpha(t.studio_bg, 0.6))
+                .child(child)
+                .into_any_element()
+        }
+        rexa_ui::open_command_dialog_with_footer(
+            cx,
+            "connections-search",
+            "Search connections...",
+            move |_, _| {
+                let items = rows.iter().map(|r| {
+                    let (id, weak) = (r.conn.id, weak.clone());
+                    let provider = crate::providers::provider_of(&r.conn);
+                    rexa_ui::CommandItem::new(r.conn.name.clone())
+                        .value(format!("{} {}", r.conn.name, r.conn.id))
+                        .keywords([r.conn.name.clone(), r.conn.connection_string.clone()])
+                        .leading(move |cx| tile(provider_logo(&provider, 16., cx), cx))
+                        .on_select(move |_, cx| {
+                            weak.update(cx, |this, cx| this.open_connection(id, cx)).ok();
+                        })
+                });
+                vec![
+                    rexa_ui::CommandGroup::new("Connections").items(items),
+                    rexa_ui::CommandGroup::new("Actions").item(
+                        rexa_ui::CommandItem::new("Open Browser")
+                            .value("open-browser")
+                            .keywords(["browser", "web", "internet", "url"])
+                            .leading(|cx| tile(Icon::new(IconName::Globe).size_4().into_any_element(), cx)),
+                    ),
+                ]
+            },
+            |_, cx| {
+                let t = cx.tokens().clone();
+                // `h-10 border-t border-studio-border bg-studio-bg px-4 text-xs`: <Kbd>Enter</Kbd> Select.
+                Some(
+                    div()
+                        .flex()
+                        .h_10()
+                        .items_center()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(t.studio_border)
+                        .bg(t.studio_bg)
+                        .px_4()
+                        .tw_text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(t.muted_foreground)
+                        .child(rexa_ui::Kbd::new("Enter"))
+                        .child("Select")
+                        .into_any_element(),
+                )
+            },
+        );
     }
 
     // ---- keyboard -------------------------------------------------------------------
