@@ -230,7 +230,23 @@ pub struct AccountsScreen {
     error: Option<String>,
     importing: bool,
     connecting: Option<String>,
+    /// Neon project id / PlanetScale database name whose branches are shown.
+    expanded: Option<String>,
+    branches: std::collections::HashMap<String, Vec<Value>>,
+    branches_loading: Option<String>,
+    /// `connectingBranchId` / `connectingBranch`.
+    connecting_branch: Option<String>,
     _sub: gpui::Subscription,
+}
+
+/// Neon "Connect to database" dialog state (`connectDialog`).
+struct NeonPick {
+    profile: String,
+    project_id: String,
+    project: String,
+    branch: Value,
+    databases: Vec<String>,
+    roles: Vec<String>,
 }
 
 impl EventEmitter<AccountsEvent> for AccountsScreen {}
@@ -252,6 +268,10 @@ impl AccountsScreen {
             error: None,
             importing: false,
             connecting: None,
+            expanded: None,
+            branches: Default::default(),
+            branches_loading: None,
+            connecting_branch: None,
             _sub: sub,
         };
         this.load(cx);
@@ -350,6 +370,285 @@ impl AccountsScreen {
                 .detach();
             }
         }
+    }
+
+    /// The expandable key of a Neon project / PlanetScale database row.
+    fn branch_scope(r: &Resource) -> Option<String> {
+        match &r.connect {
+            Connect::Neon { project_id, .. } => Some(project_id.clone()),
+            Connect::Planetscale { org, database, .. } => Some(format!("{org}/{database}")),
+            Connect::Ready { .. } => None,
+        }
+    }
+
+    /// `toggleProject` / `toggleDatabase`: expand and lazily `listBranches`.
+    fn toggle_branches(&mut self, r: Resource, cx: &mut Context<Self>) {
+        let Some(scope) = Self::branch_scope(&r) else { return };
+        if self.expanded.as_deref() == Some(scope.as_str()) {
+            self.expanded = None;
+            cx.notify();
+            return;
+        }
+        self.expanded = Some(scope.clone());
+        cx.notify();
+        if self.branches.contains_key(&scope) {
+            return;
+        }
+        let Some(account) = self.active_account() else { return };
+        self.branches_loading = Some(scope.clone());
+        let connect = r.connect.clone();
+        let task = rexa_core::runtime::spawn(async move { list_branches(&connect, &account).await });
+        cx.spawn(async move |this, cx| {
+            let res = task.await;
+            this.update(cx, |this, cx| {
+                this.branches_loading = None;
+                match res {
+                    Ok(list) => {
+                        this.branches.insert(scope, list);
+                    }
+                    Err(e) => {
+                        toast::error(format!("{e:#}"), cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn add_connection(&mut self, name: String, cs: String, kind: &'static str, cx: &mut Context<Self>) {
+        if self.existing.iter().any(|e| *e == cs) {
+            toast::info("This database and role are already connected.", cx);
+        } else if self.create(&name, &cs, kind, cx) {
+            toast::success(format!("Connected to {name}"), cx);
+            cx.emit(AccountsEvent::Changed);
+        } else {
+            toast::error("Failed to create connection.", cx);
+        }
+        cx.notify();
+    }
+
+    /// `handleConnectBranch` (Neon: databases × roles, picker when ambiguous;
+    /// PlanetScale: mint a branch password).
+    fn connect_branch(&mut self, r: Resource, branch: Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(account) = self.active_account() else { return };
+        let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let branch_key = match &r.connect {
+            Connect::Planetscale { database, .. } => format!("{database}/{}", st(&branch, "name")),
+            _ => st(&branch, "id"),
+        };
+        self.connecting_branch = Some(branch_key);
+        cx.notify();
+        match r.connect.clone() {
+            Connect::Neon { profile, project_id, project } => {
+                let (acct, pid, bid) = (account.clone(), project_id.clone(), st(&branch, "id"));
+                let task = rexa_core::runtime::spawn(async move { neon_databases_and_roles(&acct, &pid, &bid).await });
+                cx.spawn_in(window, async move |this, cx| {
+                    let res = task.await;
+                    this.update_in(cx, |this, window, cx| {
+                        this.connecting_branch = None;
+                        cx.notify();
+                        let (databases, roles) = match res {
+                            Ok(v) => v,
+                            Err(e) => {
+                                toast::error(format!("{e:#}"), cx);
+                                return;
+                            }
+                        };
+                        if databases.is_empty() || roles.is_empty() {
+                            toast::error("This branch has no database/role to connect to.", cx);
+                            return;
+                        }
+                        let pick = NeonPick { profile, project_id, project, branch, databases, roles };
+                        let available = pick.databases.iter().flat_map(|d| pick.roles.iter().map(move |r| (d.clone(), r.clone()))).find(|(d, r)| !this.existing.iter().any(|e| *e == pick.connection_string(d, r)));
+                        let Some((db, role)) = available else {
+                            toast::info("All database and role combinations are already connected.", cx);
+                            return;
+                        };
+                        if pick.databases.len() == 1 && pick.roles.len() == 1 {
+                            let (name, cs) = (pick.name(&db, &role), pick.connection_string(&db, &role));
+                            this.add_connection(name, cs, "neon", cx);
+                            return;
+                        }
+                        this.open_neon_picker(pick, db, role, window, cx);
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            Connect::Planetscale { org, database, kind } => {
+                let task = rexa_core::runtime::spawn(async move { planetscale_branch_connection(&account, &org, &database, &kind, &branch).await });
+                cx.spawn(async move |this, cx| {
+                    let res = task.await;
+                    this.update(cx, |this, cx| {
+                        this.connecting_branch = None;
+                        match res {
+                            Ok((name, cs, kind)) => this.add_connection(name, cs, kind, cx),
+                            Err(e) => {
+                                toast::error(format!("{e:#}"), cx);
+                            }
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            Connect::Ready { .. } => {
+                self.connecting_branch = None;
+            }
+        }
+    }
+
+    /// The "Connect to database" dialog (Database / Role selects).
+    fn open_neon_picker(&mut self, pick: NeonPick, db: String, role: String, _window: &mut Window, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        let existing = self.existing.clone();
+        let pick = std::rc::Rc::new(pick);
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
+        rexa_ui::open_dialog(cx, move |window, cx| {
+            let t = cx.tokens().clone();
+            let sel = window.use_keyed_state(gpui::SharedString::from(format!("neon-pick-{nonce}")), cx, {
+                let (db, role) = (db.clone(), role.clone());
+                move |_, _| (db, role)
+            });
+            let (cur_db, cur_role) = sel.read(cx).clone();
+            let exists = existing.iter().any(|e| *e == pick.connection_string(&cur_db, &cur_role));
+            let field = |label: &'static str, id: &'static str, options: &[String], value: String, set_db: bool| {
+                let sel = sel.clone();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(div().tw_text_xs().font_weight(FontWeight::MEDIUM).text_color(t.muted_foreground).child(label))
+                    .child(
+                        rexa_ui::Select::new(id)
+                            .w_full()
+                            .placeholder(if set_db { "Select a database" } else { "Select a role" })
+                            .options(options.iter().map(|o| rexa_ui::SelectOption::simple(o.clone())))
+                            .value(Some(value))
+                            .on_change(move |v, _, cx| {
+                                sel.update(cx, |s, cx| {
+                                    if set_db {
+                                        s.0 = v.to_string();
+                                    } else {
+                                        s.1 = v.to_string();
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    )
+            };
+            let (p2, w2) = (pick.clone(), weak.clone());
+            let (d2, r2) = (cur_db.clone(), cur_role.clone());
+            rexa_ui::Dialog::new()
+                .max_w(448.)
+                .title("Connect to database")
+                .description(format!("{} · {}", pick.project, pick.branch.get("name").and_then(Value::as_str).unwrap_or("")))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_4()
+                        .child(field("Database", "neon-pick-db", &pick.databases, cur_db.clone(), true))
+                        .when(pick.roles.len() > 1, |d| d.child(field("Role", "neon-pick-role", &pick.roles, cur_role.clone(), false)))
+                        .when(exists, |d| d.child(div().tw_text_xs().text_color(t.muted_foreground).child("This database and role are already connected."))),
+                )
+                .footer(Button::new("neon-pick-cancel").outline().size(ButtonSize::Sm).label("Cancel").on_click(|_, _, cx| rexa_ui::close_top(cx)))
+                .footer(Button::new("neon-pick-connect").size(ButtonSize::Sm).label("Connect").disabled(cur_db.is_empty() || cur_role.is_empty() || exists).on_click(move |_, _, cx| {
+                    rexa_ui::close_top(cx);
+                    let (name, cs) = (p2.name(&d2, &r2), p2.connection_string(&d2, &r2));
+                    w2.update(cx, |this, cx| this.add_connection(name, cs, "neon", cx)).ok();
+                }))
+        });
+    }
+
+    fn branch_rows(&self, r: &Resource, t: &Tokens, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let scope = Self::branch_scope(r)?;
+        if self.expanded.as_deref() != Some(scope.as_str()) {
+            return None;
+        }
+        let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let body: AnyElement = if self.branches_loading.as_deref() == Some(scope.as_str()) {
+            div().flex().items_center().justify_center().py_5().child(rexa_ui::Spinner::new(16.)).into_any_element()
+        } else {
+            let list = self.branches.get(&scope).cloned().unwrap_or_default();
+            if list.is_empty() {
+                div().py_3().tw_text_xs().text_color(t.muted_foreground).child("No branches found.").into_any_element()
+            } else {
+                let neon = matches!(r.connect, Connect::Neon { .. });
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .children(list.into_iter().enumerate().map(|(i, b)| {
+                        let (badge, key) = if neon {
+                            (b.get("default").and_then(Value::as_bool) == Some(true), st(&b, "id"))
+                        } else {
+                            let db = match &r.connect {
+                                Connect::Planetscale { database, .. } => database.clone(),
+                                _ => String::new(),
+                            };
+                            (b.get("production").and_then(Value::as_bool) == Some(true), format!("{db}/{}", st(&b, "name")))
+                        };
+                        let connected = if neon {
+                            let bid = st(&b, "id");
+                            self.existing.iter().filter(|e| neon_pointer_branch(e).as_deref() == Some(bid.as_str())).count()
+                        } else {
+                            0
+                        };
+                        let busy = self.connecting_branch.as_deref() == Some(key.as_str());
+                        let disabled = if neon { self.connecting_branch.is_some() } else { busy };
+                        let (res, branch) = (r.clone(), b.clone());
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.))
+                            .rounded(px(6.))
+                            .px_2()
+                            .py(px(6.))
+                            .hover(|s| s.bg(with_alpha(t.studio_row_hover, 0.5)))
+                            .child(Icon::new(IconName::GitBranch).size(px(14.)).flex_shrink_0().text_color(t.muted_foreground))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .flex()
+                                    .items_baseline()
+                                    .tw_text_xs()
+                                    .child(div().font_weight(FontWeight::MEDIUM).child(st(&b, "name")))
+                                    .when(badge, |d| d.child(div().ml(px(6.)).text_size(px(10.)).text_color(t.muted_foreground).child(if neon { "default" } else { "production" }))),
+                            )
+                            .when(connected > 0, |d| {
+                                d.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(with_alpha(t.primary, 0.2))
+                                        .bg(with_alpha(t.primary, 0.1))
+                                        .px_2()
+                                        .py(px(2.))
+                                        .text_size(px(10.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(t.primary)
+                                        .child(format!("{connected} connected")),
+                                )
+                            })
+                            .child(
+                                Button::new(("branch-connect", i))
+                                    .size(ButtonSize::Xs)
+                                    .when(busy, |b| b.icon(IconName::LoaderCircle))
+                                    .label("Connect")
+                                    .disabled(disabled)
+                                    .on_click(cx.listener(move |this, _, window, cx| this.connect_branch(res.clone(), branch.clone(), window, cx))),
+                            )
+                    }))
+                    .into_any_element()
+            }
+        };
+        Some(div().ml(px(52.)).border_l_1().border_color(with_alpha(t.studio_border, 0.5)).py_1().pl_3().child(body).into_any_element())
     }
 
     /// `registerActiveSupabaseProjects` / `registerSpacetimeDbDatabases`.
@@ -807,7 +1106,12 @@ impl AccountsScreen {
             trailing = trailing.child(pill(label.clone(), *active));
         }
         let busy = self.connecting.as_deref() == Some(r.title.as_str());
-        trailing = if connected {
+        let scope = Self::branch_scope(r);
+        let expandable = scope.is_some();
+        let expanded = scope.is_some() && self.expanded == scope;
+        trailing = if expandable {
+            trailing
+        } else if connected {
             trailing.child(pill("Connected".into(), true))
         } else {
             let res = r.clone();
@@ -822,13 +1126,22 @@ impl AccountsScreen {
         if let Some(url) = r.external.clone() {
             trailing = trailing.child(Button::new(("res-ext", i)).ghost().size(ButtonSize::IconSm).icon(IconName::ExternalLink).on_click(move |_, _, cx| cx.open_url(&url)));
         }
-        div()
+        let row_res = r.clone();
+        let row = div()
+            .id(("res-row", i))
             .flex()
             .items_center()
             .gap_3()
             .tw_rounded_lg()
             .px(px(10.))
             .py(px(10.))
+            .when(expandable, |d| {
+                d.cursor_pointer()
+                    .hover(|s| s.bg(with_alpha(t.studio_row_hover, 0.7)))
+                    .when(expanded, |d| d.bg(with_alpha(t.studio_row_hover, 0.5)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_branches(row_res.clone(), cx)))
+                    .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(14.)).flex_shrink_0().text_color(t.muted_foreground))
+            })
             .child(
                 div()
                     .flex()
@@ -847,7 +1160,9 @@ impl AccountsScreen {
                     .child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().tw_text_sm().font_weight(FontWeight::MEDIUM).child(r.title.clone()))
                     .child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().tw_text_xs().text_color(t.muted_foreground).child(r.subtitle.clone())),
             )
-            .child(trailing)
+            .child(trailing);
+        let branches = self.branch_rows(r, t, cx);
+        div().overflow_hidden().tw_rounded_lg().child(row).children(branches)
     }
 }
 
@@ -1425,6 +1740,83 @@ async fn list_resources(kind: AccountKind, account: &Value) -> anyhow::Result<Ve
             Ok(out)
         }
     }
+}
+
+impl NeonPick {
+    /// `buildNeonCliConnectionString`
+    fn connection_string(&self, database: &str, role: &str) -> String {
+        format!(
+            "neon-cli://{}/{}/{}/{}?role={}",
+            encode_component(&self.profile),
+            encode_component(&self.project_id),
+            encode_component(self.branch.get("id").and_then(Value::as_str).unwrap_or("")),
+            encode_component(database),
+            encode_component(role)
+        )
+    }
+
+    fn name(&self, database: &str, role: &str) -> String {
+        if self.branch.get("default").and_then(Value::as_bool) == Some(true) {
+            format!("{} / {database} ({role})", self.project)
+        } else {
+            format!("{} ({}) / {database} ({role})", self.project, self.branch.get("name").and_then(Value::as_str).unwrap_or(""))
+        }
+    }
+}
+
+/// The branch id of a `neon-cli://profile/project/branch/db` pointer.
+fn neon_pointer_branch(cs: &str) -> Option<String> {
+    let rest = cs.strip_prefix("neon-cli://")?;
+    let path = rest.split('?').next()?;
+    path.split('/').nth(2).map(|b| urlencoding_decode(b))
+}
+
+fn urlencoding_decode(s: &str) -> String {
+    url::form_urlencoded::parse(format!("x={s}").as_bytes()).next().map(|(_, v)| v.into_owned()).unwrap_or_else(|| s.to_string())
+}
+
+/// `listBranches` (Neon project branches / PlanetScale database branches).
+async fn list_branches(c: &Connect, account: &Value) -> anyhow::Result<Vec<Value>> {
+    match c {
+        Connect::Neon { project_id, .. } => {
+            let token = neon_access_token(account).await?;
+            let v = crate::http::get_json(&format!("{NEON_API}/projects/{project_id}/branches"), &token).await?;
+            Ok(v.get("branches").and_then(Value::as_array).cloned().unwrap_or_default())
+        }
+        Connect::Planetscale { org, database, .. } => {
+            let token = account.get("accessToken").and_then(Value::as_str).unwrap_or("").to_string();
+            let v = crate::http::get_json(&format!("https://api.planetscale.com/v1/organizations/{}/databases/{}/branches", encode_component(org), encode_component(database)), &token).await?;
+            Ok(v.get("data").and_then(Value::as_array).cloned().unwrap_or_default())
+        }
+        Connect::Ready { .. } => Ok(Vec::new()),
+    }
+}
+
+/// `listDatabases` + `listRoles` for a Neon branch.
+async fn neon_databases_and_roles(account: &Value, project_id: &str, branch_id: &str) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let token = neon_access_token(account).await?;
+    let base = format!("{NEON_API}/projects/{project_id}/branches/{branch_id}");
+    let (db_url, role_url) = (format!("{base}/databases"), format!("{base}/roles"));
+    let (dbs, roles) = tokio::try_join!(crate::http::get_json(&db_url, &token), crate::http::get_json(&role_url, &token))?;
+    let names = |v: &Value, k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.get("name").and_then(Value::as_str).map(str::to_string)).collect()).unwrap_or_default();
+    Ok((names(&dbs, "databases"), names(&roles, "roles")))
+}
+
+/// `createBranchPassword` + `buildPlanetscaleConnectionString` for one branch.
+async fn planetscale_branch_connection(account: &Value, org: &str, database: &str, kind: &str, branch: &Value) -> anyhow::Result<(String, String, &'static str)> {
+    let st = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let token = account.get("accessToken").and_then(Value::as_str).unwrap_or("").to_string();
+    let base = format!("https://api.planetscale.com/v1/organizations/{}/databases/{}", encode_component(org), encode_component(database));
+    let bname = st(branch, "name");
+    let pw = crate::http::post_json(&format!("{base}/branches/{}/passwords", encode_component(&bname)), &token, serde_json::json!({ "name": "rexadb", "role": "admin" })).await?;
+    let (host, user, pass) = (st(&pw, "access_host_url"), encode_component(&st(&pw, "username")), encode_component(&st(&pw, "plain_text")));
+    let cs = if kind.to_lowercase().contains("postgres") {
+        format!("postgresql://{user}:{pass}@{host}:5432/{database}?sslmode=require")
+    } else {
+        format!("mysql://{user}:{pass}@{host}:3306/{database}?ssl=true")
+    };
+    let production = branch.get("production").and_then(Value::as_bool) == Some(true);
+    Ok((if production { database.to_string() } else { format!("{database} ({bname})") }, cs, "planetscale"))
 }
 
 /// Neon: default branch → first database + owner role → `neon-cli://` pointer.
