@@ -1,0 +1,297 @@
+{
+  "schemaStatements": [
+    "CREATE SCHEMA IF NOT EXISTS \"paykit\"",
+    "GRANT USAGE ON SCHEMA \"paykit\" TO service_role",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA \"paykit\" GRANT ALL ON TABLES TO service_role",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA \"paykit\" GRANT ALL ON SEQUENCES TO service_role",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"customer\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"email\" text,\n    \"name\" text,\n    \"metadata\" jsonb,\n    \"deleted_at\" timestamp,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    \"stripe_customer_id\" text,\n    \"stripe_test_clock_id\" text,\n    \"stripe_frozen_time\" timestamptz,\n    \"stripe_synced_email\" text,\n    \"stripe_synced_name\" text,\n    \"stripe_synced_metadata\" jsonb\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"entitlement\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"subscription_id\" text,\n    \"customer_id\" text NOT NULL,\n    \"feature_id\" text NOT NULL,\n    \"limit\" integer,\n    \"balance\" integer,\n    \"next_reset_at\" timestamp,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"feature\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"type\" text NOT NULL,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"invoice\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"customer_id\" text NOT NULL,\n    \"subscription_id\" text,\n    \"type\" text NOT NULL,\n    \"status\" text NOT NULL,\n    \"amount\" integer NOT NULL,\n    \"currency\" text NOT NULL,\n    \"description\" text,\n    \"hosted_url\" text,\n    \"period_start_at\" timestamp,\n    \"period_end_at\" timestamp,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    \"stripe_invoice_id\" text,\n    \"stripe_payment_id\" text,\n    \"stripe_payment_method_id\" text\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"metadata\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"type\" text NOT NULL,\n    \"data\" jsonb NOT NULL,\n    \"expires_at\" timestamp,\n    \"created_at\" timestamp NOT NULL,\n    \"stripe_checkout_session_id\" text\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"payment_method\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"customer_id\" text NOT NULL,\n    \"deleted_at\" timestamp,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    \"stripe_payment_method_id\" text,\n    \"type\" text,\n    \"brand\" text,\n    \"last4\" text,\n    \"expiry_month\" integer,\n    \"expiry_year\" integer,\n    \"is_default\" boolean DEFAULT false NOT NULL\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"product\" (\n    \"internal_id\" text PRIMARY KEY NOT NULL,\n    \"id\" text NOT NULL,\n    \"version\" integer DEFAULT 1 NOT NULL,\n    \"name\" text NOT NULL,\n    \"group\" text DEFAULT '' NOT NULL,\n    \"is_default\" boolean DEFAULT false NOT NULL,\n    \"price_amount\" integer,\n    \"price_interval\" text,\n    \"price_currency\" text,\n    \"hash\" text,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    \"stripe_product_id\" text,\n    \"stripe_price_id\" text\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"product_feature\" (\n    \"product_internal_id\" text NOT NULL,\n    \"feature_id\" text NOT NULL,\n    \"limit\" integer,\n    \"reset_interval\" text,\n    \"config\" jsonb,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    CONSTRAINT \"paykit_product_feature_pkey\" PRIMARY KEY(\"product_internal_id\",\"feature_id\")\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"subscription\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"customer_id\" text NOT NULL,\n    \"product_internal_id\" text NOT NULL,\n    \"status\" text NOT NULL,\n    \"canceled\" boolean DEFAULT false NOT NULL,\n    \"cancel_at_period_end\" boolean DEFAULT false NOT NULL,\n    \"started_at\" timestamp,\n    \"trial_ends_at\" timestamp,\n    \"current_period_start_at\" timestamp,\n    \"current_period_end_at\" timestamp,\n    \"canceled_at\" timestamp,\n    \"ended_at\" timestamp,\n    \"scheduled_product_id\" text,\n    \"quantity\" integer DEFAULT 1 NOT NULL,\n    \"created_at\" timestamp NOT NULL,\n    \"updated_at\" timestamp NOT NULL,\n    \"stripe_subscription_id\" text,\n    \"stripe_subscription_schedule_id\" text\n  )",
+    "CREATE TABLE IF NOT EXISTS \"paykit\".\"webhook_event\" (\n    \"id\" text PRIMARY KEY NOT NULL,\n    \"type\" text NOT NULL,\n    \"payload\" jsonb NOT NULL,\n    \"status\" text NOT NULL,\n    \"error\" text,\n    \"trace_id\" text,\n    \"received_at\" timestamp NOT NULL,\n    \"processed_at\" timestamp,\n    \"stripe_event_id\" text\n  )",
+    "GRANT ALL ON ALL TABLES IN SCHEMA \"paykit\" TO service_role",
+    "ALTER TABLE \"paykit\".\"customer\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"entitlement\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"feature\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"invoice\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"metadata\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"payment_method\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"product\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"product_feature\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"subscription\" ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE \"paykit\".\"webhook_event\" ENABLE ROW LEVEL SECURITY",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_entitlement_subscription_fk') THEN\n      ALTER TABLE \"paykit\".\"entitlement\" ADD CONSTRAINT \"paykit_entitlement_subscription_fk\" FOREIGN KEY (\"subscription_id\") REFERENCES \"paykit\".\"subscription\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_entitlement_customer_fk') THEN\n      ALTER TABLE \"paykit\".\"entitlement\" ADD CONSTRAINT \"paykit_entitlement_customer_fk\" FOREIGN KEY (\"customer_id\") REFERENCES \"paykit\".\"customer\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_entitlement_feature_fk') THEN\n      ALTER TABLE \"paykit\".\"entitlement\" ADD CONSTRAINT \"paykit_entitlement_feature_fk\" FOREIGN KEY (\"feature_id\") REFERENCES \"paykit\".\"feature\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_invoice_customer_fk') THEN\n      ALTER TABLE \"paykit\".\"invoice\" ADD CONSTRAINT \"paykit_invoice_customer_fk\" FOREIGN KEY (\"customer_id\") REFERENCES \"paykit\".\"customer\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_invoice_subscription_fk') THEN\n      ALTER TABLE \"paykit\".\"invoice\" ADD CONSTRAINT \"paykit_invoice_subscription_fk\" FOREIGN KEY (\"subscription_id\") REFERENCES \"paykit\".\"subscription\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_payment_method_customer_fk') THEN\n      ALTER TABLE \"paykit\".\"payment_method\" ADD CONSTRAINT \"paykit_payment_method_customer_fk\" FOREIGN KEY (\"customer_id\") REFERENCES \"paykit\".\"customer\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_product_feature_product_fk') THEN\n      ALTER TABLE \"paykit\".\"product_feature\" ADD CONSTRAINT \"paykit_product_feature_product_fk\" FOREIGN KEY (\"product_internal_id\") REFERENCES \"paykit\".\"product\"(\"internal_id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_product_feature_feature_fk') THEN\n      ALTER TABLE \"paykit\".\"product_feature\" ADD CONSTRAINT \"paykit_product_feature_feature_fk\" FOREIGN KEY (\"feature_id\") REFERENCES \"paykit\".\"feature\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_subscription_customer_fk') THEN\n      ALTER TABLE \"paykit\".\"subscription\" ADD CONSTRAINT \"paykit_subscription_customer_fk\" FOREIGN KEY (\"customer_id\") REFERENCES \"paykit\".\"customer\"(\"id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "DO $$ BEGIN\n    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'paykit_subscription_product_fk') THEN\n      ALTER TABLE \"paykit\".\"subscription\" ADD CONSTRAINT \"paykit_subscription_product_fk\" FOREIGN KEY (\"product_internal_id\") REFERENCES \"paykit\".\"product\"(\"internal_id\") ON DELETE no action ON UPDATE no action;\n    END IF;\n  END $$",
+    "CREATE INDEX IF NOT EXISTS \"paykit_customer_deleted_at_idx\" ON \"paykit\".\"customer\" USING btree (\"deleted_at\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_customer_stripe_customer_idx\" ON \"paykit\".\"customer\" USING btree (\"stripe_customer_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_entitlement_subscription_idx\" ON \"paykit\".\"entitlement\" USING btree (\"subscription_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_entitlement_customer_feature_idx\" ON \"paykit\".\"entitlement\" USING btree (\"customer_id\",\"feature_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_entitlement_next_reset_idx\" ON \"paykit\".\"entitlement\" USING btree (\"next_reset_at\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_invoice_customer_idx\" ON \"paykit\".\"invoice\" USING btree (\"customer_id\",\"created_at\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_invoice_subscription_idx\" ON \"paykit\".\"invoice\" USING btree (\"subscription_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_invoice_stripe_invoice_idx\" ON \"paykit\".\"invoice\" USING btree (\"stripe_invoice_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_payment_method_customer_idx\" ON \"paykit\".\"payment_method\" USING btree (\"customer_id\",\"deleted_at\")",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"paykit_product_id_version_unique\" ON \"paykit\".\"product\" USING btree (\"id\",\"version\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_product_default_idx\" ON \"paykit\".\"product\" USING btree (\"is_default\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_product_stripe_product_idx\" ON \"paykit\".\"product\" USING btree (\"stripe_product_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_product_stripe_price_idx\" ON \"paykit\".\"product\" USING btree (\"stripe_price_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_product_feature_feature_idx\" ON \"paykit\".\"product_feature\" USING btree (\"feature_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_subscription_customer_status_idx\" ON \"paykit\".\"subscription\" USING btree (\"customer_id\",\"status\",\"ended_at\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_subscription_product_idx\" ON \"paykit\".\"subscription\" USING btree (\"product_internal_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_subscription_stripe_subscription_idx\" ON \"paykit\".\"subscription\" USING btree (\"stripe_subscription_id\")",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"paykit_metadata_stripe_checkout_session_unique\" ON \"paykit\".\"metadata\" USING btree (\"stripe_checkout_session_id\")",
+    "CREATE UNIQUE INDEX IF NOT EXISTS \"paykit_webhook_event_stripe_event_id_unique\" ON \"paykit\".\"webhook_event\" USING btree (\"stripe_event_id\")",
+    "CREATE INDEX IF NOT EXISTS \"paykit_webhook_event_stripe_status_idx\" ON \"paykit\".\"webhook_event\" USING btree (\"status\")"
+  ],
+  "schemaSetupCount": 4,
+  "tableNames": [
+    "customer",
+    "entitlement",
+    "feature",
+    "invoice",
+    "metadata",
+    "payment_method",
+    "product",
+    "product_feature",
+    "subscription",
+    "webhook_event"
+  ],
+  "grantStatements": [
+    "GRANT USAGE ON SCHEMA \"paykit\" TO service_role",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA \"paykit\" GRANT ALL ON TABLES TO service_role",
+    "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA \"paykit\" GRANT ALL ON SEQUENCES TO service_role",
+    "GRANT ALL ON ALL TABLES IN SCHEMA \"paykit\" TO service_role"
+  ],
+  "requiredPrivileges": [
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE"
+  ],
+  "schemaVersion": "paykit-schema-1",
+  "webhookEvents": [
+    "checkout.session.completed",
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+    "invoice.payment_succeeded",
+    "invoice.payment_failed",
+    "payment_method.attached",
+    "payment_method.updated",
+    "payment_method.detached",
+    "customer.created",
+    "customer.updated"
+  ],
+  "requiredSecrets": [
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET"
+  ],
+  "apiSlug": "paykit-api",
+  "webhookSlug": "paykit-webhook",
+  "templateVersion": "3",
+  "currencies": [
+    {
+      "code": "usd",
+      "name": "US Dollar",
+      "symbol": "$"
+    },
+    {
+      "code": "eur",
+      "name": "Euro",
+      "symbol": "€"
+    },
+    {
+      "code": "gbp",
+      "name": "British Pound",
+      "symbol": "£"
+    },
+    {
+      "code": "jpy",
+      "name": "Japanese Yen",
+      "symbol": "¥"
+    },
+    {
+      "code": "aed",
+      "name": "United Arab Emirates Dirham",
+      "symbol": "د.إ"
+    },
+    {
+      "code": "aud",
+      "name": "Australian Dollar",
+      "symbol": "A$"
+    },
+    {
+      "code": "brl",
+      "name": "Brazilian Real",
+      "symbol": "R$"
+    },
+    {
+      "code": "cad",
+      "name": "Canadian Dollar",
+      "symbol": "C$"
+    },
+    {
+      "code": "chf",
+      "name": "Swiss Franc",
+      "symbol": "CHF"
+    },
+    {
+      "code": "cny",
+      "name": "Chinese Yuan",
+      "symbol": "¥"
+    },
+    {
+      "code": "dkk",
+      "name": "Danish Krone",
+      "symbol": "kr"
+    },
+    {
+      "code": "egp",
+      "name": "Egyptian Pound",
+      "symbol": "E£"
+    },
+    {
+      "code": "hkd",
+      "name": "Hong Kong Dollar",
+      "symbol": "HK$"
+    },
+    {
+      "code": "huf",
+      "name": "Hungarian Forint",
+      "symbol": "Ft"
+    },
+    {
+      "code": "idr",
+      "name": "Indonesian Rupiah",
+      "symbol": "Rp"
+    },
+    {
+      "code": "ils",
+      "name": "Israeli Shekel",
+      "symbol": "₪"
+    },
+    {
+      "code": "inr",
+      "name": "Indian Rupee",
+      "symbol": "₹"
+    },
+    {
+      "code": "kes",
+      "name": "Kenyan Shilling",
+      "symbol": "KSh"
+    },
+    {
+      "code": "krw",
+      "name": "South Korean Won",
+      "symbol": "₩"
+    },
+    {
+      "code": "mxn",
+      "name": "Mexican Peso",
+      "symbol": "M$"
+    },
+    {
+      "code": "myr",
+      "name": "Malaysian Ringgit",
+      "symbol": "RM"
+    },
+    {
+      "code": "ngn",
+      "name": "Nigerian Naira",
+      "symbol": "₦"
+    },
+    {
+      "code": "nok",
+      "name": "Norwegian Krone",
+      "symbol": "kr"
+    },
+    {
+      "code": "nzd",
+      "name": "New Zealand Dollar",
+      "symbol": "NZ$"
+    },
+    {
+      "code": "php",
+      "name": "Philippine Peso",
+      "symbol": "₱"
+    },
+    {
+      "code": "pkr",
+      "name": "Pakistani Rupee",
+      "symbol": "₨"
+    },
+    {
+      "code": "pln",
+      "name": "Polish Zloty",
+      "symbol": "zł"
+    },
+    {
+      "code": "qar",
+      "name": "Qatari Riyal",
+      "symbol": "QR"
+    },
+    {
+      "code": "ron",
+      "name": "Romanian Leu",
+      "symbol": "lei"
+    },
+    {
+      "code": "sar",
+      "name": "Saudi Riyal",
+      "symbol": "﷼"
+    },
+    {
+      "code": "sek",
+      "name": "Swedish Krona",
+      "symbol": "kr"
+    },
+    {
+      "code": "sgd",
+      "name": "Singapore Dollar",
+      "symbol": "S$"
+    },
+    {
+      "code": "thb",
+      "name": "Thai Baht",
+      "symbol": "฿"
+    },
+    {
+      "code": "try",
+      "name": "Turkish Lira",
+      "symbol": "₺"
+    },
+    {
+      "code": "twd",
+      "name": "Taiwan Dollar",
+      "symbol": "NT$"
+    },
+    {
+      "code": "uah",
+      "name": "Ukrainian Hryvnia",
+      "symbol": "₴"
+    },
+    {
+      "code": "vnd",
+      "name": "Vietnamese Dong",
+      "symbol": "₫"
+    },
+    {
+      "code": "zar",
+      "name": "South African Rand",
+      "symbol": "R"
+    }
+  ]
+}

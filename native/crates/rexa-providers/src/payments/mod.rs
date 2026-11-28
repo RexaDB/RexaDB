@@ -1,13 +1,23 @@
 //! Port of components/studio/payments/{views/shared,views/customers-view,views/revenue-view,
-//! views/plans-view,plans-tab,paykit-shared,revenue-charts}.tsx and
-//! lib/supabase-paykit/{queries,analytics,currencies}.ts.
+//! views/plans-view,plans-tab,features-tab,product-sheet,feature-sheet,paykit-shared,revenue-charts}.tsx
+//! and lib/supabase-paykit/{queries,analytics,currencies,validation,types}.ts.
 //!
-//! Approximations: recharts area/bar charts are painted with GPUI paths
-//! (flat-alpha fill instead of the gradient, no hover tooltip). Plans keeps the
-//! draft product list (same `rexadb-paykit-drafts:<ref>` key, now in
-//! app_settings) with filter / duplicate / delete and a compact create/edit
-//! dialog; the full product/feature sheets, "Sync to Stripe" deploy and the
-//! Setup wizard are not ported.
+//! Plans uses contained ProductSheet + FeatureSheet (`crate::ui::studio_sheet`).
+//! Setup/sync live in `setup.rs` / `deploy.rs`. Approximations: recharts area/bar
+//! charts are painted with GPUI paths (flat-alpha fill, no hover tooltip).
+
+mod currencies;
+mod deploy;
+mod drafts;
+mod plans;
+mod prompt;
+mod setup;
+mod sql;
+mod templates;
+
+pub use drafts::*;
+pub use plans::PlansView;
+pub use setup::SetupView;
 
 use crate::common::Grid;
 use crate::data_table::{Column, DataTable, Row, TableState};
@@ -15,9 +25,8 @@ use crate::supabase;
 use crate::ui;
 use gpui::{canvas, div, point, prelude::*, px, AnyElement, AnyView, App, AppContext, Bounds, Context, Entity, FontWeight, PathBuilder, Pixels, SharedString, Window};
 use rexa_core::{Session, StudioEvent, TabSpec};
-use rexa_ui::widgets::{Icon, InputState};
-use rexa_ui::{tw, with_alpha, ActiveTokens, Align, Badge, BadgeVariant, Button, ButtonSize, Dialog, DropdownMenu, IconName, Kbd, MenuItem, Select, SelectOption, Switch, TextInput, Toast, Tw, MONO};
-use serde::{Deserialize, Serialize};
+use rexa_ui::widgets::Icon;
+use rexa_ui::{tw, with_alpha, ActiveTokens, Badge, BadgeVariant, Button, ButtonSize, IconName, Tw, MONO};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -28,6 +37,7 @@ pub fn build_tab(view: &str, _params: &Value, session: Arc<Session>, window: &mu
         "payments-webhooks" => cx.new(|cx| ListView::new(session, ListKind::Webhooks, cx)).into(),
         "payments-revenue" => cx.new(|cx| RevenueView::new(session, cx)).into(),
         "payments-plans" => cx.new(|cx| PlansView::new(session, window, cx)).into(),
+        "payments-setup" => cx.new(|cx| SetupView::new(session, window, cx)).into(),
         _ => return None,
     })
 }
@@ -122,46 +132,6 @@ async fn query_paykit(driver: Arc<dyn rexa_drivers::Driver>, sql: String) -> Pay
             let m = format!("{e:#}");
             PaykitResult { grid: Grid::default(), missing: is_missing_table(&m), error: Some(m) }
         }
-    }
-}
-
-fn currency_symbol(code: &str) -> &'static str {
-    match code.to_lowercase().as_str() {
-        "eur" => "€",
-        "gbp" => "£",
-        "jpy" | "cny" => "¥",
-        "aed" => "د.إ",
-        "aud" => "A$",
-        "brl" => "R$",
-        "cad" => "C$",
-        "chf" => "CHF",
-        "dkk" | "nok" | "sek" => "kr",
-        "egp" => "E£",
-        "hkd" => "HK$",
-        "huf" => "Ft",
-        "idr" => "Rp",
-        "ils" => "₪",
-        "inr" => "₹",
-        "kes" => "KSh",
-        "krw" => "₩",
-        "mxn" => "M$",
-        "myr" => "RM",
-        "ngn" => "₦",
-        "nzd" => "NZ$",
-        "php" => "₱",
-        "pkr" => "₨",
-        "pln" => "zł",
-        "qar" => "QR",
-        "ron" => "lei",
-        "sar" => "﷼",
-        "sgd" => "S$",
-        "thb" => "฿",
-        "try" => "₺",
-        "twd" => "NT$",
-        "uah" => "₴",
-        "vnd" => "₫",
-        "zar" => "R",
-        _ => "$",
     }
 }
 
@@ -935,398 +905,6 @@ impl Render for RevenueView {
     }
 }
 
-// ---- plans (drafts) --------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanInclude {
-    pub feature_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reset: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanDraft {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub group: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default: Option<bool>,
-    #[serde(default)]
-    pub price_amount: Option<f64>,
-    #[serde(default)]
-    pub price_interval: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub price_currency: Option<String>,
-    #[serde(default)]
-    pub includes: Vec<PlanInclude>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DraftState {
-    pub version: u32,
-    #[serde(default)]
-    pub features: Vec<Value>,
-    pub plans: Vec<PlanDraft>,
-    #[serde(default)]
-    pub updated_at: i64,
-}
-
-impl Default for DraftState {
-    /// `createEmptyDraftState`.
-    fn default() -> Self {
-        DraftState { version: 1, features: vec![], plans: vec![PlanDraft { id: "free".into(), name: "Free".into(), group: "base".into(), default: Some(true), ..Default::default() }], updated_at: chrono::Utc::now().timestamp_millis() }
-    }
-}
-
-fn drafts_key(r: &str) -> String {
-    format!("rexadb-paykit-drafts:{r}")
-}
-
-pub fn load_drafts(r: &str) -> DraftState {
-    let raw = rexa_store::Store::open().ok().and_then(|s| s.setting(&drafts_key(r)).ok().flatten()).or_else(|| rexa_store::WebStore::open()?.get(&drafts_key(r)).ok().flatten());
-    raw.and_then(|r| serde_json::from_str::<DraftState>(&r).ok()).filter(|d| d.version == 1).unwrap_or_default()
-}
-
-fn save_drafts(r: &str, d: &DraftState) {
-    let mut d = d.clone();
-    d.updated_at = chrono::Utc::now().timestamp_millis();
-    if let (Ok(s), Ok(json)) = (rexa_store::Store::open(), serde_json::to_string(&d)) {
-        s.set_setting(&drafts_key(r), &json).ok();
-    }
-}
-
-fn is_paid(p: &PlanDraft) -> bool {
-    p.price_amount.is_some_and(f64::is_finite)
-}
-
-/// `formatPlanPrice`.
-pub fn format_plan_price(p: &PlanDraft) -> (String, Option<String>) {
-    if !is_paid(p) {
-        return ("Free".into(), None);
-    }
-    let code = p.price_currency.clone().unwrap_or_else(|| "usd".into());
-    (format!("{}{:.2} {}", currency_symbol(&code), p.price_amount.unwrap_or(0.), code.to_uppercase()), Some(if p.price_interval.as_deref() == Some("year") { "Per year".into() } else { "Per month".into() }))
-}
-
-/// `validateDrafts` (subset): ids, names, duplicate ids, one default per group.
-pub fn validate_drafts(d: &DraftState) -> Vec<String> {
-    let mut errs = vec![];
-    let mut seen = std::collections::HashSet::new();
-    for (i, p) in d.plans.iter().enumerate() {
-        let label = if p.id.is_empty() { format!("Product #{}", i + 1) } else { p.id.clone() };
-        if p.id.is_empty() {
-            errs.push(format!("{label}: id is required."));
-        } else if !p.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') || p.id.len() > 64 {
-            errs.push(format!("{label}: id must be lowercase letters, numbers, dashes or underscores."));
-        } else if !seen.insert(p.id.clone()) {
-            errs.push(format!("{label}: duplicate id."));
-        }
-        if p.name.trim().is_empty() {
-            errs.push(format!("{label}: name is required."));
-        }
-        if is_paid(p) && p.price_amount.unwrap_or(0.) <= 0. {
-            errs.push(format!("{label}: price must be greater than 0."));
-        }
-    }
-    let mut groups: std::collections::HashMap<&str, usize> = Default::default();
-    for p in &d.plans {
-        if p.default == Some(true) {
-            *groups.entry(p.group.as_str()).or_default() += 1;
-        }
-    }
-    for (g, n) in groups {
-        if n > 1 {
-            errs.push(format!("Group \"{g}\" has {n} default products — only one is allowed."));
-        }
-    }
-    errs
-}
-
-pub struct PlansView {
-    project_ref: Option<String>,
-    drafts: DraftState,
-    filter: &'static str,
-    tab_features: bool,
-    // product dialog
-    editing: Option<Option<usize>>,
-    f_id: Entity<InputState>,
-    f_name: Entity<InputState>,
-    f_price: Entity<InputState>,
-    f_interval: String,
-    f_currency: String,
-    f_default: bool,
-    pending: Option<(String, String, String)>,
-}
-
-impl PlansView {
-    fn new(session: Arc<Session>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let vault = rexa_core::credential_vault(cx);
-        let project_ref = supabase::connection_info(&session, vault.as_deref()).map(|i| i.project_ref);
-        let drafts = project_ref.as_deref().map(load_drafts).unwrap_or_default();
-        let mut input = |p: &str, cx: &mut Context<Self>| cx.new(|cx| InputState::new(window, cx).placeholder(p.to_string()));
-        let (f_id, f_name, f_price) = (input("pro", cx), input("Pro", cx), input("Free", cx));
-        Self { project_ref, drafts, filter: "all", tab_features: false, editing: None, f_id, f_name, f_price, f_interval: "month".into(), f_currency: "usd".into(), f_default: false, pending: None }
-    }
-
-    fn update(&mut self, f: impl FnOnce(&mut DraftState), cx: &mut Context<Self>) {
-        f(&mut self.drafts);
-        if let Some(r) = &self.project_ref {
-            save_drafts(r, &self.drafts);
-        }
-        cx.notify();
-    }
-
-    fn duplicate(&mut self, i: usize, cx: &mut Context<Self>) {
-        let Some(src) = self.drafts.plans.get(i).cloned() else { return };
-        let taken: std::collections::HashSet<String> = self.drafts.plans.iter().map(|p| p.id.clone()).collect();
-        let mut id = if src.id.is_empty() { String::new() } else { format!("{}-copy", src.id) };
-        let mut n = 2;
-        while !id.is_empty() && taken.contains(&id) {
-            id = format!("{}-copy-{n}", src.id);
-            n += 1;
-        }
-        let copy = PlanDraft { id, name: if src.name.is_empty() { String::new() } else { format!("{} copy", src.name) }, default: Some(false), ..src };
-        self.update(|d| d.plans.push(copy), cx);
-    }
-
-    fn open_editor(&mut self, idx: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
-        let p = idx.and_then(|i| self.drafts.plans.get(i).cloned()).unwrap_or_default();
-        self.f_interval = p.price_interval.clone().unwrap_or_else(|| "month".into());
-        self.f_currency = p.price_currency.clone().unwrap_or_else(|| "usd".into());
-        self.f_default = p.default.unwrap_or(false);
-        self.pending = Some((p.id.clone(), p.name.clone(), p.price_amount.map(|a| format!("{a}")).unwrap_or_default()));
-        self.editing = Some(idx);
-        let _ = window;
-        let weak = cx.entity().downgrade();
-        let (id_s, name_s, price_s) = (self.f_id.clone(), self.f_name.clone(), self.f_price.clone());
-        rexa_ui::open_dialog(cx, move |window, cx| {
-            let Some(view) = weak.upgrade() else { return Dialog::new() };
-            view.update(cx, |v, cx| v.apply_pending(window, cx));
-            let (editing, interval, currency, default) = { let v = view.read(cx); (v.editing.flatten(), v.f_interval.clone(), v.f_currency.clone(), v.f_default) };
-            let (v1, v2, v3, v4) = (view.clone(), view.clone(), view.clone(), view.clone());
-            let row = |l: &str, el: AnyElement| div().flex().flex_col().gap_2().child(rexa_ui::Label::new(l.to_string())).child(el);
-            Dialog::new()
-                .max_w(448.)
-                .title(if editing.is_some() { "Edit product" } else { "Create product" })
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_4()
-                        .child(row("Name", TextInput::new(&name_s).into_any_element()))
-                        .child(row("Product ID", div().font_family(MONO).child(TextInput::new(&id_s)).into_any_element()))
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(div().flex_1().child(row("Price (leave empty for free)", TextInput::new(&price_s).into_any_element())))
-                                .child(div().w(px(120.)).child(row("Currency", Select::new("pp-cur").w_full().options(["usd", "eur", "gbp", "jpy", "cad", "aud", "chf", "inr", "brl", "sek"].iter().map(|c| SelectOption::new(*c, c.to_uppercase()))).value(Some(currency.clone())).on_change(move |v, _, cx| v1.update(cx, |s, cx| { s.f_currency = v.to_string(); cx.notify(); })).into_any_element())))
-                                .child(div().w(px(120.)).child(row("Interval", Select::new("pp-int").w_full().options([SelectOption::new("month", "Monthly"), SelectOption::new("year", "Yearly")]).value(Some(interval.clone())).on_change(move |v, _, cx| v2.update(cx, |s, cx| { s.f_interval = v.to_string(); cx.notify(); })).into_any_element()))),
-                        )
-                        .child(div().flex().items_center().justify_between().child(rexa_ui::Label::new("Default product for its group")).child(Switch::new("pp-def").checked(default).on_change(move |v, _, cx| v3.update(cx, |s, cx| { s.f_default = v; cx.notify(); })))),
-                )
-                .footer(
-                    div()
-                        .flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(Button::new("pp-cancel").ghost().size(ButtonSize::Sm).label("Cancel").on_click(|_, _, cx| rexa_ui::close_top(cx)))
-                        .child(Button::new("pp-save").size(ButtonSize::Sm).label(if editing.is_some() { "Save changes" } else { "Add product" }).on_click(move |_, _, cx| v4.update(cx, |s, cx| s.save_product(cx)))),
-                )
-        });
-    }
-
-    fn apply_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((id, name, price)) = self.pending.take() {
-            self.f_id.update(cx, |s, cx| s.set_value(id, window, cx));
-            self.f_name.update(cx, |s, cx| s.set_value(name, window, cx));
-            self.f_price.update(cx, |s, cx| s.set_value(price, window, cx));
-        }
-    }
-
-    fn save_product(&mut self, cx: &mut Context<Self>) {
-        let Some(idx) = self.editing else { return };
-        let id = self.f_id.read(cx).value().trim().to_string();
-        let name = self.f_name.read(cx).value().trim().to_string();
-        let price = self.f_price.read(cx).value().trim().to_string();
-        let amount = if price.is_empty() { None } else { price.parse::<f64>().ok() };
-        if !price.is_empty() && amount.is_none() {
-            Toast::error("Price must be a number.").show(cx);
-            return;
-        }
-        if id.is_empty() || name.is_empty() {
-            Toast::error("Name and product ID are required.").show(cx);
-            return;
-        }
-        if self.drafts.plans.iter().enumerate().any(|(i, p)| p.id == id && Some(i) != idx) {
-            Toast::error("A product with that ID already exists.").show(cx);
-            return;
-        }
-        let base = idx.and_then(|i| self.drafts.plans.get(i).cloned()).unwrap_or_else(|| PlanDraft { group: "base".into(), ..Default::default() });
-        let plan = PlanDraft { id, name, default: Some(self.f_default), price_amount: amount, price_interval: amount.map(|_| self.f_interval.clone()), price_currency: amount.map(|_| self.f_currency.clone()), ..base };
-        self.update(
-            |d| match idx {
-                Some(i) => d.plans[i] = plan,
-                None => d.plans.push(plan),
-            },
-            cx,
-        );
-        self.editing = None;
-        rexa_ui::close_top(cx);
-    }
-}
-
-impl Render for PlansView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.apply_pending(window, cx);
-        let t = cx.tokens().clone();
-        if self.project_ref.is_none() {
-            return shell("Plans", None, None, None, div().tw_text_xs().text_color(t.muted_foreground).child("Open a Supabase project connection to manage billing plans.").into_any_element(), cx);
-        }
-        let errors = validate_drafts(&self.drafts);
-        let sync = Button::new("pl-sync").outline().size(ButtonSize::Sm).icon(IconName::RefreshCw).label("Sync to Stripe").on_click(|_, _, cx| {
-            Toast::message("Sync to Stripe (PayKit deploy) is not available in the native app yet.").show(cx);
-        });
-        let tabs = div().flex().items_center().gap_1().border_b_1().border_color(t.border).children([(false, "Products", self.drafts.plans.len()), (true, "Features", self.drafts.features.len())].into_iter().map(|(f, label, n)| {
-            let active = f == self.tab_features;
-            div()
-                .id(SharedString::from(format!("pl-tab-{label}")))
-                .mb(px(-1.))
-                .border_b_2()
-                .border_color(if active { t.primary } else { gpui::transparent_black() })
-                .px_3()
-                .pb_2()
-                .pt_1()
-                .tw_text_sm()
-                .cursor_pointer()
-                .when(active, |d| d.font_weight(FontWeight::MEDIUM))
-                .when(!active, |d| d.text_color(t.muted_foreground))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.tab_features = f;
-                    cx.notify();
-                }))
-                .child(div().flex().gap_1().child(label).child(div().font_weight(FontWeight::NORMAL).text_color(t.muted_foreground).child(format!("({n})"))))
-        }));
-        let content: AnyElement = if self.tab_features {
-            let feats = &self.drafts.features;
-            if feats.is_empty() {
-                div().tw_rounded_lg().border_1().border_dashed().border_color(t.border).px_3().py_8().text_center().tw_text_xs().text_color(t.muted_foreground).child("No features yet.").into_any_element()
-            } else {
-                div().tw_rounded_lg().border_1().border_color(with_alpha(t.border, 0.7)).children(feats.iter().enumerate().map(|(i, f)| div().when(i > 0, |d| d.border_t_1().border_color(with_alpha(t.border, 0.6))).flex().items_center().gap_3().px_3().py(px(10.)).child(div().flex_1().font_family(MONO).tw_text_xs().child(f.get("id").and_then(Value::as_str).unwrap_or("").to_string())).child(Badge::new(f.get("type").and_then(Value::as_str).unwrap_or("boolean").to_string()).variant(BadgeVariant::Secondary)))).into_any_element()
-            }
-        } else {
-            let filter = self.filter;
-            let visible: Vec<(usize, PlanDraft)> = self.drafts.plans.iter().cloned().enumerate().filter(|(_, p)| filter == "all" || (filter == "paid") == is_paid(p)).collect();
-            let pills = div().flex().items_center().gap(px(6.)).children(["all", "paid", "free"].into_iter().map(|f| {
-                let active = f == filter;
-                div()
-                    .id(SharedString::from(format!("pl-f-{f}")))
-                    .h_8()
-                    .flex()
-                    .items_center()
-                    .tw_rounded_lg()
-                    .border_1()
-                    .px_3()
-                    .tw_text_xs()
-                    .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::MEDIUM })
-                    .border_color(if active { with_alpha(t.foreground, 0.6) } else { t.border })
-                    .when(!active, |d| d.text_color(t.muted_foreground))
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.filter = f;
-                        cx.notify();
-                    }))
-                    .child(match f { "paid" => "Paid", "free" => "Free", _ => "All" })
-            }));
-            let head = div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(pills)
-                .child(Button::new("pl-create").size(ButtonSize::Sm).icon(IconName::Plus).label("Create product").child(div().ml_1().child(Kbd::new("N"))).on_click(cx.listener(|this, _, w, cx| this.open_editor(None, w, cx))));
-            let list: AnyElement = if self.drafts.plans.is_empty() {
-                div().flex().flex_col().items_center().gap_1().tw_rounded_lg().border_1().border_dashed().border_color(t.border).px_3().py_8().text_center().child(div().tw_text_sm().font_weight(FontWeight::MEDIUM).child("No products yet")).child(div().max_w(px(320.)).tw_text_xs().text_color(t.muted_foreground).child("Create your first product above, or load a starter template from Features.")).into_any_element()
-            } else if visible.is_empty() {
-                div().tw_rounded_lg().border_1().border_dashed().border_color(t.border).px_3().py_8().text_center().tw_text_xs().text_color(t.muted_foreground).child(format!("No {} products.", if filter == "paid" { "paid" } else { "free" })).into_any_element()
-            } else {
-                let grid = |d: gpui::Div| d.flex().items_center().gap_2();
-                let w = cx.entity().downgrade();
-                div()
-                    .overflow_hidden()
-                    .tw_rounded_lg()
-                    .border_1()
-                    .border_color(with_alpha(t.border, 0.7))
-                    .child(grid(div()).border_b_1().border_color(with_alpha(t.border, 0.7)).px_3().py_2().tw_text_xs().text_color(t.muted_foreground).child(div().flex_grow(1.).flex_basis(px(0.)).min_w_0().child("Product")).child(div().w(px(160.)).child("Pricing")).child(div().w(px(110.)).child("Features")).child(div().w(px(90.)).child("Status")).child(div().w(px(36.))))
-                    .children(visible.into_iter().enumerate().map(|(k, (i, p))| {
-                        let (main, sub) = format_plan_price(&p);
-                        let w = w.clone();
-                        let menu = DropdownMenu::new(("pl-menu", i)).align(Align::End).trigger(Button::new(("pl-more", i)).ghost().size(ButtonSize::IconSm).icon(IconName::Ellipsis)).menu(move |m, _, _| {
-                            let (w1, w2, w3) = (w.clone(), w.clone(), w.clone());
-                            m.item(MenuItem::new("Open").icon(IconName::Pencil).on_select(move |win, cx| { w1.update(cx, |s, cx| s.open_editor(Some(i), win, cx)).ok(); }))
-                                .item(MenuItem::new("Duplicate").icon(IconName::Copy).on_select(move |_, cx| { w2.update(cx, |s, cx| s.duplicate(i, cx)).ok(); }))
-                                .item(MenuItem::new("Delete").icon(IconName::Trash).destructive().on_select(move |_, cx| { w3.update(cx, |s, cx| s.update(|d| { d.plans.remove(i); }, cx)).ok(); }))
-                        });
-                        grid(div())
-                            .id(("pl-row", i))
-                            .when(k > 0, |d| d.border_t_1().border_color(with_alpha(t.border, 0.6)))
-                            .px_3()
-                            .py(px(10.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(with_alpha(t.muted, 0.3)))
-                            .on_click(cx.listener(move |this, _, win, cx| this.open_editor(Some(i), win, cx)))
-                            .child(
-                                div()
-                                    .flex_grow(1.)
-                                    .flex_basis(px(0.))
-                                    .min_w_0()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(10.))
-                                    .child(div().size_9().flex_shrink_0().flex().items_center().justify_center().tw_rounded_lg().border_1().border_color(with_alpha(t.border, 0.7)).bg(with_alpha(t.muted, 0.3)).child(Icon::new(IconName::Package).size(px(16.)).text_color(t.muted_foreground)))
-                                    .child(div().min_w_0().child(div().truncate().tw_text_sm().font_weight(FontWeight::SEMIBOLD).child(if p.name.is_empty() { if p.id.is_empty() { "New product".to_string() } else { p.id.clone() } } else { p.name.clone() })).child(div().truncate().font_family(MONO).text_size(px(11.)).text_color(t.muted_foreground).child(if p.id.is_empty() { "no-id-yet".to_string() } else { p.id.clone() }))),
-                            )
-                            .child(div().w(px(160.)).min_w_0().child(div().truncate().tw_text_sm().child(main)).children(sub.map(|s| div().truncate().text_size(px(11.)).text_color(t.muted_foreground).child(s))))
-                            .child(div().w(px(110.)).truncate().tw_text_xs().text_color(t.muted_foreground).child(if p.includes.is_empty() { "—".to_string() } else { format!("{} feature{}", p.includes.len(), if p.includes.len() == 1 { "" } else { "s" }) }))
-                            .child(div().w(px(90.)).child(if p.default == Some(true) { div().h(px(22.)).flex().items_center().rounded_full().border_1().border_color(with_alpha(t.primary, 0.2)).bg(with_alpha(t.primary, 0.1)).px_2().text_size(px(11.)).font_weight(FontWeight::MEDIUM).text_color(t.primary).child("Default").into_any_element() } else { div().tw_text_xs().text_color(t.muted_foreground).child("—").into_any_element() }))
-                            .child(div().w(px(36.)).on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(menu))
-                    }))
-                    .into_any_element()
-            };
-            div().flex().flex_col().gap_3().child(head).child(list).into_any_element()
-        };
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .when(!errors.is_empty(), |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .tw_rounded_xl()
-                        .border_1()
-                        .border_color(with_alpha(tw("amber-500"), 0.3))
-                        .bg(with_alpha(tw("amber-500"), 0.05))
-                        .p_3()
-                        .tw_text_xs()
-                        .child(Icon::new(IconName::TriangleAlert).size(px(16.)).text_color(tw("amber-500")))
-                        .child(div().flex().flex_col().gap(px(2.)).children(errors.iter().take(6).map(|e| div().child(format!("• {e}")))).when(errors.len() > 6, |d| d.child(format!("• …and {} more", errors.len() - 6)))),
-                )
-            })
-            .child(tabs)
-            .child(content)
-            .into_any_element();
-        shell("Plans", Some("Define once here, then deploy to sync products and prices to Stripe. Drafts are stored on this device until deployed."), Some(sync.into_any_element()), None, body, cx)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1347,16 +925,12 @@ mod tests {
     }
 
     #[test]
-    fn drafts_roundtrip_and_validation() {
-        let d: DraftState = serde_json::from_str(r#"{"version":1,"features":[],"plans":[{"id":"pro","name":"Pro","group":"base","priceAmount":29,"priceInterval":"month","includes":[]}],"updatedAt":1}"#).unwrap();
-        assert_eq!(format_plan_price(&d.plans[0]), ("$29.00 USD".to_string(), Some("Per month".to_string())));
+    fn drafts_roundtrip_smoke() {
+        // Full FeatureDraft / validation coverage lives in drafts::tests.
+        let d: DraftState = serde_json::from_str(r#"{"version":1,"features":[{"id":"msgs","type":"boolean"}],"plans":[{"id":"pro","name":"Pro","group":"base","priceAmount":29,"priceInterval":"month","includes":[]}],"updatedAt":1}"#).unwrap();
+        assert_eq!(d.features[0].feature_type, "boolean");
+        assert_eq!(format_plan_price(&d.plans[0]).0, "$29.00 USD");
         assert!(validate_drafts(&d).is_empty());
-        let s = serde_json::to_string(&d).unwrap();
-        assert!(s.contains("\"priceAmount\":29"));
-        let dflt = DraftState::default();
-        assert_eq!(format_plan_price(&dflt.plans[0]).0, "Free");
-        let bad = DraftState { plans: vec![PlanDraft { id: "Bad Id".into(), ..Default::default() }], ..dflt };
-        assert_eq!(validate_drafts(&bad).len(), 2);
     }
 
     #[test]

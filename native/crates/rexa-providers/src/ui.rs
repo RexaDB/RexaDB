@@ -115,9 +115,14 @@ pub fn th(text: &str, cx: &App) -> AnyElement {
 /// `w-[min(420px,92vw)]`, the h-9 tab-strip header with the pill title, a
 /// scrolling body and the compact footer.
 pub fn studio_sheet(id: &'static str, title: impl Into<SharedString>, body: AnyElement, footer: Option<AnyElement>, on_close: impl Fn(&mut Window, &mut App) + 'static, cx: &App) -> AnyElement {
+    studio_sheet_w(id, title, 420., body, footer, on_close, cx)
+}
+
+/// Contained studio sheet with an explicit width (product ~600, feature ~480).
+pub fn studio_sheet_w(id: &'static str, title: impl Into<SharedString>, width: f32, body: AnyElement, footer: Option<AnyElement>, on_close: impl Fn(&mut Window, &mut App) + 'static, cx: &App) -> AnyElement {
     let t = cx.tokens();
     div()
-        .w(px(420.))
+        .w(px(width))
         .flex_shrink_0()
         .h_full()
         .flex()
