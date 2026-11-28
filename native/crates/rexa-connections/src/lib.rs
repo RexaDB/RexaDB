@@ -8,6 +8,7 @@ pub mod home;
 mod http;
 pub mod providers;
 mod select;
+mod vault_prompt;
 mod widgets;
 
 use gpui::{App, AppContext};

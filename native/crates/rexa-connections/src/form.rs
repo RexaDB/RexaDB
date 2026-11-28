@@ -572,6 +572,10 @@ impl ConnectionForm {
 
     /// `handleAdd`.
     fn save(&mut self, cx: &mut Context<Self>) {
+        // The vault stays unlocked in memory for the app session.
+        if self.vault.is_none() {
+            self.vault = rexa_core::credential_vault(cx);
+        }
         if Store::open().ok().is_some_and(|s| rexa_store::CredentialStorageMode::current(&s) == rexa_store::CredentialStorageMode::Vault) && self.vault.is_none() {
             self.prompt_vault(cx);
             return;
@@ -655,41 +659,32 @@ impl ConnectionForm {
         }
     }
 
+    /// `requestVaultPassphrase` -> CredentialVaultPrompt, then save with the unlocked vault.
     fn prompt_vault(&mut self, cx: &mut Context<Self>) {
         let weak = cx.entity().downgrade();
         let existing = Store::open().ok().and_then(|s| s.vault_config().ok().flatten());
-        rexa_ui::open_dialog(cx, move |window, cx| {
-            let passphrase = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("At least 12 characters"));
-            let pass = passphrase.clone();
-            let existing = existing.clone();
-            let w = weak.clone();
-            rexa_ui::Dialog::new()
-                .title(if existing.is_some() { "Unlock credential vault" } else { "Set up credential vault" })
-                .description(if existing.is_some() { "Enter your vault passphrase to save this connection." } else { "Choose a passphrase of at least 12 characters. It cannot be recovered." })
-                .child(FieldInput::new(&passphrase))
-                .footer(Button::new("vault-cancel").outline().label("Cancel").on_click(|_, _, cx| rexa_ui::close_top(cx)))
-                .footer(Button::new("vault-unlock").label(if existing.is_some() { "Unlock and save" } else { "Create vault and save" }).on_click(move |_, _, cx| {
-                    let input = pass.read(cx).value().to_string();
-                    if input.len() < 12 {
-                        toast::error("Use at least 12 characters for the vault passphrase.", cx);
-                        return;
-                    }
-                    let result = if let Some((salt, verifier)) = &existing {
-                        Vault::unlock(&input, salt, verifier).map(|v| (v, None))
-                    } else {
-                        Vault::create(&input).and_then(|(v, salt, verifier)| {
-                            Store::open()?.create_vault_config(&salt, &verifier)?;
-                            Ok((v, Some(())))
-                        })
-                    };
-                    match result {
-                        Ok((vault, _)) => {
-                            rexa_ui::close_top(cx);
-                            w.update(cx, |form, cx| { form.vault = Some(Arc::new(vault)); form.save(cx); }).ok();
-                        }
-                        Err(e) => { toast::error(format!("{e:#}"), cx); }
-                    }
-                }))
+        crate::vault_prompt::open(existing.is_none(), cx, move |input, _, cx| {
+            let result = if let Some((salt, verifier)) = &existing {
+                Vault::unlock(&input, salt, verifier)
+            } else {
+                Vault::create(&input).and_then(|(v, salt, verifier)| {
+                    Store::open()?.create_vault_config(&salt, &verifier)?;
+                    Ok(v)
+                })
+            };
+            match result {
+                Ok(vault) => {
+                    rexa_core::unlock_credential_vault(vault, cx);
+                    let vault = rexa_core::credential_vault(cx);
+                    weak.update(cx, |form, cx| {
+                        form.vault = vault;
+                        form.save(cx);
+                    })
+                    .ok();
+                    Ok(())
+                }
+                Err(e) => Err(format!("{e:#}")),
+            }
         });
     }
 

@@ -1764,36 +1764,31 @@ impl ConnectionsScreen {
 }
 
 fn open_vault_unlock_dialog(id: i64, for_edit: bool, weak: gpui::WeakEntity<ConnectionsScreen>, cx: &mut App) {
+    // The row stops spinning while the prompt is up; Unlock reopens it.
+    weak.update(cx, |this, cx| {
+        this.opening.remove(&id);
+        cx.notify();
+    })
+    .ok();
     let config = Store::open().ok().and_then(|s| s.vault_config().ok().flatten());
-    rexa_ui::open_dialog(cx, move |window, cx| {
-        let passphrase = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Vault passphrase"));
-        let input = passphrase.clone();
-        let weak_cancel = weak.clone();
-        let weak_connect = weak.clone();
-        let config = config.clone();
-        Dialog::new()
-            .title("Unlock credential vault")
-            .description("Enter your vault passphrase to connect to this database.")
-            .child(crate::widgets::FieldInput::new(&passphrase))
-            .footer(Button::new("vault-cancel").outline().label("Cancel").on_click(move |_, _, cx| {
-                rexa_ui::close_top(cx);
-                weak_cancel.update(cx, |this, cx| { this.opening.remove(&id); cx.notify(); }).ok();
-            }))
-            .footer(Button::new("vault-connect").label(if for_edit { "Unlock and edit" } else { "Unlock and connect" }).on_click(move |_, window, cx| {
-                let Some((salt, verifier)) = &config else { toast::error("Credential vault settings were not found.", cx); return; };
-                let pass = input.read(cx).value().to_string();
-                match rexa_store::Vault::unlock(&pass, salt, verifier) {
-                    Ok(vault) => {
-                        rexa_core::unlock_credential_vault(vault, cx);
-                        rexa_ui::close_top(cx);
-                        weak_connect.update(cx, |this, cx| {
-                            if for_edit { this.edit_connection(id, false, window, cx); }
-                            else { this.open_connection(id, cx); }
-                        }).ok();
-                    }
-                    Err(e) => { toast::error(format!("{e:#}"), cx); }
+    let Some((salt, verifier)) = config else {
+        toast::error("Credential vault settings were not found.", cx);
+        return;
+    };
+    crate::vault_prompt::open(false, cx, move |pass, window, cx| match rexa_store::Vault::unlock(&pass, &salt, &verifier) {
+        Ok(vault) => {
+            rexa_core::unlock_credential_vault(vault, cx);
+            weak.update(cx, |this, cx| {
+                if for_edit {
+                    this.edit_connection(id, false, window, cx);
+                } else {
+                    this.open_connection(id, cx);
                 }
-            }))
+            })
+            .ok();
+            Ok(())
+        }
+        Err(e) => Err(format!("{e:#}")),
     });
 }
 
