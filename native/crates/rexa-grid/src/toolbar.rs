@@ -932,6 +932,7 @@ impl TableEditor {
             })
             .children(rls)
             .children(permission)
+            .children(crate::realtime::render_realtime_control(self, cx))
             .child(
                 div()
                     .flex()

@@ -12,6 +12,7 @@ pub mod filters;
 mod permissions;
 mod footer;
 mod grid;
+mod realtime;
 pub mod settings;
 mod sheets;
 mod toolbar;

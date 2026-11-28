@@ -36,6 +36,7 @@ pub mod ddl;
 pub mod detect;
 pub mod dialect;
 pub mod grid;
+pub mod postgres_compat;
 pub mod records;
 pub mod split;
 pub mod types;
@@ -54,7 +55,7 @@ mod mongo;
 #[cfg(feature = "mssql")]
 mod mssql;
 mod mysql;
-mod neon_oauth;
+pub mod neon_oauth;
 mod oracle;
 mod pgcat;
 mod postgres;
@@ -78,6 +79,7 @@ pub use supabase_mgmt::build_connection_string as build_supabase_mgmt_connection
 pub use detect::{detect_provider, Provider};
 pub use dialect::Dialect;
 pub use grid::{FilterOperator, FilterRule, SortConfig, SortDirection, TableFilter, TableQuery};
+pub use postgres_compat::{compile_for_sqlite, compile_postgres_query, CompiledQuery, PgCompatTarget};
 pub use records::Record;
 pub use types::{ColumnMeta, TypeCategory};
 pub use value::Value;

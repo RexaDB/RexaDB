@@ -199,6 +199,9 @@ impl RemoteSqliteDriver {
 
     /// One statement → one result.
     async fn one(&self, sql: &str, row_limit: usize) -> Result<QueryResult> {
+        // Match web sql-engine: Postgres-flavoured SQL → SQLite before the remote call.
+        let sql = crate::postgres_compat::compile_for_sqlite(sql)?;
+        let sql = sql.as_str();
         match &self.target {
             RemoteSqlite::Libsql { url, token } => {
                 let mut req = client().post(format!("{url}/v2/pipeline")).json(&json!({
@@ -297,6 +300,9 @@ impl RemoteSqliteDriver {
 
     /// Atomic batch where the backend has one (`runBatch`).
     async fn batch(&self, statements: &[String]) -> Result<Option<Vec<QueryResult>>> {
+        let compiled: Result<Vec<String>> = statements.iter().map(|s| crate::postgres_compat::compile_for_sqlite(s)).collect();
+        let statements = compiled?;
+        let statements = statements.as_slice();
         match &self.target {
             RemoteSqlite::Libsql { url, token } => {
                 let n = statements.len();

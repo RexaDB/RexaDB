@@ -211,6 +211,7 @@ pub struct TableEditor {
     auto_refresh_task: Option<Task<()>>,
     pub(crate) exporting_all: bool,
     pub(crate) access: crate::permissions::AccessState,
+    pub(crate) realtime: crate::realtime::toolbar::RealtimeState,
     debug_ran: bool,
     _subs: Vec<Subscription>,
 }
@@ -340,6 +341,7 @@ impl TableEditor {
             auto_refresh_task: None,
             exporting_all: false,
             access: Default::default(),
+            realtime: Default::default(),
             debug_ran: false,
             session,
             _subs: subs,
@@ -666,12 +668,14 @@ impl TableEditor {
 
     pub fn set_page(&mut self, page: usize, cx: &mut Context<Self>) {
         self.page = page;
+        self.restart_realtime_if_live(cx);
         self.refresh(cx);
     }
 
     pub fn set_page_size(&mut self, size: usize, cx: &mut Context<Self>) {
         self.page_size = size.max(1);
         self.page = 0;
+        self.restart_realtime_if_live(cx);
         self.refresh(cx);
     }
 
@@ -679,6 +683,7 @@ impl TableEditor {
     pub fn apply_filter_sort(&mut self, filter: String, sort: Option<SortConfig>, cx: &mut Context<Self>) {
         self.filter_query = filter;
         self.sort = sort;
+        self.restart_realtime_if_live(cx);
         self.refresh(cx);
     }
 
@@ -691,12 +696,20 @@ impl TableEditor {
             Some(s) if s.column == column => None,
             _ => Some(SortConfig { column: column.into(), direction: SortDirection::Asc }),
         };
+        self.restart_realtime_if_live(cx);
         self.refresh(cx);
     }
 
     pub fn set_sort(&mut self, sort: Option<SortConfig>, cx: &mut Context<Self>) {
         self.sort = sort;
+        self.restart_realtime_if_live(cx);
         self.refresh(cx);
+    }
+
+    fn restart_realtime_if_live(&mut self, cx: &mut Context<Self>) {
+        if self.realtime.live {
+            self.start_realtime_watch(cx);
+        }
     }
 
     // ---- columns ------------------------------------------------------------------------

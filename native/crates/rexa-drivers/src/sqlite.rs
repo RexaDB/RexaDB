@@ -184,6 +184,11 @@ fn assert_supported(sql: &str) -> Result<()> {
     Ok(())
 }
 
+/// Rewrite Postgres-flavoured SQL to SQLite (`lib/db/postgres-compat`).
+fn compile_sql(sql: &str) -> Result<String> {
+    crate::postgres_compat::compile_for_sqlite(sql)
+}
+
 /// Run every statement of `sql`; one result per statement.
 fn run_all(conn: &Connection, sql: &str, row_limit: usize) -> Result<Vec<QueryResult>> {
     let mut out = Vec::new();
@@ -203,8 +208,9 @@ fn run_all(conn: &Connection, sql: &str, row_limit: usize) -> Result<Vec<QueryRe
 }
 
 fn run_one(conn: &Connection, sql: &str, row_limit: usize) -> Result<QueryResult> {
+    let sql = compile_sql(sql)?;
     let started = Instant::now();
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare(&sql)?;
     let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let mut current = if columns.is_empty() {
         let n = stmt.execute([])?;
@@ -621,6 +627,29 @@ mod tests {
             .unwrap();
         assert!(r.truncated && r.rows.len() == 2);
         assert!(d.execute("CREATE SCHEMA x", 1).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn compiles_postgres_syntax_on_execute() {
+        let d = SqliteDriver::open(":memory:").unwrap();
+        d.execute(
+            r#"CREATE TABLE "users" ("id" serial primary key, "name" text, "email" text)"#,
+            1,
+        )
+        .await
+        .unwrap();
+        d.execute(r#"INSERT INTO "users" ("name", "email") VALUES ('Ada', 'ada@example.com')"#, 1)
+            .await
+            .unwrap();
+        let r = d
+            .execute(
+                r#"SELECT "name"::text FROM "users" WHERE "email" ILIKE '%ADA%'"#,
+                10,
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0][0], Cell::Text("Ada".into()));
     }
 
     #[tokio::test]
