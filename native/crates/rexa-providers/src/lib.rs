@@ -18,6 +18,7 @@ mod common;
 mod data_table;
 mod database_views;
 mod edge;
+mod payments;
 mod storage;
 mod supabase;
 mod team;
@@ -35,6 +36,7 @@ fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mu
     if let Some(tab) = storage::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
     if let Some(tab) = edge::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
     if let Some(tab) = auth::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
+    if let Some(tab) = payments::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
     if let Some(tab) = database_views::build_tab(spec, session.clone(), window, cx) { return Some(tab); }
     if view == "manage-workspaces" {
         return Some(cx.new(|cx| team::Workspaces::new(window, cx)).into());
