@@ -6449,6 +6449,7 @@ dependencies = [
  "rexa-store",
  "rexa-studio",
  "rexa-ui",
+ "serde_json",
 ]
 
 [[package]]

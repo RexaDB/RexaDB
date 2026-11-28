@@ -25,6 +25,9 @@ impl AppRoot {
             cx.notify();
         });
         let settings = rexa_settings::model::SettingsModel::global(cx);
+        // `data-button-style` is applied at boot (SettingsModel::set only covers changes).
+        let button_style = settings.read(cx).str("buttonStyle");
+        rexa_ui::button::set_global_style(&button_style, cx);
         let settings_sub = cx.observe(&settings, |_, _, cx| cx.notify());
         let route = nav.read(cx).route.clone();
         let view = Registry::build_screen(&route, window, cx);
@@ -65,10 +68,13 @@ fn main() {
     let app = gpui_platform::application().with_assets(rexa_ui::assets::Assets);
     app.run(|cx: &mut App| {
         rexa_ui::init(cx);
-        let (theme_id, custom) = rexa_store::Store::open()
-            .map(|s| (s.setting("app_theme_id").ok().flatten(), s.setting("custom_app_themes").ok().flatten()))
+        let (theme_id, custom, studio) = rexa_store::Store::open()
+            .map(|s| (s.setting("app_theme_id").ok().flatten(), s.setting("custom_app_themes").ok().flatten(), s.setting("studio_settings").ok().flatten()))
             .unwrap_or_default();
-        rexa_ui::theme::install(rexa_ui::theme::load(theme_id.as_deref(), custom.as_deref()), cx);
+        // `.tui-mode` on the root (useGlobalStudioSettings → tuiMode).
+        let tui = studio.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()).and_then(|v| v.get("tuiMode").and_then(|b| b.as_bool())).unwrap_or(false);
+        rexa_ui::theme::set_tui_mode(tui);
+        rexa_ui::theme::install(rexa_ui::theme::load_effective(theme_id.as_deref(), custom.as_deref()), cx);
 
         rexa_core::init(cx);
         rexa_connections::init(cx);

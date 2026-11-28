@@ -16,6 +16,7 @@ duckdb = ["rexa-drivers/duckdb"]
 
 [dependencies]
 anyhow.workspace = true
+serde_json.workspace = true
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-component = "0.9.1"
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "runtime_shaders"] }

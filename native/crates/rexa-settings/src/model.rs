@@ -220,6 +220,10 @@ impl SettingsModel {
         if key == "buttonStyle" {
             rexa_ui::button::set_global_style(&self.str(key), cx);
         }
+        if key == "tuiMode" {
+            rexa_ui::theme::set_tui_mode(self.bool(key));
+            apply_app_theme(&self.app_theme_id, &self.custom_app_themes_json(), cx);
+        }
         let payload = self.studio_payload();
         self.last_error = persist::save_studio_settings(&payload).err().map(|e| e.to_string());
         self.changed(key, cx);
@@ -351,7 +355,7 @@ pub fn resolve_theme_id(id: &str, appearance: WindowAppearance) -> String {
 /// useGlobalAppTheme's apply effect: install the resolved tokens app-wide.
 pub fn apply_app_theme(id: &str, custom_json: &str, cx: &mut App) {
     let resolved = resolve_theme_id(id, cx.window_appearance());
-    rexa_ui::theme::install(rexa_ui::theme::load(Some(&resolved), Some(custom_json)), cx);
+    rexa_ui::theme::install(rexa_ui::theme::load_effective(Some(&resolved), Some(custom_json)), cx);
     cx.refresh_windows();
 }
 

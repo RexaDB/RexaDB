@@ -395,3 +395,80 @@ pub fn mix(a: Hsla, p: f32, b: Hsla) -> Hsla {
 pub fn white(alpha: f32) -> Hsla {
     gpui::hsla(0., 0., 1., alpha)
 }
+
+/// `.tui-mode` (globals.css): flat terminal palette derived from the theme's
+/// foreground/background and `--radius: 0`. The studio shell switches the font to
+/// mono. (`.tui-mode * { border-radius: 0 }` on fixed Tailwind radii is not emulated.)
+pub fn apply_tui_mode(mut t: Tokens) -> Tokens {
+    let (fg, bg) = (t.foreground, t.background);
+    let css = |c: Hsla| {
+        let r: Rgba = c.into();
+        let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+        format!("#{:02x}{:02x}{:02x}{:02x}", b(r.r), b(r.g), b(r.b), b(r.a))
+    };
+    let tint = |p: f32| mix(fg, p, bg);
+    let border = tint(0.18);
+    let muted_fg = mix(fg, 0.65, gpui::transparent_black());
+    let set: Vec<(&str, Hsla)> = vec![
+        ("--card", bg),
+        ("--card-foreground", fg),
+        ("--popover", bg),
+        ("--popover-foreground", fg),
+        ("--secondary", tint(0.06)),
+        ("--secondary-foreground", fg),
+        ("--muted", tint(0.04)),
+        ("--muted-foreground", muted_fg),
+        ("--accent", tint(0.06)),
+        ("--accent-foreground", fg),
+        ("--border", border),
+        ("--input", border),
+        ("--ring", fg),
+        ("--studio-bg", bg),
+        ("--studio-border", border),
+        ("--studio-header-bg", bg),
+        ("--table-header-bg", bg),
+        ("--studio-row-hover", tint(0.08)),
+        ("--studio-selection", tint(0.18)),
+    ];
+    for (name, color) in set {
+        t.vars.insert(name.to_string(), css(color));
+    }
+    t.vars.insert("--radius".into(), "0rem".into());
+    t.card = bg;
+    t.popover = bg;
+    t.muted = tint(0.04);
+    t.muted_foreground = muted_fg;
+    t.accent = tint(0.06);
+    t.accent_foreground = fg;
+    t.border = border;
+    t.input = border;
+    t.ring = fg;
+    t.studio_bg = bg;
+    t.studio_border = border;
+    t.studio_header_bg = bg;
+    t.studio_row_hover = tint(0.08);
+    t.studio_selection = tint(0.18);
+    t.radius = 0.;
+    t
+}
+
+static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether [`load`] results should get [`apply_tui_mode`] (`tuiMode` setting).
+pub fn tui_mode_enabled() -> bool {
+    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_tui_mode(on: bool) {
+    TUI_MODE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// [`load`] with the TUI palette applied when `tuiMode` is on.
+pub fn load_effective(app_theme_id: Option<&str>, custom_themes_json: Option<&str>) -> Tokens {
+    let t = load(app_theme_id, custom_themes_json);
+    if tui_mode_enabled() {
+        apply_tui_mode(t)
+    } else {
+        t
+    }
+}
