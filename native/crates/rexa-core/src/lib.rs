@@ -6,6 +6,7 @@
 //!   their `init(cx)`, so no crate needs to know about the others.
 //! - [`Sessions`]: open database connections, shared by every studio tab.
 
+pub mod review;
 pub mod runtime;
 pub mod update;
 
@@ -196,6 +197,8 @@ pub enum StudioEvent {
     TabCommand { tab: TabSpec, command: String },
     /// Open the settings modal at a section ("general", "ai", …).
     OpenSettings { section: Option<String> },
+    /// The studio-level review queue ([`review`]) changed or its sheet toggled.
+    ReviewQueueChanged,
 }
 
 /// Emit any studio event on the bus.

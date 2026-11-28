@@ -90,6 +90,7 @@ pub struct Studio {
     pub panel_open: bool,
     pub ai_open: bool,
     pub sql_sheet_open: bool,
+    pub(crate) review_committing: bool,
     pub threads_open: bool,
     pub ai_width: f32,
     pub sql_sheet_width: f32,
@@ -206,6 +207,7 @@ impl Studio {
             panel_open: false,
             ai_open: false,
             sql_sheet_open: false,
+            review_committing: false,
             threads_open: false,
             ai_width: 400.,
             sql_sheet_width: 480.,
@@ -439,6 +441,7 @@ impl Studio {
             }
             StudioEvent::OpenSettings { section } => self.open_settings(section.clone(), window, cx),
             StudioEvent::TabCommand { .. } => {}
+            StudioEvent::ReviewQueueChanged => cx.notify(),
         }
     }
 

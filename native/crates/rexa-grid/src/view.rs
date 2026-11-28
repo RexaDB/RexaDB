@@ -120,7 +120,6 @@ pub enum ActionKind {
     DeleteRow,
     InsertRow,
     DuplicateRow,
-    EnableRls,
 }
 
 impl ActionKind {
@@ -129,7 +128,6 @@ impl ActionKind {
             ActionKind::DeleteRow => "delete_row",
             ActionKind::InsertRow => "insert_row",
             ActionKind::DuplicateRow => "duplicate_row",
-            ActionKind::EnableRls => "enable_rls",
         }
     }
 }

@@ -234,6 +234,8 @@ impl Studio {
             );
         }
 
+        // Studio-level review sheet (addReviewAction), contained over the main column.
+        let left_col = left_col.relative().children(self.render_review_sheet(cx));
         let mut inset = div().flex().flex_1().min_h_0().min_w_0().mr_2().when(!sidebar_open, |d| d.ml_1()).child(left_col);
         if self.sql_sheet_open {
             let w = self.sql_sheet_width;

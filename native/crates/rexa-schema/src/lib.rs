@@ -29,6 +29,7 @@ pub mod data_table;
 pub mod dictionary;
 pub mod erd;
 pub mod erd_project;
+pub mod fk_sheet;
 pub mod lists;
 pub mod object_view;
 pub mod prefill;

@@ -9,7 +9,8 @@
 //!
 //! Approximations: the sheet opens window-level through `rexa_ui::open_sheet`
 //! (the original is `contained` in the table area) at rexa-ui's sheet width; the
-//! dirty-close confirm (`confirmSheetClose`) and review mode are not ported.
+//! dirty-close confirm (`confirmSheetClose`) is not ported (the window-level sheet
+//! has no outside-interaction close). Review mode queues into `rexa_core::review`.
 
 use crate::actions::{dq, sq};
 use crate::column_types;
@@ -432,6 +433,20 @@ impl ColumnSheet {
                 }
             }
         };
+        // Review mode (addReviewAction): queue instead of running.
+        if !self.mongo() {
+            let kind = if self.editing.is_some() { "edit_column" } else { "add_column" };
+            let name = self.name.read(cx).value().trim().to_string();
+            let description = match &self.editing {
+                Some(orig) => format!("Edit column {orig} on {}", self.target.table),
+                None => format!("Add column {name} to {}", self.target.table),
+            };
+            let actions: Vec<_> = stmts.iter().map(|s| rexa_core::review::ReviewAction::new(kind, description.clone(), s.clone())).collect();
+            if rexa_core::review::add_review_actions(actions, cx) {
+                rexa_ui::close_top(cx);
+                return;
+            }
+        }
         self.busy = true;
         cx.notify();
         let d = self.target.session.driver.clone();

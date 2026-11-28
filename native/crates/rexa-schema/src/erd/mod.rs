@@ -8,8 +8,7 @@
 //! Emulated by hand (GPUI has no React Flow): pan by dragging the background,
 //! wheel / pinch zoom around the cursor (0.2–2), node dragging by the header,
 //! `fitView` (padding 0.2). Approximations / not ported: edge selection + its
-//! relation badge, drag-to-connect (→ add-fk sheet), PNG/SVG download (toast),
-//! filled "non-nullable" diamond (drawn as a solid rhombus), the ERD designer
+//! relation badge, filled "non-nullable" diamond (drawn as a solid rhombus), the ERD designer
 //! (`erd/*`, editable mode).
 
 pub mod layout;
@@ -200,6 +199,8 @@ enum LayoutMode {
 enum Drag {
     Pan { start: Point<Pixels>, pan0: Point<f32> },
     Node { id: String, start: Point<Pixels>, pos0: (f32, f32) },
+    /// React Flow connection drag from a column handle (`onConnectStart`).
+    Connect { table: String, column: String, from: Point<f32>, to: Point<f32> },
 }
 
 pub struct SchemaDiagram {
@@ -218,7 +219,20 @@ pub struct SchemaDiagram {
     bounds: Rc<Cell<Bounds<Pixels>>>,
     needs_fit: bool,
     copied: bool,
+    fk_sheet: Option<crate::fk_sheet::AddFkSheet>,
     _subs: Vec<gpui::Subscription>,
+}
+
+impl crate::fk_sheet::FkSheetHost for SchemaDiagram {
+    fn fk_sheet(&mut self) -> &mut Option<crate::fk_sheet::AddFkSheet> {
+        &mut self.fk_sheet
+    }
+    fn session(&self) -> Arc<Session> {
+        self.session.clone()
+    }
+    fn on_fk_created(&mut self, cx: &mut Context<Self>) {
+        self.load(cx);
+    }
 }
 
 impl SchemaDiagram {
@@ -246,6 +260,7 @@ impl SchemaDiagram {
             bounds: Rc::default(),
             needs_fit: false,
             copied: false,
+            fk_sheet: None,
             _subs: subs,
         };
         let fut = common::load_schemas(&this.session);
@@ -375,6 +390,42 @@ impl SchemaDiagram {
         self.zoom = z2;
     }
 
+    /// `allowConnect` (live diagram): Postgres / Supabase management only.
+    fn allow_connect(&self) -> bool {
+        matches!(self.db_type, "postgres" | "supabase-mgmt")
+    }
+
+    /// The `[data-table][data-col]` row under a local point.
+    fn column_at(&self, p: Point<f32>) -> Option<(String, String)> {
+        let (mx, my) = ((p.x - self.pan.x) / self.zoom, (p.y - self.pan.y) / self.zoom);
+        self.tables.iter().rev().find_map(|t| {
+            let &(x, y) = self.positions.get(&t.name)?;
+            if mx < x || mx > x + NODE_WIDTH || my < y + HEADER_HEIGHT {
+                return None;
+            }
+            let i = ((my - y - HEADER_HEIGHT) / ROW_HEIGHT).floor() as usize;
+            t.columns.get(i).map(|c| (t.name.clone(), c.name.clone()))
+        })
+    }
+
+    /// `onConnect` / `onConnectEnd`: open the add-FK sheet for the dropped column.
+    fn finish_connect(&mut self, table: String, column: String, to: Point<f32>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((target_table, target_column)) = self.column_at(to) else { return };
+        if target_table == table {
+            return;
+        }
+        let data = crate::fk_sheet::FkData {
+            source_schema: self.schema.clone(),
+            source_table: table,
+            source_column: column,
+            target_schema: self.schema.clone(),
+            target_table,
+            target_column,
+        };
+        self.fk_sheet = Some(crate::fk_sheet::AddFkSheet::new(data, window, cx));
+        cx.notify();
+    }
+
     fn local(&self, p: Point<Pixels>) -> Point<f32> {
         let o = self.bounds.get().origin;
         point(f32::from(p.x - o.x), f32::from(p.y - o.y))
@@ -492,9 +543,39 @@ impl SchemaDiagram {
                 })
                 .when(c.is_primary, |d| d.child(Icon::new(IconName::FingerprintPattern).size(s(8.)).text_color(muted)))
                 .when(identity, |d| d.child(Icon::new(IconName::Hash).size(s(8.)).text_color(muted)));
+            // React Flow row handles: `h-5 w-1.5 rounded-full opacity-0
+            // group-hover/row:opacity-100 group-hover/row:bg-primary/70 cursor-grab`.
+            let group: SharedString = format!("erd-row-{}-{}", t.name, c.name).into();
+            let handle = |side: &'static str| {
+                let (table, column) = (t.name.clone(), c.name.clone());
+                let primary = with_alpha(tk.primary, 0.7);
+                div()
+                    .id(SharedString::from(format!("erd-hd-{side}-{}-{}", t.name, c.name)))
+                    .absolute()
+                    .top(s((ROW_HEIGHT - 20.) / 2.))
+                    .when(side == "l", |d| d.left_0())
+                    .when(side == "r", |d| d.right_0())
+                    .h(s(20.))
+                    .w(s(6.))
+                    .rounded_full()
+                    .cursor_grab()
+                    .group_hover(group.clone(), move |st| st.bg(primary))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |v, e: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            let at = v.local(e.position);
+                            v.drag = Some(Drag::Connect { table: table.clone(), column: column.clone(), from: at, to: at });
+                        }),
+                    )
+            };
+            let connectable = self.allow_connect();
             card = card.child(
                 div()
+                    .group(group.clone())
+                    .relative()
                     .h(s(ROW_HEIGHT))
+                    .when(connectable, |d| d.child(handle("l")).child(handle("r")))
                     .flex()
                     .flex_row()
                     .items_center()
@@ -634,6 +715,10 @@ impl Render for SchemaDiagram {
         let edge_color = with_alpha(t.primary, if t.dark { 0.4 } else { 0.6 });
         let dot = t.border;
         let (pan, gap) = (self.pan, 16. * z);
+        let connecting = match &self.drag {
+            Some(Drag::Connect { from, to, .. }) => Some((*from, *to)),
+            _ => None,
+        };
         let bg = canvas(
             |_, _, _| {},
             move |b, _, window, _| {
@@ -652,6 +737,9 @@ impl Render for SchemaDiagram {
                 }
                 for (sx, sy, tx, ty) in &lines {
                     paint_polyline(&smoothstep(*sx, *sy, *tx, *ty, z), b.origin, 5. * z, 1.5, edge_color, window);
+                }
+                if let Some((from, to)) = connecting {
+                    paint_polyline(&[from, to], b.origin, 0., 1.5, edge_color, window);
                 }
             },
         )
@@ -832,7 +920,11 @@ impl Render for SchemaDiagram {
             .child(bg)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|v, e: &MouseDownEvent, _, _| {
+                cx.listener(|v, e: &MouseDownEvent, _, cx| {
+                    // Non-modal sheet: interacting outside closes it (useSheetCloseConfirm).
+                    if v.fk_sheet.is_some() {
+                        crate::fk_sheet::interact_outside(v, cx);
+                    }
                     v.drag = Some(Drag::Pan { start: e.position, pan0: v.pan });
                 }),
             )
@@ -851,11 +943,23 @@ impl Render for SchemaDiagram {
                         v.positions.insert(id.clone(), p);
                         cx.notify();
                     }
+                    Some(Drag::Connect { .. }) => {
+                        let at = v.local(e.position);
+                        if let Some(Drag::Connect { to, .. }) = v.drag.as_mut() {
+                            *to = at;
+                        }
+                        cx.notify();
+                    }
                     None => {}
                 }
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|v, _, _, _| {
+            .on_mouse_up(MouseButton::Left, cx.listener(|v, e: &gpui::MouseUpEvent, window, cx| {
                 if matches!(v.drag, Some(Drag::Node { .. })) { v.save_positions(); }
+                if let Some(Drag::Connect { table, column, .. }) = v.drag.take() {
+                    let at = v.local(e.position);
+                    v.finish_connect(table, column, at, window, cx);
+                    cx.notify();
+                }
                 v.drag = None;
             }))
             .on_scroll(cx.listener(|v, e: &gpui::ScrollEvent, _, cx| {
@@ -874,6 +978,7 @@ impl Render for SchemaDiagram {
             .child(controls)
             .child(legend)
             .child(panel)
+            .children(crate::fk_sheet::render(self, cx))
             .into_any_element()
     }
 }

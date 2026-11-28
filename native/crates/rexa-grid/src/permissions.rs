@@ -12,7 +12,7 @@
 //! As in the original, the execution context only applies to direct Postgres
 //! connections; Supabase management connections run the plain read.
 
-use crate::view::{ActionKind, TableEditor};
+use crate::view::TableEditor;
 use gpui::{div, prelude::*, px, AnyElement, Context, Entity, FontWeight, SharedString, Window};
 use rexa_core::runtime;
 use rexa_drivers::{AuthUser, Driver, Kind, QueryResult, TableFilter, TablePage, TableQuery, TableRef};
@@ -238,8 +238,8 @@ impl TableEditor {
         let d = self.kind.dialect();
         let (schema, table) = (self.table.schema.clone(), self.table.name.clone());
         let sql = format!("ALTER TABLE {}.{} ENABLE ROW LEVEL SECURITY;", d.quote_ident(&schema), d.quote_ident(&table));
-        if self.settings.review_mode {
-            self.add_action(ActionKind::EnableRls, format!("Enable RLS on \"{schema}\".\"{table}\""), sql, Vec::new(), cx);
+        // addReviewAction → the studio-level review queue.
+        if rexa_core::review::add_review_action(rexa_core::review::ReviewAction::new("enable_rls", format!("Enable RLS on \"{schema}\".\"{table}\""), sql.clone()), cx) {
             close.close(window, cx);
             return;
         }

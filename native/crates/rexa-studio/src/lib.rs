@@ -30,6 +30,7 @@ mod menu;
 pub mod persistence;
 mod rail;
 mod resize;
+mod review_sheet;
 mod shell;
 mod sidebar;
 pub mod split_layout;

@@ -3,8 +3,10 @@
 //! the session, toast the outcome, then refresh. Errors go to a toast (the
 //! original sets the studio error banner via `setError`).
 //!
-//! Not ported: review mode (`addReviewAction` queues the statement for the
-//! review sheet instead of running it).
+//! Review mode: `addReviewAction` queues the statement in the studio-level review
+//! queue (`rexa_core::review`) instead of running it; the action type is derived
+//! from the statement (`create_table`, `drop_index`, …) and the description from
+//! the success message.
 
 use gpui::{App, AsyncApp};
 use rexa_core::{emit_studio, runtime, Session, StudioEvent};
@@ -38,6 +40,11 @@ pub fn run(
     cx: &mut App,
     on_done: impl FnOnce(bool, &mut AsyncApp) + 'static,
 ) {
+    let description = if success.is_empty() { sql.lines().next().unwrap_or_default().to_string() } else { success.clone() };
+    if rexa_core::review::add_review_action(rexa_core::review::ReviewAction::new(review_kind(&sql), description, sql.clone()), cx) {
+        cx.spawn(async move |cx| on_done(true, cx)).detach();
+        return;
+    }
     let task = exec(session, sql);
     cx.spawn(async move |cx| {
         let r = task.await;
@@ -57,6 +64,22 @@ pub fn run(
         on_done(ok, cx);
     })
     .detach();
+}
+
+/// The review action `type` for a DDL statement: `CREATE TABLE …` → `create_table`.
+pub fn review_kind(sql: &str) -> String {
+    let words: Vec<String> = sql
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .filter(|w| !matches!(w.as_str(), "or" | "replace" | "unique" | "materialized" | "if" | "not" | "exists" | "temporary" | "temp"))
+        .take(2)
+        .collect();
+    let kind = match words.first().map(String::as_str) {
+        Some("drop") => format!("delete_{}", words.get(1).map(String::as_str).unwrap_or("object")),
+        Some(verb) => format!("{verb}_{}", words.get(1).map(String::as_str).unwrap_or("object")),
+        None => "sql".into(),
+    };
+    kind.trim_end_matches(';').to_string()
 }
 
 /// `runDeleteWithConfirm`: destructive confirm, then [`run`].

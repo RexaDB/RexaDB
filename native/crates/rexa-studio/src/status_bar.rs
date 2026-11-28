@@ -41,7 +41,7 @@ impl Studio {
         let fg = t.muted_foreground;
         let name: SharedString = self.connection.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| "No connection".into()).into();
         let db: SharedString = if self.current_database.is_empty() { "Database".into() } else { self.current_database.clone().into() };
-        let dirty = self.tabs.iter().filter(|t| t.is_dirty()).count();
+        let dirty = self.tabs.iter().filter(|t| t.is_dirty()).count() + rexa_core::review::actions(cx).len();
 
         let pending = if dirty > 0 {
             self.status_item("pending", cx)
