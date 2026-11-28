@@ -85,6 +85,11 @@ pub fn connection_string(session: &Session, vault: Option<&rexa_store::Vault>) -
 }
 
 pub fn connection_info(session: &Session, vault: Option<&rexa_store::Vault>) -> Option<ConnInfo> {
+    // Dev aid (debug builds only): treat any connection as this Supabase project ref.
+    #[cfg(debug_assertions)]
+    if let Ok(project_ref) = std::env::var("REXA_DEV_SUPABASE_REF") {
+        return Some(ConnInfo { kind: ConnKind::Postgres, project_ref, token: None });
+    }
     let kind = session.connection.kind.as_str();
     // Ref inference only needs the host, which is never stripped.
     if kind != "supabase-mgmt" {

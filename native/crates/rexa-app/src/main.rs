@@ -95,6 +95,15 @@ fn main() {
                 rexa_core::navigate(Route::ConnectionScreen(screen.into()), cx);
             }
         }
+        // Dev aid: REXA_OPEN_VIEW=<view id> opens a studio view tab once the studio is up.
+        if let Ok(view) = std::env::var("REXA_OPEN_VIEW") {
+            cx.spawn(async move |cx| {
+                let secs = std::env::var("REXA_OPEN_VIEW_DELAY").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+                cx.background_executor().timer(std::time::Duration::from_secs(secs)).await;
+                cx.update(|cx| rexa_core::open_tab(rexa_core::TabSpec::View { view, params: serde_json::Value::Null }, cx));
+            })
+            .detach();
+        }
 
         // tauri.conf.json: 1200×800, min 800×600, overlay title bar, traffic lights at (14, 21).
         // REXA_WINDOW_SIZE=WxH overrides the size (for side-by-side comparison with the old app).

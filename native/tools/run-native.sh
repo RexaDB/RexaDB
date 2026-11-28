@@ -9,6 +9,8 @@ export CARGO_TARGET_DIR=$target
 cargo build -q -p rexa-app --manifest-path $root/Cargo.toml
 bin=$(mktemp -t rexadb).bin
 cp $target/debug/rexadb $bin
+# Stable signature so the keychain's "Always Allow" survives rebuilds (see dev-run.sh).
+REXA_SIGN_ONLY=1 $here/dev-run.sh $bin
 REXA_ROUTE=${2:-} REXA_WINDOW_SIZE=${REXA_WINDOW_SIZE:-1470x864} $bin &
 pid=$!
 # A freshly copied binary can take ~15s to show its window (macOS scans new
