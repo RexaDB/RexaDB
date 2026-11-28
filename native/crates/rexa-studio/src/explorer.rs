@@ -345,21 +345,84 @@ impl Studio {
             .child(ico.el(14., t.muted_foreground))
     }
 
-    fn filter_menu(&self) -> Vec<MenuEntry> {
-        let tf = self.type_filter;
-        let total = self.tables.iter().filter(|t| !t.is_view).count();
+    /// `TablesFilterMenu`: Show (Tables + views / Tables only / Views only with counts),
+    /// Search options (Case sensitive, Wildcards), Refresh tables & views.
+    fn render_tables_filter_menu(&mut self, ctl: rexa_ui::PopoverCtl, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.tokens().clone();
+        let tables = self.tables.iter().filter(|t| !t.is_view).count();
         let views = self.tables.iter().filter(|t| t.is_view).count();
-        vec![
-            MenuEntry::Label("Show".into()),
-            MenuEntry::item("All", |s, _, cx| { s.type_filter = TypeFilter::All; cx.notify() }).checked(tf == TypeFilter::All),
-            MenuEntry::item(format!("Tables ({total})"), |s, _, cx| { s.type_filter = TypeFilter::Tables; cx.notify() }).checked(tf == TypeFilter::Tables),
-            MenuEntry::item(format!("Views ({views})"), |s, _, cx| { s.type_filter = TypeFilter::Views; cx.notify() }).checked(tf == TypeFilter::Views),
-            MenuEntry::Separator,
-            MenuEntry::item("Case sensitive", |s, _, cx| { s.case_sensitive = !s.case_sensitive; cx.notify() }).checked(self.case_sensitive),
-            MenuEntry::item("Wildcards (% and _)", |s, _, cx| { s.wildcards = !s.wildcards; cx.notify() }).checked(self.wildcards),
-            MenuEntry::Separator,
-            MenuEntry::item("Refresh", |s, _, cx| s.refresh_tables(cx)).icon(icons::lucide("refresh-cw")).disabled(self.fetching_tables),
-        ]
+        let this = cx.entity();
+        let heading = |text: &'static str| div().px_2().pb_1().text_size(px(11.)).font_weight(gpui::FontWeight::MEDIUM).text_color(t.muted_foreground).child(text.to_uppercase());
+        let options = [(TypeFilter::All, "Tables + views", tables + views), (TypeFilter::Tables, "Tables only", tables), (TypeFilter::Views, "Views only", views)];
+        let radios: Vec<_> = options.into_iter().map(|(value, label, count)| {
+            let active = self.type_filter == value;
+            let this = this.clone();
+            div()
+                .id(SharedString::from(format!("tf-{label}")))
+                .flex()
+                .items_center()
+                .gap_2()
+                .tw_rounded_md()
+                .px_2()
+                .py(px(6.))
+                .tw_text_xs()
+                .cursor_pointer()
+                .when(active, |d| d.bg(t.muted).text_color(t.foreground))
+                .when(!active, |d| d.text_color(t.muted_foreground).hover(|s| s.bg(rexa_ui::with_alpha(t.muted, 0.5)).text_color(t.foreground)))
+                .child(div().size_4().flex().items_center().justify_center().when(active, |d| d.child(icons::lucide("check").el(14., t.foreground))))
+                .child(div().min_w_0().flex_1().truncate().child(label))
+                .child(div().flex_shrink_0().text_size(px(11.)).text_color(t.muted_foreground).child(count.to_string()))
+                .on_click(move |_, _, cx| this.update(cx, |s, cx| { s.type_filter = value; cx.notify(); }))
+        }).collect();
+        let check_row = |id: &'static str, checked: bool, label: AnyElement, f: fn(&mut Studio)| {
+            let this = this.clone();
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .tw_rounded_md()
+                .px_2()
+                .py(px(6.))
+                .tw_text_xs()
+                .text_color(t.foreground)
+                .cursor_pointer()
+                .hover(|s| s.bg(rexa_ui::with_alpha(t.muted, 0.5)))
+                .child(rexa_ui::Checkbox::new(SharedString::from(format!("{id}-cb"))).checked(checked))
+                .child(div().min_w_0().flex_1().child(label))
+                .on_click(move |_, _, cx| this.update(cx, |s, cx| { f(s); cx.notify(); }))
+        };
+        let refreshing = self.fetching_tables;
+        let refresh_this = this.clone();
+        div()
+            .w_64()
+            .p(px(6.))
+            .child(div().pt_1().child(heading("Show")))
+            .child(div().flex().flex_col().gap(px(2.)).children(radios))
+            .child(div().my(px(6.)).border_t_1().border_color(t.border))
+            .child(heading("Search options"))
+            .child(check_row("tf-case", self.case_sensitive, div().child("Case sensitive").into_any_element(), |s| s.case_sensitive = !s.case_sensitive))
+            .child(check_row(
+                "tf-wild",
+                self.wildcards,
+                div().child("Wildcards").child(div().text_size(px(11.)).text_color(t.muted_foreground).child("% any text, _ one character")).into_any_element(),
+                |s| s.wildcards = !s.wildcards,
+            ))
+            .child(div().my(px(6.)).border_t_1().border_color(t.border))
+            .child(
+                rexa_ui::Button::new("tf-refresh")
+                    .ghost()
+                    .size(rexa_ui::ButtonSize::Sm)
+                    .w_full()
+                    .icon(rexa_ui::IconName::RefreshCw)
+                    .child(div().tw_text_xs().child(if refreshing { "Refreshing…" } else { "Refresh tables & views" }))
+                    .disabled(refreshing)
+                    .on_click(move |_, window, cx| {
+                        refresh_this.update(cx, |s, cx| s.refresh_tables(cx));
+                        ctl.close(window, cx);
+                    }),
+            )
+            .into_any_element()
     }
 
     /// TagFoldersList
@@ -514,24 +577,32 @@ impl Studio {
         let schema = self.selected_schema.clone().unwrap_or_default();
 
         // Search row
-        let filter_btn = div()
-            .id("tables-filter")
-            .relative()
-            .size_6()
-            .flex()
-            .flex_shrink_0()
-            .items_center()
-            .justify_center()
-            .tw_rounded_md()
-            .text_color(if filters_active { t.primary } else { t.muted_foreground })
-            .hover(move |s| s.bg(white(0.1)).text_color(if filters_active { t.primary } else { t.foreground }))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
-                cx.stop_propagation();
-                let items = this.filter_menu();
-                this.open_menu("dd:tables-filter", gpui::point(e.position.x - px(180.), e.position.y + px(14.)), 200., items, cx);
-            }))
-            .child(icons::lucide("list-filter").el(14., t.muted_foreground))
-            .when(filters_active, |d| d.child(div().absolute().right_1().top_1().size(px(6.)).rounded_full().bg(t.primary)));
+        // TablesFilterMenu (database/tables-filter-menu.tsx) in a Popover (align end, w-auto p-0).
+        let this = cx.entity();
+        let filter_btn = rexa_ui::Popover::new("tables-filter")
+            .align(rexa_ui::Align::End)
+            .w(None)
+            .p(0.)
+            .trigger(
+                div()
+                    .id("tables-filter-btn")
+                    .relative()
+                    .size_6()
+                    .flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .tw_rounded_md()
+                    .text_color(if filters_active { t.primary } else { t.muted_foreground })
+                    .hover(move |s| s.bg(white(0.1)).text_color(if filters_active { t.primary } else { t.foreground }))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(icons::lucide("list-filter").el(14., t.muted_foreground))
+                    .when(filters_active, |d| d.child(div().absolute().right_1().top_1().size(px(6.)).rounded_full().bg(t.primary))),
+            )
+            .content(move |ctl, _, cx| {
+                let ctl = ctl.clone();
+                this.update(cx, |s, cx| s.render_tables_filter_menu(ctl, cx))
+            });
         let search = TextInput::new(&self.search)
             .h(32.)
             .prefix(icons::S_SEARCH.el(14., t.muted_foreground))
