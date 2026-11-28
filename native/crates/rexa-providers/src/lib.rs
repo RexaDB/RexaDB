@@ -13,12 +13,17 @@ use rexa_ui::{ActiveTokens, Button, ButtonSize, IconName, MONO};
 use serde_json::Value;
 use std::sync::Arc;
 
+mod auth;
 mod common;
+mod data_table;
 mod database_views;
+mod edge;
 mod storage;
 mod supabase;
 mod team;
 mod ui;
+#[cfg(test)]
+mod standin_tests;
 
 pub fn init(cx: &mut App) {
     Registry::tab(cx, "rexa-providers", build_tab);
@@ -28,6 +33,8 @@ pub fn init(cx: &mut App) {
 fn build_tab(spec: &TabSpec, session: Arc<Session>, window: &mut Window, cx: &mut App) -> Option<AnyView> {
     let TabSpec::View { view, params } = spec else { return None };
     if let Some(tab) = storage::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
+    if let Some(tab) = edge::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
+    if let Some(tab) = auth::build_tab(view, params, session.clone(), window, cx) { return Some(tab); }
     if let Some(tab) = database_views::build_tab(spec, session.clone(), window, cx) { return Some(tab); }
     if view == "manage-workspaces" {
         return Some(cx.new(|cx| team::Workspaces::new(window, cx)).into());
